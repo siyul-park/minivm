@@ -5474,8 +5474,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l0
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -5505,8 +5505,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l1
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -5536,8 +5536,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l2
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -5567,8 +5567,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l3
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -5598,8 +5598,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l4
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -5629,8 +5629,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l5
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -5660,8 +5660,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l6
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -5691,8 +5691,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l7
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -5722,8 +5722,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l8
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -5753,8 +5753,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l9
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -5784,8 +5784,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l10
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -5815,8 +5815,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l11
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -5846,12 +5846,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l12
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l12
 				}
 				c.ip += 3
@@ -5885,12 +5885,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l13
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l13
 				}
 				c.ip += 3
@@ -5924,12 +5924,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l14
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l14
 				}
 				c.ip += 3
@@ -5963,12 +5963,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l15
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l15
 				}
 				c.ip += 3
@@ -6002,12 +6002,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l16
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l16
 				}
 				c.ip += 3
@@ -6041,12 +6041,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l17
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l17
 				}
 				c.ip += 3
@@ -6080,12 +6080,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l18
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l18
 				}
 				c.ip += 3
@@ -6119,12 +6119,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l19
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l19
 				}
 				c.ip += 3
@@ -6158,12 +6158,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l20
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l20
 				}
 				c.ip += 3
@@ -6197,12 +6197,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l21
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l21
 				}
 				c.ip += 3
@@ -6236,12 +6236,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l22
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l22
 				}
 				c.ip += 3
@@ -6275,12 +6275,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l23
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l23
 				}
 				c.ip += 3
@@ -6314,12 +6314,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l24
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l24
 				}
 				c.ip += 3
@@ -6353,12 +6353,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l25
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l25
 				}
 				c.ip += 3
@@ -6392,12 +6392,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l26
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l26
 				}
 				c.ip += 3
@@ -6431,12 +6431,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l27
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l27
 				}
 				c.ip += 3
@@ -6470,12 +6470,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l28
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l28
 				}
 				c.ip += 3
@@ -6509,12 +6509,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l29
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l29
 				}
 				c.ip += 3
@@ -6548,12 +6548,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l30
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l30
 				}
 				c.ip += 3
@@ -6587,12 +6587,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l31
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l31
 				}
 				c.ip += 3
@@ -6626,12 +6626,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l32
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l32
 				}
 				c.ip += 3
@@ -6665,12 +6665,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l33
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l33
 				}
 				c.ip += 3
@@ -6704,12 +6704,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l34
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l34
 				}
 				c.ip += 3
@@ -6743,12 +6743,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l35
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l35
 				}
 				c.ip += 3
@@ -6782,12 +6782,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l36
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l36
 				}
 				c.ip += 3
@@ -6821,12 +6821,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l37
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l37
 				}
 				c.ip += 3
@@ -6860,12 +6860,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l38
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l38
 				}
 				c.ip += 3
@@ -6899,12 +6899,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l39
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l39
 				}
 				c.ip += 3
@@ -6938,12 +6938,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l40
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l40
 				}
 				c.ip += 3
@@ -6977,12 +6977,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l41
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l41
 				}
 				c.ip += 3
@@ -7016,12 +7016,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l42
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l42
 				}
 				c.ip += 3
@@ -7055,12 +7055,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+8)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l43
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l43
 				}
 				c.ip += 3
@@ -7094,12 +7094,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l44
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l44
 				}
 				c.ip += 3
@@ -7134,12 +7134,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l45
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l45
 				}
 				c.ip += 3
@@ -7174,12 +7174,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l46
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l46
 				}
 				c.ip += 3
@@ -7214,12 +7214,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l47
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l47
 				}
 				c.ip += 3
@@ -7254,12 +7254,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l48
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l48
 				}
 				c.ip += 3
@@ -7294,12 +7294,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l49
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l49
 				}
 				c.ip += 3
@@ -7334,12 +7334,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l50
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l50
 				}
 				c.ip += 3
@@ -7374,12 +7374,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l51
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l51
 				}
 				c.ip += 3
@@ -7414,12 +7414,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l52
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l52
 				}
 				c.ip += 3
@@ -7454,12 +7454,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l53
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l53
 				}
 				c.ip += 3
@@ -7494,12 +7494,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l54
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l54
 				}
 				c.ip += 3
@@ -7534,12 +7534,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l55
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l55
 				}
 				c.ip += 3
@@ -7574,12 +7574,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l56
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l56
 				}
 				c.ip += 3
@@ -7614,12 +7614,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l57
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l57
 				}
 				c.ip += 3
@@ -7654,12 +7654,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l58
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l58
 				}
 				c.ip += 3
@@ -7694,12 +7694,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l59
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l59
 				}
 				c.ip += 3
@@ -7734,12 +7734,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l60
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l60
 				}
 				c.ip += 3
@@ -7774,12 +7774,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l61
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l61
 				}
 				c.ip += 3
@@ -7814,12 +7814,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l62
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l62
 				}
 				c.ip += 3
@@ -7854,12 +7854,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l63
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l63
 				}
 				c.ip += 3
@@ -7894,12 +7894,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l64
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l64
 				}
 				c.ip += 3
@@ -7934,12 +7934,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l65
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l65
 				}
 				c.ip += 3
@@ -7974,12 +7974,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l66
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l66
 				}
 				c.ip += 3
@@ -8014,12 +8014,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l67
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l67
 				}
 				c.ip += 3
@@ -8054,12 +8054,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l68
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l68
 				}
 				c.ip += 3
@@ -8094,12 +8094,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l69
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l69
 				}
 				c.ip += 3
@@ -8134,12 +8134,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l70
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l70
 				}
 				c.ip += 3
@@ -8174,12 +8174,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l71
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l71
 				}
 				c.ip += 3
@@ -8214,12 +8214,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l72
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l72
 				}
 				c.ip += 3
@@ -8254,12 +8254,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l73
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l73
 				}
 				c.ip += 3
@@ -8294,12 +8294,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l74
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l74
 				}
 				c.ip += 3
@@ -8334,12 +8334,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l75
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l75
 				}
 				c.ip += 3
@@ -8374,12 +8374,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l76
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l76
 				}
 				c.ip += 3
@@ -8413,12 +8413,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l77
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l77
 				}
 				c.ip += 3
@@ -8452,12 +8452,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l78
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l78
 				}
 				c.ip += 3
@@ -8491,12 +8491,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l79
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l79
 				}
 				c.ip += 3
@@ -8530,12 +8530,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l80
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l80
 				}
 				c.ip += 3
@@ -8569,12 +8569,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l81
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l81
 				}
 				c.ip += 3
@@ -8608,12 +8608,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l82
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l82
 				}
 				c.ip += 3
@@ -8647,12 +8647,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l83
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l83
 				}
 				c.ip += 3
@@ -8686,12 +8686,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l84
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l84
 				}
 				c.ip += 3
@@ -8725,12 +8725,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l85
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l85
 				}
 				c.ip += 3
@@ -8764,12 +8764,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l86
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l86
 				}
 				c.ip += 3
@@ -8803,12 +8803,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l87
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l87
 				}
 				c.ip += 3
@@ -8842,12 +8842,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l88
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l88
 				}
 				c.ip += 3
@@ -8881,12 +8881,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l89
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l89
 				}
 				c.ip += 3
@@ -8920,12 +8920,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l90
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l90
 				}
 				c.ip += 3
@@ -8959,12 +8959,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l91
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l91
 				}
 				c.ip += 3
@@ -8998,12 +8998,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l92
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l92
 				}
 				c.ip += 3
@@ -9037,12 +9037,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l93
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l93
 				}
 				c.ip += 3
@@ -9076,12 +9076,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l94
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l94
 				}
 				c.ip += 3
@@ -9115,12 +9115,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l95
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l95
 				}
 				c.ip += 3
@@ -9154,12 +9154,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l96
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l96
 				}
 				c.ip += 3
@@ -9193,12 +9193,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l97
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l97
 				}
 				c.ip += 3
@@ -9232,12 +9232,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l98
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l98
 				}
 				c.ip += 3
@@ -9271,12 +9271,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l99
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l99
 				}
 				c.ip += 3
@@ -9310,12 +9310,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l100
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l100
 				}
 				c.ip += 3
@@ -9349,12 +9349,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l101
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l101
 				}
 				c.ip += 3
@@ -9388,12 +9388,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l102
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l102
 				}
 				c.ip += 3
@@ -9427,12 +9427,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l103
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l103
 				}
 				c.ip += 3
@@ -9466,12 +9466,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l104
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l104
 				}
 				c.ip += 3
@@ -9505,12 +9505,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l105
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l105
 				}
 				c.ip += 3
@@ -9544,12 +9544,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l106
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l106
 				}
 				c.ip += 3
@@ -9583,12 +9583,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l107
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l107
 				}
 				c.ip += 3
@@ -9622,8 +9622,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l108
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9653,8 +9653,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l109
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9684,8 +9684,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l110
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9715,8 +9715,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l111
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9746,8 +9746,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l112
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9777,8 +9777,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l113
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9808,8 +9808,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l114
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9839,8 +9839,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l115
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9870,8 +9870,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l116
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9901,8 +9901,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+10)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l117
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9932,8 +9932,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l118
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9963,8 +9963,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l119
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -9994,8 +9994,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l120
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10025,8 +10025,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l121
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10056,8 +10056,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l122
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10087,8 +10087,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l123
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10118,8 +10118,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l124
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10149,8 +10149,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l125
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10180,8 +10180,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l126
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10211,8 +10211,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+14)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l127
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -10242,8 +10242,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l128
 				}
 				c.ip += 3
@@ -10273,8 +10273,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l129
 				}
 				c.ip += 3
@@ -10304,8 +10304,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l130
 				}
 				c.ip += 3
@@ -10335,8 +10335,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l131
 				}
 				c.ip += 3
@@ -10366,8 +10366,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l132
 				}
 				c.ip += 3
@@ -10397,8 +10397,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l133
 				}
 				c.ip += 3
@@ -10427,8 +10427,8 @@ var (
 				goto l134
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l134
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10456,8 +10456,8 @@ var (
 				goto l135
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l135
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10485,8 +10485,8 @@ var (
 				goto l136
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l136
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10514,8 +10514,8 @@ var (
 				goto l137
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l137
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10556,8 +10556,8 @@ var (
 				goto l138
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l138
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10598,8 +10598,8 @@ var (
 				goto l139
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l139
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10646,8 +10646,8 @@ var (
 				goto l140
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l140
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10675,8 +10675,8 @@ var (
 				goto l141
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l141
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10704,8 +10704,8 @@ var (
 				goto l142
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l142
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10733,8 +10733,8 @@ var (
 				goto l143
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l143
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10762,8 +10762,8 @@ var (
 				goto l144
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l144
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10791,8 +10791,8 @@ var (
 				goto l145
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l145
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10820,8 +10820,8 @@ var (
 				goto l146
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l146
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10849,8 +10849,8 @@ var (
 				goto l147
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l147
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10878,8 +10878,8 @@ var (
 				goto l148
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l148
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
@@ -10908,8 +10908,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l149
 				}
 				c.ip += 3
@@ -10939,8 +10939,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l150
 				}
 				c.ip += 3
@@ -10970,8 +10970,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l151
 				}
 				c.ip += 3
@@ -11001,8 +11001,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l152
 				}
 				c.ip += 3
@@ -11032,8 +11032,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l153
 				}
 				c.ip += 3
@@ -11063,8 +11063,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l154
 				}
 				c.ip += 3
@@ -11093,8 +11093,8 @@ var (
 				goto l155
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l155
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11122,8 +11122,8 @@ var (
 				goto l156
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l156
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11151,8 +11151,8 @@ var (
 				goto l157
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l157
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11180,8 +11180,8 @@ var (
 				goto l158
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l158
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11222,8 +11222,8 @@ var (
 				goto l159
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l159
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11264,8 +11264,8 @@ var (
 				goto l160
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l160
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11312,8 +11312,8 @@ var (
 				goto l161
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l161
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11341,8 +11341,8 @@ var (
 				goto l162
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l162
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11370,8 +11370,8 @@ var (
 				goto l163
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l163
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11399,8 +11399,8 @@ var (
 				goto l164
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l164
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11428,8 +11428,8 @@ var (
 				goto l165
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l165
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11457,8 +11457,8 @@ var (
 				goto l166
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l166
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11486,8 +11486,8 @@ var (
 				goto l167
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l167
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11515,8 +11515,8 @@ var (
 				goto l168
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l168
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11544,8 +11544,8 @@ var (
 				goto l169
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l169
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
@@ -11574,8 +11574,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l170
 				}
 				c.ip += 3
@@ -11605,8 +11605,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l171
 				}
 				c.ip += 3
@@ -11635,12 +11635,12 @@ var (
 				goto l172
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l172
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l172
 				}
 				c.ip += 3
@@ -11672,12 +11672,12 @@ var (
 				goto l173
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l173
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l173
 				}
 				c.ip += 3
@@ -11709,12 +11709,12 @@ var (
 				goto l174
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l174
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l174
 				}
 				c.ip += 3
@@ -11746,12 +11746,12 @@ var (
 				goto l175
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l175
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l175
 				}
 				c.ip += 3
@@ -11783,12 +11783,12 @@ var (
 				goto l176
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l176
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l176
 				}
 				c.ip += 3
@@ -11820,12 +11820,12 @@ var (
 				goto l177
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l177
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l177
 				}
 				c.ip += 3
@@ -11857,12 +11857,12 @@ var (
 				goto l178
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l178
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l178
 				}
 				c.ip += 3
@@ -11894,12 +11894,12 @@ var (
 				goto l179
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l179
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l179
 				}
 				c.ip += 3
@@ -11931,12 +11931,12 @@ var (
 				goto l180
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l180
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l180
 				}
 				c.ip += 3
@@ -11968,12 +11968,12 @@ var (
 				goto l181
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l181
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l181
 				}
 				c.ip += 3
@@ -12017,12 +12017,12 @@ var (
 				goto l182
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l182
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l182
 				}
 				c.ip += 3
@@ -12066,12 +12066,12 @@ var (
 				goto l183
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l183
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l183
 				}
 				c.ip += 3
@@ -12121,12 +12121,12 @@ var (
 				goto l184
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l184
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l184
 				}
 				c.ip += 3
@@ -12158,12 +12158,12 @@ var (
 				goto l185
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l185
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l185
 				}
 				c.ip += 3
@@ -12195,12 +12195,12 @@ var (
 				goto l186
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l186
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l186
 				}
 				c.ip += 3
@@ -12232,12 +12232,12 @@ var (
 				goto l187
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l187
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l187
 				}
 				c.ip += 3
@@ -12269,12 +12269,12 @@ var (
 				goto l188
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l188
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l188
 				}
 				c.ip += 3
@@ -12306,12 +12306,12 @@ var (
 				goto l189
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l189
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l189
 				}
 				c.ip += 3
@@ -12343,12 +12343,12 @@ var (
 				goto l190
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l190
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l190
 				}
 				c.ip += 3
@@ -12380,12 +12380,12 @@ var (
 				goto l191
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l191
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l191
 				}
 				c.ip += 3
@@ -12417,12 +12417,12 @@ var (
 				goto l192
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l192
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l192
 				}
 				c.ip += 3
@@ -12454,12 +12454,12 @@ var (
 				goto l193
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l193
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l193
 				}
 				c.ip += 3
@@ -12491,12 +12491,12 @@ var (
 				goto l194
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l194
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l194
 				}
 				c.ip += 3
@@ -12528,12 +12528,12 @@ var (
 				goto l195
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l195
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l195
 				}
 				c.ip += 3
@@ -12565,12 +12565,12 @@ var (
 				goto l196
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l196
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l196
 				}
 				c.ip += 3
@@ -12614,12 +12614,12 @@ var (
 				goto l197
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l197
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l197
 				}
 				c.ip += 3
@@ -12663,12 +12663,12 @@ var (
 				goto l198
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l198
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l198
 				}
 				c.ip += 3
@@ -12718,12 +12718,12 @@ var (
 				goto l199
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l199
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l199
 				}
 				c.ip += 3
@@ -12755,12 +12755,12 @@ var (
 				goto l200
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l200
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l200
 				}
 				c.ip += 3
@@ -12792,12 +12792,12 @@ var (
 				goto l201
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l201
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l201
 				}
 				c.ip += 3
@@ -12829,12 +12829,12 @@ var (
 				goto l202
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l202
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l202
 				}
 				c.ip += 3
@@ -12866,12 +12866,12 @@ var (
 				goto l203
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l203
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l203
 				}
 				c.ip += 3
@@ -12903,12 +12903,12 @@ var (
 				goto l204
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l204
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l204
 				}
 				c.ip += 3
@@ -12940,12 +12940,12 @@ var (
 				goto l205
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l205
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l205
 				}
 				c.ip += 3
@@ -12977,12 +12977,12 @@ var (
 				goto l206
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l206
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l206
 				}
 				c.ip += 3
@@ -13014,12 +13014,12 @@ var (
 				goto l207
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l207
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l207
 				}
 				c.ip += 3
@@ -13051,12 +13051,12 @@ var (
 				goto l208
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l208
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l208
 				}
 				c.ip += 3
@@ -13088,12 +13088,12 @@ var (
 				goto l209
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l209
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l209
 				}
 				c.ip += 3
@@ -13125,12 +13125,12 @@ var (
 				goto l210
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l210
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l210
 				}
 				c.ip += 3
@@ -13162,12 +13162,12 @@ var (
 				goto l211
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l211
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l211
 				}
 				c.ip += 3
@@ -13211,12 +13211,12 @@ var (
 				goto l212
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l212
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l212
 				}
 				c.ip += 3
@@ -13260,12 +13260,12 @@ var (
 				goto l213
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l213
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l213
 				}
 				c.ip += 3
@@ -13309,12 +13309,12 @@ var (
 				goto l214
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l214
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l214
 				}
 				c.ip += 3
@@ -13358,12 +13358,12 @@ var (
 				goto l215
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l215
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l215
 				}
 				c.ip += 3
@@ -13395,12 +13395,12 @@ var (
 				goto l216
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l216
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l216
 				}
 				c.ip += 3
@@ -13432,12 +13432,12 @@ var (
 				goto l217
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l217
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l217
 				}
 				c.ip += 3
@@ -13469,12 +13469,12 @@ var (
 				goto l218
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l218
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l218
 				}
 				c.ip += 3
@@ -13504,12 +13504,12 @@ var (
 				goto l219
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l219
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l219
 				}
 				c.ip += 3
@@ -13539,12 +13539,12 @@ var (
 				goto l220
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l220
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l220
 				}
 				c.ip += 3
@@ -13574,12 +13574,12 @@ var (
 				goto l221
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l221
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l221
 				}
 				c.ip += 3
@@ -13611,12 +13611,12 @@ var (
 				goto l222
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l222
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l222
 				}
 				c.ip += 3
@@ -13648,12 +13648,12 @@ var (
 				goto l223
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l223
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l223
 				}
 				c.ip += 3
@@ -13685,12 +13685,12 @@ var (
 				goto l224
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l224
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l224
 				}
 				c.ip += 3
@@ -13722,12 +13722,12 @@ var (
 				goto l225
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l225
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l225
 				}
 				c.ip += 3
@@ -13759,12 +13759,12 @@ var (
 				goto l226
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l226
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l226
 				}
 				c.ip += 3
@@ -13796,12 +13796,12 @@ var (
 				goto l227
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l227
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l227
 				}
 				c.ip += 3
@@ -13833,12 +13833,12 @@ var (
 				goto l228
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l228
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l228
 				}
 				c.ip += 3
@@ -13870,12 +13870,12 @@ var (
 				goto l229
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l229
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l229
 				}
 				c.ip += 3
@@ -13907,12 +13907,12 @@ var (
 				goto l230
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l230
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l230
 				}
 				c.ip += 3
@@ -13944,12 +13944,12 @@ var (
 				goto l231
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l231
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l231
 				}
 				c.ip += 3
@@ -13981,12 +13981,12 @@ var (
 				goto l232
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l232
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l232
 				}
 				c.ip += 3
@@ -14018,12 +14018,12 @@ var (
 				goto l233
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l233
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l233
 				}
 				c.ip += 3
@@ -14055,12 +14055,12 @@ var (
 				goto l234
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l234
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l234
 				}
 				c.ip += 3
@@ -14092,12 +14092,12 @@ var (
 				goto l235
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l235
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l235
 				}
 				c.ip += 3
@@ -14129,12 +14129,12 @@ var (
 				goto l236
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l236
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l236
 				}
 				c.ip += 3
@@ -14180,12 +14180,12 @@ var (
 				goto l237
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l237
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l237
 				}
 				c.ip += 3
@@ -14231,12 +14231,12 @@ var (
 				goto l238
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l238
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l238
 				}
 				c.ip += 3
@@ -14282,12 +14282,12 @@ var (
 				goto l239
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l239
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l239
 				}
 				c.ip += 3
@@ -14333,12 +14333,12 @@ var (
 				goto l240
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l240
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l240
 				}
 				c.ip += 3
@@ -14370,12 +14370,12 @@ var (
 				goto l241
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l241
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l241
 				}
 				c.ip += 3
@@ -14407,12 +14407,12 @@ var (
 				goto l242
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l242
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l242
 				}
 				c.ip += 3
@@ -14444,12 +14444,12 @@ var (
 				goto l243
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l243
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l243
 				}
 				c.ip += 3
@@ -14481,12 +14481,12 @@ var (
 				goto l244
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l244
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l244
 				}
 				c.ip += 3
@@ -14518,12 +14518,12 @@ var (
 				goto l245
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l245
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l245
 				}
 				c.ip += 3
@@ -14555,12 +14555,12 @@ var (
 				goto l246
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l246
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l246
 				}
 				c.ip += 3
@@ -14592,12 +14592,12 @@ var (
 				goto l247
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l247
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l247
 				}
 				c.ip += 3
@@ -14629,12 +14629,12 @@ var (
 				goto l248
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l248
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l248
 				}
 				c.ip += 3
@@ -14666,12 +14666,12 @@ var (
 				goto l249
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l249
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l249
 				}
 				c.ip += 3
@@ -14703,12 +14703,12 @@ var (
 				goto l250
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l250
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l250
 				}
 				c.ip += 3
@@ -14740,12 +14740,12 @@ var (
 				goto l251
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l251
 				}
-				i1 := instr.ParseU16(c.code, start+3+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l251
 				}
 				c.ip += 3
@@ -14778,8 +14778,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l252
 				}
 				c.ip += 3
@@ -14809,8 +14809,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l253
 				}
 				c.ip += 3
@@ -14840,8 +14840,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l254
 				}
 				c.ip += 3
@@ -14871,8 +14871,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l255
 				}
 				c.ip += 3
@@ -14901,12 +14901,12 @@ var (
 				goto l256
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l256
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l256
 				}
 				c.ip += 3
@@ -14939,12 +14939,12 @@ var (
 				goto l257
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l257
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l257
 				}
 				c.ip += 3
@@ -14977,12 +14977,12 @@ var (
 				goto l258
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l258
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l258
 				}
 				c.ip += 3
@@ -15015,12 +15015,12 @@ var (
 				goto l259
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l259
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l259
 				}
 				c.ip += 3
@@ -15053,12 +15053,12 @@ var (
 				goto l260
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l260
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l260
 				}
 				c.ip += 3
@@ -15091,12 +15091,12 @@ var (
 				goto l261
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l261
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l261
 				}
 				c.ip += 3
@@ -15129,12 +15129,12 @@ var (
 				goto l262
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l262
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l262
 				}
 				c.ip += 3
@@ -15167,12 +15167,12 @@ var (
 				goto l263
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l263
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l263
 				}
 				c.ip += 3
@@ -15205,12 +15205,12 @@ var (
 				goto l264
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l264
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l264
 				}
 				c.ip += 3
@@ -15243,12 +15243,12 @@ var (
 				goto l265
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l265
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l265
 				}
 				c.ip += 3
@@ -15293,12 +15293,12 @@ var (
 				goto l266
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l266
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l266
 				}
 				c.ip += 3
@@ -15343,12 +15343,12 @@ var (
 				goto l267
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l267
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l267
 				}
 				c.ip += 3
@@ -15399,12 +15399,12 @@ var (
 				goto l268
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l268
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l268
 				}
 				c.ip += 3
@@ -15437,12 +15437,12 @@ var (
 				goto l269
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l269
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l269
 				}
 				c.ip += 3
@@ -15475,12 +15475,12 @@ var (
 				goto l270
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l270
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l270
 				}
 				c.ip += 3
@@ -15513,12 +15513,12 @@ var (
 				goto l271
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l271
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l271
 				}
 				c.ip += 3
@@ -15551,12 +15551,12 @@ var (
 				goto l272
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l272
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l272
 				}
 				c.ip += 3
@@ -15589,12 +15589,12 @@ var (
 				goto l273
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l273
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l273
 				}
 				c.ip += 3
@@ -15627,12 +15627,12 @@ var (
 				goto l274
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l274
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l274
 				}
 				c.ip += 3
@@ -15665,12 +15665,12 @@ var (
 				goto l275
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l275
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l275
 				}
 				c.ip += 3
@@ -15703,12 +15703,12 @@ var (
 				goto l276
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l276
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l276
 				}
 				c.ip += 3
@@ -15741,12 +15741,12 @@ var (
 				goto l277
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l277
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l277
 				}
 				c.ip += 3
@@ -15779,12 +15779,12 @@ var (
 				goto l278
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l278
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l278
 				}
 				c.ip += 3
@@ -15817,12 +15817,12 @@ var (
 				goto l279
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l279
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l279
 				}
 				c.ip += 3
@@ -15855,12 +15855,12 @@ var (
 				goto l280
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l280
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l280
 				}
 				c.ip += 3
@@ -15905,12 +15905,12 @@ var (
 				goto l281
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l281
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l281
 				}
 				c.ip += 3
@@ -15955,12 +15955,12 @@ var (
 				goto l282
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l282
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l282
 				}
 				c.ip += 3
@@ -16011,12 +16011,12 @@ var (
 				goto l283
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l283
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l283
 				}
 				c.ip += 3
@@ -16049,12 +16049,12 @@ var (
 				goto l284
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l284
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l284
 				}
 				c.ip += 3
@@ -16087,12 +16087,12 @@ var (
 				goto l285
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l285
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l285
 				}
 				c.ip += 3
@@ -16125,12 +16125,12 @@ var (
 				goto l286
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l286
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l286
 				}
 				c.ip += 3
@@ -16163,12 +16163,12 @@ var (
 				goto l287
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l287
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l287
 				}
 				c.ip += 3
@@ -16201,12 +16201,12 @@ var (
 				goto l288
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l288
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l288
 				}
 				c.ip += 3
@@ -16239,12 +16239,12 @@ var (
 				goto l289
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l289
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l289
 				}
 				c.ip += 3
@@ -16277,12 +16277,12 @@ var (
 				goto l290
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l290
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l290
 				}
 				c.ip += 3
@@ -16315,12 +16315,12 @@ var (
 				goto l291
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l291
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l291
 				}
 				c.ip += 3
@@ -16353,12 +16353,12 @@ var (
 				goto l292
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l292
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l292
 				}
 				c.ip += 3
@@ -16391,12 +16391,12 @@ var (
 				goto l293
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l293
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l293
 				}
 				c.ip += 3
@@ -16429,12 +16429,12 @@ var (
 				goto l294
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l294
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l294
 				}
 				c.ip += 3
@@ -16467,12 +16467,12 @@ var (
 				goto l295
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l295
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l295
 				}
 				c.ip += 3
@@ -16517,12 +16517,12 @@ var (
 				goto l296
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l296
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l296
 				}
 				c.ip += 3
@@ -16567,12 +16567,12 @@ var (
 				goto l297
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l297
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l297
 				}
 				c.ip += 3
@@ -16617,12 +16617,12 @@ var (
 				goto l298
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l298
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l298
 				}
 				c.ip += 3
@@ -16667,12 +16667,12 @@ var (
 				goto l299
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l299
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l299
 				}
 				c.ip += 3
@@ -16705,12 +16705,12 @@ var (
 				goto l300
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l300
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l300
 				}
 				c.ip += 3
@@ -16743,12 +16743,12 @@ var (
 				goto l301
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l301
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l301
 				}
 				c.ip += 3
@@ -16781,12 +16781,12 @@ var (
 				goto l302
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l302
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l302
 				}
 				c.ip += 3
@@ -16817,12 +16817,12 @@ var (
 				goto l303
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l303
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l303
 				}
 				c.ip += 3
@@ -16853,12 +16853,12 @@ var (
 				goto l304
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l304
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l304
 				}
 				c.ip += 3
@@ -16889,12 +16889,12 @@ var (
 				goto l305
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l305
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l305
 				}
 				c.ip += 3
@@ -16927,12 +16927,12 @@ var (
 				goto l306
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l306
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l306
 				}
 				c.ip += 3
@@ -16965,12 +16965,12 @@ var (
 				goto l307
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l307
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l307
 				}
 				c.ip += 3
@@ -17003,12 +17003,12 @@ var (
 				goto l308
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l308
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l308
 				}
 				c.ip += 3
@@ -17041,12 +17041,12 @@ var (
 				goto l309
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l309
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l309
 				}
 				c.ip += 3
@@ -17079,12 +17079,12 @@ var (
 				goto l310
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l310
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l310
 				}
 				c.ip += 3
@@ -17117,12 +17117,12 @@ var (
 				goto l311
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l311
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l311
 				}
 				c.ip += 3
@@ -17155,12 +17155,12 @@ var (
 				goto l312
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l312
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l312
 				}
 				c.ip += 3
@@ -17193,12 +17193,12 @@ var (
 				goto l313
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l313
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l313
 				}
 				c.ip += 3
@@ -17231,12 +17231,12 @@ var (
 				goto l314
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l314
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l314
 				}
 				c.ip += 3
@@ -17269,12 +17269,12 @@ var (
 				goto l315
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l315
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l315
 				}
 				c.ip += 3
@@ -17307,12 +17307,12 @@ var (
 				goto l316
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l316
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l316
 				}
 				c.ip += 3
@@ -17345,12 +17345,12 @@ var (
 				goto l317
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l317
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l317
 				}
 				c.ip += 3
@@ -17383,12 +17383,12 @@ var (
 				goto l318
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l318
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l318
 				}
 				c.ip += 3
@@ -17421,12 +17421,12 @@ var (
 				goto l319
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l319
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l319
 				}
 				c.ip += 3
@@ -17459,12 +17459,12 @@ var (
 				goto l320
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l320
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l320
 				}
 				c.ip += 3
@@ -17511,12 +17511,12 @@ var (
 				goto l321
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l321
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l321
 				}
 				c.ip += 3
@@ -17563,12 +17563,12 @@ var (
 				goto l322
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l322
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l322
 				}
 				c.ip += 3
@@ -17615,12 +17615,12 @@ var (
 				goto l323
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l323
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l323
 				}
 				c.ip += 3
@@ -17667,12 +17667,12 @@ var (
 				goto l324
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l324
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l324
 				}
 				c.ip += 3
@@ -17705,12 +17705,12 @@ var (
 				goto l325
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l325
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l325
 				}
 				c.ip += 3
@@ -17743,12 +17743,12 @@ var (
 				goto l326
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l326
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l326
 				}
 				c.ip += 3
@@ -17781,12 +17781,12 @@ var (
 				goto l327
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l327
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l327
 				}
 				c.ip += 3
@@ -17819,12 +17819,12 @@ var (
 				goto l328
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l328
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l328
 				}
 				c.ip += 3
@@ -17857,12 +17857,12 @@ var (
 				goto l329
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l329
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l329
 				}
 				c.ip += 3
@@ -17895,12 +17895,12 @@ var (
 				goto l330
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l330
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l330
 				}
 				c.ip += 3
@@ -17933,12 +17933,12 @@ var (
 				goto l331
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l331
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l331
 				}
 				c.ip += 3
@@ -17971,12 +17971,12 @@ var (
 				goto l332
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l332
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l332
 				}
 				c.ip += 3
@@ -18009,12 +18009,12 @@ var (
 				goto l333
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l333
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l333
 				}
 				c.ip += 3
@@ -18047,12 +18047,12 @@ var (
 				goto l334
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l334
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l334
 				}
 				c.ip += 3
@@ -18085,12 +18085,12 @@ var (
 				goto l335
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l335
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l335
 				}
 				c.ip += 3
@@ -18123,12 +18123,12 @@ var (
 				goto l336
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l336
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l336
 				}
 				c.ip += 3
@@ -18160,12 +18160,12 @@ var (
 				goto l337
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l337
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l337
 				}
 				c.ip += 3
@@ -18197,12 +18197,12 @@ var (
 				goto l338
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l338
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l338
 				}
 				c.ip += 3
@@ -18234,12 +18234,12 @@ var (
 				goto l339
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l339
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l339
 				}
 				c.ip += 3
@@ -18271,12 +18271,12 @@ var (
 				goto l340
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l340
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l340
 				}
 				c.ip += 3
@@ -18308,12 +18308,12 @@ var (
 				goto l341
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l341
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l341
 				}
 				c.ip += 3
@@ -18345,12 +18345,12 @@ var (
 				goto l342
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l342
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l342
 				}
 				c.ip += 3
@@ -18382,12 +18382,12 @@ var (
 				goto l343
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l343
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l343
 				}
 				c.ip += 3
@@ -18419,12 +18419,12 @@ var (
 				goto l344
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l344
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l344
 				}
 				c.ip += 3
@@ -18456,12 +18456,12 @@ var (
 				goto l345
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l345
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l345
 				}
 				c.ip += 3
@@ -18505,12 +18505,12 @@ var (
 				goto l346
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l346
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l346
 				}
 				c.ip += 3
@@ -18554,12 +18554,12 @@ var (
 				goto l347
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l347
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l347
 				}
 				c.ip += 3
@@ -18609,12 +18609,12 @@ var (
 				goto l348
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l348
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l348
 				}
 				c.ip += 3
@@ -18646,12 +18646,12 @@ var (
 				goto l349
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l349
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l349
 				}
 				c.ip += 3
@@ -18683,12 +18683,12 @@ var (
 				goto l350
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l350
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l350
 				}
 				c.ip += 3
@@ -18720,12 +18720,12 @@ var (
 				goto l351
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l351
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l351
 				}
 				c.ip += 3
@@ -18757,12 +18757,12 @@ var (
 				goto l352
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l352
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l352
 				}
 				c.ip += 3
@@ -18794,12 +18794,12 @@ var (
 				goto l353
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l353
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l353
 				}
 				c.ip += 3
@@ -18831,12 +18831,12 @@ var (
 				goto l354
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l354
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l354
 				}
 				c.ip += 3
@@ -18868,12 +18868,12 @@ var (
 				goto l355
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l355
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l355
 				}
 				c.ip += 3
@@ -18905,12 +18905,12 @@ var (
 				goto l356
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l356
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+3+1, types.KindF32)
+				if !ok1 {
 					goto l356
 				}
 				c.ip += 3
@@ -18942,12 +18942,12 @@ var (
 				goto l357
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l357
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l357
 				}
 				c.ip += 3
@@ -18979,12 +18979,12 @@ var (
 				goto l358
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l358
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l358
 				}
 				c.ip += 3
@@ -19016,12 +19016,12 @@ var (
 				goto l359
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l359
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l359
 				}
 				c.ip += 3
@@ -19053,12 +19053,12 @@ var (
 				goto l360
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l360
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l360
 				}
 				c.ip += 3
@@ -19102,12 +19102,12 @@ var (
 				goto l361
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l361
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l361
 				}
 				c.ip += 3
@@ -19151,12 +19151,12 @@ var (
 				goto l362
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l362
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l362
 				}
 				c.ip += 3
@@ -19206,12 +19206,12 @@ var (
 				goto l363
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l363
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l363
 				}
 				c.ip += 3
@@ -19243,12 +19243,12 @@ var (
 				goto l364
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l364
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l364
 				}
 				c.ip += 3
@@ -19280,12 +19280,12 @@ var (
 				goto l365
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l365
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l365
 				}
 				c.ip += 3
@@ -19317,12 +19317,12 @@ var (
 				goto l366
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l366
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l366
 				}
 				c.ip += 3
@@ -19354,12 +19354,12 @@ var (
 				goto l367
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l367
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l367
 				}
 				c.ip += 3
@@ -19391,12 +19391,12 @@ var (
 				goto l368
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l368
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l368
 				}
 				c.ip += 3
@@ -19428,12 +19428,12 @@ var (
 				goto l369
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l369
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l369
 				}
 				c.ip += 3
@@ -19465,12 +19465,12 @@ var (
 				goto l370
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l370
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l370
 				}
 				c.ip += 3
@@ -19502,12 +19502,12 @@ var (
 				goto l371
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l371
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+3+1, types.KindF64)
+				if !ok1 {
 					goto l371
 				}
 				c.ip += 3
@@ -19539,12 +19539,12 @@ var (
 				goto l372
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l372
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l372
 				}
 				c.ip += 3
@@ -19576,12 +19576,12 @@ var (
 				goto l373
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l373
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l373
 				}
 				c.ip += 3
@@ -19613,12 +19613,12 @@ var (
 				goto l374
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l374
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l374
 				}
 				c.ip += 3
@@ -19650,12 +19650,12 @@ var (
 				goto l375
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l375
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l375
 				}
 				c.ip += 3
@@ -19699,12 +19699,12 @@ var (
 				goto l376
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l376
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l376
 				}
 				c.ip += 3
@@ -19748,12 +19748,12 @@ var (
 				goto l377
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l377
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l377
 				}
 				c.ip += 3
@@ -19797,12 +19797,12 @@ var (
 				goto l378
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l378
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l378
 				}
 				c.ip += 3
@@ -19846,12 +19846,12 @@ var (
 				goto l379
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l379
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l379
 				}
 				c.ip += 3
@@ -19883,12 +19883,12 @@ var (
 				goto l380
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l380
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l380
 				}
 				c.ip += 3
@@ -19920,12 +19920,12 @@ var (
 				goto l381
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l381
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l381
 				}
 				c.ip += 3
@@ -19957,12 +19957,12 @@ var (
 				goto l382
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l382
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l382
 				}
 				c.ip += 3
@@ -19992,12 +19992,12 @@ var (
 				goto l383
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l383
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l383
 				}
 				c.ip += 3
@@ -20027,12 +20027,12 @@ var (
 				goto l384
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l384
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l384
 				}
 				c.ip += 3
@@ -20062,12 +20062,12 @@ var (
 				goto l385
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l385
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l385
 				}
 				c.ip += 3
@@ -20099,12 +20099,12 @@ var (
 				goto l386
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l386
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l386
 				}
 				c.ip += 3
@@ -20136,12 +20136,12 @@ var (
 				goto l387
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l387
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l387
 				}
 				c.ip += 3
@@ -20173,12 +20173,12 @@ var (
 				goto l388
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l388
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l388
 				}
 				c.ip += 3
@@ -20210,12 +20210,12 @@ var (
 				goto l389
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l389
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l389
 				}
 				c.ip += 3
@@ -20247,12 +20247,12 @@ var (
 				goto l390
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l390
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l390
 				}
 				c.ip += 3
@@ -20284,12 +20284,12 @@ var (
 				goto l391
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l391
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l391
 				}
 				c.ip += 3
@@ -20321,12 +20321,12 @@ var (
 				goto l392
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l392
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l392
 				}
 				c.ip += 3
@@ -20358,12 +20358,12 @@ var (
 				goto l393
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l393
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l393
 				}
 				c.ip += 3
@@ -20395,12 +20395,12 @@ var (
 				goto l394
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l394
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l394
 				}
 				c.ip += 3
@@ -20432,12 +20432,12 @@ var (
 				goto l395
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l395
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l395
 				}
 				c.ip += 3
@@ -20469,12 +20469,12 @@ var (
 				goto l396
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l396
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
 					goto l396
 				}
 				c.ip += 3
@@ -20506,12 +20506,12 @@ var (
 				goto l397
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l397
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l397
 				}
 				c.ip += 3
@@ -20543,12 +20543,12 @@ var (
 				goto l398
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l398
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l398
 				}
 				c.ip += 3
@@ -20580,12 +20580,12 @@ var (
 				goto l399
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l399
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l399
 				}
 				c.ip += 3
@@ -20617,12 +20617,12 @@ var (
 				goto l400
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l400
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l400
 				}
 				c.ip += 3
@@ -20668,12 +20668,12 @@ var (
 				goto l401
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l401
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l401
 				}
 				c.ip += 3
@@ -20719,12 +20719,12 @@ var (
 				goto l402
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l402
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l402
 				}
 				c.ip += 3
@@ -20770,12 +20770,12 @@ var (
 				goto l403
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l403
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l403
 				}
 				c.ip += 3
@@ -20821,12 +20821,12 @@ var (
 				goto l404
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l404
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l404
 				}
 				c.ip += 3
@@ -20858,12 +20858,12 @@ var (
 				goto l405
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l405
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l405
 				}
 				c.ip += 3
@@ -20895,12 +20895,12 @@ var (
 				goto l406
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l406
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l406
 				}
 				c.ip += 3
@@ -20932,12 +20932,12 @@ var (
 				goto l407
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l407
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l407
 				}
 				c.ip += 3
@@ -20969,12 +20969,12 @@ var (
 				goto l408
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l408
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l408
 				}
 				c.ip += 3
@@ -21006,12 +21006,12 @@ var (
 				goto l409
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l409
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l409
 				}
 				c.ip += 3
@@ -21043,12 +21043,12 @@ var (
 				goto l410
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l410
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l410
 				}
 				c.ip += 3
@@ -21080,12 +21080,12 @@ var (
 				goto l411
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l411
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l411
 				}
 				c.ip += 3
@@ -21117,12 +21117,12 @@ var (
 				goto l412
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l412
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l412
 				}
 				c.ip += 3
@@ -21154,12 +21154,12 @@ var (
 				goto l413
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l413
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l413
 				}
 				c.ip += 3
@@ -21191,12 +21191,12 @@ var (
 				goto l414
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l414
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l414
 				}
 				c.ip += 3
@@ -21228,12 +21228,12 @@ var (
 				goto l415
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l415
 				}
-				i1 := int(c.code[start+3+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+3+1, types.KindI64)
+				if !ok1 {
 					goto l415
 				}
 				c.ip += 3
@@ -21266,8 +21266,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindRef {
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
 					goto l416
 				}
 				c.ip += 3
@@ -21290,8 +21290,8 @@ var (
 				goto l417
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l417
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21319,8 +21319,8 @@ var (
 				goto l418
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l418
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21348,8 +21348,8 @@ var (
 				goto l419
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l419
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21377,8 +21377,8 @@ var (
 				goto l420
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l420
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21419,8 +21419,8 @@ var (
 				goto l421
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l421
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21461,8 +21461,8 @@ var (
 				goto l422
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l422
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21503,8 +21503,8 @@ var (
 				goto l423
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l423
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21545,8 +21545,8 @@ var (
 				goto l424
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l424
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21574,8 +21574,8 @@ var (
 				goto l425
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l425
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21603,8 +21603,8 @@ var (
 				goto l426
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l426
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21632,8 +21632,8 @@ var (
 				goto l427
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l427
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+3:]).Operand(0)))
@@ -21660,8 +21660,8 @@ var (
 				goto l428
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l428
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+3:]).Operand(0)))
@@ -21688,8 +21688,8 @@ var (
 				goto l429
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l429
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+3:]).Operand(0)))
@@ -21716,8 +21716,8 @@ var (
 				goto l430
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l430
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21745,8 +21745,8 @@ var (
 				goto l431
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l431
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21774,8 +21774,8 @@ var (
 				goto l432
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l432
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21803,8 +21803,8 @@ var (
 				goto l433
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l433
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21832,8 +21832,8 @@ var (
 				goto l434
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l434
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21861,8 +21861,8 @@ var (
 				goto l435
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l435
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21890,8 +21890,8 @@ var (
 				goto l436
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l436
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21919,8 +21919,8 @@ var (
 				goto l437
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l437
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21948,8 +21948,8 @@ var (
 				goto l438
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l438
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -21977,8 +21977,8 @@ var (
 				goto l439
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l439
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22006,8 +22006,8 @@ var (
 				goto l440
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l440
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22035,8 +22035,8 @@ var (
 				goto l441
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l441
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22065,8 +22065,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l442
 				}
 				c.ip += 3
@@ -22096,8 +22096,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l443
 				}
 				c.ip += 3
@@ -22127,8 +22127,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l444
 				}
 				c.ip += 3
@@ -22158,8 +22158,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l445
 				}
 				c.ip += 3
@@ -22189,8 +22189,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l446
 				}
 				c.ip += 3
@@ -22220,8 +22220,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l447
 				}
 				c.ip += 3
@@ -22251,8 +22251,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l448
 				}
 				c.ip += 3
@@ -22282,8 +22282,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l449
 				}
 				c.ip += 3
@@ -22313,8 +22313,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l450
 				}
 				c.ip += 3
@@ -22344,8 +22344,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l451
 				}
 				c.ip += 3
@@ -22374,8 +22374,8 @@ var (
 				goto l452
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l452
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22403,8 +22403,8 @@ var (
 				goto l453
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l453
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22432,8 +22432,8 @@ var (
 				goto l454
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l454
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22461,8 +22461,8 @@ var (
 				goto l455
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l455
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22490,8 +22490,8 @@ var (
 				goto l456
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l456
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22519,8 +22519,8 @@ var (
 				goto l457
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l457
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22548,8 +22548,8 @@ var (
 				goto l458
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l458
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22577,8 +22577,8 @@ var (
 				goto l459
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l459
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22606,8 +22606,8 @@ var (
 				goto l460
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l460
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22635,8 +22635,8 @@ var (
 				goto l461
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l461
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22678,8 +22678,8 @@ var (
 				goto l462
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l462
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22721,8 +22721,8 @@ var (
 				goto l463
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l463
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22764,8 +22764,8 @@ var (
 				goto l464
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l464
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22807,8 +22807,8 @@ var (
 				goto l465
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l465
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22836,8 +22836,8 @@ var (
 				goto l466
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l466
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22865,8 +22865,8 @@ var (
 				goto l467
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l467
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22894,8 +22894,8 @@ var (
 				goto l468
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l468
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22923,8 +22923,8 @@ var (
 				goto l469
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l469
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22952,8 +22952,8 @@ var (
 				goto l470
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l470
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -22981,8 +22981,8 @@ var (
 				goto l471
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l471
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -23010,8 +23010,8 @@ var (
 				goto l472
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l472
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -23039,8 +23039,8 @@ var (
 				goto l473
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l473
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -23068,8 +23068,8 @@ var (
 				goto l474
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l474
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -23097,8 +23097,8 @@ var (
 				goto l475
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l475
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -23126,8 +23126,8 @@ var (
 				goto l476
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l476
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
@@ -23156,8 +23156,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l477
 				}
 				c.ip += 3
@@ -23187,8 +23187,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l478
 				}
 				c.ip += 3
@@ -23218,8 +23218,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l479
 				}
 				c.ip += 3
@@ -23249,8 +23249,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l480
 				}
 				c.ip += 3
@@ -23279,8 +23279,8 @@ var (
 				goto l481
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l481
 				}
 				c.ip += 3
@@ -23306,8 +23306,8 @@ var (
 				goto l482
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l482
 				}
 				c.ip += 3
@@ -23333,8 +23333,8 @@ var (
 				goto l483
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l483
 				}
 				c.ip += 3
@@ -23360,8 +23360,8 @@ var (
 				goto l484
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l484
 				}
 				c.ip += 3
@@ -23387,8 +23387,8 @@ var (
 				goto l485
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l485
 				}
 				c.ip += 3
@@ -23414,8 +23414,8 @@ var (
 				goto l486
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l486
 				}
 				c.ip += 3
@@ -23441,8 +23441,8 @@ var (
 				goto l487
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l487
 				}
 				c.ip += 3
@@ -23468,8 +23468,8 @@ var (
 				goto l488
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l488
 				}
 				c.ip += 3
@@ -23495,8 +23495,8 @@ var (
 				goto l489
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l489
 				}
 				c.ip += 3
@@ -23522,8 +23522,8 @@ var (
 				goto l490
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l490
 				}
 				c.ip += 3
@@ -23557,8 +23557,8 @@ var (
 				goto l491
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l491
 				}
 				c.ip += 3
@@ -23592,8 +23592,8 @@ var (
 				goto l492
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l492
 				}
 				c.ip += 3
@@ -23633,8 +23633,8 @@ var (
 				goto l493
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l493
 				}
 				c.ip += 3
@@ -23660,8 +23660,8 @@ var (
 				goto l494
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l494
 				}
 				c.ip += 3
@@ -23687,8 +23687,8 @@ var (
 				goto l495
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l495
 				}
 				c.ip += 3
@@ -23714,8 +23714,8 @@ var (
 				goto l496
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l496
 				}
 				c.ip += 3
@@ -23741,8 +23741,8 @@ var (
 				goto l497
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l497
 				}
 				c.ip += 3
@@ -23768,8 +23768,8 @@ var (
 				goto l498
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l498
 				}
 				c.ip += 3
@@ -23795,8 +23795,8 @@ var (
 				goto l499
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l499
 				}
 				c.ip += 3
@@ -23822,8 +23822,8 @@ var (
 				goto l500
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l500
 				}
 				c.ip += 3
@@ -23849,8 +23849,8 @@ var (
 				goto l501
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.global(start+1, types.KindF32)
+				if !ok0 {
 					goto l501
 				}
 				c.ip += 3
@@ -23876,8 +23876,8 @@ var (
 				goto l502
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l502
 				}
 				c.ip += 3
@@ -23903,8 +23903,8 @@ var (
 				goto l503
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l503
 				}
 				c.ip += 3
@@ -23930,8 +23930,8 @@ var (
 				goto l504
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l504
 				}
 				c.ip += 3
@@ -23957,8 +23957,8 @@ var (
 				goto l505
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l505
 				}
 				c.ip += 3
@@ -23992,8 +23992,8 @@ var (
 				goto l506
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l506
 				}
 				c.ip += 3
@@ -24027,8 +24027,8 @@ var (
 				goto l507
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l507
 				}
 				c.ip += 3
@@ -24068,8 +24068,8 @@ var (
 				goto l508
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l508
 				}
 				c.ip += 3
@@ -24095,8 +24095,8 @@ var (
 				goto l509
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l509
 				}
 				c.ip += 3
@@ -24122,8 +24122,8 @@ var (
 				goto l510
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l510
 				}
 				c.ip += 3
@@ -24149,8 +24149,8 @@ var (
 				goto l511
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l511
 				}
 				c.ip += 3
@@ -24176,8 +24176,8 @@ var (
 				goto l512
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l512
 				}
 				c.ip += 3
@@ -24203,8 +24203,8 @@ var (
 				goto l513
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l513
 				}
 				c.ip += 3
@@ -24230,8 +24230,8 @@ var (
 				goto l514
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l514
 				}
 				c.ip += 3
@@ -24257,8 +24257,8 @@ var (
 				goto l515
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l515
 				}
 				c.ip += 3
@@ -24284,8 +24284,8 @@ var (
 				goto l516
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.global(start+1, types.KindF64)
+				if !ok0 {
 					goto l516
 				}
 				c.ip += 3
@@ -24311,8 +24311,8 @@ var (
 				goto l517
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindRef {
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
 					goto l517
 				}
 				c.ip += 3
@@ -24331,8 +24331,8 @@ var (
 				goto l518
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindRef {
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
 					goto l518
 				}
 				c.ip += 3
@@ -24354,8 +24354,8 @@ var (
 				goto l519
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l519
 				}
 				c.ip += 3
@@ -24381,8 +24381,8 @@ var (
 				goto l520
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l520
 				}
 				c.ip += 3
@@ -24408,8 +24408,8 @@ var (
 				goto l521
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l521
 				}
 				c.ip += 3
@@ -24435,8 +24435,8 @@ var (
 				goto l522
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l522
 				}
 				c.ip += 3
@@ -24470,8 +24470,8 @@ var (
 				goto l523
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l523
 				}
 				c.ip += 3
@@ -24505,8 +24505,8 @@ var (
 				goto l524
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l524
 				}
 				c.ip += 3
@@ -24540,8 +24540,8 @@ var (
 				goto l525
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l525
 				}
 				c.ip += 3
@@ -24575,8 +24575,8 @@ var (
 				goto l526
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l526
 				}
 				c.ip += 3
@@ -24602,8 +24602,8 @@ var (
 				goto l527
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l527
 				}
 				c.ip += 3
@@ -24629,8 +24629,8 @@ var (
 				goto l528
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l528
 				}
 				c.ip += 3
@@ -24656,8 +24656,8 @@ var (
 				goto l529
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l529
 				}
 				c.ip += 3
@@ -24682,8 +24682,8 @@ var (
 				goto l530
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l530
 				}
 				c.ip += 3
@@ -24708,8 +24708,8 @@ var (
 				goto l531
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l531
 				}
 				c.ip += 3
@@ -24734,8 +24734,8 @@ var (
 				goto l532
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l532
 				}
 				c.ip += 3
@@ -24761,8 +24761,8 @@ var (
 				goto l533
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l533
 				}
 				c.ip += 3
@@ -24788,8 +24788,8 @@ var (
 				goto l534
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l534
 				}
 				c.ip += 3
@@ -24815,8 +24815,8 @@ var (
 				goto l535
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l535
 				}
 				c.ip += 3
@@ -24842,8 +24842,8 @@ var (
 				goto l536
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l536
 				}
 				c.ip += 3
@@ -24869,8 +24869,8 @@ var (
 				goto l537
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l537
 				}
 				c.ip += 3
@@ -24896,8 +24896,8 @@ var (
 				goto l538
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l538
 				}
 				c.ip += 3
@@ -24923,8 +24923,8 @@ var (
 				goto l539
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l539
 				}
 				c.ip += 3
@@ -24950,8 +24950,8 @@ var (
 				goto l540
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l540
 				}
 				c.ip += 3
@@ -24977,8 +24977,8 @@ var (
 				goto l541
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l541
 				}
 				c.ip += 3
@@ -25004,8 +25004,8 @@ var (
 				goto l542
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l542
 				}
 				c.ip += 3
@@ -25031,8 +25031,8 @@ var (
 				goto l543
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.global(start+1, types.KindI32)
+				if !ok0 {
 					goto l543
 				}
 				c.ip += 3
@@ -25058,8 +25058,8 @@ var (
 				goto l544
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l544
 				}
 				c.ip += 3
@@ -25085,8 +25085,8 @@ var (
 				goto l545
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l545
 				}
 				c.ip += 3
@@ -25112,8 +25112,8 @@ var (
 				goto l546
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l546
 				}
 				c.ip += 3
@@ -25139,8 +25139,8 @@ var (
 				goto l547
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l547
 				}
 				c.ip += 3
@@ -25175,8 +25175,8 @@ var (
 				goto l548
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l548
 				}
 				c.ip += 3
@@ -25211,8 +25211,8 @@ var (
 				goto l549
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l549
 				}
 				c.ip += 3
@@ -25247,8 +25247,8 @@ var (
 				goto l550
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l550
 				}
 				c.ip += 3
@@ -25283,8 +25283,8 @@ var (
 				goto l551
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l551
 				}
 				c.ip += 3
@@ -25310,8 +25310,8 @@ var (
 				goto l552
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l552
 				}
 				c.ip += 3
@@ -25337,8 +25337,8 @@ var (
 				goto l553
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l553
 				}
 				c.ip += 3
@@ -25364,8 +25364,8 @@ var (
 				goto l554
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l554
 				}
 				c.ip += 3
@@ -25391,8 +25391,8 @@ var (
 				goto l555
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l555
 				}
 				c.ip += 3
@@ -25418,8 +25418,8 @@ var (
 				goto l556
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l556
 				}
 				c.ip += 3
@@ -25445,8 +25445,8 @@ var (
 				goto l557
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l557
 				}
 				c.ip += 3
@@ -25472,8 +25472,8 @@ var (
 				goto l558
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l558
 				}
 				c.ip += 3
@@ -25499,8 +25499,8 @@ var (
 				goto l559
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l559
 				}
 				c.ip += 3
@@ -25526,8 +25526,8 @@ var (
 				goto l560
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l560
 				}
 				c.ip += 3
@@ -25553,8 +25553,8 @@ var (
 				goto l561
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l561
 				}
 				c.ip += 3
@@ -25580,8 +25580,8 @@ var (
 				goto l562
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.global(start+1, types.KindI64)
+				if !ok0 {
 					goto l562
 				}
 				c.ip += 3
@@ -25612,8 +25612,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l0
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -25644,8 +25644,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l1
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -25676,8 +25676,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l2
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -25708,8 +25708,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l3
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -25740,8 +25740,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l4
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -25772,8 +25772,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l5
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -25804,8 +25804,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l6
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -25836,8 +25836,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l7
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -25868,8 +25868,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l8
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -25900,8 +25900,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l9
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -25932,8 +25932,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l10
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -25964,8 +25964,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l11
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -25996,12 +25996,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l12
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l12
 				}
 				c.ip += 2
@@ -26037,12 +26037,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l13
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l13
 				}
 				c.ip += 2
@@ -26078,12 +26078,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l14
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l14
 				}
 				c.ip += 2
@@ -26119,12 +26119,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l15
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l15
 				}
 				c.ip += 2
@@ -26160,12 +26160,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l16
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l16
 				}
 				c.ip += 2
@@ -26201,12 +26201,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l17
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l17
 				}
 				c.ip += 2
@@ -26242,12 +26242,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l18
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l18
 				}
 				c.ip += 2
@@ -26283,12 +26283,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l19
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l19
 				}
 				c.ip += 2
@@ -26324,12 +26324,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l20
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l20
 				}
 				c.ip += 2
@@ -26365,12 +26365,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l21
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l21
 				}
 				c.ip += 2
@@ -26406,12 +26406,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l22
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l22
 				}
 				c.ip += 2
@@ -26447,12 +26447,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l23
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l23
 				}
 				c.ip += 2
@@ -26488,12 +26488,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l24
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l24
 				}
 				c.ip += 2
@@ -26529,12 +26529,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l25
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l25
 				}
 				c.ip += 2
@@ -26570,12 +26570,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l26
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l26
 				}
 				c.ip += 2
@@ -26611,12 +26611,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l27
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l27
 				}
 				c.ip += 2
@@ -26652,12 +26652,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l28
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l28
 				}
 				c.ip += 2
@@ -26693,12 +26693,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l29
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l29
 				}
 				c.ip += 2
@@ -26734,12 +26734,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l30
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l30
 				}
 				c.ip += 2
@@ -26775,12 +26775,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l31
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l31
 				}
 				c.ip += 2
@@ -26816,12 +26816,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l32
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l32
 				}
 				c.ip += 2
@@ -26857,12 +26857,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l33
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l33
 				}
 				c.ip += 2
@@ -26898,12 +26898,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l34
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l34
 				}
 				c.ip += 2
@@ -26939,12 +26939,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l35
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l35
 				}
 				c.ip += 2
@@ -26980,12 +26980,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l36
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l36
 				}
 				c.ip += 2
@@ -27021,12 +27021,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l37
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l37
 				}
 				c.ip += 2
@@ -27062,12 +27062,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l38
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l38
 				}
 				c.ip += 2
@@ -27103,12 +27103,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l39
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l39
 				}
 				c.ip += 2
@@ -27144,12 +27144,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l40
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l40
 				}
 				c.ip += 2
@@ -27185,12 +27185,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l41
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l41
 				}
 				c.ip += 2
@@ -27226,12 +27226,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l42
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l42
 				}
 				c.ip += 2
@@ -27267,12 +27267,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l43
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l43
 				}
 				c.ip += 2
@@ -27308,8 +27308,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l44
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27340,8 +27340,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l45
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27372,8 +27372,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l46
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27404,8 +27404,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l47
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27436,8 +27436,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l48
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27468,8 +27468,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l49
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27500,8 +27500,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l50
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27532,8 +27532,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l51
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27564,8 +27564,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l52
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27596,8 +27596,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l53
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27628,8 +27628,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l54
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27660,8 +27660,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l55
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27692,8 +27692,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l56
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27724,8 +27724,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l57
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27756,8 +27756,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l58
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27788,8 +27788,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l59
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27820,8 +27820,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l60
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27852,8 +27852,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l61
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27884,8 +27884,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l62
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27916,8 +27916,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l63
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -27948,8 +27948,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l64
 				}
 				c.ip += 2
@@ -27980,8 +27980,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l65
 				}
 				c.ip += 2
@@ -28012,8 +28012,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l66
 				}
 				c.ip += 2
@@ -28044,8 +28044,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l67
 				}
 				c.ip += 2
@@ -28076,8 +28076,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l68
 				}
 				c.ip += 2
@@ -28108,8 +28108,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l69
 				}
 				c.ip += 2
@@ -28139,8 +28139,8 @@ var (
 				goto l70
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l70
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28169,8 +28169,8 @@ var (
 				goto l71
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l71
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28199,8 +28199,8 @@ var (
 				goto l72
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l72
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28229,8 +28229,8 @@ var (
 				goto l73
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l73
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28272,8 +28272,8 @@ var (
 				goto l74
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l74
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28315,8 +28315,8 @@ var (
 				goto l75
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l75
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28364,8 +28364,8 @@ var (
 				goto l76
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l76
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28394,8 +28394,8 @@ var (
 				goto l77
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l77
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28424,8 +28424,8 @@ var (
 				goto l78
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l78
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28454,8 +28454,8 @@ var (
 				goto l79
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l79
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28484,8 +28484,8 @@ var (
 				goto l80
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l80
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28514,8 +28514,8 @@ var (
 				goto l81
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l81
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28544,8 +28544,8 @@ var (
 				goto l82
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l82
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28574,8 +28574,8 @@ var (
 				goto l83
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l83
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28604,8 +28604,8 @@ var (
 				goto l84
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l84
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -28635,8 +28635,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l85
 				}
 				c.ip += 2
@@ -28667,8 +28667,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l86
 				}
 				c.ip += 2
@@ -28699,8 +28699,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l87
 				}
 				c.ip += 2
@@ -28731,8 +28731,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l88
 				}
 				c.ip += 2
@@ -28763,8 +28763,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l89
 				}
 				c.ip += 2
@@ -28795,8 +28795,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l90
 				}
 				c.ip += 2
@@ -28826,8 +28826,8 @@ var (
 				goto l91
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l91
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -28856,8 +28856,8 @@ var (
 				goto l92
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l92
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -28886,8 +28886,8 @@ var (
 				goto l93
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l93
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -28916,8 +28916,8 @@ var (
 				goto l94
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l94
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -28959,8 +28959,8 @@ var (
 				goto l95
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l95
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29002,8 +29002,8 @@ var (
 				goto l96
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l96
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29051,8 +29051,8 @@ var (
 				goto l97
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l97
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29081,8 +29081,8 @@ var (
 				goto l98
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l98
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29111,8 +29111,8 @@ var (
 				goto l99
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l99
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29141,8 +29141,8 @@ var (
 				goto l100
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l100
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29171,8 +29171,8 @@ var (
 				goto l101
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l101
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29201,8 +29201,8 @@ var (
 				goto l102
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l102
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29231,8 +29231,8 @@ var (
 				goto l103
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l103
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29261,8 +29261,8 @@ var (
 				goto l104
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l104
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29291,8 +29291,8 @@ var (
 				goto l105
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l105
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -29322,8 +29322,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l106
 				}
 				c.ip += 2
@@ -29354,8 +29354,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l107
 				}
 				c.ip += 2
@@ -29386,8 +29386,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l108
 				}
 				c.ip += 2
@@ -29418,8 +29418,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l109
 				}
 				c.ip += 2
@@ -29450,8 +29450,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l110
 				}
 				c.ip += 2
@@ -29482,8 +29482,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l111
 				}
 				c.ip += 2
@@ -29513,12 +29513,12 @@ var (
 				goto l112
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l112
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l112
 				}
 				c.ip += 2
@@ -29552,12 +29552,12 @@ var (
 				goto l113
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l113
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l113
 				}
 				c.ip += 2
@@ -29591,12 +29591,12 @@ var (
 				goto l114
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l114
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l114
 				}
 				c.ip += 2
@@ -29630,12 +29630,12 @@ var (
 				goto l115
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l115
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l115
 				}
 				c.ip += 2
@@ -29669,12 +29669,12 @@ var (
 				goto l116
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l116
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l116
 				}
 				c.ip += 2
@@ -29708,12 +29708,12 @@ var (
 				goto l117
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l117
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l117
 				}
 				c.ip += 2
@@ -29747,12 +29747,12 @@ var (
 				goto l118
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l118
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l118
 				}
 				c.ip += 2
@@ -29786,12 +29786,12 @@ var (
 				goto l119
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l119
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l119
 				}
 				c.ip += 2
@@ -29825,12 +29825,12 @@ var (
 				goto l120
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l120
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l120
 				}
 				c.ip += 2
@@ -29864,12 +29864,12 @@ var (
 				goto l121
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l121
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l121
 				}
 				c.ip += 2
@@ -29915,12 +29915,12 @@ var (
 				goto l122
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l122
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l122
 				}
 				c.ip += 2
@@ -29966,12 +29966,12 @@ var (
 				goto l123
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l123
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l123
 				}
 				c.ip += 2
@@ -30023,12 +30023,12 @@ var (
 				goto l124
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l124
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l124
 				}
 				c.ip += 2
@@ -30062,12 +30062,12 @@ var (
 				goto l125
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l125
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l125
 				}
 				c.ip += 2
@@ -30101,12 +30101,12 @@ var (
 				goto l126
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l126
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l126
 				}
 				c.ip += 2
@@ -30140,12 +30140,12 @@ var (
 				goto l127
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l127
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l127
 				}
 				c.ip += 2
@@ -30179,12 +30179,12 @@ var (
 				goto l128
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l128
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l128
 				}
 				c.ip += 2
@@ -30218,12 +30218,12 @@ var (
 				goto l129
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l129
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l129
 				}
 				c.ip += 2
@@ -30257,12 +30257,12 @@ var (
 				goto l130
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l130
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l130
 				}
 				c.ip += 2
@@ -30296,12 +30296,12 @@ var (
 				goto l131
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l131
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l131
 				}
 				c.ip += 2
@@ -30335,12 +30335,12 @@ var (
 				goto l132
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l132
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l132
 				}
 				c.ip += 2
@@ -30374,12 +30374,12 @@ var (
 				goto l133
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l133
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l133
 				}
 				c.ip += 2
@@ -30413,12 +30413,12 @@ var (
 				goto l134
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l134
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l134
 				}
 				c.ip += 2
@@ -30452,12 +30452,12 @@ var (
 				goto l135
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l135
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l135
 				}
 				c.ip += 2
@@ -30491,12 +30491,12 @@ var (
 				goto l136
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l136
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l136
 				}
 				c.ip += 2
@@ -30542,12 +30542,12 @@ var (
 				goto l137
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l137
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l137
 				}
 				c.ip += 2
@@ -30593,12 +30593,12 @@ var (
 				goto l138
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l138
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l138
 				}
 				c.ip += 2
@@ -30650,12 +30650,12 @@ var (
 				goto l139
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l139
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l139
 				}
 				c.ip += 2
@@ -30689,12 +30689,12 @@ var (
 				goto l140
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l140
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l140
 				}
 				c.ip += 2
@@ -30728,12 +30728,12 @@ var (
 				goto l141
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l141
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l141
 				}
 				c.ip += 2
@@ -30767,12 +30767,12 @@ var (
 				goto l142
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l142
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l142
 				}
 				c.ip += 2
@@ -30806,12 +30806,12 @@ var (
 				goto l143
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l143
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l143
 				}
 				c.ip += 2
@@ -30845,12 +30845,12 @@ var (
 				goto l144
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l144
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l144
 				}
 				c.ip += 2
@@ -30884,12 +30884,12 @@ var (
 				goto l145
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l145
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l145
 				}
 				c.ip += 2
@@ -30923,12 +30923,12 @@ var (
 				goto l146
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l146
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l146
 				}
 				c.ip += 2
@@ -30962,12 +30962,12 @@ var (
 				goto l147
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l147
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l147
 				}
 				c.ip += 2
@@ -31001,12 +31001,12 @@ var (
 				goto l148
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l148
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l148
 				}
 				c.ip += 2
@@ -31040,12 +31040,12 @@ var (
 				goto l149
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l149
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l149
 				}
 				c.ip += 2
@@ -31079,12 +31079,12 @@ var (
 				goto l150
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l150
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l150
 				}
 				c.ip += 2
@@ -31118,12 +31118,12 @@ var (
 				goto l151
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l151
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l151
 				}
 				c.ip += 2
@@ -31169,12 +31169,12 @@ var (
 				goto l152
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l152
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l152
 				}
 				c.ip += 2
@@ -31220,12 +31220,12 @@ var (
 				goto l153
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l153
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l153
 				}
 				c.ip += 2
@@ -31271,12 +31271,12 @@ var (
 				goto l154
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l154
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l154
 				}
 				c.ip += 2
@@ -31322,12 +31322,12 @@ var (
 				goto l155
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l155
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l155
 				}
 				c.ip += 2
@@ -31361,12 +31361,12 @@ var (
 				goto l156
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l156
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l156
 				}
 				c.ip += 2
@@ -31400,12 +31400,12 @@ var (
 				goto l157
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l157
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l157
 				}
 				c.ip += 2
@@ -31439,12 +31439,12 @@ var (
 				goto l158
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l158
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l158
 				}
 				c.ip += 2
@@ -31476,12 +31476,12 @@ var (
 				goto l159
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l159
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l159
 				}
 				c.ip += 2
@@ -31513,12 +31513,12 @@ var (
 				goto l160
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l160
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l160
 				}
 				c.ip += 2
@@ -31550,12 +31550,12 @@ var (
 				goto l161
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l161
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l161
 				}
 				c.ip += 2
@@ -31589,12 +31589,12 @@ var (
 				goto l162
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l162
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l162
 				}
 				c.ip += 2
@@ -31628,12 +31628,12 @@ var (
 				goto l163
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l163
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l163
 				}
 				c.ip += 2
@@ -31667,12 +31667,12 @@ var (
 				goto l164
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l164
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l164
 				}
 				c.ip += 2
@@ -31706,12 +31706,12 @@ var (
 				goto l165
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l165
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l165
 				}
 				c.ip += 2
@@ -31745,12 +31745,12 @@ var (
 				goto l166
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l166
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l166
 				}
 				c.ip += 2
@@ -31784,12 +31784,12 @@ var (
 				goto l167
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l167
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l167
 				}
 				c.ip += 2
@@ -31823,12 +31823,12 @@ var (
 				goto l168
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l168
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l168
 				}
 				c.ip += 2
@@ -31862,12 +31862,12 @@ var (
 				goto l169
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l169
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l169
 				}
 				c.ip += 2
@@ -31901,12 +31901,12 @@ var (
 				goto l170
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l170
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l170
 				}
 				c.ip += 2
@@ -31940,12 +31940,12 @@ var (
 				goto l171
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l171
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l171
 				}
 				c.ip += 2
@@ -31979,12 +31979,12 @@ var (
 				goto l172
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l172
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l172
 				}
 				c.ip += 2
@@ -32018,12 +32018,12 @@ var (
 				goto l173
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l173
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l173
 				}
 				c.ip += 2
@@ -32057,12 +32057,12 @@ var (
 				goto l174
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l174
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l174
 				}
 				c.ip += 2
@@ -32096,12 +32096,12 @@ var (
 				goto l175
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l175
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l175
 				}
 				c.ip += 2
@@ -32135,12 +32135,12 @@ var (
 				goto l176
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l176
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l176
 				}
 				c.ip += 2
@@ -32188,12 +32188,12 @@ var (
 				goto l177
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l177
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l177
 				}
 				c.ip += 2
@@ -32241,12 +32241,12 @@ var (
 				goto l178
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l178
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l178
 				}
 				c.ip += 2
@@ -32294,12 +32294,12 @@ var (
 				goto l179
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l179
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l179
 				}
 				c.ip += 2
@@ -32347,12 +32347,12 @@ var (
 				goto l180
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l180
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l180
 				}
 				c.ip += 2
@@ -32386,12 +32386,12 @@ var (
 				goto l181
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l181
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l181
 				}
 				c.ip += 2
@@ -32425,12 +32425,12 @@ var (
 				goto l182
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l182
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l182
 				}
 				c.ip += 2
@@ -32464,12 +32464,12 @@ var (
 				goto l183
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l183
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l183
 				}
 				c.ip += 2
@@ -32503,12 +32503,12 @@ var (
 				goto l184
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l184
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l184
 				}
 				c.ip += 2
@@ -32542,12 +32542,12 @@ var (
 				goto l185
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l185
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l185
 				}
 				c.ip += 2
@@ -32581,12 +32581,12 @@ var (
 				goto l186
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l186
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l186
 				}
 				c.ip += 2
@@ -32620,12 +32620,12 @@ var (
 				goto l187
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l187
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l187
 				}
 				c.ip += 2
@@ -32659,12 +32659,12 @@ var (
 				goto l188
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l188
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l188
 				}
 				c.ip += 2
@@ -32698,12 +32698,12 @@ var (
 				goto l189
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l189
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l189
 				}
 				c.ip += 2
@@ -32737,12 +32737,12 @@ var (
 				goto l190
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l190
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l190
 				}
 				c.ip += 2
@@ -32776,12 +32776,12 @@ var (
 				goto l191
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l191
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l191
 				}
 				c.ip += 2
@@ -32816,8 +32816,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindRef {
+				i0, ok0 := c.local(start+1, types.KindRef)
+				if !ok0 {
 					goto l192
 				}
 				c.ip += 2
@@ -32841,8 +32841,8 @@ var (
 				goto l193
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l193
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -32871,8 +32871,8 @@ var (
 				goto l194
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l194
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -32901,8 +32901,8 @@ var (
 				goto l195
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l195
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -32931,8 +32931,8 @@ var (
 				goto l196
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l196
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -32974,8 +32974,8 @@ var (
 				goto l197
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l197
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33017,8 +33017,8 @@ var (
 				goto l198
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l198
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33060,8 +33060,8 @@ var (
 				goto l199
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l199
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33103,8 +33103,8 @@ var (
 				goto l200
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l200
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33133,8 +33133,8 @@ var (
 				goto l201
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l201
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33163,8 +33163,8 @@ var (
 				goto l202
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l202
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33193,8 +33193,8 @@ var (
 				goto l203
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l203
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
@@ -33222,8 +33222,8 @@ var (
 				goto l204
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l204
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
@@ -33251,8 +33251,8 @@ var (
 				goto l205
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l205
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
@@ -33280,8 +33280,8 @@ var (
 				goto l206
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l206
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33310,8 +33310,8 @@ var (
 				goto l207
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l207
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33340,8 +33340,8 @@ var (
 				goto l208
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l208
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33370,8 +33370,8 @@ var (
 				goto l209
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l209
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33400,8 +33400,8 @@ var (
 				goto l210
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l210
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33430,8 +33430,8 @@ var (
 				goto l211
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l211
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33460,8 +33460,8 @@ var (
 				goto l212
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l212
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33490,8 +33490,8 @@ var (
 				goto l213
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l213
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33520,8 +33520,8 @@ var (
 				goto l214
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l214
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33550,8 +33550,8 @@ var (
 				goto l215
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l215
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33580,8 +33580,8 @@ var (
 				goto l216
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l216
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33610,8 +33610,8 @@ var (
 				goto l217
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l217
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33641,8 +33641,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l218
 				}
 				c.ip += 2
@@ -33673,8 +33673,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l219
 				}
 				c.ip += 2
@@ -33705,8 +33705,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l220
 				}
 				c.ip += 2
@@ -33737,8 +33737,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l221
 				}
 				c.ip += 2
@@ -33769,8 +33769,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l222
 				}
 				c.ip += 2
@@ -33801,8 +33801,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l223
 				}
 				c.ip += 2
@@ -33833,8 +33833,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l224
 				}
 				c.ip += 2
@@ -33865,8 +33865,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l225
 				}
 				c.ip += 2
@@ -33897,8 +33897,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l226
 				}
 				c.ip += 2
@@ -33929,8 +33929,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l227
 				}
 				c.ip += 2
@@ -33960,8 +33960,8 @@ var (
 				goto l228
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l228
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -33990,8 +33990,8 @@ var (
 				goto l229
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l229
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34020,8 +34020,8 @@ var (
 				goto l230
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l230
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34050,8 +34050,8 @@ var (
 				goto l231
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l231
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34080,8 +34080,8 @@ var (
 				goto l232
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l232
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34110,8 +34110,8 @@ var (
 				goto l233
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l233
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34140,8 +34140,8 @@ var (
 				goto l234
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l234
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34170,8 +34170,8 @@ var (
 				goto l235
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l235
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34200,8 +34200,8 @@ var (
 				goto l236
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l236
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34230,8 +34230,8 @@ var (
 				goto l237
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l237
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34274,8 +34274,8 @@ var (
 				goto l238
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l238
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34318,8 +34318,8 @@ var (
 				goto l239
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l239
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34362,8 +34362,8 @@ var (
 				goto l240
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l240
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34406,8 +34406,8 @@ var (
 				goto l241
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l241
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34436,8 +34436,8 @@ var (
 				goto l242
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l242
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34466,8 +34466,8 @@ var (
 				goto l243
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l243
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34496,8 +34496,8 @@ var (
 				goto l244
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l244
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34526,8 +34526,8 @@ var (
 				goto l245
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l245
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34556,8 +34556,8 @@ var (
 				goto l246
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l246
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34586,8 +34586,8 @@ var (
 				goto l247
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l247
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34616,8 +34616,8 @@ var (
 				goto l248
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l248
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34646,8 +34646,8 @@ var (
 				goto l249
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l249
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34676,8 +34676,8 @@ var (
 				goto l250
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l250
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34706,8 +34706,8 @@ var (
 				goto l251
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l251
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34736,8 +34736,8 @@ var (
 				goto l252
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l252
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -34767,8 +34767,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l253
 				}
 				c.ip += 2
@@ -34799,8 +34799,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l254
 				}
 				c.ip += 2
@@ -34831,8 +34831,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l255
 				}
 				c.ip += 2
@@ -34863,8 +34863,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l256
 				}
 				c.ip += 2
@@ -34894,8 +34894,8 @@ var (
 				goto l257
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l257
 				}
 				c.ip += 2
@@ -34922,8 +34922,8 @@ var (
 				goto l258
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l258
 				}
 				c.ip += 2
@@ -34950,8 +34950,8 @@ var (
 				goto l259
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l259
 				}
 				c.ip += 2
@@ -34978,8 +34978,8 @@ var (
 				goto l260
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l260
 				}
 				c.ip += 2
@@ -35006,8 +35006,8 @@ var (
 				goto l261
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l261
 				}
 				c.ip += 2
@@ -35034,8 +35034,8 @@ var (
 				goto l262
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l262
 				}
 				c.ip += 2
@@ -35062,8 +35062,8 @@ var (
 				goto l263
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l263
 				}
 				c.ip += 2
@@ -35090,8 +35090,8 @@ var (
 				goto l264
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l264
 				}
 				c.ip += 2
@@ -35118,8 +35118,8 @@ var (
 				goto l265
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l265
 				}
 				c.ip += 2
@@ -35146,8 +35146,8 @@ var (
 				goto l266
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l266
 				}
 				c.ip += 2
@@ -35182,8 +35182,8 @@ var (
 				goto l267
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l267
 				}
 				c.ip += 2
@@ -35218,8 +35218,8 @@ var (
 				goto l268
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l268
 				}
 				c.ip += 2
@@ -35260,8 +35260,8 @@ var (
 				goto l269
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l269
 				}
 				c.ip += 2
@@ -35288,8 +35288,8 @@ var (
 				goto l270
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l270
 				}
 				c.ip += 2
@@ -35316,8 +35316,8 @@ var (
 				goto l271
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l271
 				}
 				c.ip += 2
@@ -35344,8 +35344,8 @@ var (
 				goto l272
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l272
 				}
 				c.ip += 2
@@ -35372,8 +35372,8 @@ var (
 				goto l273
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l273
 				}
 				c.ip += 2
@@ -35400,8 +35400,8 @@ var (
 				goto l274
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l274
 				}
 				c.ip += 2
@@ -35428,8 +35428,8 @@ var (
 				goto l275
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l275
 				}
 				c.ip += 2
@@ -35456,8 +35456,8 @@ var (
 				goto l276
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l276
 				}
 				c.ip += 2
@@ -35484,8 +35484,8 @@ var (
 				goto l277
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
 					goto l277
 				}
 				c.ip += 2
@@ -35512,8 +35512,8 @@ var (
 				goto l278
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l278
 				}
 				c.ip += 2
@@ -35540,8 +35540,8 @@ var (
 				goto l279
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l279
 				}
 				c.ip += 2
@@ -35568,8 +35568,8 @@ var (
 				goto l280
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l280
 				}
 				c.ip += 2
@@ -35596,8 +35596,8 @@ var (
 				goto l281
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l281
 				}
 				c.ip += 2
@@ -35632,8 +35632,8 @@ var (
 				goto l282
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l282
 				}
 				c.ip += 2
@@ -35668,8 +35668,8 @@ var (
 				goto l283
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l283
 				}
 				c.ip += 2
@@ -35710,8 +35710,8 @@ var (
 				goto l284
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l284
 				}
 				c.ip += 2
@@ -35738,8 +35738,8 @@ var (
 				goto l285
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l285
 				}
 				c.ip += 2
@@ -35766,8 +35766,8 @@ var (
 				goto l286
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l286
 				}
 				c.ip += 2
@@ -35794,8 +35794,8 @@ var (
 				goto l287
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l287
 				}
 				c.ip += 2
@@ -35822,8 +35822,8 @@ var (
 				goto l288
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l288
 				}
 				c.ip += 2
@@ -35850,8 +35850,8 @@ var (
 				goto l289
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l289
 				}
 				c.ip += 2
@@ -35878,8 +35878,8 @@ var (
 				goto l290
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l290
 				}
 				c.ip += 2
@@ -35906,8 +35906,8 @@ var (
 				goto l291
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l291
 				}
 				c.ip += 2
@@ -35934,8 +35934,8 @@ var (
 				goto l292
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
 					goto l292
 				}
 				c.ip += 2
@@ -35962,8 +35962,8 @@ var (
 				goto l293
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindRef {
+				i0, ok0 := c.local(start+1, types.KindRef)
+				if !ok0 {
 					goto l293
 				}
 				c.ip += 2
@@ -35982,8 +35982,8 @@ var (
 				goto l294
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindRef {
+				i0, ok0 := c.local(start+1, types.KindRef)
+				if !ok0 {
 					goto l294
 				}
 				c.ip += 2
@@ -36006,8 +36006,8 @@ var (
 				goto l295
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l295
 				}
 				c.ip += 2
@@ -36034,8 +36034,8 @@ var (
 				goto l296
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l296
 				}
 				c.ip += 2
@@ -36062,8 +36062,8 @@ var (
 				goto l297
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l297
 				}
 				c.ip += 2
@@ -36090,8 +36090,8 @@ var (
 				goto l298
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l298
 				}
 				c.ip += 2
@@ -36126,8 +36126,8 @@ var (
 				goto l299
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l299
 				}
 				c.ip += 2
@@ -36162,8 +36162,8 @@ var (
 				goto l300
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l300
 				}
 				c.ip += 2
@@ -36198,8 +36198,8 @@ var (
 				goto l301
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l301
 				}
 				c.ip += 2
@@ -36234,8 +36234,8 @@ var (
 				goto l302
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l302
 				}
 				c.ip += 2
@@ -36262,8 +36262,8 @@ var (
 				goto l303
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l303
 				}
 				c.ip += 2
@@ -36290,8 +36290,8 @@ var (
 				goto l304
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l304
 				}
 				c.ip += 2
@@ -36318,8 +36318,8 @@ var (
 				goto l305
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l305
 				}
 				c.ip += 2
@@ -36345,8 +36345,8 @@ var (
 				goto l306
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l306
 				}
 				c.ip += 2
@@ -36372,8 +36372,8 @@ var (
 				goto l307
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l307
 				}
 				c.ip += 2
@@ -36399,8 +36399,8 @@ var (
 				goto l308
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l308
 				}
 				c.ip += 2
@@ -36427,8 +36427,8 @@ var (
 				goto l309
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l309
 				}
 				c.ip += 2
@@ -36455,8 +36455,8 @@ var (
 				goto l310
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l310
 				}
 				c.ip += 2
@@ -36483,8 +36483,8 @@ var (
 				goto l311
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l311
 				}
 				c.ip += 2
@@ -36511,8 +36511,8 @@ var (
 				goto l312
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l312
 				}
 				c.ip += 2
@@ -36539,8 +36539,8 @@ var (
 				goto l313
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l313
 				}
 				c.ip += 2
@@ -36567,8 +36567,8 @@ var (
 				goto l314
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l314
 				}
 				c.ip += 2
@@ -36595,8 +36595,8 @@ var (
 				goto l315
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l315
 				}
 				c.ip += 2
@@ -36623,8 +36623,8 @@ var (
 				goto l316
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l316
 				}
 				c.ip += 2
@@ -36651,8 +36651,8 @@ var (
 				goto l317
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l317
 				}
 				c.ip += 2
@@ -36679,8 +36679,8 @@ var (
 				goto l318
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l318
 				}
 				c.ip += 2
@@ -36707,8 +36707,8 @@ var (
 				goto l319
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
 					goto l319
 				}
 				c.ip += 2
@@ -36735,8 +36735,8 @@ var (
 				goto l320
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l320
 				}
 				c.ip += 2
@@ -36763,8 +36763,8 @@ var (
 				goto l321
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l321
 				}
 				c.ip += 2
@@ -36791,8 +36791,8 @@ var (
 				goto l322
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l322
 				}
 				c.ip += 2
@@ -36819,8 +36819,8 @@ var (
 				goto l323
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l323
 				}
 				c.ip += 2
@@ -36856,8 +36856,8 @@ var (
 				goto l324
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l324
 				}
 				c.ip += 2
@@ -36893,8 +36893,8 @@ var (
 				goto l325
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l325
 				}
 				c.ip += 2
@@ -36930,8 +36930,8 @@ var (
 				goto l326
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l326
 				}
 				c.ip += 2
@@ -36967,8 +36967,8 @@ var (
 				goto l327
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l327
 				}
 				c.ip += 2
@@ -36995,8 +36995,8 @@ var (
 				goto l328
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l328
 				}
 				c.ip += 2
@@ -37023,8 +37023,8 @@ var (
 				goto l329
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l329
 				}
 				c.ip += 2
@@ -37051,8 +37051,8 @@ var (
 				goto l330
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l330
 				}
 				c.ip += 2
@@ -37079,8 +37079,8 @@ var (
 				goto l331
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l331
 				}
 				c.ip += 2
@@ -37107,8 +37107,8 @@ var (
 				goto l332
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l332
 				}
 				c.ip += 2
@@ -37135,8 +37135,8 @@ var (
 				goto l333
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l333
 				}
 				c.ip += 2
@@ -37163,8 +37163,8 @@ var (
 				goto l334
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l334
 				}
 				c.ip += 2
@@ -37191,8 +37191,8 @@ var (
 				goto l335
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l335
 				}
 				c.ip += 2
@@ -37219,8 +37219,8 @@ var (
 				goto l336
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l336
 				}
 				c.ip += 2
@@ -37247,8 +37247,8 @@ var (
 				goto l337
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l337
 				}
 				c.ip += 2
@@ -37275,8 +37275,8 @@ var (
 				goto l338
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
 					goto l338
 				}
 				c.ip += 2
@@ -37308,12 +37308,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l0
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l0
 				}
 				c.ip += 3
@@ -37339,12 +37335,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l1
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l1
 				}
 				c.ip += 3
@@ -37370,12 +37362,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l2
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l2
 				}
 				c.ip += 3
@@ -37401,12 +37389,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l3
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l3
 				}
 				c.ip += 3
@@ -37432,12 +37416,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l4
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l4
 				}
 				c.ip += 3
@@ -37463,12 +37443,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l5
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l5
 				}
 				c.ip += 3
@@ -37494,12 +37470,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l6
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l6
 				}
 				c.ip += 3
@@ -37525,12 +37497,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l7
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l7
 				}
 				c.ip += 3
@@ -37556,12 +37524,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l8
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l8
 				}
 				c.ip += 3
@@ -37587,12 +37551,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l9
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l9
 				}
 				c.ip += 3
@@ -37618,12 +37578,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l10
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l10
 				}
 				c.ip += 3
@@ -37649,12 +37605,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l11
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l11
 				}
 				c.ip += 3
@@ -37680,12 +37632,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l12
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l12
 				}
 				c.ip += 3
@@ -37711,12 +37659,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l13
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l13
 				}
 				c.ip += 3
@@ -37742,12 +37686,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l14
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l14
 				}
 				c.ip += 3
@@ -37773,12 +37713,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l15
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l15
 				}
 				c.ip += 3
@@ -37804,12 +37740,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l16
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l16
 				}
 				c.ip += 3
@@ -37835,12 +37767,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l17
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l17
 				}
 				c.ip += 3
@@ -37866,12 +37794,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l18
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l18
 				}
 				c.ip += 3
@@ -37897,12 +37821,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l19
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l19
 				}
 				c.ip += 3
@@ -37928,12 +37848,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l20
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l20
 				}
 				c.ip += 3
@@ -37959,12 +37875,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l21
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l21
 				}
 				c.ip += 3
@@ -37990,23 +37902,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l22
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l22
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l22
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l22
 				}
 				c.ip += 3
@@ -38032,23 +37929,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l23
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l23
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l23
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l23
 				}
 				c.ip += 3
@@ -38074,23 +37956,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l24
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l24
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l24
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l24
 				}
 				c.ip += 3
@@ -38116,23 +37983,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l25
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l25
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l25
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l25
 				}
 				c.ip += 3
@@ -38158,23 +38010,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l26
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l26
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l26
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l26
 				}
 				c.ip += 3
@@ -38200,23 +38037,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l27
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l27
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l27
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l27
 				}
 				c.ip += 3
@@ -38242,23 +38064,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l28
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l28
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l28
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l28
 				}
 				c.ip += 3
@@ -38284,23 +38091,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l29
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l29
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l29
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l29
 				}
 				c.ip += 3
@@ -38326,23 +38118,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l30
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l30
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l30
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l30
 				}
 				c.ip += 3
@@ -38368,23 +38145,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l31
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l31
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l31
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l31
 				}
 				c.ip += 3
@@ -38410,12 +38172,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+5)
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l32
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindRef {
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
 					goto l32
 				}
 				c0 := r0.Ref()
@@ -38441,12 +38199,8 @@ var (
 				goto l33
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l33
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindRef {
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
 					goto l33
 				}
 				addr := r0.Ref()
@@ -38650,12 +38404,8 @@ var (
 				goto l34
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l34
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindRef {
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
 					goto l34
 				}
 				addr := r0.Ref()
@@ -38691,12 +38441,8 @@ var (
 				goto l35
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l35
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindRef {
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
 					goto l35
 				}
 				addr := r0.Ref()
@@ -38833,12 +38579,8 @@ var (
 				goto l36
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l36
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l36
 				}
 				c.ip += 3
@@ -38860,12 +38602,8 @@ var (
 				goto l37
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l37
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l37
 				}
 				c.ip += 3
@@ -38887,12 +38625,8 @@ var (
 				goto l38
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l38
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l38
 				}
 				c.ip += 3
@@ -38914,12 +38648,8 @@ var (
 				goto l39
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l39
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l39
 				}
 				c.ip += 3
@@ -38950,12 +38680,8 @@ var (
 				goto l40
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l40
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l40
 				}
 				c.ip += 3
@@ -38986,12 +38712,8 @@ var (
 				goto l41
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l41
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l41
 				}
 				c.ip += 3
@@ -39028,12 +38750,8 @@ var (
 				goto l42
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l42
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l42
 				}
 				c.ip += 3
@@ -39055,12 +38773,8 @@ var (
 				goto l43
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l43
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l43
 				}
 				c.ip += 3
@@ -39082,12 +38796,8 @@ var (
 				goto l44
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l44
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l44
 				}
 				c.ip += 3
@@ -39109,12 +38819,8 @@ var (
 				goto l45
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l45
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l45
 				}
 				c.ip += 3
@@ -39136,12 +38842,8 @@ var (
 				goto l46
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l46
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l46
 				}
 				c.ip += 3
@@ -39163,12 +38865,8 @@ var (
 				goto l47
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l47
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l47
 				}
 				c.ip += 3
@@ -39190,12 +38888,8 @@ var (
 				goto l48
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l48
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l48
 				}
 				c.ip += 3
@@ -39217,12 +38911,8 @@ var (
 				goto l49
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l49
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l49
 				}
 				c.ip += 3
@@ -39244,12 +38934,8 @@ var (
 				goto l50
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l50
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF32 {
+				r0, ok0 := c.constant(start+1, types.KindF32)
+				if !ok0 {
 					goto l50
 				}
 				c.ip += 3
@@ -39271,12 +38957,8 @@ var (
 				goto l51
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l51
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l51
 				}
 				c.ip += 3
@@ -39298,12 +38980,8 @@ var (
 				goto l52
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l52
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l52
 				}
 				c.ip += 3
@@ -39325,12 +39003,8 @@ var (
 				goto l53
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l53
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l53
 				}
 				c.ip += 3
@@ -39352,12 +39026,8 @@ var (
 				goto l54
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l54
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l54
 				}
 				c.ip += 3
@@ -39388,12 +39058,8 @@ var (
 				goto l55
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l55
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l55
 				}
 				c.ip += 3
@@ -39424,12 +39090,8 @@ var (
 				goto l56
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l56
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l56
 				}
 				c.ip += 3
@@ -39466,12 +39128,8 @@ var (
 				goto l57
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l57
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l57
 				}
 				c.ip += 3
@@ -39493,12 +39151,8 @@ var (
 				goto l58
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l58
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l58
 				}
 				c.ip += 3
@@ -39520,12 +39174,8 @@ var (
 				goto l59
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l59
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l59
 				}
 				c.ip += 3
@@ -39547,12 +39197,8 @@ var (
 				goto l60
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l60
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l60
 				}
 				c.ip += 3
@@ -39574,12 +39220,8 @@ var (
 				goto l61
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l61
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l61
 				}
 				c.ip += 3
@@ -39601,12 +39243,8 @@ var (
 				goto l62
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l62
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l62
 				}
 				c.ip += 3
@@ -39628,12 +39266,8 @@ var (
 				goto l63
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l63
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l63
 				}
 				c.ip += 3
@@ -39655,12 +39289,8 @@ var (
 				goto l64
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l64
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l64
 				}
 				c.ip += 3
@@ -39682,12 +39312,8 @@ var (
 				goto l65
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l65
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindF64 {
+				r0, ok0 := c.constant(start+1, types.KindF64)
+				if !ok0 {
 					goto l65
 				}
 				c.ip += 3
@@ -39709,12 +39335,8 @@ var (
 				goto l66
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l66
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l66
 				}
 				c.ip += 3
@@ -39784,12 +39406,8 @@ var (
 				goto l67
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l67
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l67
 				}
 				c.ip += 3
@@ -39861,12 +39479,8 @@ var (
 				goto l68
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l68
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l68
 				}
 				c.ip += 3
@@ -39888,12 +39502,8 @@ var (
 				goto l69
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l69
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l69
 				}
 				c.ip += 3
@@ -39915,12 +39525,8 @@ var (
 				goto l70
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l70
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l70
 				}
 				c.ip += 3
@@ -39942,12 +39548,8 @@ var (
 				goto l71
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l71
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l71
 				}
 				c.ip += 3
@@ -39978,12 +39580,8 @@ var (
 				goto l72
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l72
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l72
 				}
 				c.ip += 3
@@ -40014,12 +39612,8 @@ var (
 				goto l73
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l73
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l73
 				}
 				c.ip += 3
@@ -40050,12 +39644,8 @@ var (
 				goto l74
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l74
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l74
 				}
 				c.ip += 3
@@ -40086,12 +39676,8 @@ var (
 				goto l75
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l75
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l75
 				}
 				c.ip += 3
@@ -40113,12 +39699,8 @@ var (
 				goto l76
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l76
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l76
 				}
 				c.ip += 3
@@ -40140,12 +39722,8 @@ var (
 				goto l77
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l77
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l77
 				}
 				c.ip += 3
@@ -40167,12 +39745,8 @@ var (
 				goto l78
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l78
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l78
 				}
 				c.ip += 3
@@ -40193,12 +39767,8 @@ var (
 				goto l79
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l79
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l79
 				}
 				c.ip += 3
@@ -40219,12 +39789,8 @@ var (
 				goto l80
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l80
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l80
 				}
 				c.ip += 3
@@ -40245,12 +39811,8 @@ var (
 				goto l81
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l81
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l81
 				}
 				c.ip += 3
@@ -40272,12 +39834,8 @@ var (
 				goto l82
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l82
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l82
 				}
 				c.ip += 3
@@ -40299,12 +39857,8 @@ var (
 				goto l83
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l83
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l83
 				}
 				c.ip += 3
@@ -40326,12 +39880,8 @@ var (
 				goto l84
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l84
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l84
 				}
 				c.ip += 3
@@ -40353,12 +39903,8 @@ var (
 				goto l85
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l85
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l85
 				}
 				c.ip += 3
@@ -40380,12 +39926,8 @@ var (
 				goto l86
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l86
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l86
 				}
 				c.ip += 3
@@ -40407,12 +39949,8 @@ var (
 				goto l87
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l87
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l87
 				}
 				c.ip += 3
@@ -40434,12 +39972,8 @@ var (
 				goto l88
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l88
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l88
 				}
 				c.ip += 3
@@ -40461,12 +39995,8 @@ var (
 				goto l89
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l89
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l89
 				}
 				c.ip += 3
@@ -40488,12 +40018,8 @@ var (
 				goto l90
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l90
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l90
 				}
 				c.ip += 3
@@ -40515,12 +40041,8 @@ var (
 				goto l91
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l91
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l91
 				}
 				c.ip += 3
@@ -40542,12 +40064,8 @@ var (
 				goto l92
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l92
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				r0, ok0 := c.constant(start+1, types.KindI32)
+				if !ok0 {
 					goto l92
 				}
 				c.ip += 3
@@ -40569,23 +40087,8 @@ var (
 				goto l93
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l93
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l93
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l93
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l93
 				}
 				c.ip += 3
@@ -40607,23 +40110,8 @@ var (
 				goto l94
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l94
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l94
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l94
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l94
 				}
 				c.ip += 3
@@ -40645,23 +40133,8 @@ var (
 				goto l95
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l95
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l95
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l95
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l95
 				}
 				c.ip += 3
@@ -40683,23 +40156,8 @@ var (
 				goto l96
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l96
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l96
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l96
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l96
 				}
 				c.ip += 3
@@ -40721,23 +40179,8 @@ var (
 				goto l97
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l97
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l97
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l97
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l97
 				}
 				c.ip += 3
@@ -40759,23 +40202,8 @@ var (
 				goto l98
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l98
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l98
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l98
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l98
 				}
 				c.ip += 3
@@ -40797,23 +40225,8 @@ var (
 				goto l99
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l99
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l99
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l99
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l99
 				}
 				c.ip += 3
@@ -40835,23 +40248,8 @@ var (
 				goto l100
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l100
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l100
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l100
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l100
 				}
 				c.ip += 3
@@ -40873,23 +40271,8 @@ var (
 				goto l101
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l101
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l101
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l101
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l101
 				}
 				c.ip += 3
@@ -40911,23 +40294,8 @@ var (
 				goto l102
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l102
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l102
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l102
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l102
 				}
 				c.ip += 3
@@ -40958,23 +40326,8 @@ var (
 				goto l103
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l103
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l103
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l103
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l103
 				}
 				c.ip += 3
@@ -41005,23 +40358,8 @@ var (
 				goto l104
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l104
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l104
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l104
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l104
 				}
 				c.ip += 3
@@ -41052,23 +40390,8 @@ var (
 				goto l105
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l105
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l105
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l105
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l105
 				}
 				c.ip += 3
@@ -41099,23 +40422,8 @@ var (
 				goto l106
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l106
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l106
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l106
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l106
 				}
 				c.ip += 3
@@ -41137,23 +40445,8 @@ var (
 				goto l107
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l107
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l107
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l107
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l107
 				}
 				c.ip += 3
@@ -41175,23 +40468,8 @@ var (
 				goto l108
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l108
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l108
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l108
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l108
 				}
 				c.ip += 3
@@ -41213,23 +40491,8 @@ var (
 				goto l109
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l109
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l109
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l109
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l109
 				}
 				c.ip += 3
@@ -41251,23 +40514,8 @@ var (
 				goto l110
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l110
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l110
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l110
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l110
 				}
 				c.ip += 3
@@ -41289,23 +40537,8 @@ var (
 				goto l111
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l111
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l111
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l111
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l111
 				}
 				c.ip += 3
@@ -41327,23 +40560,8 @@ var (
 				goto l112
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l112
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l112
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l112
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l112
 				}
 				c.ip += 3
@@ -41365,23 +40583,8 @@ var (
 				goto l113
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l113
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l113
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l113
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l113
 				}
 				c.ip += 3
@@ -41403,23 +40606,8 @@ var (
 				goto l114
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l114
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l114
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l114
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l114
 				}
 				c.ip += 3
@@ -41441,23 +40629,8 @@ var (
 				goto l115
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l115
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l115
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l115
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l115
 				}
 				c.ip += 3
@@ -41479,23 +40652,8 @@ var (
 				goto l116
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l116
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l116
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l116
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l116
 				}
 				c.ip += 3
@@ -41517,23 +40675,8 @@ var (
 				goto l117
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l117
-				}
-				r0 := c.constants[i0]
-				switch r0.Kind() {
-				case types.KindI64:
-				case types.KindRef:
-					constantRef := r0.Ref()
-					if constantRef < 0 || constantRef >= len(c.heap) {
-						goto l117
-					}
-					_, ok := c.heap[constantRef].(types.I64)
-					if !ok {
-						goto l117
-					}
-				default:
+				r0, ok0 := c.constant(start+1, types.KindI64)
+				if !ok0 {
 					goto l117
 				}
 				c.ip += 3
@@ -41555,12 +40698,8 @@ var (
 				goto l118
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l118
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindRef {
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
 					goto l118
 				}
 				c0 := r0.Ref()
@@ -41583,12 +40722,8 @@ var (
 				goto l119
 			}
 			{
-				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.constants) {
-					goto l119
-				}
-				r0 := c.constants[i0]
-				if r0.Kind() != types.KindRef {
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
 					goto l119
 				}
 				c0 := r0.Ref()
@@ -41618,8 +40753,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l0
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -41649,8 +40784,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l1
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -41680,8 +40815,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l2
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -41711,8 +40846,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l3
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -41742,8 +40877,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l4
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -41773,8 +40908,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l5
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -41804,8 +40939,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l6
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -41835,8 +40970,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l7
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -41866,8 +41001,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l8
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -41897,8 +41032,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l9
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -41928,8 +41063,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l10
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -41959,8 +41094,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l11
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -41990,12 +41125,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l12
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l12
 				}
 				c.ip += 2
@@ -42029,12 +41164,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l13
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l13
 				}
 				c.ip += 2
@@ -42068,12 +41203,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l14
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l14
 				}
 				c.ip += 2
@@ -42107,12 +41242,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l15
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l15
 				}
 				c.ip += 2
@@ -42146,12 +41281,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l16
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l16
 				}
 				c.ip += 2
@@ -42185,12 +41320,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l17
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l17
 				}
 				c.ip += 2
@@ -42224,12 +41359,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l18
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l18
 				}
 				c.ip += 2
@@ -42263,12 +41398,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l19
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l19
 				}
 				c.ip += 2
@@ -42302,12 +41437,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l20
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l20
 				}
 				c.ip += 2
@@ -42341,12 +41476,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l21
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l21
 				}
 				c.ip += 2
@@ -42380,12 +41515,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l22
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l22
 				}
 				c.ip += 2
@@ -42419,12 +41554,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l23
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l23
 				}
 				c.ip += 2
@@ -42458,12 +41593,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l24
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l24
 				}
 				c.ip += 2
@@ -42497,12 +41632,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l25
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l25
 				}
 				c.ip += 2
@@ -42536,12 +41671,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l26
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l26
 				}
 				c.ip += 2
@@ -42575,12 +41710,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l27
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l27
 				}
 				c.ip += 2
@@ -42614,12 +41749,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l28
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l28
 				}
 				c.ip += 2
@@ -42653,12 +41788,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l29
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l29
 				}
 				c.ip += 2
@@ -42692,12 +41827,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l30
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l30
 				}
 				c.ip += 2
@@ -42731,12 +41866,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l31
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l31
 				}
 				c.ip += 2
@@ -42770,12 +41905,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l32
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l32
 				}
 				c.ip += 2
@@ -42809,12 +41944,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l33
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l33
 				}
 				c.ip += 2
@@ -42848,12 +41983,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l34
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l34
 				}
 				c.ip += 2
@@ -42887,12 +42022,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l35
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l35
 				}
 				c.ip += 2
@@ -42926,12 +42061,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l36
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l36
 				}
 				c.ip += 2
@@ -42965,12 +42100,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l37
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l37
 				}
 				c.ip += 2
@@ -43004,12 +42139,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l38
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l38
 				}
 				c.ip += 2
@@ -43043,12 +42178,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l39
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l39
 				}
 				c.ip += 2
@@ -43082,12 +42217,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l40
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l40
 				}
 				c.ip += 2
@@ -43121,12 +42256,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l41
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l41
 				}
 				c.ip += 2
@@ -43160,12 +42295,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l42
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l42
 				}
 				c.ip += 2
@@ -43199,12 +42334,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+7)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l43
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l43
 				}
 				c.ip += 2
@@ -43238,12 +42373,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l44
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l44
 				}
 				c.ip += 2
@@ -43278,12 +42413,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l45
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l45
 				}
 				c.ip += 2
@@ -43318,12 +42453,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l46
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l46
 				}
 				c.ip += 2
@@ -43358,12 +42493,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l47
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l47
 				}
 				c.ip += 2
@@ -43398,12 +42533,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l48
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l48
 				}
 				c.ip += 2
@@ -43438,12 +42573,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l49
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l49
 				}
 				c.ip += 2
@@ -43478,12 +42613,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l50
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l50
 				}
 				c.ip += 2
@@ -43518,12 +42653,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l51
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l51
 				}
 				c.ip += 2
@@ -43558,12 +42693,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l52
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l52
 				}
 				c.ip += 2
@@ -43598,12 +42733,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l53
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l53
 				}
 				c.ip += 2
@@ -43638,12 +42773,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l54
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l54
 				}
 				c.ip += 2
@@ -43678,12 +42813,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l55
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l55
 				}
 				c.ip += 2
@@ -43718,12 +42853,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l56
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l56
 				}
 				c.ip += 2
@@ -43758,12 +42893,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l57
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l57
 				}
 				c.ip += 2
@@ -43798,12 +42933,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l58
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l58
 				}
 				c.ip += 2
@@ -43838,12 +42973,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l59
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l59
 				}
 				c.ip += 2
@@ -43878,12 +43013,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l60
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l60
 				}
 				c.ip += 2
@@ -43918,12 +43053,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l61
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l61
 				}
 				c.ip += 2
@@ -43958,12 +43093,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l62
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l62
 				}
 				c.ip += 2
@@ -43998,12 +43133,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l63
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l63
 				}
 				c.ip += 2
@@ -44038,12 +43173,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l64
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l64
 				}
 				c.ip += 2
@@ -44078,12 +43213,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l65
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l65
 				}
 				c.ip += 2
@@ -44118,12 +43253,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l66
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l66
 				}
 				c.ip += 2
@@ -44158,12 +43293,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l67
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l67
 				}
 				c.ip += 2
@@ -44198,12 +43333,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l68
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l68
 				}
 				c.ip += 2
@@ -44238,12 +43373,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l69
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l69
 				}
 				c.ip += 2
@@ -44278,12 +43413,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l70
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l70
 				}
 				c.ip += 2
@@ -44318,12 +43453,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l71
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l71
 				}
 				c.ip += 2
@@ -44358,12 +43493,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l72
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l72
 				}
 				c.ip += 2
@@ -44398,12 +43533,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l73
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l73
 				}
 				c.ip += 2
@@ -44438,12 +43573,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l74
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l74
 				}
 				c.ip += 2
@@ -44478,12 +43613,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l75
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l75
 				}
 				c.ip += 2
@@ -44518,12 +43653,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l76
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l76
 				}
 				c.ip += 2
@@ -44557,12 +43692,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l77
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l77
 				}
 				c.ip += 2
@@ -44596,12 +43731,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l78
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l78
 				}
 				c.ip += 2
@@ -44635,12 +43770,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l79
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l79
 				}
 				c.ip += 2
@@ -44674,12 +43809,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l80
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l80
 				}
 				c.ip += 2
@@ -44713,12 +43848,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l81
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l81
 				}
 				c.ip += 2
@@ -44752,12 +43887,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l82
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l82
 				}
 				c.ip += 2
@@ -44791,12 +43926,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l83
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l83
 				}
 				c.ip += 2
@@ -44830,12 +43965,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l84
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l84
 				}
 				c.ip += 2
@@ -44869,12 +44004,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l85
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l85
 				}
 				c.ip += 2
@@ -44908,12 +44043,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l86
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l86
 				}
 				c.ip += 2
@@ -44947,12 +44082,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l87
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l87
 				}
 				c.ip += 2
@@ -44986,12 +44121,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l88
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l88
 				}
 				c.ip += 2
@@ -45025,12 +44160,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l89
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l89
 				}
 				c.ip += 2
@@ -45064,12 +44199,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l90
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l90
 				}
 				c.ip += 2
@@ -45103,12 +44238,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l91
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l91
 				}
 				c.ip += 2
@@ -45142,12 +44277,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l92
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l92
 				}
 				c.ip += 2
@@ -45181,12 +44316,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l93
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l93
 				}
 				c.ip += 2
@@ -45220,12 +44355,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l94
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l94
 				}
 				c.ip += 2
@@ -45259,12 +44394,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l95
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l95
 				}
 				c.ip += 2
@@ -45298,12 +44433,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l96
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l96
 				}
 				c.ip += 2
@@ -45337,12 +44472,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l97
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l97
 				}
 				c.ip += 2
@@ -45376,12 +44511,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l98
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l98
 				}
 				c.ip += 2
@@ -45415,12 +44550,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l99
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l99
 				}
 				c.ip += 2
@@ -45454,12 +44589,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l100
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l100
 				}
 				c.ip += 2
@@ -45493,12 +44628,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l101
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l101
 				}
 				c.ip += 2
@@ -45532,12 +44667,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l102
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l102
 				}
 				c.ip += 2
@@ -45571,12 +44706,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l103
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l103
 				}
 				c.ip += 2
@@ -45610,12 +44745,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l104
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l104
 				}
 				c.ip += 2
@@ -45649,12 +44784,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l105
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l105
 				}
 				c.ip += 2
@@ -45688,12 +44823,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l106
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l106
 				}
 				c.ip += 2
@@ -45727,12 +44862,12 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l107
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l107
 				}
 				c.ip += 2
@@ -45766,8 +44901,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l108
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45797,8 +44932,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l109
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45828,8 +44963,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l110
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45859,8 +44994,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l111
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45890,8 +45025,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l112
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45921,8 +45056,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l113
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45952,8 +45087,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l114
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -45983,8 +45118,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l115
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46014,8 +45149,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l116
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46045,8 +45180,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l117
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46076,8 +45211,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l118
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46107,8 +45242,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l119
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46138,8 +45273,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l120
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46169,8 +45304,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l121
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46200,8 +45335,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l122
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46231,8 +45366,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l123
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46262,8 +45397,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l124
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46293,8 +45428,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l125
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46324,8 +45459,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l126
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46355,8 +45490,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l127
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -46386,8 +45521,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l128
 				}
 				c.ip += 2
@@ -46417,8 +45552,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l129
 				}
 				c.ip += 2
@@ -46448,8 +45583,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l130
 				}
 				c.ip += 2
@@ -46479,8 +45614,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l131
 				}
 				c.ip += 2
@@ -46510,8 +45645,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l132
 				}
 				c.ip += 2
@@ -46541,8 +45676,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l133
 				}
 				c.ip += 2
@@ -46571,8 +45706,8 @@ var (
 				goto l134
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l134
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46600,8 +45735,8 @@ var (
 				goto l135
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l135
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46629,8 +45764,8 @@ var (
 				goto l136
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l136
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46658,8 +45793,8 @@ var (
 				goto l137
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l137
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46700,8 +45835,8 @@ var (
 				goto l138
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l138
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46742,8 +45877,8 @@ var (
 				goto l139
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l139
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46790,8 +45925,8 @@ var (
 				goto l140
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l140
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46819,8 +45954,8 @@ var (
 				goto l141
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l141
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46848,8 +45983,8 @@ var (
 				goto l142
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l142
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46877,8 +46012,8 @@ var (
 				goto l143
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l143
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46906,8 +46041,8 @@ var (
 				goto l144
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l144
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46935,8 +46070,8 @@ var (
 				goto l145
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l145
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46964,8 +46099,8 @@ var (
 				goto l146
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l146
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -46993,8 +46128,8 @@ var (
 				goto l147
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l147
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -47022,8 +46157,8 @@ var (
 				goto l148
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l148
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
@@ -47052,8 +46187,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l149
 				}
 				c.ip += 2
@@ -47083,8 +46218,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l150
 				}
 				c.ip += 2
@@ -47114,8 +46249,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l151
 				}
 				c.ip += 2
@@ -47145,8 +46280,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l152
 				}
 				c.ip += 2
@@ -47176,8 +46311,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l153
 				}
 				c.ip += 2
@@ -47207,8 +46342,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l154
 				}
 				c.ip += 2
@@ -47237,8 +46372,8 @@ var (
 				goto l155
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l155
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47266,8 +46401,8 @@ var (
 				goto l156
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l156
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47295,8 +46430,8 @@ var (
 				goto l157
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l157
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47324,8 +46459,8 @@ var (
 				goto l158
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l158
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47366,8 +46501,8 @@ var (
 				goto l159
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l159
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47408,8 +46543,8 @@ var (
 				goto l160
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l160
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47456,8 +46591,8 @@ var (
 				goto l161
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l161
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47485,8 +46620,8 @@ var (
 				goto l162
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l162
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47514,8 +46649,8 @@ var (
 				goto l163
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l163
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47543,8 +46678,8 @@ var (
 				goto l164
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l164
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47572,8 +46707,8 @@ var (
 				goto l165
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l165
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47601,8 +46736,8 @@ var (
 				goto l166
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l166
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47630,8 +46765,8 @@ var (
 				goto l167
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l167
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47659,8 +46794,8 @@ var (
 				goto l168
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l168
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47688,8 +46823,8 @@ var (
 				goto l169
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l169
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
@@ -47718,8 +46853,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l170
 				}
 				c.ip += 2
@@ -47749,8 +46884,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l171
 				}
 				c.ip += 2
@@ -47779,12 +46914,12 @@ var (
 				goto l172
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l172
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l172
 				}
 				c.ip += 2
@@ -47816,12 +46951,12 @@ var (
 				goto l173
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l173
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l173
 				}
 				c.ip += 2
@@ -47853,12 +46988,12 @@ var (
 				goto l174
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l174
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l174
 				}
 				c.ip += 2
@@ -47890,12 +47025,12 @@ var (
 				goto l175
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l175
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l175
 				}
 				c.ip += 2
@@ -47927,12 +47062,12 @@ var (
 				goto l176
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l176
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l176
 				}
 				c.ip += 2
@@ -47964,12 +47099,12 @@ var (
 				goto l177
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l177
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l177
 				}
 				c.ip += 2
@@ -48001,12 +47136,12 @@ var (
 				goto l178
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l178
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l178
 				}
 				c.ip += 2
@@ -48038,12 +47173,12 @@ var (
 				goto l179
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l179
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l179
 				}
 				c.ip += 2
@@ -48075,12 +47210,12 @@ var (
 				goto l180
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l180
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l180
 				}
 				c.ip += 2
@@ -48112,12 +47247,12 @@ var (
 				goto l181
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l181
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l181
 				}
 				c.ip += 2
@@ -48161,12 +47296,12 @@ var (
 				goto l182
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l182
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l182
 				}
 				c.ip += 2
@@ -48210,12 +47345,12 @@ var (
 				goto l183
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l183
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l183
 				}
 				c.ip += 2
@@ -48265,12 +47400,12 @@ var (
 				goto l184
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l184
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l184
 				}
 				c.ip += 2
@@ -48302,12 +47437,12 @@ var (
 				goto l185
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l185
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l185
 				}
 				c.ip += 2
@@ -48339,12 +47474,12 @@ var (
 				goto l186
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l186
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l186
 				}
 				c.ip += 2
@@ -48376,12 +47511,12 @@ var (
 				goto l187
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l187
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l187
 				}
 				c.ip += 2
@@ -48413,12 +47548,12 @@ var (
 				goto l188
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l188
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l188
 				}
 				c.ip += 2
@@ -48450,12 +47585,12 @@ var (
 				goto l189
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l189
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l189
 				}
 				c.ip += 2
@@ -48487,12 +47622,12 @@ var (
 				goto l190
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l190
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l190
 				}
 				c.ip += 2
@@ -48524,12 +47659,12 @@ var (
 				goto l191
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l191
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l191
 				}
 				c.ip += 2
@@ -48561,12 +47696,12 @@ var (
 				goto l192
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l192
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.global(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l192
 				}
 				c.ip += 2
@@ -48598,12 +47733,12 @@ var (
 				goto l193
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l193
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l193
 				}
 				c.ip += 2
@@ -48635,12 +47770,12 @@ var (
 				goto l194
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l194
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l194
 				}
 				c.ip += 2
@@ -48672,12 +47807,12 @@ var (
 				goto l195
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l195
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l195
 				}
 				c.ip += 2
@@ -48709,12 +47844,12 @@ var (
 				goto l196
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l196
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l196
 				}
 				c.ip += 2
@@ -48758,12 +47893,12 @@ var (
 				goto l197
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l197
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l197
 				}
 				c.ip += 2
@@ -48807,12 +47942,12 @@ var (
 				goto l198
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l198
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l198
 				}
 				c.ip += 2
@@ -48862,12 +47997,12 @@ var (
 				goto l199
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l199
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l199
 				}
 				c.ip += 2
@@ -48899,12 +48034,12 @@ var (
 				goto l200
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l200
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l200
 				}
 				c.ip += 2
@@ -48936,12 +48071,12 @@ var (
 				goto l201
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l201
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l201
 				}
 				c.ip += 2
@@ -48973,12 +48108,12 @@ var (
 				goto l202
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l202
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l202
 				}
 				c.ip += 2
@@ -49010,12 +48145,12 @@ var (
 				goto l203
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l203
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l203
 				}
 				c.ip += 2
@@ -49047,12 +48182,12 @@ var (
 				goto l204
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l204
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l204
 				}
 				c.ip += 2
@@ -49084,12 +48219,12 @@ var (
 				goto l205
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l205
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l205
 				}
 				c.ip += 2
@@ -49121,12 +48256,12 @@ var (
 				goto l206
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l206
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l206
 				}
 				c.ip += 2
@@ -49158,12 +48293,12 @@ var (
 				goto l207
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l207
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.global(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l207
 				}
 				c.ip += 2
@@ -49195,12 +48330,12 @@ var (
 				goto l208
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l208
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l208
 				}
 				c.ip += 2
@@ -49232,12 +48367,12 @@ var (
 				goto l209
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l209
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l209
 				}
 				c.ip += 2
@@ -49269,12 +48404,12 @@ var (
 				goto l210
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l210
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l210
 				}
 				c.ip += 2
@@ -49306,12 +48441,12 @@ var (
 				goto l211
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l211
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l211
 				}
 				c.ip += 2
@@ -49355,12 +48490,12 @@ var (
 				goto l212
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l212
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l212
 				}
 				c.ip += 2
@@ -49404,12 +48539,12 @@ var (
 				goto l213
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l213
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l213
 				}
 				c.ip += 2
@@ -49453,12 +48588,12 @@ var (
 				goto l214
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l214
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l214
 				}
 				c.ip += 2
@@ -49502,12 +48637,12 @@ var (
 				goto l215
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l215
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l215
 				}
 				c.ip += 2
@@ -49539,12 +48674,12 @@ var (
 				goto l216
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l216
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l216
 				}
 				c.ip += 2
@@ -49576,12 +48711,12 @@ var (
 				goto l217
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l217
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l217
 				}
 				c.ip += 2
@@ -49613,12 +48748,12 @@ var (
 				goto l218
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l218
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l218
 				}
 				c.ip += 2
@@ -49648,12 +48783,12 @@ var (
 				goto l219
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l219
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l219
 				}
 				c.ip += 2
@@ -49683,12 +48818,12 @@ var (
 				goto l220
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l220
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l220
 				}
 				c.ip += 2
@@ -49718,12 +48853,12 @@ var (
 				goto l221
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l221
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l221
 				}
 				c.ip += 2
@@ -49755,12 +48890,12 @@ var (
 				goto l222
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l222
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l222
 				}
 				c.ip += 2
@@ -49792,12 +48927,12 @@ var (
 				goto l223
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l223
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l223
 				}
 				c.ip += 2
@@ -49829,12 +48964,12 @@ var (
 				goto l224
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l224
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l224
 				}
 				c.ip += 2
@@ -49866,12 +49001,12 @@ var (
 				goto l225
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l225
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l225
 				}
 				c.ip += 2
@@ -49903,12 +49038,12 @@ var (
 				goto l226
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l226
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l226
 				}
 				c.ip += 2
@@ -49940,12 +49075,12 @@ var (
 				goto l227
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l227
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l227
 				}
 				c.ip += 2
@@ -49977,12 +49112,12 @@ var (
 				goto l228
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l228
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l228
 				}
 				c.ip += 2
@@ -50014,12 +49149,12 @@ var (
 				goto l229
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l229
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l229
 				}
 				c.ip += 2
@@ -50051,12 +49186,12 @@ var (
 				goto l230
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l230
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l230
 				}
 				c.ip += 2
@@ -50088,12 +49223,12 @@ var (
 				goto l231
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l231
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l231
 				}
 				c.ip += 2
@@ -50125,12 +49260,12 @@ var (
 				goto l232
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l232
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l232
 				}
 				c.ip += 2
@@ -50162,12 +49297,12 @@ var (
 				goto l233
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l233
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l233
 				}
 				c.ip += 2
@@ -50199,12 +49334,12 @@ var (
 				goto l234
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l234
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l234
 				}
 				c.ip += 2
@@ -50236,12 +49371,12 @@ var (
 				goto l235
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l235
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l235
 				}
 				c.ip += 2
@@ -50273,12 +49408,12 @@ var (
 				goto l236
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l236
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l236
 				}
 				c.ip += 2
@@ -50324,12 +49459,12 @@ var (
 				goto l237
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l237
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l237
 				}
 				c.ip += 2
@@ -50375,12 +49510,12 @@ var (
 				goto l238
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l238
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l238
 				}
 				c.ip += 2
@@ -50426,12 +49561,12 @@ var (
 				goto l239
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l239
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l239
 				}
 				c.ip += 2
@@ -50477,12 +49612,12 @@ var (
 				goto l240
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l240
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l240
 				}
 				c.ip += 2
@@ -50514,12 +49649,12 @@ var (
 				goto l241
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l241
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l241
 				}
 				c.ip += 2
@@ -50551,12 +49686,12 @@ var (
 				goto l242
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l242
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l242
 				}
 				c.ip += 2
@@ -50588,12 +49723,12 @@ var (
 				goto l243
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l243
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l243
 				}
 				c.ip += 2
@@ -50625,12 +49760,12 @@ var (
 				goto l244
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l244
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l244
 				}
 				c.ip += 2
@@ -50662,12 +49797,12 @@ var (
 				goto l245
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l245
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l245
 				}
 				c.ip += 2
@@ -50699,12 +49834,12 @@ var (
 				goto l246
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l246
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l246
 				}
 				c.ip += 2
@@ -50736,12 +49871,12 @@ var (
 				goto l247
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l247
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l247
 				}
 				c.ip += 2
@@ -50773,12 +49908,12 @@ var (
 				goto l248
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l248
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l248
 				}
 				c.ip += 2
@@ -50810,12 +49945,12 @@ var (
 				goto l249
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l249
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l249
 				}
 				c.ip += 2
@@ -50847,12 +49982,12 @@ var (
 				goto l250
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l250
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l250
 				}
 				c.ip += 2
@@ -50884,12 +50019,12 @@ var (
 				goto l251
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l251
 				}
-				i1 := instr.ParseU16(c.code, start+2+1)
-				if i1 >= len(c.globals) || c.globals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.global(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l251
 				}
 				c.ip += 2
@@ -50922,8 +50057,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l252
 				}
 				c.ip += 2
@@ -50953,8 +50088,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l253
 				}
 				c.ip += 2
@@ -50984,8 +50119,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l254
 				}
 				c.ip += 2
@@ -51015,8 +50150,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l255
 				}
 				c.ip += 2
@@ -51045,12 +50180,12 @@ var (
 				goto l256
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l256
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l256
 				}
 				c.ip += 2
@@ -51083,12 +50218,12 @@ var (
 				goto l257
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l257
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l257
 				}
 				c.ip += 2
@@ -51121,12 +50256,12 @@ var (
 				goto l258
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l258
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l258
 				}
 				c.ip += 2
@@ -51159,12 +50294,12 @@ var (
 				goto l259
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l259
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l259
 				}
 				c.ip += 2
@@ -51197,12 +50332,12 @@ var (
 				goto l260
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l260
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l260
 				}
 				c.ip += 2
@@ -51235,12 +50370,12 @@ var (
 				goto l261
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l261
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l261
 				}
 				c.ip += 2
@@ -51273,12 +50408,12 @@ var (
 				goto l262
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l262
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l262
 				}
 				c.ip += 2
@@ -51311,12 +50446,12 @@ var (
 				goto l263
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l263
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l263
 				}
 				c.ip += 2
@@ -51349,12 +50484,12 @@ var (
 				goto l264
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l264
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l264
 				}
 				c.ip += 2
@@ -51387,12 +50522,12 @@ var (
 				goto l265
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l265
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l265
 				}
 				c.ip += 2
@@ -51437,12 +50572,12 @@ var (
 				goto l266
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l266
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l266
 				}
 				c.ip += 2
@@ -51487,12 +50622,12 @@ var (
 				goto l267
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l267
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l267
 				}
 				c.ip += 2
@@ -51543,12 +50678,12 @@ var (
 				goto l268
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l268
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l268
 				}
 				c.ip += 2
@@ -51581,12 +50716,12 @@ var (
 				goto l269
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l269
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l269
 				}
 				c.ip += 2
@@ -51619,12 +50754,12 @@ var (
 				goto l270
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l270
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l270
 				}
 				c.ip += 2
@@ -51657,12 +50792,12 @@ var (
 				goto l271
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l271
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l271
 				}
 				c.ip += 2
@@ -51695,12 +50830,12 @@ var (
 				goto l272
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l272
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l272
 				}
 				c.ip += 2
@@ -51733,12 +50868,12 @@ var (
 				goto l273
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l273
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l273
 				}
 				c.ip += 2
@@ -51771,12 +50906,12 @@ var (
 				goto l274
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l274
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l274
 				}
 				c.ip += 2
@@ -51809,12 +50944,12 @@ var (
 				goto l275
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l275
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l275
 				}
 				c.ip += 2
@@ -51847,12 +50982,12 @@ var (
 				goto l276
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l276
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l276
 				}
 				c.ip += 2
@@ -51885,12 +51020,12 @@ var (
 				goto l277
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l277
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l277
 				}
 				c.ip += 2
@@ -51923,12 +51058,12 @@ var (
 				goto l278
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l278
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l278
 				}
 				c.ip += 2
@@ -51961,12 +51096,12 @@ var (
 				goto l279
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l279
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l279
 				}
 				c.ip += 2
@@ -51999,12 +51134,12 @@ var (
 				goto l280
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l280
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l280
 				}
 				c.ip += 2
@@ -52049,12 +51184,12 @@ var (
 				goto l281
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l281
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l281
 				}
 				c.ip += 2
@@ -52099,12 +51234,12 @@ var (
 				goto l282
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l282
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l282
 				}
 				c.ip += 2
@@ -52155,12 +51290,12 @@ var (
 				goto l283
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l283
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l283
 				}
 				c.ip += 2
@@ -52193,12 +51328,12 @@ var (
 				goto l284
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l284
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l284
 				}
 				c.ip += 2
@@ -52231,12 +51366,12 @@ var (
 				goto l285
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l285
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l285
 				}
 				c.ip += 2
@@ -52269,12 +51404,12 @@ var (
 				goto l286
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l286
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l286
 				}
 				c.ip += 2
@@ -52307,12 +51442,12 @@ var (
 				goto l287
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l287
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l287
 				}
 				c.ip += 2
@@ -52345,12 +51480,12 @@ var (
 				goto l288
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l288
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l288
 				}
 				c.ip += 2
@@ -52383,12 +51518,12 @@ var (
 				goto l289
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l289
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l289
 				}
 				c.ip += 2
@@ -52421,12 +51556,12 @@ var (
 				goto l290
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l290
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l290
 				}
 				c.ip += 2
@@ -52459,12 +51594,12 @@ var (
 				goto l291
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l291
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l291
 				}
 				c.ip += 2
@@ -52497,12 +51632,12 @@ var (
 				goto l292
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l292
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l292
 				}
 				c.ip += 2
@@ -52535,12 +51670,12 @@ var (
 				goto l293
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l293
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l293
 				}
 				c.ip += 2
@@ -52573,12 +51708,12 @@ var (
 				goto l294
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l294
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l294
 				}
 				c.ip += 2
@@ -52611,12 +51746,12 @@ var (
 				goto l295
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l295
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l295
 				}
 				c.ip += 2
@@ -52661,12 +51796,12 @@ var (
 				goto l296
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l296
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l296
 				}
 				c.ip += 2
@@ -52711,12 +51846,12 @@ var (
 				goto l297
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l297
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l297
 				}
 				c.ip += 2
@@ -52761,12 +51896,12 @@ var (
 				goto l298
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l298
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l298
 				}
 				c.ip += 2
@@ -52811,12 +51946,12 @@ var (
 				goto l299
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l299
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l299
 				}
 				c.ip += 2
@@ -52849,12 +51984,12 @@ var (
 				goto l300
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l300
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l300
 				}
 				c.ip += 2
@@ -52887,12 +52022,12 @@ var (
 				goto l301
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l301
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l301
 				}
 				c.ip += 2
@@ -52925,12 +52060,12 @@ var (
 				goto l302
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l302
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l302
 				}
 				c.ip += 2
@@ -52961,12 +52096,12 @@ var (
 				goto l303
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l303
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l303
 				}
 				c.ip += 2
@@ -52997,12 +52132,12 @@ var (
 				goto l304
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l304
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l304
 				}
 				c.ip += 2
@@ -53033,12 +52168,12 @@ var (
 				goto l305
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l305
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l305
 				}
 				c.ip += 2
@@ -53071,12 +52206,12 @@ var (
 				goto l306
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l306
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l306
 				}
 				c.ip += 2
@@ -53109,12 +52244,12 @@ var (
 				goto l307
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l307
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l307
 				}
 				c.ip += 2
@@ -53147,12 +52282,12 @@ var (
 				goto l308
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l308
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l308
 				}
 				c.ip += 2
@@ -53185,12 +52320,12 @@ var (
 				goto l309
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l309
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l309
 				}
 				c.ip += 2
@@ -53223,12 +52358,12 @@ var (
 				goto l310
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l310
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l310
 				}
 				c.ip += 2
@@ -53261,12 +52396,12 @@ var (
 				goto l311
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l311
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l311
 				}
 				c.ip += 2
@@ -53299,12 +52434,12 @@ var (
 				goto l312
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l312
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l312
 				}
 				c.ip += 2
@@ -53337,12 +52472,12 @@ var (
 				goto l313
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l313
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l313
 				}
 				c.ip += 2
@@ -53375,12 +52510,12 @@ var (
 				goto l314
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l314
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l314
 				}
 				c.ip += 2
@@ -53413,12 +52548,12 @@ var (
 				goto l315
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l315
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l315
 				}
 				c.ip += 2
@@ -53451,12 +52586,12 @@ var (
 				goto l316
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l316
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l316
 				}
 				c.ip += 2
@@ -53489,12 +52624,12 @@ var (
 				goto l317
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l317
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l317
 				}
 				c.ip += 2
@@ -53527,12 +52662,12 @@ var (
 				goto l318
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l318
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l318
 				}
 				c.ip += 2
@@ -53565,12 +52700,12 @@ var (
 				goto l319
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l319
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l319
 				}
 				c.ip += 2
@@ -53603,12 +52738,12 @@ var (
 				goto l320
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l320
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l320
 				}
 				c.ip += 2
@@ -53655,12 +52790,12 @@ var (
 				goto l321
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l321
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l321
 				}
 				c.ip += 2
@@ -53707,12 +52842,12 @@ var (
 				goto l322
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l322
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l322
 				}
 				c.ip += 2
@@ -53759,12 +52894,12 @@ var (
 				goto l323
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l323
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l323
 				}
 				c.ip += 2
@@ -53811,12 +52946,12 @@ var (
 				goto l324
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l324
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l324
 				}
 				c.ip += 2
@@ -53849,12 +52984,12 @@ var (
 				goto l325
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l325
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l325
 				}
 				c.ip += 2
@@ -53887,12 +53022,12 @@ var (
 				goto l326
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l326
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l326
 				}
 				c.ip += 2
@@ -53925,12 +53060,12 @@ var (
 				goto l327
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l327
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l327
 				}
 				c.ip += 2
@@ -53963,12 +53098,12 @@ var (
 				goto l328
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l328
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l328
 				}
 				c.ip += 2
@@ -54001,12 +53136,12 @@ var (
 				goto l329
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l329
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l329
 				}
 				c.ip += 2
@@ -54039,12 +53174,12 @@ var (
 				goto l330
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l330
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l330
 				}
 				c.ip += 2
@@ -54077,12 +53212,12 @@ var (
 				goto l331
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l331
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l331
 				}
 				c.ip += 2
@@ -54115,12 +53250,12 @@ var (
 				goto l332
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l332
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l332
 				}
 				c.ip += 2
@@ -54153,12 +53288,12 @@ var (
 				goto l333
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l333
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l333
 				}
 				c.ip += 2
@@ -54191,12 +53326,12 @@ var (
 				goto l334
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l334
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l334
 				}
 				c.ip += 2
@@ -54229,12 +53364,12 @@ var (
 				goto l335
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l335
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.locals) || c.locals[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l335
 				}
 				c.ip += 2
@@ -54267,12 +53402,12 @@ var (
 				goto l336
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l336
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l336
 				}
 				c.ip += 2
@@ -54304,12 +53439,12 @@ var (
 				goto l337
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l337
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l337
 				}
 				c.ip += 2
@@ -54341,12 +53476,12 @@ var (
 				goto l338
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l338
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l338
 				}
 				c.ip += 2
@@ -54378,12 +53513,12 @@ var (
 				goto l339
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l339
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l339
 				}
 				c.ip += 2
@@ -54415,12 +53550,12 @@ var (
 				goto l340
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l340
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l340
 				}
 				c.ip += 2
@@ -54452,12 +53587,12 @@ var (
 				goto l341
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l341
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l341
 				}
 				c.ip += 2
@@ -54489,12 +53624,12 @@ var (
 				goto l342
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l342
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l342
 				}
 				c.ip += 2
@@ -54526,12 +53661,12 @@ var (
 				goto l343
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l343
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l343
 				}
 				c.ip += 2
@@ -54563,12 +53698,12 @@ var (
 				goto l344
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l344
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l344
 				}
 				c.ip += 2
@@ -54600,12 +53735,12 @@ var (
 				goto l345
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l345
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l345
 				}
 				c.ip += 2
@@ -54649,12 +53784,12 @@ var (
 				goto l346
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l346
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l346
 				}
 				c.ip += 2
@@ -54698,12 +53833,12 @@ var (
 				goto l347
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l347
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l347
 				}
 				c.ip += 2
@@ -54753,12 +53888,12 @@ var (
 				goto l348
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l348
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l348
 				}
 				c.ip += 2
@@ -54790,12 +53925,12 @@ var (
 				goto l349
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l349
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l349
 				}
 				c.ip += 2
@@ -54827,12 +53962,12 @@ var (
 				goto l350
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l350
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l350
 				}
 				c.ip += 2
@@ -54864,12 +53999,12 @@ var (
 				goto l351
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l351
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l351
 				}
 				c.ip += 2
@@ -54901,12 +54036,12 @@ var (
 				goto l352
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l352
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l352
 				}
 				c.ip += 2
@@ -54938,12 +54073,12 @@ var (
 				goto l353
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l353
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l353
 				}
 				c.ip += 2
@@ -54975,12 +54110,12 @@ var (
 				goto l354
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l354
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l354
 				}
 				c.ip += 2
@@ -55012,12 +54147,12 @@ var (
 				goto l355
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l355
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l355
 				}
 				c.ip += 2
@@ -55049,12 +54184,12 @@ var (
 				goto l356
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l356
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF32 {
+				i1, ok1 := c.upval(start+2+1, types.KindF32)
+				if !ok1 {
 					goto l356
 				}
 				c.ip += 2
@@ -55086,12 +54221,12 @@ var (
 				goto l357
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l357
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l357
 				}
 				c.ip += 2
@@ -55123,12 +54258,12 @@ var (
 				goto l358
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l358
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l358
 				}
 				c.ip += 2
@@ -55160,12 +54295,12 @@ var (
 				goto l359
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l359
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l359
 				}
 				c.ip += 2
@@ -55197,12 +54332,12 @@ var (
 				goto l360
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l360
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l360
 				}
 				c.ip += 2
@@ -55246,12 +54381,12 @@ var (
 				goto l361
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l361
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l361
 				}
 				c.ip += 2
@@ -55295,12 +54430,12 @@ var (
 				goto l362
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l362
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l362
 				}
 				c.ip += 2
@@ -55350,12 +54485,12 @@ var (
 				goto l363
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l363
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l363
 				}
 				c.ip += 2
@@ -55387,12 +54522,12 @@ var (
 				goto l364
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l364
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l364
 				}
 				c.ip += 2
@@ -55424,12 +54559,12 @@ var (
 				goto l365
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l365
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l365
 				}
 				c.ip += 2
@@ -55461,12 +54596,12 @@ var (
 				goto l366
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l366
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l366
 				}
 				c.ip += 2
@@ -55498,12 +54633,12 @@ var (
 				goto l367
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l367
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l367
 				}
 				c.ip += 2
@@ -55535,12 +54670,12 @@ var (
 				goto l368
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l368
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l368
 				}
 				c.ip += 2
@@ -55572,12 +54707,12 @@ var (
 				goto l369
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l369
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l369
 				}
 				c.ip += 2
@@ -55609,12 +54744,12 @@ var (
 				goto l370
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l370
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l370
 				}
 				c.ip += 2
@@ -55646,12 +54781,12 @@ var (
 				goto l371
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l371
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindF64 {
+				i1, ok1 := c.upval(start+2+1, types.KindF64)
+				if !ok1 {
 					goto l371
 				}
 				c.ip += 2
@@ -55683,12 +54818,12 @@ var (
 				goto l372
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l372
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l372
 				}
 				c.ip += 2
@@ -55720,12 +54855,12 @@ var (
 				goto l373
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l373
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l373
 				}
 				c.ip += 2
@@ -55757,12 +54892,12 @@ var (
 				goto l374
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l374
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l374
 				}
 				c.ip += 2
@@ -55794,12 +54929,12 @@ var (
 				goto l375
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l375
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l375
 				}
 				c.ip += 2
@@ -55843,12 +54978,12 @@ var (
 				goto l376
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l376
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l376
 				}
 				c.ip += 2
@@ -55892,12 +55027,12 @@ var (
 				goto l377
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l377
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l377
 				}
 				c.ip += 2
@@ -55941,12 +55076,12 @@ var (
 				goto l378
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l378
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l378
 				}
 				c.ip += 2
@@ -55990,12 +55125,12 @@ var (
 				goto l379
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l379
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l379
 				}
 				c.ip += 2
@@ -56027,12 +55162,12 @@ var (
 				goto l380
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l380
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l380
 				}
 				c.ip += 2
@@ -56064,12 +55199,12 @@ var (
 				goto l381
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l381
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l381
 				}
 				c.ip += 2
@@ -56101,12 +55236,12 @@ var (
 				goto l382
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l382
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l382
 				}
 				c.ip += 2
@@ -56136,12 +55271,12 @@ var (
 				goto l383
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l383
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l383
 				}
 				c.ip += 2
@@ -56171,12 +55306,12 @@ var (
 				goto l384
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l384
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l384
 				}
 				c.ip += 2
@@ -56206,12 +55341,12 @@ var (
 				goto l385
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l385
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l385
 				}
 				c.ip += 2
@@ -56243,12 +55378,12 @@ var (
 				goto l386
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l386
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l386
 				}
 				c.ip += 2
@@ -56280,12 +55415,12 @@ var (
 				goto l387
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l387
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l387
 				}
 				c.ip += 2
@@ -56317,12 +55452,12 @@ var (
 				goto l388
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l388
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l388
 				}
 				c.ip += 2
@@ -56354,12 +55489,12 @@ var (
 				goto l389
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l389
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l389
 				}
 				c.ip += 2
@@ -56391,12 +55526,12 @@ var (
 				goto l390
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l390
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l390
 				}
 				c.ip += 2
@@ -56428,12 +55563,12 @@ var (
 				goto l391
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l391
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l391
 				}
 				c.ip += 2
@@ -56465,12 +55600,12 @@ var (
 				goto l392
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l392
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l392
 				}
 				c.ip += 2
@@ -56502,12 +55637,12 @@ var (
 				goto l393
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l393
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l393
 				}
 				c.ip += 2
@@ -56539,12 +55674,12 @@ var (
 				goto l394
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l394
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l394
 				}
 				c.ip += 2
@@ -56576,12 +55711,12 @@ var (
 				goto l395
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l395
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l395
 				}
 				c.ip += 2
@@ -56613,12 +55748,12 @@ var (
 				goto l396
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l396
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI32 {
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
 					goto l396
 				}
 				c.ip += 2
@@ -56650,12 +55785,12 @@ var (
 				goto l397
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l397
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l397
 				}
 				c.ip += 2
@@ -56687,12 +55822,12 @@ var (
 				goto l398
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l398
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l398
 				}
 				c.ip += 2
@@ -56724,12 +55859,12 @@ var (
 				goto l399
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l399
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l399
 				}
 				c.ip += 2
@@ -56761,12 +55896,12 @@ var (
 				goto l400
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l400
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l400
 				}
 				c.ip += 2
@@ -56812,12 +55947,12 @@ var (
 				goto l401
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l401
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l401
 				}
 				c.ip += 2
@@ -56863,12 +55998,12 @@ var (
 				goto l402
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l402
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l402
 				}
 				c.ip += 2
@@ -56914,12 +56049,12 @@ var (
 				goto l403
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l403
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l403
 				}
 				c.ip += 2
@@ -56965,12 +56100,12 @@ var (
 				goto l404
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l404
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l404
 				}
 				c.ip += 2
@@ -57002,12 +56137,12 @@ var (
 				goto l405
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l405
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l405
 				}
 				c.ip += 2
@@ -57039,12 +56174,12 @@ var (
 				goto l406
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l406
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l406
 				}
 				c.ip += 2
@@ -57076,12 +56211,12 @@ var (
 				goto l407
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l407
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l407
 				}
 				c.ip += 2
@@ -57113,12 +56248,12 @@ var (
 				goto l408
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l408
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l408
 				}
 				c.ip += 2
@@ -57150,12 +56285,12 @@ var (
 				goto l409
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l409
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l409
 				}
 				c.ip += 2
@@ -57187,12 +56322,12 @@ var (
 				goto l410
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l410
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l410
 				}
 				c.ip += 2
@@ -57224,12 +56359,12 @@ var (
 				goto l411
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l411
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l411
 				}
 				c.ip += 2
@@ -57261,12 +56396,12 @@ var (
 				goto l412
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l412
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l412
 				}
 				c.ip += 2
@@ -57298,12 +56433,12 @@ var (
 				goto l413
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l413
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l413
 				}
 				c.ip += 2
@@ -57335,12 +56470,12 @@ var (
 				goto l414
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l414
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l414
 				}
 				c.ip += 2
@@ -57372,12 +56507,12 @@ var (
 				goto l415
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l415
 				}
-				i1 := int(c.code[start+2+1])
-				if i1 >= len(c.captures) || c.captures[i1].Repr() != types.KindI64 {
+				i1, ok1 := c.upval(start+2+1, types.KindI64)
+				if !ok1 {
 					goto l415
 				}
 				c.ip += 2
@@ -57410,8 +56545,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindRef {
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
 					goto l416
 				}
 				c.ip += 2
@@ -57434,8 +56569,8 @@ var (
 				goto l417
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l417
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57463,8 +56598,8 @@ var (
 				goto l418
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l418
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57492,8 +56627,8 @@ var (
 				goto l419
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l419
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57521,8 +56656,8 @@ var (
 				goto l420
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l420
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57563,8 +56698,8 @@ var (
 				goto l421
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l421
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57605,8 +56740,8 @@ var (
 				goto l422
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l422
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57647,8 +56782,8 @@ var (
 				goto l423
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l423
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57689,8 +56824,8 @@ var (
 				goto l424
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l424
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57718,8 +56853,8 @@ var (
 				goto l425
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l425
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57747,8 +56882,8 @@ var (
 				goto l426
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l426
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57776,8 +56911,8 @@ var (
 				goto l427
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l427
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
@@ -57804,8 +56939,8 @@ var (
 				goto l428
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l428
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
@@ -57832,8 +56967,8 @@ var (
 				goto l429
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l429
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
@@ -57860,8 +56995,8 @@ var (
 				goto l430
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l430
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57889,8 +57024,8 @@ var (
 				goto l431
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l431
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57918,8 +57053,8 @@ var (
 				goto l432
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l432
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57947,8 +57082,8 @@ var (
 				goto l433
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l433
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -57976,8 +57111,8 @@ var (
 				goto l434
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l434
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58005,8 +57140,8 @@ var (
 				goto l435
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l435
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58034,8 +57169,8 @@ var (
 				goto l436
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l436
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58063,8 +57198,8 @@ var (
 				goto l437
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l437
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58092,8 +57227,8 @@ var (
 				goto l438
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l438
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58121,8 +57256,8 @@ var (
 				goto l439
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l439
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58150,8 +57285,8 @@ var (
 				goto l440
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l440
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58179,8 +57314,8 @@ var (
 				goto l441
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l441
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58209,8 +57344,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l442
 				}
 				c.ip += 2
@@ -58240,8 +57375,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l443
 				}
 				c.ip += 2
@@ -58271,8 +57406,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l444
 				}
 				c.ip += 2
@@ -58302,8 +57437,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l445
 				}
 				c.ip += 2
@@ -58333,8 +57468,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l446
 				}
 				c.ip += 2
@@ -58364,8 +57499,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l447
 				}
 				c.ip += 2
@@ -58395,8 +57530,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l448
 				}
 				c.ip += 2
@@ -58426,8 +57561,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l449
 				}
 				c.ip += 2
@@ -58457,8 +57592,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l450
 				}
 				c.ip += 2
@@ -58488,8 +57623,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l451
 				}
 				c.ip += 2
@@ -58518,8 +57653,8 @@ var (
 				goto l452
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l452
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58547,8 +57682,8 @@ var (
 				goto l453
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l453
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58576,8 +57711,8 @@ var (
 				goto l454
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l454
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58605,8 +57740,8 @@ var (
 				goto l455
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l455
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58634,8 +57769,8 @@ var (
 				goto l456
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l456
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58663,8 +57798,8 @@ var (
 				goto l457
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l457
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58692,8 +57827,8 @@ var (
 				goto l458
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l458
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58721,8 +57856,8 @@ var (
 				goto l459
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l459
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58750,8 +57885,8 @@ var (
 				goto l460
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l460
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58779,8 +57914,8 @@ var (
 				goto l461
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l461
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58822,8 +57957,8 @@ var (
 				goto l462
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l462
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58865,8 +58000,8 @@ var (
 				goto l463
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l463
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58908,8 +58043,8 @@ var (
 				goto l464
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l464
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58951,8 +58086,8 @@ var (
 				goto l465
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l465
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -58980,8 +58115,8 @@ var (
 				goto l466
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l466
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59009,8 +58144,8 @@ var (
 				goto l467
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l467
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59038,8 +58173,8 @@ var (
 				goto l468
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l468
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59067,8 +58202,8 @@ var (
 				goto l469
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l469
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59096,8 +58231,8 @@ var (
 				goto l470
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l470
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59125,8 +58260,8 @@ var (
 				goto l471
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l471
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59154,8 +58289,8 @@ var (
 				goto l472
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l472
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59183,8 +58318,8 @@ var (
 				goto l473
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l473
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59212,8 +58347,8 @@ var (
 				goto l474
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l474
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59241,8 +58376,8 @@ var (
 				goto l475
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l475
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59270,8 +58405,8 @@ var (
 				goto l476
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l476
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
@@ -59300,8 +58435,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l477
 				}
 				c.ip += 2
@@ -59331,8 +58466,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l478
 				}
 				c.ip += 2
@@ -59362,8 +58497,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l479
 				}
 				c.ip += 2
@@ -59393,8 +58528,8 @@ var (
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l480
 				}
 				c.ip += 2
@@ -59423,8 +58558,8 @@ var (
 				goto l481
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l481
 				}
 				c.ip += 2
@@ -59450,8 +58585,8 @@ var (
 				goto l482
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l482
 				}
 				c.ip += 2
@@ -59477,8 +58612,8 @@ var (
 				goto l483
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l483
 				}
 				c.ip += 2
@@ -59504,8 +58639,8 @@ var (
 				goto l484
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l484
 				}
 				c.ip += 2
@@ -59531,8 +58666,8 @@ var (
 				goto l485
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l485
 				}
 				c.ip += 2
@@ -59558,8 +58693,8 @@ var (
 				goto l486
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l486
 				}
 				c.ip += 2
@@ -59585,8 +58720,8 @@ var (
 				goto l487
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l487
 				}
 				c.ip += 2
@@ -59612,8 +58747,8 @@ var (
 				goto l488
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l488
 				}
 				c.ip += 2
@@ -59639,8 +58774,8 @@ var (
 				goto l489
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l489
 				}
 				c.ip += 2
@@ -59666,8 +58801,8 @@ var (
 				goto l490
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l490
 				}
 				c.ip += 2
@@ -59701,8 +58836,8 @@ var (
 				goto l491
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l491
 				}
 				c.ip += 2
@@ -59736,8 +58871,8 @@ var (
 				goto l492
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l492
 				}
 				c.ip += 2
@@ -59777,8 +58912,8 @@ var (
 				goto l493
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l493
 				}
 				c.ip += 2
@@ -59804,8 +58939,8 @@ var (
 				goto l494
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l494
 				}
 				c.ip += 2
@@ -59831,8 +58966,8 @@ var (
 				goto l495
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l495
 				}
 				c.ip += 2
@@ -59858,8 +58993,8 @@ var (
 				goto l496
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l496
 				}
 				c.ip += 2
@@ -59885,8 +59020,8 @@ var (
 				goto l497
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l497
 				}
 				c.ip += 2
@@ -59912,8 +59047,8 @@ var (
 				goto l498
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l498
 				}
 				c.ip += 2
@@ -59939,8 +59074,8 @@ var (
 				goto l499
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l499
 				}
 				c.ip += 2
@@ -59966,8 +59101,8 @@ var (
 				goto l500
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l500
 				}
 				c.ip += 2
@@ -59993,8 +59128,8 @@ var (
 				goto l501
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF32 {
+				i0, ok0 := c.upval(start+1, types.KindF32)
+				if !ok0 {
 					goto l501
 				}
 				c.ip += 2
@@ -60020,8 +59155,8 @@ var (
 				goto l502
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l502
 				}
 				c.ip += 2
@@ -60047,8 +59182,8 @@ var (
 				goto l503
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l503
 				}
 				c.ip += 2
@@ -60074,8 +59209,8 @@ var (
 				goto l504
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l504
 				}
 				c.ip += 2
@@ -60101,8 +59236,8 @@ var (
 				goto l505
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l505
 				}
 				c.ip += 2
@@ -60136,8 +59271,8 @@ var (
 				goto l506
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l506
 				}
 				c.ip += 2
@@ -60171,8 +59306,8 @@ var (
 				goto l507
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l507
 				}
 				c.ip += 2
@@ -60212,8 +59347,8 @@ var (
 				goto l508
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l508
 				}
 				c.ip += 2
@@ -60239,8 +59374,8 @@ var (
 				goto l509
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l509
 				}
 				c.ip += 2
@@ -60266,8 +59401,8 @@ var (
 				goto l510
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l510
 				}
 				c.ip += 2
@@ -60293,8 +59428,8 @@ var (
 				goto l511
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l511
 				}
 				c.ip += 2
@@ -60320,8 +59455,8 @@ var (
 				goto l512
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l512
 				}
 				c.ip += 2
@@ -60347,8 +59482,8 @@ var (
 				goto l513
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l513
 				}
 				c.ip += 2
@@ -60374,8 +59509,8 @@ var (
 				goto l514
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l514
 				}
 				c.ip += 2
@@ -60401,8 +59536,8 @@ var (
 				goto l515
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l515
 				}
 				c.ip += 2
@@ -60428,8 +59563,8 @@ var (
 				goto l516
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindF64 {
+				i0, ok0 := c.upval(start+1, types.KindF64)
+				if !ok0 {
 					goto l516
 				}
 				c.ip += 2
@@ -60455,8 +59590,8 @@ var (
 				goto l517
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindRef {
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
 					goto l517
 				}
 				c.ip += 2
@@ -60475,8 +59610,8 @@ var (
 				goto l518
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindRef {
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
 					goto l518
 				}
 				c.ip += 2
@@ -60498,8 +59633,8 @@ var (
 				goto l519
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l519
 				}
 				c.ip += 2
@@ -60525,8 +59660,8 @@ var (
 				goto l520
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l520
 				}
 				c.ip += 2
@@ -60552,8 +59687,8 @@ var (
 				goto l521
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l521
 				}
 				c.ip += 2
@@ -60579,8 +59714,8 @@ var (
 				goto l522
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l522
 				}
 				c.ip += 2
@@ -60614,8 +59749,8 @@ var (
 				goto l523
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l523
 				}
 				c.ip += 2
@@ -60649,8 +59784,8 @@ var (
 				goto l524
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l524
 				}
 				c.ip += 2
@@ -60684,8 +59819,8 @@ var (
 				goto l525
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l525
 				}
 				c.ip += 2
@@ -60719,8 +59854,8 @@ var (
 				goto l526
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l526
 				}
 				c.ip += 2
@@ -60746,8 +59881,8 @@ var (
 				goto l527
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l527
 				}
 				c.ip += 2
@@ -60773,8 +59908,8 @@ var (
 				goto l528
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l528
 				}
 				c.ip += 2
@@ -60800,8 +59935,8 @@ var (
 				goto l529
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l529
 				}
 				c.ip += 2
@@ -60826,8 +59961,8 @@ var (
 				goto l530
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l530
 				}
 				c.ip += 2
@@ -60852,8 +59987,8 @@ var (
 				goto l531
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l531
 				}
 				c.ip += 2
@@ -60878,8 +60013,8 @@ var (
 				goto l532
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l532
 				}
 				c.ip += 2
@@ -60905,8 +60040,8 @@ var (
 				goto l533
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l533
 				}
 				c.ip += 2
@@ -60932,8 +60067,8 @@ var (
 				goto l534
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l534
 				}
 				c.ip += 2
@@ -60959,8 +60094,8 @@ var (
 				goto l535
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l535
 				}
 				c.ip += 2
@@ -60986,8 +60121,8 @@ var (
 				goto l536
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l536
 				}
 				c.ip += 2
@@ -61013,8 +60148,8 @@ var (
 				goto l537
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l537
 				}
 				c.ip += 2
@@ -61040,8 +60175,8 @@ var (
 				goto l538
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l538
 				}
 				c.ip += 2
@@ -61067,8 +60202,8 @@ var (
 				goto l539
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l539
 				}
 				c.ip += 2
@@ -61094,8 +60229,8 @@ var (
 				goto l540
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l540
 				}
 				c.ip += 2
@@ -61121,8 +60256,8 @@ var (
 				goto l541
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l541
 				}
 				c.ip += 2
@@ -61148,8 +60283,8 @@ var (
 				goto l542
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l542
 				}
 				c.ip += 2
@@ -61175,8 +60310,8 @@ var (
 				goto l543
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				i0, ok0 := c.upval(start+1, types.KindI32)
+				if !ok0 {
 					goto l543
 				}
 				c.ip += 2
@@ -61202,8 +60337,8 @@ var (
 				goto l544
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l544
 				}
 				c.ip += 2
@@ -61229,8 +60364,8 @@ var (
 				goto l545
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l545
 				}
 				c.ip += 2
@@ -61256,8 +60391,8 @@ var (
 				goto l546
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l546
 				}
 				c.ip += 2
@@ -61283,8 +60418,8 @@ var (
 				goto l547
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l547
 				}
 				c.ip += 2
@@ -61319,8 +60454,8 @@ var (
 				goto l548
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l548
 				}
 				c.ip += 2
@@ -61355,8 +60490,8 @@ var (
 				goto l549
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l549
 				}
 				c.ip += 2
@@ -61391,8 +60526,8 @@ var (
 				goto l550
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l550
 				}
 				c.ip += 2
@@ -61427,8 +60562,8 @@ var (
 				goto l551
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l551
 				}
 				c.ip += 2
@@ -61454,8 +60589,8 @@ var (
 				goto l552
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l552
 				}
 				c.ip += 2
@@ -61481,8 +60616,8 @@ var (
 				goto l553
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l553
 				}
 				c.ip += 2
@@ -61508,8 +60643,8 @@ var (
 				goto l554
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l554
 				}
 				c.ip += 2
@@ -61535,8 +60670,8 @@ var (
 				goto l555
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l555
 				}
 				c.ip += 2
@@ -61562,8 +60697,8 @@ var (
 				goto l556
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l556
 				}
 				c.ip += 2
@@ -61589,8 +60724,8 @@ var (
 				goto l557
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l557
 				}
 				c.ip += 2
@@ -61616,8 +60751,8 @@ var (
 				goto l558
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l558
 				}
 				c.ip += 2
@@ -61643,8 +60778,8 @@ var (
 				goto l559
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l559
 				}
 				c.ip += 2
@@ -61670,8 +60805,8 @@ var (
 				goto l560
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l560
 				}
 				c.ip += 2
@@ -61697,8 +60832,8 @@ var (
 				goto l561
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l561
 				}
 				c.ip += 2
@@ -61724,8 +60859,8 @@ var (
 				goto l562
 			}
 			{
-				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI64 {
+				i0, ok0 := c.upval(start+1, types.KindI64)
+				if !ok0 {
 					goto l562
 				}
 				c.ip += 2
