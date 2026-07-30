@@ -21,7 +21,7 @@ This directory uses a single-owner model. Each topic owns one area of behavior; 
 | Benchmark results and methodology | `benchmarks.md` |
 | Debugger API | `debugging.md` |
 | Current priorities | `roadmap.md` |
-| Normative Go coding standard | `coding-patterns.md` (`MVM-RFC-0001`) |
+| Normative Go coding specification | `coding-patterns.md` |
 | Applied symbol naming decisions | `symbol-naming-audit.md` |
 | Adding an opcode | `guides/add-opcode.md` |
 | Adding a JIT backend | `guides/add-architecture.md` |

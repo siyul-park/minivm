@@ -10,7 +10,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 
 | Concern | Source |
 |---|---|
-| test shape and naming | `docs/coding-patterns.md` (`MVM-RFC-0001`) §12 |
+| test shape and naming | `docs/coding-patterns.md` §12 |
 | public API behavior | production owner test matching the defining file |
 | opcode metadata and mnemonic | `instr/type.go` and `TestValid` |
 | verifier policy | `program/verify.go` and `TestVerify/defines_a_policy_for_every_opcode` |

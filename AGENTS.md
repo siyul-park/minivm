@@ -11,8 +11,8 @@ Keep this file terse and actionable. Put detailed coding rules in `docs/coding-p
 1. Follow the user's latest explicit request first.
 2. Follow the closest applicable repository instruction file.
 3. Use this file as the root repository workflow contract.
-4. Apply `docs/coding-patterns.md` (`MVM-RFC-0001`) as the normative coding standard.
-5. Match nearby code only when it is more specific and RFC-compliant.
+4. Apply `docs/coding-patterns.md` as the normative coding specification.
+5. Match nearby code only when it is more specific and specification-compliant.
 
 If instructions conflict, choose the more specific instruction and record the conflict in the final summary.
 
@@ -42,7 +42,7 @@ go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./int
 1. Run `git status --short`; never overwrite or commit unrelated user changes.
 2. Prefer structural tools for symbol ownership and call-flow exploration; use grep/read for literal text and final verification.
 3. Read task-relevant docs from the Task Router before changing code or tests.
-4. Apply `MVM-RFC-0001` §2 and §16 to every code/test change, plus sections selected by §1.3.
+4. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus sections selected by §1.3.
 5. Review top-down from package contract to mechanics and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
 6. Make the smallest correct change. Do not add speculative structure or preserve obsolete compatibility without an explicit contract.
 7. Validate the narrowest relevant behavior first, then race, static, generated, architecture, and benchmark checks warranted by the change.
@@ -52,22 +52,22 @@ go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./int
 
 Do not call work complete until every item is true:
 
-1. Every changed file was re-read against `MVM-RFC-0001` §2 and the task-specific sections.
+1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
 2. Top-down ownership and bottom-up symbol reviews are complete at the requested scope.
 3. Every affected symbol has a current reason to exist; removable symbols were removed, inlined, merged, narrowed, privatized, or renamed by role.
 4. The chosen algorithm and control flow are the simplest correct options found without a measured performance regression.
 5. Another simplification pass found no safe improvement.
-6. Declarations form a caller-before-callee staircase and follow RFC §9.
-7. Tests follow RFC §12 and assert only public observable behavior.
-8. Performance claims include the reproducible evidence required by RFC §14.
-9. Commits and documentation follow RFC §15, and unrelated user changes are absent.
+6. Declarations form a caller-before-callee staircase and follow specification §9.
+7. Tests follow specification §12 and assert only public observable behavior.
+8. Performance claims include the reproducible evidence required by specification §14.
+9. Commits and documentation follow specification §15, and unrelated user changes are absent.
 10. Any intentionally skipped simplification or validation is recorded with its reason.
 
 ## Coding Standard Map
 
 `docs/coding-patterns.md` is normative. Use this map only for routing.
 
-| Need | Read in `MVM-RFC-0001` |
+| Need | Read in `docs/coding-patterns.md` |
 |---|---|
 | Every code/test change | §2, §16 |
 | Functions, helpers, naming | §3-§4 |
@@ -182,16 +182,16 @@ Violations cause silent corruption or invalid execution.
 
 ## Tests
 
-Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `MVM-RFC-0001` §12.
+Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §12.
 
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
 - Put sub-cases under `t.Run`; do not split them into parallel top-level tests.
-- Keep setup, execution, and assertions visible unless RFC §12 permits a real reusable abstraction.
+- Keep setup, execution, and assertions visible unless specification §12 permits a real reusable abstraction.
 - Use `require`, not `assert`.
 
 ## Documentation Maintenance
 
-Update docs when behavior, invariants, commands, architecture, pitfalls, workflow, or conventions change. Use the owner matrix in `MVM-RFC-0001` §15:
+Update docs when behavior, invariants, commands, architecture, pitfalls, workflow, or conventions change. Use the owner matrix in `docs/coding-patterns.md` §15:
 
 - workflow / convention rules -> update both `AGENTS.md` and `.claude/CLAUDE.md`
 - invariants / pitfalls -> update `docs/architecture.md`

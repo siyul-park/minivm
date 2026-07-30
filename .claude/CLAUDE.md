@@ -20,15 +20,15 @@ Use this file only for Claude-specific execution reminders.
 
 Before reporting done, re-read every changed code and test file and verify:
 
-- `MVM-RFC-0001` §2 and §16 were applied.
+- `docs/coding-patterns.md` §2 and §16 were applied.
 - Top-down package/API/flow review and bottom-up review of every affected symbol are complete.
 - Every symbol has a current owner and reason; duplicate, wrapper, dead, mergeable, or private candidates were resolved.
 - Functions keep one abstraction level, single-use helpers remain inline unless they isolate real mechanics, and receiver-owned behavior is a method.
-- Declarations form a caller-before-callee staircase; fields and groups follow RFC §9.
+- Declarations form a caller-before-callee staircase; fields and groups follow specification §9.
 - Public APIs remain minimal and compatible unless the user explicitly authorized a change.
-- Tests use public observable behavior, isolated arrange per subtest, production-matched files, and `require` (RFC §12).
-- Performance work has a baseline, profile-guided owner, correctness checks, and reproducible before/after evidence (RFC §14).
-- Documentation, workflow, and conventions were updated in their RFC §15 owner documents.
+- Tests use public observable behavior, isolated arrange per subtest, production-matched files, and `require` (specification §12).
+- Performance work has a baseline, profile-guided owner, correctness checks, and reproducible before/after evidence (specification §14).
+- Documentation, workflow, and conventions were updated in their specification §15 owner documents.
 
 Record any intentionally skipped simplification, validation, or benchmark target and its reason in the final summary.
 

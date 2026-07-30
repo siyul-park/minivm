@@ -1,34 +1,22 @@
-# MVM-RFC-0001: Go Coding Standard
+# Go Coding Patterns
 
-| Field | Value |
-|---|---|
-| Status | Accepted |
-| Category | Standards Track |
-| Applies to | All Go production and test code in minivm |
-| Effective | 2026-07-30 |
-| Supersedes | The previous `docs/coding-patterns.md` guide |
+Normative coding specification for all Go production and test code in minivm.
+It defines function shape, naming, type design, package ownership, public APIs,
+file layout, errors, concurrency, tests, generated code, performance work, Git,
+and documentation.
 
-## Abstract
+Non-compliance in a changed file is a blocking defect, not a style preference.
 
-This RFC defines the normative Go coding standard for minivm. It governs
-function shape, naming, type design, package ownership, public APIs, file
-layout, errors, concurrency, tests, generated code, performance work, Git, and
-documentation.
+## Normative Language
 
-A violation in a changed file is a blocking defect, not a style preference.
-
-## Status of This Memo
-
-This document is an accepted repository standard. Production code, tests,
-generators, reviews, and agent changes MUST comply. Amendments MUST update this
-RFC and the routing rules in `AGENTS.md` and `.claude/CLAUDE.md` in the same
-change.
-
-The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**,
-**RECOMMENDED**, **MAY**, and **OPTIONAL** are to be interpreted as described by
+This specification uses **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**,
+**SHOULD NOT**, **RECOMMENDED**, **MAY**, and **OPTIONAL** as described by
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) when, and only when, they
 appear in uppercase.
+
+Changes to this specification MUST update the routing rules in `AGENTS.md` and
+`.claude/CLAUDE.md` in the same change.
 
 ## 1. Scope and Precedence
 
@@ -37,12 +25,12 @@ appear in uppercase.
 Apply the first rule that resolves a question:
 
 1. Nearby code that already applies a more specific pattern consistently.
-2. This RFC.
+2. This specification.
 3. General Go convention.
 
-Nearby code does not override this RFC merely because a violation is repeated.
-A deliberate exception MUST be documented in the change summary with its
-reason and removal condition.
+Nearby code does not override this specification merely because a violation is
+repeated. A deliberate exception MUST be documented in the change summary with
+its reason and removal condition.
 
 ### 1.2 Requirement Levels
 
@@ -688,7 +676,7 @@ summarize and link rather than duplicate it.
 
 | Change | Update |
 |---|---|
-| coding rules, names, structure | this RFC |
+| coding rules, names, structure | this specification |
 | architecture, ownership, invariants | `docs/architecture.md` |
 | opcode semantics and JIT status | `docs/instruction-set.md` |
 | JIT contracts and assembler APIs | `docs/jit-internals.md` |
@@ -723,10 +711,10 @@ Before completing a change, verify:
 
 ## Maintenance Notes
 
-Changes to this RFC SHOULD remove ambiguity rather than add process. New rules
-MUST prevent a demonstrated class of defect or inconsistency. Examples MUST use
-current APIs. Historic decisions belong in focused audit or architecture docs,
-not in this standard.
+Changes to this specification SHOULD remove ambiguity rather than add process.
+New rules MUST prevent a demonstrated class of defect or inconsistency. Examples
+MUST use current APIs. Historic decisions belong in focused audit or
+architecture docs, not in this standard.
 
 ## Related Documents
 
