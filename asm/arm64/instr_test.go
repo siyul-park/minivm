@@ -163,12 +163,19 @@ func TestInstructionFactories(t *testing.T) {
 				if !ok {
 					return true
 				}
-				name, ok := call.Fun.(*ast.Ident)
-				if !ok {
+				// Tests live both in this package (Name) and beside it
+				// (arm64.Name), so accept either call shape.
+				var name string
+				switch fn := call.Fun.(type) {
+				case *ast.Ident:
+					name = fn.Name
+				case *ast.SelectorExpr:
+					name = fn.Sel.Name
+				default:
 					return true
 				}
-				if _, ok := factories[name.Name]; ok {
-					covered[name.Name] = struct{}{}
+				if _, ok := factories[name]; ok {
+					covered[name] = struct{}{}
 				}
 				return true
 			})

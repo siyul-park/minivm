@@ -7,345 +7,376 @@ import (
 
 // rewriter transforms an instruction list whose operands reference virtual
 // registers into one whose operands reference physical registers. It owns
-// the linear-scan policy: bind each vreg as it is used or defined, release
-// vregs at their last use, and — when the physical bank is exhausted —
-// spill the value whose next use is farthest away to a stack slot,
-// reloading it on demand.
+// both the physical-register pool and the linear-scan policy: bind each
+// vreg as it is used or defined, release it at its last use, and — when the
+// bank is exhausted — spill the value whose next use is farthest away to a
+// stack slot, reloading it on demand.
+//
+// Virtual registers are dense, so every per-vreg fact lives in one indexed
+// table rather than a map, and owners is its inverse: a bank slot maps to
+// the vreg holding it. Slots are width-insensitive, so X0 and W0 name the
+// same slot.
 //
 // run is a single forward pass. Spilling inserts reload/store instructions
-// and a stack frame, so run also remaps the caller's label→index table to
-// account for the inserted instructions.
+// and a stack frame, so run also rebases the caller's label→index table
+// onto the rewritten stream.
 type rewriter struct {
-	pool  *allocator
 	frame Frame
-	pins  map[int32]PReg
-	last  map[int32]int
 
-	widths   map[int32]RegWidth
-	assigned map[int32]PReg
-	spilled  map[int32]bool
-	slotOf   map[int32]int
-	free     []int
-	slots    int
+	regs   []vreg
+	owners [2][bankSize]int32
+
+	avail       [2]RegMask
+	allocatable [2]RegMask
+
+	slots int
+	freed []int
 
 	out []Instruction
 }
 
+// vreg is the rewriter's state for one virtual register.
+type vreg struct {
+	pin PReg
+	reg PReg
+
+	last  int
+	guard int
+	slot  int
+
+	width RegWidth
+
+	pinned  bool
+	mapped  bool
+	bound   bool
+	spilled bool
+}
+
 // MaxSpillSlots caps how many spill slots the allocator may use for one
-// Code. It sizes the spill area the arm64 invoke trampoline reserves on its
+// build. It sizes the spill area the arm64 invoke trampoline reserves on its
 // native stack frame (see docs/jit-internals.md and asm/arm64/abi_arm64.s);
 // changing it without updating the trampoline's reserve and interp's
 // nativeFrameLimit breaks that arithmetic invariant silently.
 const MaxSpillSlots = 512
 
-func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg) *rewriter {
+// bankSize is how many physical register slots one bank can hold, fixed by
+// RegMask's width.
+const bankSize = 64
+
+var ErrNoRegistersAvailable = errors.New("no registers available")
+
+// newRewriter prepares the register table for insts. count is how many
+// virtual registers the assembler handed out; every referenced vreg id must
+// fall below it.
+func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int) (*rewriter, error) {
 	info := arch.Registers()
-	pool := newAllocator(info)
-	for i := uint8(0); i < 64; i++ {
-		if info.Scratch.Contains(i) {
-			pool.exclude(NewPReg(i, RegTypeInt, Width64))
+	r := &rewriter{
+		frame: arch.Frame(),
+		regs:  make([]vreg, count),
+		avail: [2]RegMask{
+			RegTypeInt:   info.Allocatable(RegTypeInt),
+			RegTypeFloat: info.Allocatable(RegTypeFloat),
+		},
+		allocatable: [2]RegMask{
+			RegTypeInt:   info.Allocatable(RegTypeInt) &^ info.Scratch,
+			RegTypeFloat: info.Allocatable(RegTypeFloat),
+		},
+	}
+	for i := range r.regs {
+		r.regs[i] = vreg{last: -1, guard: -1, slot: -1}
+	}
+	for i := range r.owners {
+		for slot := range r.owners[i] {
+			r.owners[i][slot] = -1
 		}
 	}
-	r := &rewriter{
-		pool:     pool,
-		frame:    arch.Frame(),
-		pins:     pins,
-		widths:   make(map[int32]RegWidth),
-		assigned: make(map[int32]PReg),
-		spilled:  make(map[int32]bool),
-		slotOf:   make(map[int32]int),
+	if err := r.scan(insts); err != nil {
+		return nil, err
 	}
-	r.last = r.scan(insts)
-	for id, pr := range pins {
-		r.widths[id] = pr.Width()
+	for id, preg := range pins {
+		if err := r.check(id); err != nil {
+			return nil, err
+		}
+		r.regs[id].pin = preg
+		r.regs[id].pinned = true
+		r.regs[id].width = preg.Width()
 	}
-	return r
+	return r, nil
 }
 
-// run produces the rewritten instruction list together with the remapped
-// label table. It walks insts once, binding and spilling as it goes and
-// substituting every operand's vreg with its current physical register,
-// then injects the spill frame and returns labels rebased onto the
-// rewritten stream.
-func (r *rewriter) run(insts []Instruction, labels map[Label]int, entries []Label) ([]Instruction, map[Label]int, error) {
+// scan records, for every referenced vreg, the highest instruction index
+// that references it and the first width it declares. A pin overrides the
+// declared width afterwards.
+func (r *rewriter) scan(insts []Instruction) error {
 	for i, inst := range insts {
-		lbl, ok := inst.Src2.(LabelOperand)
-		if !ok {
-			continue
+		uses, n := inst.uses()
+		for _, v := range uses[:n] {
+			if err := r.note(v, i); err != nil {
+				return err
+			}
 		}
-		if pos, intra := labels[lbl.ID]; intra && pos <= i {
-			r.frame = nil
-			break
+		if dst, ok := inst.def(); ok {
+			if err := r.note(dst, i); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// note records that the instruction at at references v, keeping the highest
+// index and the width v declares first.
+func (r *rewriter) note(v VReg, at int) error {
+	if err := r.check(v.ID()); err != nil {
+		return err
+	}
+	s := &r.regs[v.ID()]
+	s.last = at
+	if s.width == WidthUndefined {
+		s.width = v.Width()
+	}
+	return nil
+}
+
+// check rejects a vreg the assembler never handed out, so every later
+// lookup can index the register table directly.
+func (r *rewriter) check(id int32) error {
+	if id < 0 || int(id) >= len(r.regs) {
+		return fmt.Errorf("%w: virtual register %d", ErrInvalidOperand, id)
+	}
+	return nil
+}
+
+// run produces the rewritten instruction list together with the rebased
+// label table.
+func (r *rewriter) run(insts []Instruction, labels map[Label]int) ([]Instruction, map[Label]int, error) {
+	if backEdge(insts, labels) {
+		r.frame = nil
+	}
+
+	moved := make([]int, len(insts)+1)
+	for i, inst := range insts {
+		moved[i] = len(r.out)
+		if err := r.step(i, inst); err != nil {
+			return nil, nil, err
+		}
+	}
+	moved[len(insts)] = len(r.out)
+
+	final, rebased := r.inject(labels, moved)
+	return final, rebased, nil
+}
+
+// step binds every register the instruction at i touches, appends its
+// physical-register form, then releases whatever dies at i.
+func (r *rewriter) step(i int, inst Instruction) error {
+	uses, n := inst.uses()
+	for _, v := range uses[:n] {
+		if err := r.use(v, i); err != nil {
+			return err
+		}
+	}
+	dst, defines := inst.def()
+	if defines {
+		if err := r.define(dst, i); err != nil {
+			return err
 		}
 	}
 
-	newIdx := make([]int, len(insts)+1)
-	for i, inst := range insts {
-		newIdx[i] = len(r.out)
-		protected := make(map[int32]bool)
-		for _, v := range inst.Uses() {
-			if err := r.use(v, protected); err != nil {
-				return nil, nil, err
-			}
-		}
-		if dst, ok := inst.Def(); ok {
-			if err := r.define(dst, protected); err != nil {
-				return nil, nil, err
-			}
-		}
-		r.out = append(r.out, r.substitute(inst))
-		for _, v := range inst.Uses() {
-			if r.last[v.ID()] == i {
-				r.release(v)
-			}
-		}
-		// A def that is never read again is dead after this instruction;
-		// without this release its register would stay bound forever, since
-		// the use loop above only frees operands that appear as reads.
-		if dst, ok := inst.Def(); ok && r.last[dst.ID()] == i {
-			r.release(dst)
+	r.out = append(r.out, r.substitute(inst))
+
+	for _, v := range uses[:n] {
+		if r.regs[v.ID()].last == i {
+			r.release(v.ID())
 		}
 	}
-	newIdx[len(insts)] = len(r.out)
-	return r.inject(labels, entries, newIdx)
+	// A def that is never read again is dead after this instruction; the use
+	// loop above only frees operands that appear as reads.
+	if defines && r.regs[dst.ID()].last == i {
+		r.release(dst.ID())
+	}
+	return nil
 }
 
 // use ensures v occupies a physical register before the instruction that
-// reads it. A pinned vreg reserves its slot; a spilled vreg reloads; an
-// unbound vreg allocates. protected records every vreg the current
-// instruction touches so satisfying one operand never evicts another.
-func (r *rewriter) use(v VReg, protected map[int32]bool) error {
-	r.note(v)
-	if _, ok := r.pool.bindings[v.ID()]; ok {
-		protected[v.ID()] = true
-		return nil
-	}
-	if pin, ok := r.pins[v.ID()]; ok {
-		return r.pin(v, pin, protected)
-	}
-	if r.spilled[v.ID()] {
-		pr, err := r.obtain(v, protected)
-		if err != nil {
-			return err
-		}
-		r.out = append(r.out, r.frame.Reload(pr, r.slotOf[v.ID()]))
-		delete(r.spilled, v.ID())
-		protected[v.ID()] = true
-		return nil
-	}
-	if _, err := r.obtain(v, protected); err != nil {
+// reads it, reloading it first when it was spilled.
+func (r *rewriter) use(v VReg, at int) error {
+	s := &r.regs[v.ID()]
+	reload := s.spilled && !s.bound
+
+	preg, err := r.bind(v, at)
+	if err != nil {
 		return err
 	}
-	protected[v.ID()] = true
+	if reload {
+		r.out = append(r.out, r.frame.Reload(preg, s.slot))
+	}
+	s.spilled = false
 	return nil
 }
 
 // define ensures v's destination register exists before the instruction
-// that writes it.
-func (r *rewriter) define(v VReg, protected map[int32]bool) error {
-	r.note(v)
-	if _, ok := r.pool.bindings[v.ID()]; ok {
-		protected[v.ID()] = true
-		return nil
-	}
-	if pin, ok := r.pins[v.ID()]; ok {
-		return r.pin(v, pin, protected)
-	}
-	if _, err := r.obtain(v, protected); err != nil {
+// that writes it. The new definition supersedes any spilled copy.
+func (r *rewriter) define(v VReg, at int) error {
+	if _, err := r.bind(v, at); err != nil {
 		return err
 	}
-	protected[v.ID()] = true
+	r.regs[v.ID()].spilled = false
 	return nil
 }
 
-// pin reserves v's pinned physical register, evicting any other vreg that
-// currently holds the slot.
-func (r *rewriter) pin(v VReg, pin PReg, protected map[int32]bool) error {
-	if id, busy := r.pool.owner(pin); busy && id != v.ID() {
-		r.pool.free(NewVReg(id, pin.Type(), pin.Width()))
+// bind guarantees v holds a physical register and marks it as off-limits to
+// eviction while the instruction at at is being rewritten, so satisfying one
+// operand never displaces another.
+func (r *rewriter) bind(v VReg, at int) (PReg, error) {
+	s := &r.regs[v.ID()]
+	s.guard = at
+	switch {
+	case s.bound:
+		return s.reg, nil
+	case s.pinned:
+		r.reserve(v.ID(), s.pin)
+		return s.pin, nil
+	default:
+		return r.obtain(v, at)
 	}
-	if err := r.pool.reserve(v, pin); err != nil {
-		return fmt.Errorf("%w: vreg %v pin %v: %w", ErrConflictingPin, v, pin, err)
-	}
-	r.assigned[v.ID()] = pin
-	protected[v.ID()] = true
-	return nil
 }
 
-// obtain returns a physical register for v, drawing from the free pool or,
-// when the bank is exhausted and the arch supports a spill frame, evicting
-// the farthest-future integer value to a stack slot first.
-func (r *rewriter) obtain(v VReg, protected map[int32]bool) (PReg, error) {
-	pr, err := r.pool.alloc(v)
-	if err == nil {
-		r.assigned[v.ID()] = pr
-		return pr, nil
+// reserve hands id a specific physical register, evicting whichever vreg
+// currently holds that bank slot.
+func (r *rewriter) reserve(id int32, preg PReg) {
+	if held := r.owners[preg.Type()][preg.ID()]; held >= 0 && held != id {
+		r.free(held)
 	}
-	if !errors.Is(err, ErrNoRegistersAvailable) {
-		return PReg{}, err
+	r.avail[preg.Type()] = r.avail[preg.Type()].Clear(preg.ID())
+	r.own(id, preg)
+}
+
+// obtain draws a physical register for v, spilling the value whose last use
+// lies farthest ahead when the bank is exhausted and the arch supplies a
+// spill frame.
+func (r *rewriter) obtain(v VReg, at int) (PReg, error) {
+	if preg, ok := r.alloc(v); ok {
+		return preg, nil
 	}
 	if r.frame == nil || v.Type() != RegTypeInt {
-		return PReg{}, err
+		return PReg{}, ErrNoRegistersAvailable
 	}
-	victim, ok := r.victim(protected)
+	victim, ok := r.victim(at)
 	if !ok {
-		return PReg{}, err
+		return PReg{}, ErrNoRegistersAvailable
 	}
 	if err := r.spill(victim); err != nil {
 		return PReg{}, err
 	}
-	pr, err = r.pool.alloc(v)
-	if err == nil {
-		r.assigned[v.ID()] = pr
+	preg, ok := r.alloc(v)
+	if !ok {
+		return PReg{}, ErrNoRegistersAvailable
 	}
-	return pr, err
+	return preg, nil
+}
+
+// alloc claims the lowest free physical register from v's bank.
+func (r *rewriter) alloc(v VReg) (PReg, bool) {
+	typ := v.Type()
+	id := (r.avail[typ] & r.allocatable[typ]).First()
+	if id == 0xFF {
+		return PReg{}, false
+	}
+	preg := NewPReg(id, typ, v.Width())
+	r.avail[typ] = r.avail[typ].Clear(id)
+	r.own(v.ID(), preg)
+	return preg, true
 }
 
 // victim selects the bound integer vreg whose last use lies farthest ahead
-// — the value least likely to be needed soon. Pinned, protected, and
-// non-integer bindings are never chosen.
-func (r *rewriter) victim(protected map[int32]bool) (int32, bool) {
+// — the value least likely to be needed soon. Pinned registers, and every
+// register the instruction at at touches, are never chosen.
+func (r *rewriter) victim(at int) (int32, bool) {
 	best := int32(-1)
-	bestLast := -1
-	for id, pr := range r.pool.bindings {
-		if pr.Type() != RegTypeInt {
+	last := -1
+	for _, id := range r.owners[RegTypeInt] {
+		if id < 0 {
 			continue
 		}
-		if _, pinned := r.pins[id]; pinned {
+		s := &r.regs[id]
+		if s.pinned || s.guard == at || s.last <= last {
 			continue
 		}
-		if protected[id] {
-			continue
-		}
-		if l := r.last[id]; l > bestLast {
-			bestLast = l
-			best = id
-		}
+		last = s.last
+		best = id
 	}
-	if best < 0 {
-		return 0, false
-	}
-	return best, true
+	return best, best >= 0
 }
 
-// spill writes the victim's live value to its stack slot and frees the
-// register it held.
+// spill writes id's live value to its stack slot and returns the register it
+// held to the pool.
 func (r *rewriter) spill(id int32) error {
-	pr := r.pool.bindings[id]
-	slot, ok := r.slotFor(id)
-	if !ok {
-		return ErrNoRegistersAvailable
+	s := &r.regs[id]
+	if s.slot < 0 {
+		slot, ok := r.reserveSlot()
+		if !ok {
+			return ErrNoRegistersAvailable
+		}
+		s.slot = slot
 	}
-	r.out = append(r.out, r.frame.Store(slot, pr))
-	r.pool.free(NewVReg(id, pr.Type(), pr.Width()))
-	r.spilled[id] = true
+	r.out = append(r.out, r.frame.Store(s.slot, s.reg))
+	r.free(id)
+	s.spilled = true
 	return nil
 }
 
-// slotFor returns id's stable spill slot, assigning a fresh one on first
-// spill.
-func (r *rewriter) slotFor(id int32) (int, bool) {
-	if s, ok := r.slotOf[id]; ok {
-		return s, true
+// reserveSlot hands out a spill slot, reusing one a dead vreg released
+// before widening the frame.
+func (r *rewriter) reserveSlot() (int, bool) {
+	if n := len(r.freed); n > 0 {
+		slot := r.freed[n-1]
+		r.freed = r.freed[:n-1]
+		return slot, true
 	}
-	var s int
-	if n := len(r.free); n > 0 {
-		s = r.free[n-1]
-		r.free = r.free[:n-1]
-	} else {
-		if r.slots >= MaxSpillSlots {
-			return 0, false
-		}
-		s = r.slots
-		r.slots++
+	if r.slots >= MaxSpillSlots {
+		return 0, false
 	}
-	r.slotOf[id] = s
-	return s, true
+	r.slots++
+	return r.slots - 1, true
 }
 
-// release returns v's register to the pool at its last use and clears any
-// spill bookkeeping.
-func (r *rewriter) release(v VReg) {
-	if _, ok := r.pool.bindings[v.ID()]; ok {
-		r.pool.free(v)
-	}
-	delete(r.spilled, v.ID())
-	if s, ok := r.slotOf[v.ID()]; ok {
-		r.free = append(r.free, s)
-		delete(r.slotOf, v.ID())
+// release returns id's register and spill slot at its last use.
+func (r *rewriter) release(id int32) {
+	r.free(id)
+	s := &r.regs[id]
+	s.spilled = false
+	if s.slot >= 0 {
+		r.freed = append(r.freed, s.slot)
+		s.slot = -1
 	}
 }
 
-// note records v's declared width the first time it is seen so operands
-// carrying WidthUndefined can resolve to the right physical-register view.
-func (r *rewriter) note(v VReg) {
-	if w := v.Width(); w != WidthUndefined {
-		if _, ok := r.widths[v.ID()]; !ok {
-			r.widths[v.ID()] = w
-		}
+// free returns id's bank slot to the available pool, leaving the recorded
+// assignment intact for resolve.
+func (r *rewriter) free(id int32) {
+	s := &r.regs[id]
+	if !s.bound {
+		return
 	}
+	typ := s.reg.Type()
+	r.owners[typ][s.reg.ID()] = -1
+	r.avail[typ] = r.avail[typ].Set(s.reg.ID())
+	s.bound = false
 }
 
-// inject finalizes the rewritten stream. With no spills the body passes
-// through and labels rebase onto the (1:1) instruction indices. Otherwise a
-// frame prologue is prepended, a frame epilogue precedes every return, and
-// labels are rebased across both the per-instruction shifts and the
-// inserted frame instructions. Resume is injected only after a call whose
-// target label is bound in this Code: an external call (resolved later by
-// Link) never runs this Code's epilogue, so re-reserving the spill area
-// after it would double-adjust SP.
-func (r *rewriter) inject(labels map[Label]int, entries []Label, newIdx []int) ([]Instruction, map[Label]int, error) {
-	if r.slots == 0 || r.frame == nil {
-		out := make(map[Label]int, len(labels))
-		for id, idx := range labels {
-			out[id] = newIdx[idx]
-		}
-		return r.out, out, nil
-	}
-
-	enter := r.frame.Enter(r.slots)
-	leave := r.frame.Leave(r.slots)
-	entry := make(map[Label]bool, len(entries))
-	for _, id := range entries {
-		if labels[id] != 0 {
-			return nil, nil, fmt.Errorf("%w: entry=%d offset=%d", ErrEntryRequiresFrame, id, labels[id])
-		}
-		entry[id] = true
-	}
-	final := make([]Instruction, 0, len(enter)+len(r.out)+len(leave))
-	final = append(final, enter...)
-
-	bodyToFinal := make([]int, len(r.out)+1)
-	for bi, inst := range r.out {
-		bodyToFinal[bi] = len(final)
-		if r.frame.Returns(inst.Op) {
-			final = append(final, leave...)
-		}
-		final = append(final, inst)
-		if lbl, isLabel := inst.Src2.(LabelOperand); isLabel && r.frame.Calls(inst.Op) {
-			if _, intra := labels[lbl.ID]; intra {
-				final = append(final, r.frame.Resume(r.slots)...)
-			}
-		}
-	}
-	bodyToFinal[len(r.out)] = len(final)
-
-	// Internal branches skip the prologue so a back-edge cannot reserve the
-	// frame again. An external entry bound at instruction zero is different:
-	// its callable must start at byte zero and execute Enter before the body.
-	out := make(map[Label]int, len(labels))
-	for id, idx := range labels {
-		if entry[id] {
-			out[id] = 0
-			continue
-		}
-		out[id] = bodyToFinal[newIdx[idx]]
-	}
-	return final, out, nil
+// own records that id holds preg's bank slot.
+func (r *rewriter) own(id int32, preg PReg) {
+	r.free(id)
+	s := &r.regs[id]
+	s.reg = preg
+	s.mapped = true
+	s.bound = true
+	r.owners[preg.Type()][preg.ID()] = id
 }
 
-// substitute returns a copy of inst with every VReg / MemOperand base
-// replaced by its currently bound physical register.
+// substitute returns a copy of inst with every VReg — including a
+// MemOperand base — replaced by its bound physical register.
 func (r *rewriter) substitute(inst Instruction) Instruction {
 	return Instruction{
 		Op:   inst.Op,
@@ -359,57 +390,102 @@ func (r *rewriter) substitute(inst Instruction) Instruction {
 func (r *rewriter) rewriteOp(op Operand) Operand {
 	switch v := op.(type) {
 	case VRegOperand:
-		if pr, ok := r.resolve(v.Reg); ok {
-			return P(pr)
+		if preg, ok := r.resolve(v.Reg); ok {
+			return P(preg)
 		}
 	case MemOperand:
-		base, isVReg := v.Base.(VRegOperand)
+		vbase, isVReg := v.Base.(VRegOperand)
 		if !isVReg {
 			break
 		}
-		if pr, ok := r.resolve(base.Reg); ok {
-			return Mem(P(pr), v.Offset)
+		if preg, ok := r.resolve(vbase.Reg); ok {
+			return Mem(P(preg), v.Offset)
 		}
 	}
 	return op
 }
 
-// resolve looks up v's physical register and produces a PReg with v's
-// declared width, falling back to the collected widths map when v itself
-// carries WidthUndefined.
+// resolve names the physical register standing in for v, viewed at v's
+// declared width or, when v carries none, at the width first recorded for
+// it.
 //
-// It prefers the live binding but falls back to the last-recorded
-// assignment: a single instruction may write a pinned register that one of
-// its own sources also occupies (a self-move such as MOV SP, SP), and
-// binding the destination evicts that source before substitution reads it.
-// The recorded assignment still names the correct physical register for
-// the instruction being emitted.
+// It reads the most recent assignment rather than only the live binding: one
+// instruction may write a pinned register that one of its own sources also
+// occupies (a self-move such as MOV SP, SP), and binding the destination
+// evicts that source before substitution reads it. The recorded assignment
+// still names the correct physical register for the instruction being
+// emitted.
 func (r *rewriter) resolve(v VReg) (PReg, bool) {
-	pr, ok := r.pool.bindings[v.ID()]
-	if !ok {
-		pr, ok = r.assigned[v.ID()]
-	}
-	if !ok {
+	s := r.regs[v.ID()]
+	if !s.mapped {
 		return PReg{}, false
 	}
-	w := v.Width()
-	if w == WidthUndefined {
-		w = r.widths[v.ID()]
+	width := v.Width()
+	if width == WidthUndefined {
+		width = s.width
 	}
-	return NewPReg(pr.ID(), pr.Type(), w), true
+	return NewPReg(s.reg.ID(), s.reg.Type(), width), true
 }
 
-// scan returns the highest instruction index at which each vreg is
-// referenced (use or def).
-func (*rewriter) scan(insts []Instruction) map[int32]int {
-	last := make(map[int32]int)
-	for i, inst := range insts {
-		if dst, ok := inst.Def(); ok {
-			last[dst.ID()] = i
+// inject finalizes the rewritten stream. With no spills the body passes
+// through and labels rebase onto the shifted instruction indices. Otherwise
+// a frame prologue is prepended, a frame epilogue precedes every return, and
+// labels are rebased across both the per-instruction shifts and the inserted
+// frame instructions. Internal branches therefore skip the prologue, so a
+// back-edge cannot reserve the frame twice.
+//
+// Resume follows only a call whose target label is bound here: a call
+// resolved elsewhere never runs this epilogue, so re-reserving the spill
+// area after it would double-adjust SP.
+func (r *rewriter) inject(labels map[Label]int, moved []int) ([]Instruction, map[Label]int) {
+	rebased := make(map[Label]int, len(labels))
+	if r.slots == 0 || r.frame == nil {
+		for id, idx := range labels {
+			rebased[id] = moved[idx]
 		}
-		for _, v := range inst.Uses() {
-			last[v.ID()] = i
+		return r.out, rebased
+	}
+
+	enter := r.frame.Enter(r.slots)
+	leave := r.frame.Leave(r.slots)
+	resume := r.frame.Resume(r.slots)
+
+	final := make([]Instruction, 0, len(enter)+len(r.out)+len(leave))
+	final = append(final, enter...)
+	framed := make([]int, len(r.out)+1)
+	for i, inst := range r.out {
+		framed[i] = len(final)
+		if r.frame.Returns(inst.Op) {
+			final = append(final, leave...)
+		}
+		final = append(final, inst)
+		if lbl, ok := inst.Src2.(LabelOperand); ok && r.frame.Calls(inst.Op) {
+			if _, bound := labels[lbl.ID]; bound {
+				final = append(final, resume...)
+			}
 		}
 	}
-	return last
+	framed[len(r.out)] = len(final)
+
+	for id, idx := range labels {
+		rebased[id] = framed[moved[idx]]
+	}
+	return final, rebased
+}
+
+// backEdge reports whether any branch targets an earlier instruction.
+// Linear-scan lifetimes only describe a forward-only stream: a value live
+// across a loop would be spilled at what merely looks like its last use, so
+// code with a back-edge runs without a spill frame instead.
+func backEdge(insts []Instruction, labels map[Label]int) bool {
+	for i, inst := range insts {
+		lbl, ok := inst.Src2.(LabelOperand)
+		if !ok {
+			continue
+		}
+		if pos, bound := labels[lbl.ID]; bound && pos <= i {
+			return true
+		}
+	}
+	return false
 }

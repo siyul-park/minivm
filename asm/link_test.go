@@ -5,14 +5,15 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/asm/arm64"
-	"github.com/stretchr/testify/require"
 )
 
 func TestLink(t *testing.T) {
 	t.Run("nil buffer", func(t *testing.T) {
-		_, err := asm.Link(nil, arm64.New(), nil, nil)
+		_, err := asm.Link(nil, arm64.New(), nil)
 		require.ErrorIs(t, err, asm.ErrInvalidArgs)
 	})
 
@@ -20,42 +21,44 @@ func TestLink(t *testing.T) {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
 	}
 
-	t.Run("exposes internal entry", func(t *testing.T) {
+	t.Run("keeps earlier entries callable after the buffer grows", func(t *testing.T) {
+		// A buffer sized for one entry must grow on the second install. The
+		// outgoing mapping is retained and resealed, so the first Callable
+		// stays executable and its Addr keeps pointing at live code.
 		arch := arm64.New()
 
-		a := asm.New(arch)
-		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
-		v := a.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, a.Pin(ctx, arm64.X0))
-
-		entry := a.Label()
-		a.Emit(arm64.LDI(v, 3)...)
-		a.Emit(arm64.STR(v, ctx, 0))
-		a.Emit(arm64.RET())
-		a.Entry(entry)
-		a.Emit(arm64.LDR(v, ctx, 0))
-		a.Emit(arm64.ADDI(v, v, 1))
-		a.Emit(arm64.STR(v, ctx, 0))
-		a.Emit(arm64.RET())
-
-		code, err := a.Build()
+		buffer, err := asm.NewBuffer(1)
 		require.NoError(t, err)
+		defer buffer.Free()
 
-		buf, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer buf.Free()
+		callables := make([]asm.Callable, 2)
+		for i := range callables {
+			assembler := asm.New(arch)
+			ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			value := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			require.NoError(t, assembler.Pin(ctx, arm64.X0))
 
-		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
-		require.NoError(t, err)
-		require.Len(t, linked, 1)
-		require.Contains(t, linked[0].Entries, entry)
+			assembler.Emit(arm64.LDI(value, uint64(i+1))...)
+			assembler.Emit(arm64.STR(value, ctx, 0))
+			// Pad past a page so the second install cannot share the first
+			// mapping.
+			for range 1024 {
+				assembler.Emit(arm64.ADDI(value, value, 0))
+			}
+			assembler.Emit(arm64.RET())
 
-		ctxBuf := []uint64{0}
-		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&ctxBuf[0])))
-		require.Equal(t, uint64(3), ctxBuf[0])
+			code, err := assembler.Build()
+			require.NoError(t, err)
 
-		ctxBuf[0] = 41
-		require.NoError(t, linked[0].Entries[entry].Call(unsafe.Pointer(&ctxBuf[0])))
-		require.Equal(t, uint64(42), ctxBuf[0])
+			callables[i], err = asm.Link(buffer, arch, code)
+			require.NoError(t, err)
+			require.NotNil(t, callables[i].Addr())
+		}
+
+		for i, callable := range callables {
+			slot := [1]uint64{}
+			require.NoError(t, callable.Call(unsafe.Pointer(&slot[0])))
+			require.Equal(t, uint64(i+1), slot[0])
+		}
 	})
 }

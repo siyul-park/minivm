@@ -1,17 +1,33 @@
 package prof
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strconv"
+
+	"github.com/siyul-park/minivm/instr"
 )
 
+// jitMetrics holds one counter table per JIT metric family. Every table maps
+// an immutable key describing the row's labels to a stable counter handle, so
+// a registered handle stays valid across merges and resets.
 type jitMetrics struct {
 	captures map[captureKey]*Counter
 	compiles map[compileKey]*Counter
-	emits    map[entryKey]*emitCounts
+	emits    map[entryKey]*Counter
+	bytes    map[entryKey]*Counter
 	entries  map[entryKey]*Counter
 	yields   map[entryKey]*Counter
 	exits    map[exitKey]*Counter
+}
+
+// key constrains the label set of one JIT metric row. A row key is a
+// comparable value type so it can index a counter table directly, and it
+// orders itself against its own type so emitted rows are stable.
+type key[K any] interface {
+	comparable
+	labels() []Label
+	compare(other K) int
 }
 
 type captureKey struct {
@@ -43,334 +59,228 @@ type exitKey struct {
 	opcode int
 }
 
-type emitCounts struct {
-	emits uint64
-	bytes uint64
-}
-
-func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric {
-	captures := active(m.captures)
-	sort.Slice(captures, func(i, j int) bool { return captures[i].less(captures[j]) })
-	for _, key := range captures {
-		out = append(out, Metric{
-			Name: "vm_jit_trace_captures_total",
-			Labels: []Label{
-				{Key: "func", Value: strconv.Itoa(key.fn)},
-				{Key: "ip", Value: strconv.Itoa(key.ip)},
-				{Key: "outcome", Value: key.outcome.label()},
-				{Key: "reason", Value: key.reason.label()},
-			},
-			Value: float64(m.captures[key].value),
-		})
+var (
+	frontendLabels = [...]string{
+		FrontendStatic: "static",
+		FrontendTrace:  "trace",
 	}
-
-	compiles := active(m.compiles)
-	sort.Slice(compiles, func(i, j int) bool { return compiles[i].less(compiles[j]) })
-	for _, key := range compiles {
-		out = append(out, Metric{
-			Name: "vm_jit_compiles_total",
-			Labels: []Label{
-				{Key: "func", Value: strconv.Itoa(key.fn)},
-				{Key: "ip", Value: strconv.Itoa(key.ip)},
-				{Key: "trigger", Value: key.trigger.label()},
-				{Key: "frontend", Value: key.frontend.label()},
-				{Key: "outcome", Value: key.outcome.label()},
-				{Key: "reason", Value: key.reason.label()},
-			},
-			Value: float64(m.compiles[key].value),
-		})
+	triggerLabels = [...]string{
+		TriggerHot:      "hot",
+		TriggerSideExit: "side-exit",
 	}
-
-	emits := make([]entryKey, 0, len(m.emits))
-	for key, counts := range m.emits {
-		if counts.emits > 0 || counts.bytes > 0 {
-			emits = append(emits, key)
-		}
+	entryLabels = [...]string{
+		EntryStart: "start",
+		EntryCall:  "call",
+		EntryLoop:  "loop",
 	}
-	sort.Slice(emits, func(i, j int) bool { return emits[i].less(emits[j]) })
-	for _, key := range emits {
-		labels := key.labels()
-		counters := m.emits[key]
-		if counters.emits > 0 {
-			out = append(out, Metric{Name: "vm_jit_entry_emits_total", Labels: labels, Value: float64(counters.emits)})
-		}
-		if counters.bytes > 0 {
-			out = append(out, Metric{Name: "vm_jit_entry_bytes_total", Labels: labels, Value: float64(counters.bytes)})
-		}
+	captureOutcomeLabels = [...]string{
+		CaptureOutcomePublished: "published",
+		CaptureOutcomePartial:   "partial",
+		CaptureOutcomeRejected:  "rejected",
 	}
-
-	out = appendEntries(out, "vm_jit_native_entries_total", m.entries)
-	out = appendEntries(out, "vm_jit_native_yields_total", m.yields)
-
-	exits := active(m.exits)
-	sort.Slice(exits, func(i, j int) bool { return exits[i].less(exits[j]) })
-	for _, key := range exits {
-		opcode := "none"
-		if key.opcode >= 0 && key.opcode <= 255 {
-			opcode = collector.opcodeLabel(byte(key.opcode))
-		}
-		out = append(out, Metric{
-			Name: "vm_jit_native_exits_total",
-			Labels: []Label{
-				{Key: "func", Value: strconv.Itoa(key.fn)},
-				{Key: "ip", Value: strconv.Itoa(key.ip)},
-				{Key: "kind", Value: key.kind.label()},
-				{Key: "frontend", Value: key.frontend.label()},
-				{Key: "reason", Value: key.reason.label()},
-				{Key: "opcode", Value: opcode},
-			},
-			Value: float64(m.exits[key].value),
-		})
+	captureReasonLabels = [...]string{
+		CaptureReasonAttemptLimit:   "attempt-limit",
+		CaptureReasonInvalidAnchor:  "invalid-anchor",
+		CaptureReasonHostCall:       "host-call",
+		CaptureReasonTailClosure:    "tail-closure",
+		CaptureReasonUnsupportedOp:  "unsupported-op",
+		CaptureReasonNestedTerminal: "nested-terminal",
+		CaptureReasonStepTrap:       "step-trap",
+		CaptureReasonOpLimit:        "op-limit",
 	}
-	return out
+	compileOutcomeLabels = [...]string{
+		CompileOutcomeEmitted:  "emitted",
+		CompileOutcomeEmpty:    "empty",
+		CompileOutcomeRejected: "rejected",
+		CompileOutcomeError:    "error",
+	}
+	compileReasonLabels = [...]string{
+		CompileReasonNoInput:            "no-input",
+		CompileReasonNoPlan:             "no-plan",
+		CompileReasonInvalidPlan:        "invalid-plan",
+		CompileReasonLoweringRejected:   "lowering-rejected",
+		CompileReasonRegisterPressure:   "register-pressure",
+		CompileReasonBranchRange:        "branch-range",
+		CompileReasonBackendUnavailable: "backend-unavailable",
+		CompileReasonError:              "error",
+	}
+	exitLabels = [...]string{
+		ExitGuardKind:   "guard-kind",
+		ExitGuardShape:  "guard-shape",
+		ExitGuardBounds: "guard-bounds",
+		ExitGuardValue:  "guard-value",
+		ExitColdBranch:  "cold-branch",
+		ExitTraceCut:    "trace-cut",
+		ExitTerminalOp:  "terminal-op",
+		ExitLoop:        "loop-exit",
+	}
+)
+
+// appendMetrics appends every non-zero row of every family, each family's
+// rows sorted by their label set so output is stable across runs.
+func (m *jitMetrics) appendMetrics(out []Metric) []Metric {
+	out = appendRows(out, "vm_jit_trace_captures_total", m.captures)
+	out = appendRows(out, "vm_jit_compiles_total", m.compiles)
+	out = appendRows(out, "vm_jit_entry_emits_total", m.emits)
+	out = appendRows(out, "vm_jit_entry_bytes_total", m.bytes)
+	out = appendRows(out, "vm_jit_native_entries_total", m.entries)
+	out = appendRows(out, "vm_jit_native_yields_total", m.yields)
+	return appendRows(out, "vm_jit_native_exits_total", m.exits)
 }
 
 func (m *jitMetrics) merge(other *jitMetrics) {
-	merge(&m.captures, other.captures)
-	merge(&m.compiles, other.compiles)
-	if len(other.emits) > 0 && m.emits == nil {
-		m.emits = make(map[entryKey]*emitCounts)
-	}
-	for key, source := range other.emits {
-		if source.emits == 0 && source.bytes == 0 {
-			continue
-		}
-		destination := m.emits[key]
-		if destination == nil {
-			destination = &emitCounts{}
-			m.emits[key] = destination
-		}
-		destination.emits += source.emits
-		destination.bytes += source.bytes
-	}
-	merge(&m.entries, other.entries)
-	merge(&m.yields, other.yields)
-	merge(&m.exits, other.exits)
+	mergeRows(&m.captures, other.captures)
+	mergeRows(&m.compiles, other.compiles)
+	mergeRows(&m.emits, other.emits)
+	mergeRows(&m.bytes, other.bytes)
+	mergeRows(&m.entries, other.entries)
+	mergeRows(&m.yields, other.yields)
+	mergeRows(&m.exits, other.exits)
 }
 
 func (m *jitMetrics) reset() {
-	reset(m.captures)
-	reset(m.compiles)
-	for _, counters := range m.emits {
-		counters.emits = 0
-		counters.bytes = 0
+	resetRows(m.captures)
+	resetRows(m.compiles)
+	resetRows(m.emits)
+	resetRows(m.bytes)
+	resetRows(m.entries)
+	resetRows(m.yields)
+	resetRows(m.exits)
+}
+
+func (k captureKey) labels() []Label {
+	return []Label{
+		{Key: "func", Value: strconv.Itoa(k.fn)},
+		{Key: "ip", Value: strconv.Itoa(k.ip)},
+		{Key: "outcome", Value: label(captureOutcomeLabels[:], int(k.outcome))},
+		{Key: "reason", Value: label(captureReasonLabels[:], int(k.reason))},
 	}
-	reset(m.entries)
-	reset(m.yields)
-	reset(m.exits)
 }
 
-func (k captureKey) less(other captureKey) bool {
-	return k.fn < other.fn ||
-		k.fn == other.fn && (k.ip < other.ip ||
-			k.ip == other.ip && (k.outcome < other.outcome ||
-				k.outcome == other.outcome && k.reason < other.reason))
+func (k captureKey) compare(o captureKey) int {
+	return cmp.Or(
+		cmp.Compare(k.fn, o.fn),
+		cmp.Compare(k.ip, o.ip),
+		cmp.Compare(k.outcome, o.outcome),
+		cmp.Compare(k.reason, o.reason),
+	)
 }
 
-func (k compileKey) less(other compileKey) bool {
-	return k.fn < other.fn ||
-		k.fn == other.fn && (k.ip < other.ip ||
-			k.ip == other.ip && (k.trigger < other.trigger ||
-				k.trigger == other.trigger && (k.frontend < other.frontend ||
-					k.frontend == other.frontend && (k.outcome < other.outcome ||
-						k.outcome == other.outcome && k.reason < other.reason))))
+func (k compileKey) labels() []Label {
+	return []Label{
+		{Key: "func", Value: strconv.Itoa(k.fn)},
+		{Key: "ip", Value: strconv.Itoa(k.ip)},
+		{Key: "trigger", Value: label(triggerLabels[:], int(k.trigger))},
+		{Key: "frontend", Value: label(frontendLabels[:], int(k.frontend))},
+		{Key: "outcome", Value: label(compileOutcomeLabels[:], int(k.outcome))},
+		{Key: "reason", Value: label(compileReasonLabels[:], int(k.reason))},
+	}
+}
+
+func (k compileKey) compare(o compileKey) int {
+	return cmp.Or(
+		cmp.Compare(k.fn, o.fn),
+		cmp.Compare(k.ip, o.ip),
+		cmp.Compare(k.trigger, o.trigger),
+		cmp.Compare(k.frontend, o.frontend),
+		cmp.Compare(k.outcome, o.outcome),
+		cmp.Compare(k.reason, o.reason),
+	)
 }
 
 func (k entryKey) labels() []Label {
 	return []Label{
 		{Key: "func", Value: strconv.Itoa(k.fn)},
 		{Key: "ip", Value: strconv.Itoa(k.ip)},
-		{Key: "kind", Value: k.kind.label()},
-		{Key: "frontend", Value: k.frontend.label()},
+		{Key: "kind", Value: label(entryLabels[:], int(k.kind))},
+		{Key: "frontend", Value: label(frontendLabels[:], int(k.frontend))},
 	}
 }
 
-func (k entryKey) less(other entryKey) bool {
-	return k.fn < other.fn ||
-		k.fn == other.fn && (k.ip < other.ip ||
-			k.ip == other.ip && (k.kind < other.kind ||
-				k.kind == other.kind && k.frontend < other.frontend))
+func (k entryKey) compare(other entryKey) int {
+	return cmp.Or(
+		cmp.Compare(k.fn, other.fn),
+		cmp.Compare(k.ip, other.ip),
+		cmp.Compare(k.kind, other.kind),
+		cmp.Compare(k.frontend, other.frontend),
+	)
 }
 
-func (k exitKey) less(other exitKey) bool {
-	return k.entryKey.less(other.entryKey) ||
-		k.entryKey == other.entryKey && (k.reason < other.reason ||
-			k.reason == other.reason && k.opcode < other.opcode)
-}
-
-func (v Frontend) label() string {
-	switch v {
-	case FrontendStatic:
-		return "static"
-	case FrontendTrace:
-		return "trace"
-	default:
-		return "none"
+func (k exitKey) labels() []Label {
+	opcode := "none"
+	if k.opcode >= 0 && k.opcode <= 255 {
+		opcode = opcodeLabel(byte(k.opcode))
 	}
+	return append(k.entryKey.labels(),
+		Label{Key: "reason", Value: label(exitLabels[:], int(k.reason))},
+		Label{Key: "opcode", Value: opcode},
+	)
 }
 
-func (v Trigger) label() string {
-	switch v {
-	case TriggerHot:
-		return "hot"
-	case TriggerSideExit:
-		return "side-exit"
-	default:
-		return "none"
+func (k exitKey) compare(o exitKey) int {
+	return cmp.Or(
+		k.entryKey.compare(o.entryKey),
+		cmp.Compare(k.reason, o.reason),
+		cmp.Compare(k.opcode, o.opcode),
+	)
+}
+
+// appendRows appends one metric per non-zero row, in label order.
+func appendRows[K key[K]](out []Metric, name string, rows map[K]*Counter) []Metric {
+	active := make([]K, 0, len(rows))
+	for row, counter := range rows {
+		if counter.value > 0 {
+			active = append(active, row)
+		}
 	}
-}
-
-func (v EntryKind) label() string {
-	switch v {
-	case EntryStart:
-		return "start"
-	case EntryCall:
-		return "call"
-	case EntryLoop:
-		return "loop"
-	default:
-		return "none"
-	}
-}
-
-func (v CaptureOutcome) label() string {
-	switch v {
-	case CaptureOutcomePublished:
-		return "published"
-	case CaptureOutcomePartial:
-		return "partial"
-	case CaptureOutcomeRejected:
-		return "rejected"
-	default:
-		return "none"
-	}
-}
-
-func (v CaptureReason) label() string {
-	switch v {
-	case CaptureReasonAttemptLimit:
-		return "attempt-limit"
-	case CaptureReasonInvalidAnchor:
-		return "invalid-anchor"
-	case CaptureReasonHostCall:
-		return "host-call"
-	case CaptureReasonTailClosure:
-		return "tail-closure"
-	case CaptureReasonUnsupportedOp:
-		return "unsupported-op"
-	case CaptureReasonNestedTerminal:
-		return "nested-terminal"
-	case CaptureReasonStepTrap:
-		return "step-trap"
-	case CaptureReasonOpLimit:
-		return "op-limit"
-	default:
-		return "none"
-	}
-}
-
-func (v CompileOutcome) label() string {
-	switch v {
-	case CompileOutcomeEmitted:
-		return "emitted"
-	case CompileOutcomeEmpty:
-		return "empty"
-	case CompileOutcomeRejected:
-		return "rejected"
-	case CompileOutcomeError:
-		return "error"
-	default:
-		return "none"
-	}
-}
-
-func (v CompileReason) label() string {
-	switch v {
-	case CompileReasonNoInput:
-		return "no-input"
-	case CompileReasonNoPlan:
-		return "no-plan"
-	case CompileReasonInvalidPlan:
-		return "invalid-plan"
-	case CompileReasonLoweringRejected:
-		return "lowering-rejected"
-	case CompileReasonRegisterPressure:
-		return "register-pressure"
-	case CompileReasonBranchRange:
-		return "branch-range"
-	case CompileReasonBackendUnavailable:
-		return "backend-unavailable"
-	case CompileReasonError:
-		return "error"
-	default:
-		return "none"
-	}
-}
-
-func (v ExitReason) label() string {
-	switch v {
-	case ExitGuardKind:
-		return "guard-kind"
-	case ExitGuardShape:
-		return "guard-shape"
-	case ExitGuardBounds:
-		return "guard-bounds"
-	case ExitGuardValue:
-		return "guard-value"
-	case ExitColdBranch:
-		return "cold-branch"
-	case ExitTraceCut:
-		return "trace-cut"
-	case ExitTerminalOp:
-		return "terminal-op"
-	case ExitLoop:
-		return "loop-exit"
-	default:
-		return "none"
-	}
-}
-
-func appendEntries(out []Metric, name string, rows map[entryKey]*Counter) []Metric {
-	keys := active(rows)
-	sort.Slice(keys, func(i, j int) bool { return keys[i].less(keys[j]) })
-	for _, key := range keys {
-		out = append(out, Metric{Name: name, Labels: key.labels(), Value: float64(rows[key].value)})
+	slices.SortFunc(active, func(a, b K) int { return a.compare(b) })
+	for _, row := range active {
+		out = append(out, Metric{Name: name, Labels: row.labels(), Value: float64(rows[row].value)})
 	}
 	return out
 }
 
-func active[K comparable](rows map[K]*Counter) []K {
-	keys := make([]K, 0, len(rows))
-	for key, counter := range rows {
+func mergeRows[K key[K]](rows *map[K]*Counter, source map[K]*Counter) {
+	for row, counter := range source {
 		if counter.value > 0 {
-			keys = append(keys, key)
-		}
-	}
-	return keys
-}
-
-func merge[K comparable](destination *map[K]*Counter, source map[K]*Counter) {
-	for key, row := range source {
-		if row.value > 0 {
-			counter(destination, key).value += row.value
+			register(rows, row).value += counter.value
 		}
 	}
 }
 
-func counter[K comparable](rows *map[K]*Counter, key K) *Counter {
+func resetRows[K key[K]](rows map[K]*Counter) {
+	for _, counter := range rows {
+		counter.value = 0
+	}
+}
+
+// register returns row's counter, creating the table and the counter on first
+// use. The handle is stable, so a caller may keep it and increment it directly.
+func register[K key[K]](rows *map[K]*Counter, row K) *Counter {
 	if *rows == nil {
 		*rows = make(map[K]*Counter)
 	}
-	counter := (*rows)[key]
+	counter := (*rows)[row]
 	if counter == nil {
 		counter = &Counter{}
-		(*rows)[key] = counter
+		(*rows)[row] = counter
 	}
 	return counter
 }
 
-func reset[K comparable](rows map[K]*Counter) {
-	for _, counter := range rows {
-		counter.value = 0
+// label names an enum value, falling back to "none" for the zero value and
+// for anything outside the declared range.
+func label(names []string, value int) string {
+	if value < 0 || value >= len(names) || names[value] == "" {
+		return "none"
 	}
+	return names[value]
+}
+
+// opcodeLabel names an opcode by mnemonic, falling back to its hex code.
+func opcodeLabel(code byte) string {
+	if typ := instr.TypeOf(instr.Opcode(code)); typ.Mnemonic != "" {
+		return typ.Mnemonic
+	}
+	return "0x" + strconv.FormatInt(int64(code), 16)
 }

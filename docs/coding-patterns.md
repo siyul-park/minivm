@@ -394,10 +394,11 @@ The JIT is an optimization over threaded semantics.
 memory lifecycle. Architecture packages own concrete instruction encoding and
 ABI details.
 
-Executable buffers MUST follow `Unseal -> Append -> Seal -> Call`. Relaxation
-MUST terminate, and each replacement MUST already be encodable at its final
-range. Resource cleanup MUST be explicit and idempotent where the public
-contract permits repeated cleanup.
+Executable buffers MUST own their own write/execute transition, so a buffer is
+executable whenever no install is in flight and installs serialize internally.
+Relaxation MUST terminate, and each replacement MUST already be encodable at
+its final range. Resource cleanup MUST be explicit and idempotent where the
+public contract permits repeated cleanup.
 
 ### 7.5 Profiling
 

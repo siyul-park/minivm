@@ -37,8 +37,10 @@ type RegWidth uint8
 type RegMask uint64
 
 // RegInfo enumerates the integer and float register banks of an
-// architecture and the IDs the assembler must avoid (ABI-reserved,
-// frame pointer, link register, etc.).
+// architecture. IntReserved and FloatReserved name the IDs the assembler must
+// never touch (ABI-reserved, frame pointer, link register, etc.). Scratch
+// names integer IDs auto-allocation must leave alone but Assembler.Pin may
+// still claim.
 type RegInfo struct {
 	NumInt        uint8
 	NumFloat      uint8
@@ -140,19 +142,6 @@ func (m RegMask) First() uint8 {
 		return 0xFF
 	}
 	return uint8(bits.TrailingZeros64(uint64(m)))
-}
-
-func (m RegMask) PopFirst() (uint8, RegMask) {
-	if m == 0 {
-		return 0xFF, m
-	}
-	i := uint8(bits.TrailingZeros64(uint64(m)))
-	m &^= 1 << i
-	return i, m
-}
-
-func (m RegMask) Count() int {
-	return bits.OnesCount64(uint64(m))
 }
 
 func (ri RegInfo) Allocatable(typ RegType) RegMask {

@@ -55,8 +55,7 @@ The map constructors remain deliberately distinct:
 | `analysis` | `gnumbering`, `newGNumbering` | `numbering`, `newNumbering` |
 | `analysis` | `gcompute` | `compute` |
 | `asm` | `collectRelaxations`, `spliceRelaxations` | `collect`, `splice` |
-| `asm` | `patchExternalRelocs` | `patch` |
-| `asm` | `regAlloc`, `newRegAlloc` | `allocator`, `newAllocator` |
+| `asm` | `regAlloc`, `newRegAlloc` | `rewriter`, `newRewriter` |
 | `asm` | `scanLastUses` | `scan` |
 | `cli` | `doBreak` | `breakpoint` |
 | `cli` | `doClear` | `clearBreakpoint` |
@@ -70,8 +69,8 @@ The map constructors remain deliberately distinct:
 | `interp` | `newCompileInput` | `input` |
 | `interp` | `applyPlanBlock`, `applyPlanStep` | `applyBlock`, `applyStep` |
 | `prof` | `function` | `samples` |
-| `prof` | `appendEntryCounters`, `activeKeys` | `appendEntries`, `active` |
-| `prof` | `mergeCounters`, `counterFor`, `resetCounters` | `merge`, `counter`, `reset` |
+| `prof` | `appendEntryCounters`, `activeKeys` | `appendRows` |
+| `prof` | `mergeCounters`, `counterFor`, `resetCounters` | `mergeRows`, `register`, `resetRows` |
 
 ## Retained Names
 

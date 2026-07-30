@@ -93,12 +93,11 @@ func newCompiler() (*compiler, error) {
 	}, nil
 }
 
-// enter opens the framed callable: the external entry mirrors the
+// enter opens the framed callable: the entry at offset zero mirrors the
 // journal header into the pinned scratch registers, then the internal head —
 // the BL target for recursive trace calls — saves the link register.
 func (l arm64Lowerer) enter(ctx *lowering) {
 	a := ctx.assembler
-	a.Entry(ctx.entry)
 	a.Emit(
 		arm64.MOV(ctx.scratch[scratchCtrl], arm64.X0),
 		arm64.LDP(ctx.scratch[scratchStack], ctx.scratch[scratchGlobals], ctx.scratch[scratchCtrl], int16(journalStack*8)),

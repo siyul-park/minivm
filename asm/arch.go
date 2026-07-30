@@ -32,8 +32,8 @@ type ABI interface {
 // Relaxer is an optional Arch capability implemented by architectures that
 // can rewrite a branch instruction with an out-of-range immediate
 // displacement into an equivalent multi-instruction sequence that fits.
-// Assembler.encode type-asserts Arch for Relaxer and, when present, runs a
-// fixpoint pass over intra-Code label branches before final encoding.
+// Build type-asserts Arch for Relaxer and, when present, runs a fixpoint
+// pass over label branches before final encoding.
 type Relaxer interface {
 	// Relax inspects a PC-relative label-branch instruction and its
 	// resolved byte displacement (target - instruction address). It
@@ -62,8 +62,9 @@ type Frame interface {
 	// Leave releases the spill area. Emitted immediately before every
 	// instruction Returns reports true for. Returns nil when slots == 0.
 	Leave(slots int) []Instruction
-	// Resume reserves the spill area again after an intra-Code call returns
-	// through the shared epilogue. It must preserve the current spill base.
+	// Resume reserves the spill area again after a call to a label in the
+	// same code returns through the shared epilogue. It must preserve the
+	// current spill base.
 	Resume(slots int) []Instruction
 	// Store writes reg into spill slot.
 	Store(slot int, reg PReg) Instruction
@@ -72,7 +73,9 @@ type Frame interface {
 	// Returns reports whether op transfers control out of the callable, so
 	// the allocator must restore the stack with Leave before it.
 	Returns(op uint16) bool
-	// Calls reports whether op calls another label in the same Code.
+	// Calls reports whether op calls a label rather than an absolute
+	// address, so a target bound in the same code returns through the
+	// shared epilogue.
 	Calls(op uint16) bool
 }
 

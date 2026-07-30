@@ -172,7 +172,7 @@ Violations cause silent corruption or invalid execution.
 - Compile-time threaded code advances `c.ip`; runtime threaded execution advances `f.ip`.
 - JIT handlers return `true` only after lowering the opcode and advancing `s.ip` by its exact width.
 - On JIT type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.
-- Executable buffers must follow `Unseal -> Append -> Seal -> Call`; `Seal()` must sync the instruction cache on Darwin/ARM64.
+- Executable buffers own their write/execute transition inside `asm.Buffer.install`, which must sync the instruction cache on Darwin/ARM64 before resealing; a full buffer is replaced by a larger mapping and the old one is retained so entry pointers stay valid.
 - Offset-preserving passes must preserve byte offsets; `GVNPass` and `DCEPass` are the known exceptions and must repair branches/handlers.
 - `asm.Relaxer.Relax` implementations must return a replacement sequence that is already in range; `asm.Assembler.encode`'s fixpoint loop relies on this to relax each branch at most once and terminate.
 - A JIT trace fragment's own `status`, not the root trace's, decides how its ops lower when they run out; `tracePlan` must skip any `aborted` root or branch, so a fragment that recorded a partial, unsupported prefix is never planned or inlined into a parent trace.

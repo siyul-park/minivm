@@ -1,44 +1,32 @@
-package asm
+package asm_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/siyul-park/minivm/asm"
 )
 
-func TestInstruction_Def(t *testing.T) {
-	reg := NewVReg(1, RegTypeInt, Width64)
-
-	got, ok := (Instruction{Dst: V(reg)}).Def()
-	require.True(t, ok)
-	require.Equal(t, reg, got)
-
-	got, ok = (Instruction{Dst: Imm(1)}).Def()
-	require.False(t, ok)
-	require.Zero(t, got)
-}
-
-func TestInstruction_Uses(t *testing.T) {
-	a := NewVReg(1, RegTypeInt, Width64)
-	b := NewVReg(2, RegTypeInt, Width64)
-	c := NewVReg(3, RegTypeInt, Width64)
-
-	inst := Instruction{
-		Dst:  Mem(V(a), 8),
-		Src1: V(b),
-		Src2: Mem(V(c), 16),
-		Src3: Imm(1),
-	}
-
-	require.Equal(t, []VReg{a, b, c}, inst.Uses())
-	require.Equal(t, []VReg{a, b}, (Instruction{Op: OpPseudoUse, Src1: V(a), Src2: V(b)}).Uses())
-}
-
 func TestInstruction_String(t *testing.T) {
-	reg := NewVReg(1, RegTypeInt, Width64)
+	reg := asm.NewVReg(1, asm.RegTypeInt, asm.Width64)
 
-	require.Equal(t, "1", (Instruction{Op: 1}).String())
-	require.Equal(t, "1 vr1", (Instruction{Op: 1, Dst: V(reg)}).String())
-	require.Equal(t, "1 vr1, #2", (Instruction{Op: 1, Dst: V(reg), Src1: Imm(2)}).String())
-	require.Equal(t, "1 vr1, #2, #3", (Instruction{Op: 1, Dst: V(reg), Src1: Imm(2), Src2: Imm(3)}).String())
+	tests := []struct {
+		inst asm.Instruction
+		str  string
+	}{
+		{asm.Instruction{Op: 1}, "1"},
+		{asm.Instruction{Op: 1, Dst: asm.V(reg)}, "1 vr1"},
+		{asm.Instruction{Op: 1, Src2: asm.Imm(3)}, "1 #3"},
+		{asm.Instruction{Op: 1, Dst: asm.V(reg), Src1: asm.Imm(2)}, "1 vr1, #2"},
+		{
+			asm.Instruction{Op: 1, Dst: asm.V(reg), Src1: asm.Imm(2), Src2: asm.Imm(3), Src3: asm.Imm(4)},
+			"1 vr1, #2, #3, #4",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.str, func(t *testing.T) {
+			require.Equal(t, tt.str, tt.inst.String())
+		})
+	}
 }
