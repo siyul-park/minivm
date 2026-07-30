@@ -21,14 +21,15 @@ For implementation details, see `docs/jit-internals.md`. For profiling counters,
 
 ## Measurement Environment
 
-All numbers in this document were measured on July 16, 2026 (the `Sieve(256)` minivm rows were re-measured on July 18, 2026 after issue #155):
+The cross-runtime comparison table was measured on July 30, 2026. The public
+API cost tables below it were measured on July 16, 2026:
 
 - Apple M4 Pro, 12 cores
 - `darwin/arm64`
 - macOS 26.4.1
 - Go 1.26.2
 
-Every table reports the median of three sequential samples. Lower `ns/op`, `B/op`, and `allocs/op` are better. The runs were executed serially so concurrent benchmark processes did not compete for CPU time.
+Every table reports the median of three sequential samples. Lower `ns/op`, `B/op`, and `allocs/op` are better. The runs were executed serially so concurrent benchmark processes did not compete for CPU time. The comparison numbers come from one `-benchtime=300ms` pass over the whole suite, so a short-warmup adaptive mode reads slightly slower there than in a focused single-kernel run.
 
 ## Reproduction
 
@@ -57,14 +58,15 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
 
 ## Summary
 
-- `RecursiveFib(35)` places `minivm/default` at **46.30 ms**, within about **2.6%** of wazero's **45.11 ms**, while remaining allocation-free after warmup.
-- Adaptive native traces reduce `IterativeFib(30)` from **738.6 ns** threaded to **76.14 ns**, `TypedArraySum(256)` from **6.299 us** to **669.0 ns**, and `BranchTree(96)` from **981.8 ns** to **235.1 ns**.
+- `RecursiveFib(35)` places `minivm/default` at **46.18 ms**, within about **3.9%** of wazero's **44.45 ms**, while remaining allocation-free after warmup.
+- Adaptive native traces reduce `IterativeFib(30)` from **746.3 ns** threaded to **92.15 ns**, `TypedArraySum(256)` from **6.313 us** to **683.2 ns**, and `BranchTree(96)` from **952.0 ns** to **267.1 ns**.
+- Fused threaded handlers check stack room once for their own net push instead of once per folded source. That removes about 5,400 generated lines and cuts threaded time on every fusion-heavy kernel: `BranchTree(96)` **-4.3%**, `TypedArraySum(256)` **-4.1%**, `IterativeFib(30)` **-3.6%**, and `Sieve(256)` **-2.8%** (interleaved A/B, median of five). Native and adaptive modes are unchanged within noise.
 - Primitive array mutation stays on the native loop path in `Sieve(256)`: deferred-ownership elision drops the per-element retain/release pair, so a runtime-allocated array reaches the same cheap native path a typed-array constant already used. All three modes allocate `1,048 B` in `2` allocations.
 - Loop-invariant container hoisting (issue #153) removes the per-access heap-cell derivation, itab guard, and slice-header reload from hoisted loop bodies. It shrinks the loop callables but leaves wall time unchanged: the removed loads sat off the out-of-order critical path.
-- Branch-leg folding (issue #155) records native loop exits as branches and folds hot legs that rejoin the header back into the native loop as real back-edges. On `Sieve(256)` this removes the per-prime entry/exit round trips (scan-loop native entries drop from ~55 to ~1 per run) and cuts `default` from **4.72 us** to **1.61 us** and eager `jit` to **1.57 us**, versus **15.9 us** threaded (interleaved A/B on M4 Pro). The remaining gap to wazero (~0.66 us) is dominated by the per-iteration operand flush.
+- Branch-leg folding (issue #155) records native loop exits as branches and folds hot legs that rejoin the header back into the native loop as real back-edges. On `Sieve(256)` this removes the per-prime entry/exit round trips (scan-loop native entries drop from ~55 to ~1 per run) and cuts `default` from **4.72 us** to **2.68 us**, versus **16.2 us** threaded. The remaining gap to wazero (**687.3 ns**) is dominated by the per-iteration operand flush.
 - Threshold-zero `jit` is not a warmed-JIT guarantee. It matches `default` on Sieve and BranchTree, but is slower on IterativeFib, TypedArraySum, and recursive Fibonacci because it can compile before representative traces are learned.
-- Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **7.617 us**; adaptive and eager modes add profiling cost without native coverage.
-- Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **54.94 us** in `default`, versus **568 us** threaded and **42.3 us** in wazero. Eager `jit` stays at **589 us**, consistent with the threshold-zero note above.
+- Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **7.774 us**; adaptive and eager modes add profiling cost without native coverage.
+- Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **54.85 us** in `default`, versus **576 us** threaded and **43.3 us** in wazero. Eager `jit` stays at **594 us**, consistent with the threshold-zero note above.
 
 These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, host-call conventions, and compilation strategies.
 
@@ -86,96 +88,96 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 
 | Workload | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| IterativeFib(30) | minivm/default | 76.14 | 0 | 0 |
-| IterativeFib(30) | minivm/threaded | 738.6 | 0 | 0 |
-| IterativeFib(30) | minivm/jit | 109.1 | 0 | 0 |
-| IterativeFib(30) | native Go | 8.757 | 0 | 0 |
-| IterativeFib(30) | wazero | 50.26 | 8 | 1 |
-| IterativeFib(30) | Tengo | 9,966 | 90,592 | 61 |
-| IterativeFib(30) | gopher-lua | 511.6 | 160 | 0 |
-| IterativeFib(30) | Goja | 2,218 | 368 | 20 |
-| IterativeFib(30) | gpython | 2,590 | 2,448 | 88 |
-| IterativeFib(30) | Yaegi | 2,801 | 2,036 | 101 |
-| Sieve(256) | minivm/default | 1,610 | 1,048 | 2 |
-| Sieve(256) | minivm/threaded | 15,933 | 1,048 | 2 |
-| Sieve(256) | minivm/jit | 1,572 | 1,048 | 2 |
-| Sieve(256) | native Go | 238.3 | 0 | 0 |
-| Sieve(256) | wazero | 662.8 | 8 | 1 |
-| Sieve(256) | Tengo | 53,437 | 122,504 | 1,611 |
-| Sieve(256) | gopher-lua | 23,269 | 18,416 | 44 |
-| Sieve(256) | Goja | 43,554 | 1,872 | 25 |
-| Sieve(256) | gpython | 36,598 | 5,704 | 30 |
-| Sieve(256) | Yaegi | 18,655 | 1,800 | 37 |
-| RecursiveFib(20) | minivm/default | 37,417 | 0 | 0 |
-| RecursiveFib(20) | minivm/threaded | 351,637 | 0 | 0 |
-| RecursiveFib(20) | minivm/jit | 362,772 | 0 | 0 |
-| RecursiveFib(20) | native Go | 13,553 | 0 | 0 |
-| RecursiveFib(20) | wazero | 31,262 | 8 | 1 |
-| RecursiveFib(20) | Tengo | 841,631 | 319,345 | 28,655 |
-| RecursiveFib(20) | gopher-lua | 1,032,737 | 704 | 2 |
-| RecursiveFib(20) | Goja | 1,476,390 | 4,680 | 39 |
-| RecursiveFib(20) | gpython | 3,764,356 | 9,807,927 | 109,494 |
-| RecursiveFib(20) | Yaegi | 3,840,787 | 8,302,122 | 192,840 |
-| RecursiveFib(35) | minivm/default | 46,303,288 | 0 | 0 |
-| RecursiveFib(35) | minivm/threaded | 490,321,941 | 0 | 0 |
-| RecursiveFib(35) | minivm/jit | 508,171,481 | 0 | 0 |
-| RecursiveFib(35) | native Go | 19,463,741 | 0 | 0 |
-| RecursiveFib(35) | wazero | 45,112,434 | 9 | 1 |
-| RecursiveFib(35) | Tengo | 1,180,099,833 | 312,797,184 | 39,088,173 |
-| RecursiveFib(35) | gopher-lua | 1,453,945,708 | 971,008 | 3,793 |
-| RecursiveFib(35) | Goja | 2,058,714,041 | 375,360 | 46,373 |
-| RecursiveFib(35) | gpython | 5,364,887,708 | 13,378,034,960 | 149,350,308 |
-| RecursiveFib(35) | Yaegi | 5,537,717,750 | 11,324,340,872 | 263,043,707 |
-| IndirectRecursiveFib(20) | minivm/default | 54,937 | 0 | 0 |
-| IndirectRecursiveFib(20) | minivm/threaded | 567,896 | 0 | 0 |
-| IndirectRecursiveFib(20) | minivm/jit | 589,191 | 0 | 0 |
-| IndirectRecursiveFib(20) | native Go | 16,040 | 0 | 0 |
-| IndirectRecursiveFib(20) | wazero | 42,331 | 8 | 1 |
-| IndirectRecursiveFib(20) | Tengo | 958,917 | 319,345 | 28,655 |
-| IndirectRecursiveFib(20) | gopher-lua | 944,516 | 704 | 2 |
-| IndirectRecursiveFib(20) | Goja | 1,366,603 | 4,680 | 39 |
-| IndirectRecursiveFib(20) | gpython | 3,961,904 | 10,158,200 | 109,494 |
-| IndirectRecursiveFib(20) | Yaegi | 11,013,641 | 13,059,857 | 394,041 |
-| ClosureCounter(128) | minivm/default | 3,159 | 64 | 2 |
-| ClosureCounter(128) | minivm/threaded | 3,021 | 64 | 2 |
-| ClosureCounter(128) | minivm/jit | 3,159 | 64 | 2 |
-| ClosureCounter(128) | native Go | 34.99 | 0 | 0 |
+| IterativeFib(30) | minivm/default | 92.15 | 0 | 0 |
+| IterativeFib(30) | minivm/threaded | 746.3 | 0 | 0 |
+| IterativeFib(30) | minivm/jit | 95.07 | 0 | 0 |
+| IterativeFib(30) | native Go | 9.256 | 0 | 0 |
+| IterativeFib(30) | wazero | 52.63 | 8 | 1 |
+| IterativeFib(30) | Tengo | 9,406 | 90,592 | 61 |
+| IterativeFib(30) | gopher-lua | 513.9 | 160 | 0 |
+| IterativeFib(30) | Goja | 2,226 | 368 | 20 |
+| IterativeFib(30) | gpython | 2,599 | 2,448 | 88 |
+| IterativeFib(30) | Yaegi | 2,856 | 2,036 | 101 |
+| Sieve(256) | minivm/default | 2,682 | 1,048 | 2 |
+| Sieve(256) | minivm/threaded | 16,239 | 1,048 | 2 |
+| Sieve(256) | minivm/jit | 2,696 | 1,048 | 2 |
+| Sieve(256) | native Go | 237.2 | 0 | 0 |
+| Sieve(256) | wazero | 687.3 | 8 | 1 |
+| Sieve(256) | Tengo | 53,630 | 122,504 | 1,611 |
+| Sieve(256) | gopher-lua | 23,289 | 18,416 | 44 |
+| Sieve(256) | Goja | 43,140 | 1,872 | 25 |
+| Sieve(256) | gpython | 35,636 | 5,704 | 30 |
+| Sieve(256) | Yaegi | 18,762 | 1,800 | 37 |
+| RecursiveFib(20) | minivm/default | 38,266 | 0 | 0 |
+| RecursiveFib(20) | minivm/threaded | 357,450 | 0 | 0 |
+| RecursiveFib(20) | minivm/jit | 368,423 | 0 | 0 |
+| RecursiveFib(20) | native Go | 14,455 | 0 | 0 |
+| RecursiveFib(20) | wazero | 31,077 | 8 | 1 |
+| RecursiveFib(20) | Tengo | 809,410 | 319,346 | 28,655 |
+| RecursiveFib(20) | gopher-lua | 1,055,661 | 704 | 2 |
+| RecursiveFib(20) | Goja | 1,456,275 | 4,680 | 39 |
+| RecursiveFib(20) | gpython | 3,701,017 | 9,807,924 | 109,494 |
+| RecursiveFib(20) | Yaegi | 3,791,815 | 8,302,126 | 192,840 |
+| RecursiveFib(35) | minivm/default | 46,175,150 | 0 | 0 |
+| RecursiveFib(35) | minivm/threaded | 499,079,076 | 0 | 0 |
+| RecursiveFib(35) | minivm/jit | 522,672,192 | 0 | 0 |
+| RecursiveFib(35) | native Go | 20,107,461 | 0 | 0 |
+| RecursiveFib(35) | wazero | 44,453,238 | 9 | 1 |
+| RecursiveFib(35) | Tengo | 1,168,612,000 | 312,797,584 | 39,088,176 |
+| RecursiveFib(35) | gopher-lua | 1,477,085,041 | 971,008 | 3,793 |
+| RecursiveFib(35) | Goja | 2,099,479,958 | 375,360 | 46,373 |
+| RecursiveFib(35) | gpython | 5,578,092,292 | 13,378,028,656 | 149,350,236 |
+| RecursiveFib(35) | Yaegi | 5,903,047,625 | 11,324,344,728 | 263,043,676 |
+| IndirectRecursiveFib(20) | minivm/default | 54,848 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/threaded | 576,182 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/jit | 594,117 | 0 | 0 |
+| IndirectRecursiveFib(20) | native Go | 15,981 | 0 | 0 |
+| IndirectRecursiveFib(20) | wazero | 43,260 | 8 | 1 |
+| IndirectRecursiveFib(20) | Tengo | 953,537 | 319,346 | 28,655 |
+| IndirectRecursiveFib(20) | gopher-lua | 954,423 | 704 | 2 |
+| IndirectRecursiveFib(20) | Goja | 1,377,150 | 4,680 | 39 |
+| IndirectRecursiveFib(20) | gpython | 4,018,147 | 10,158,201 | 109,494 |
+| IndirectRecursiveFib(20) | Yaegi | 11,430,601 | 13,059,854 | 394,041 |
+| ClosureCounter(128) | minivm/default | 3,362 | 64 | 2 |
+| ClosureCounter(128) | minivm/threaded | 2,978 | 64 | 2 |
+| ClosureCounter(128) | minivm/jit | 3,372 | 64 | 2 |
+| ClosureCounter(128) | native Go | 38.22 | 0 | 0 |
 | ClosureCounter(128) | wazero | N/A | N/A | N/A |
-| ClosureCounter(128) | Tengo | 13,287 | 92,272 | 261 |
-| ClosureCounter(128) | gopher-lua | 5,842 | 151 | 3 |
-| ClosureCounter(128) | Goja | 10,144 | 1,264 | 13 |
-| ClosureCounter(128) | gpython | 27,037 | 58,312 | 659 |
-| ClosureCounter(128) | Yaegi | 33,173 | 34,784 | 786 |
-| TypedArraySum(256) | minivm/default | 669.0 | 0 | 0 |
-| TypedArraySum(256) | minivm/threaded | 6,299 | 0 | 0 |
-| TypedArraySum(256) | minivm/jit | 3,537 | 0 | 0 |
-| TypedArraySum(256) | native Go | 66.26 | 0 | 0 |
-| TypedArraySum(256) | wazero | 153.5 | 8 | 1 |
-| TypedArraySum(256) | Tengo | 15,676 | 94,208 | 513 |
-| TypedArraySum(256) | gopher-lua | 3,415 | 4,000 | 15 |
-| TypedArraySum(256) | Goja | 13,303 | 2,080 | 238 |
-| TypedArraySum(256) | gpython | 7,776 | 2,496 | 246 |
-| TypedArraySum(256) | Yaegi | 4,002 | 296 | 8 |
-| AllocationGraph(128) | minivm/default | 9,226 | 5,120 | 256 |
-| AllocationGraph(128) | minivm/threaded | 7,617 | 5,120 | 256 |
-| AllocationGraph(128) | minivm/jit | 9,199 | 5,120 | 256 |
-| AllocationGraph(128) | native Go | 935.5 | 1,024 | 128 |
+| ClosureCounter(128) | Tengo | 13,503 | 92,272 | 261 |
+| ClosureCounter(128) | gopher-lua | 5,910 | 151 | 3 |
+| ClosureCounter(128) | Goja | 10,173 | 1,264 | 13 |
+| ClosureCounter(128) | gpython | 28,235 | 58,312 | 659 |
+| ClosureCounter(128) | Yaegi | 34,704 | 34,784 | 786 |
+| TypedArraySum(256) | minivm/default | 683.2 | 0 | 0 |
+| TypedArraySum(256) | minivm/threaded | 6,313 | 0 | 0 |
+| TypedArraySum(256) | minivm/jit | 621.5 | 0 | 0 |
+| TypedArraySum(256) | native Go | 73.2 | 0 | 0 |
+| TypedArraySum(256) | wazero | 157 | 8 | 1 |
+| TypedArraySum(256) | Tengo | 15,507 | 94,208 | 513 |
+| TypedArraySum(256) | gopher-lua | 3,413 | 4,000 | 15 |
+| TypedArraySum(256) | Goja | 13,399 | 2,080 | 238 |
+| TypedArraySum(256) | gpython | 7,652 | 2,496 | 246 |
+| TypedArraySum(256) | Yaegi | 4,246 | 296 | 8 |
+| AllocationGraph(128) | minivm/default | 9,370 | 5,120 | 256 |
+| AllocationGraph(128) | minivm/threaded | 7,774 | 5,120 | 256 |
+| AllocationGraph(128) | minivm/jit | 9,362 | 5,120 | 256 |
+| AllocationGraph(128) | native Go | 943.8 | 1,024 | 128 |
 | AllocationGraph(128) | wazero | N/A | N/A | N/A |
-| AllocationGraph(128) | Tengo | 13,988 | 96,288 | 388 |
-| AllocationGraph(128) | gopher-lua | 6,273 | 14,376 | 256 |
-| AllocationGraph(128) | Goja | 25,412 | 78,016 | 770 |
-| AllocationGraph(128) | gpython | 5,941 | 5,712 | 266 |
-| AllocationGraph(128) | Yaegi | 12,222 | 1,492 | 142 |
-| BranchTree(96) | minivm/default | 235.1 | 0 | 0 |
-| BranchTree(96) | minivm/threaded | 981.8 | 0 | 0 |
-| BranchTree(96) | minivm/jit | 234.0 | 0 | 0 |
-| BranchTree(96) | native Go | 79.10 | 0 | 0 |
-| BranchTree(96) | wazero | 164.2 | 16 | 1 |
-| BranchTree(96) | Tengo | 17,274 | 95,384 | 660 |
-| BranchTree(96) | gopher-lua | 8,775 | 2,464 | 9 |
-| BranchTree(96) | Goja | 13,901 | 1,992 | 196 |
-| BranchTree(96) | gpython | 12,295 | 2,168 | 203 |
-| BranchTree(96) | Yaegi | 11,062 | 1,832 | 308 |
+| AllocationGraph(128) | Tengo | 14,516 | 96,288 | 388 |
+| AllocationGraph(128) | gopher-lua | 6,543 | 14,376 | 256 |
+| AllocationGraph(128) | Goja | 26,551 | 78,016 | 770 |
+| AllocationGraph(128) | gpython | 5,715 | 5,712 | 266 |
+| AllocationGraph(128) | Yaegi | 12,190 | 1,492 | 142 |
+| BranchTree(96) | minivm/default | 267.1 | 0 | 0 |
+| BranchTree(96) | minivm/threaded | 952 | 0 | 0 |
+| BranchTree(96) | minivm/jit | 264.7 | 0 | 0 |
+| BranchTree(96) | native Go | 79.98 | 0 | 0 |
+| BranchTree(96) | wazero | 172.1 | 16 | 1 |
+| BranchTree(96) | Tengo | 18,088 | 95,384 | 660 |
+| BranchTree(96) | gopher-lua | 8,716 | 2,464 | 9 |
+| BranchTree(96) | Goja | 13,926 | 1,992 | 196 |
+| BranchTree(96) | gpython | 12,187 | 2,168 | 203 |
+| BranchTree(96) | Yaegi | 10,769 | 1,832 | 308 |
 
 Wazero has no equivalent canonical fixture for `ClosureCounter(128)` or `AllocationGraph(128)`, so those rows are `N/A`.
 

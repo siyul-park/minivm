@@ -1015,9 +1015,6 @@ var (
 					}
 				}
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					i.retain(addr)
 					i.stack[i.sp] = r0
 					i.sp++
@@ -5482,17 +5479,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5513,17 +5504,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5544,17 +5529,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5575,17 +5554,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5606,17 +5579,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5637,17 +5604,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5668,17 +5629,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5699,17 +5654,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5730,17 +5679,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5761,17 +5704,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5792,17 +5729,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5823,17 +5754,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -5857,17 +5782,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -5896,17 +5815,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -5935,17 +5848,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -5974,17 +5881,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6013,17 +5914,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6052,17 +5947,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6091,17 +5980,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6130,17 +6013,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6169,17 +6046,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6208,17 +6079,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6247,17 +6112,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6286,17 +6145,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6325,17 +6178,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6364,17 +6211,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6403,17 +6244,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6442,17 +6277,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6481,17 +6310,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6520,17 +6343,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6559,17 +6376,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6598,17 +6409,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6637,17 +6442,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6676,17 +6475,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6715,17 +6508,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6754,17 +6541,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6793,17 +6574,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6832,17 +6607,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6871,17 +6640,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6910,17 +6673,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6949,17 +6706,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -6988,17 +6739,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -7027,17 +6772,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -7066,17 +6805,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -7105,17 +6838,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7145,17 +6872,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7185,17 +6906,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7225,17 +6940,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7265,17 +6974,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7305,17 +7008,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7345,17 +7042,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7385,17 +7076,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7425,17 +7110,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7465,17 +7144,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7505,17 +7178,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7545,17 +7212,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7585,17 +7246,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7625,17 +7280,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7665,17 +7314,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7705,17 +7348,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7745,17 +7382,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7785,17 +7416,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7825,17 +7450,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7865,17 +7484,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7905,17 +7518,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7945,17 +7552,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -7985,17 +7586,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8025,17 +7620,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8065,17 +7654,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8105,17 +7688,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8145,17 +7722,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8185,17 +7756,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8225,17 +7790,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8265,17 +7824,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8305,17 +7858,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8345,17 +7892,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -8385,17 +7926,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8424,17 +7959,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8463,17 +7992,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8502,17 +8025,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8541,17 +8058,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8580,17 +8091,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8619,17 +8124,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8658,17 +8157,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8697,17 +8190,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8736,17 +8223,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8775,17 +8256,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8814,17 +8289,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8853,17 +8322,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8892,17 +8355,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8931,17 +8388,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -8970,17 +8421,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9009,17 +8454,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9048,17 +8487,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9087,17 +8520,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9126,17 +8553,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9165,17 +8586,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9204,17 +8619,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9243,17 +8652,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9282,17 +8685,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9321,17 +8718,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9360,17 +8751,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9399,17 +8784,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9438,17 +8817,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9477,17 +8850,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9516,17 +8883,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9555,17 +8916,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9594,17 +8949,11 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -9630,17 +8979,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9661,17 +9004,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9692,17 +9029,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9723,17 +9054,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9754,17 +9079,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9785,17 +9104,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9816,17 +9129,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9847,17 +9154,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9878,17 +9179,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9909,17 +9204,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9940,17 +9229,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -9971,17 +9254,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10002,17 +9279,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10033,17 +9304,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10064,17 +9329,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10095,17 +9354,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10126,17 +9379,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10157,17 +9404,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10188,17 +9429,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10219,17 +9454,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -10249,9 +9478,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10280,9 +9506,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10311,9 +9534,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10342,9 +9562,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10373,9 +9590,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10404,9 +9618,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10443,9 +9654,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10472,9 +9680,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10501,9 +9706,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10662,9 +9864,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(min(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10691,9 +9890,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(max(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10720,9 +9916,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10749,9 +9942,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10778,9 +9968,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10807,9 +9994,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10836,9 +10020,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10865,9 +10046,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10894,9 +10072,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -10915,9 +10090,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10946,9 +10118,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -10977,9 +10146,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11008,9 +10174,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11039,9 +10202,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11070,9 +10230,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11109,9 +10266,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11138,9 +10292,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11167,9 +10318,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11328,9 +10476,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Min(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11357,9 +10502,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Max(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11386,9 +10528,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Copysign(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11415,9 +10554,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11444,9 +10580,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11473,9 +10606,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11502,9 +10632,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11531,9 +10658,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11560,9 +10684,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -11581,9 +10702,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11612,9 +10730,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11654,9 +10769,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11691,9 +10803,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11728,9 +10837,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11765,9 +10871,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11802,9 +10905,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11839,9 +10939,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11876,9 +10973,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11913,9 +11007,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -11950,9 +11041,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12140,9 +11228,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12177,9 +11262,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12214,9 +11296,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12251,9 +11330,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12288,9 +11364,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12325,9 +11398,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12362,9 +11432,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12399,9 +11466,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12436,9 +11500,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12473,9 +11534,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12510,9 +11568,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12547,9 +11602,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12737,9 +11789,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12774,9 +11823,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12811,9 +11857,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12848,9 +11891,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12885,9 +11925,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12922,9 +11959,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12959,9 +11993,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -12996,9 +12027,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13033,9 +12061,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13070,9 +12095,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13107,9 +12129,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13144,9 +12163,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13377,9 +12393,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13414,9 +12427,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13451,9 +12461,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13487,9 +12494,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13522,9 +12526,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13557,9 +12558,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13593,9 +12591,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13630,9 +12625,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13667,9 +12659,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13704,9 +12693,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13741,9 +12727,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13778,9 +12761,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13815,9 +12795,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13852,9 +12829,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13889,9 +12863,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13926,9 +12897,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -13963,9 +12931,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14000,9 +12965,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14037,9 +12999,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14074,9 +13033,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14111,9 +13067,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14352,9 +13305,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14389,9 +13339,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14426,9 +13373,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14463,9 +13407,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14500,9 +13441,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14537,9 +13475,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14574,9 +13509,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14611,9 +13543,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14648,9 +13577,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14685,9 +13611,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14722,9 +13645,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14759,9 +13679,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14785,9 +13702,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14816,9 +13730,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14847,9 +13758,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14878,9 +13786,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -14920,9 +13825,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -14958,9 +13860,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -14996,9 +13895,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15034,9 +13930,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15072,9 +13965,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15110,9 +14000,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15148,9 +14035,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15186,9 +14070,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15224,9 +14105,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15418,9 +14296,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15456,9 +14331,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15494,9 +14366,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15532,9 +14401,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15570,9 +14436,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15608,9 +14471,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15646,9 +14506,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15684,9 +14541,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15722,9 +14576,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15760,9 +14611,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15798,9 +14646,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -15836,9 +14681,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16030,9 +14872,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16068,9 +14907,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16106,9 +14942,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16144,9 +14977,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16182,9 +15012,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16220,9 +15047,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16258,9 +15082,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16296,9 +15117,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16334,9 +15152,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16372,9 +15187,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16410,9 +15222,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16448,9 +15257,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16686,9 +15492,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16724,9 +15527,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16762,9 +15562,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16799,9 +15596,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16835,9 +15629,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16871,9 +15662,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16908,9 +15696,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16946,9 +15731,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -16984,9 +15766,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17022,9 +15801,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17060,9 +15836,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17098,9 +15871,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17136,9 +15906,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17174,9 +15941,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17212,9 +15976,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17250,9 +16011,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17288,9 +16046,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17326,9 +16081,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17364,9 +16116,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17402,9 +16151,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17440,9 +16186,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17686,9 +16429,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17724,9 +16464,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17762,9 +16499,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17800,9 +16534,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17838,9 +16569,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17876,9 +16604,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17914,9 +16639,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17952,9 +16674,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -17990,9 +16709,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -18028,9 +16744,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -18066,9 +16779,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -18104,9 +16814,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -18142,9 +16849,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18179,9 +16883,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18216,9 +16917,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18253,9 +16951,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18290,9 +16985,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18327,9 +17019,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18364,9 +17053,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18401,9 +17087,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18438,9 +17121,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18628,9 +17308,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18665,9 +17342,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18702,9 +17376,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18739,9 +17410,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18776,9 +17444,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18813,9 +17478,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18850,9 +17512,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18887,9 +17546,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18924,9 +17580,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18961,9 +17614,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -18998,9 +17648,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19035,9 +17682,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19225,9 +17869,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19262,9 +17903,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19299,9 +17937,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19336,9 +17971,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19373,9 +18005,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19410,9 +18039,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19447,9 +18073,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19484,9 +18107,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19521,9 +18141,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19558,9 +18175,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19595,9 +18209,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19632,9 +18243,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19865,9 +18473,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19902,9 +18507,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19939,9 +18541,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -19975,9 +18574,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20010,9 +18606,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20045,9 +18638,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20081,9 +18671,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20118,9 +18705,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20155,9 +18739,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20192,9 +18773,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20229,9 +18807,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20266,9 +18841,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20303,9 +18875,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20340,9 +18909,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20377,9 +18943,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20414,9 +18977,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20451,9 +19011,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20488,9 +19045,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20525,9 +19079,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20562,9 +19113,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20599,9 +19147,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20840,9 +19385,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20877,9 +19419,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20914,9 +19453,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20951,9 +19487,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -20988,9 +19521,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21025,9 +19555,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21062,9 +19589,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21099,9 +19623,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21136,9 +19657,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21173,9 +19691,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21210,9 +19725,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21247,9 +19759,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21273,9 +19782,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -21306,9 +19812,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21335,9 +19838,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21364,9 +19864,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21561,9 +20058,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 << (v1 & 31))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21590,9 +20084,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 >> (v1 & 31))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21619,9 +20110,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21647,9 +20135,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21675,9 +20160,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21703,9 +20185,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21732,9 +20211,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21761,9 +20237,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21790,9 +20263,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21819,9 +20289,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21848,9 +20315,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21877,9 +20341,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21906,9 +20367,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21935,9 +20393,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21964,9 +20419,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -21993,9 +20445,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22022,9 +20471,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22051,9 +20497,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22072,9 +20515,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22103,9 +20543,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22134,9 +20571,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22165,9 +20599,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22196,9 +20627,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22227,9 +20655,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22258,9 +20683,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22289,9 +20711,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22320,9 +20739,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22351,9 +20767,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -22390,9 +20803,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22419,9 +20829,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22448,9 +20855,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22477,9 +20881,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22506,9 +20907,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22535,9 +20933,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22564,9 +20959,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22593,9 +20985,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22622,9 +21011,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22823,9 +21209,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 << (v1 & 63))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22852,9 +21235,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 >> (v1 & 63))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22881,9 +21261,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22910,9 +21287,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 ^ v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22939,9 +21313,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 & v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22968,9 +21339,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 | v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -22997,9 +21365,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -23026,9 +21391,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -23055,9 +21417,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -23084,9 +21443,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -23113,9 +21469,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -23142,9 +21495,6 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -23163,9 +21513,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23194,9 +21541,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23225,9 +21569,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23256,9 +21597,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23286,9 +21624,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23313,9 +21648,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23340,9 +21672,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23367,9 +21696,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23394,9 +21720,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23421,9 +21744,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23448,9 +21768,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23475,9 +21792,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23502,9 +21816,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23640,9 +21951,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23667,9 +21975,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23694,9 +21999,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23721,9 +22023,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23748,9 +22047,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23775,9 +22071,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23802,9 +22095,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23829,9 +22119,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23856,9 +22143,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23883,9 +22167,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23910,9 +22191,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -23937,9 +22215,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24075,9 +22350,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24102,9 +22374,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24129,9 +22398,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24156,9 +22422,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24183,9 +22446,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24210,9 +22470,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24237,9 +22494,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24264,9 +22518,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24291,9 +22542,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24318,9 +22566,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24338,9 +22583,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24361,9 +22603,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24388,9 +22627,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24415,9 +22651,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24582,9 +22815,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24609,9 +22839,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24636,9 +22863,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24663,9 +22887,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24689,9 +22910,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24715,9 +22933,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24741,9 +22956,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24768,9 +22980,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24795,9 +23004,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24822,9 +23028,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24849,9 +23052,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24876,9 +23076,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24903,9 +23100,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24930,9 +23124,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24957,9 +23148,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -24984,9 +23172,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25011,9 +23196,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25038,9 +23220,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25065,9 +23244,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25092,9 +23268,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25119,9 +23292,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25290,9 +23460,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25317,9 +23484,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25344,9 +23508,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25371,9 +23532,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25398,9 +23556,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25425,9 +23580,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25452,9 +23604,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25479,9 +23628,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25506,9 +23652,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25533,9 +23676,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25560,9 +23700,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25587,9 +23724,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -25620,18 +23754,12 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25652,18 +23780,12 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25684,18 +23806,12 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25716,18 +23832,12 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25748,18 +23858,12 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25780,18 +23884,12 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25812,18 +23910,12 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25844,18 +23936,12 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25876,18 +23962,12 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25908,18 +23988,12 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25940,18 +24014,12 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -25972,18 +24040,12 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -26007,18 +24069,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26048,18 +24104,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26089,18 +24139,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26130,18 +24174,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26171,18 +24209,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26212,18 +24244,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26253,18 +24279,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26294,18 +24314,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26335,18 +24349,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26376,18 +24384,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26417,18 +24419,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26458,18 +24454,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26499,18 +24489,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26540,18 +24524,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26581,18 +24559,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26622,18 +24594,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26663,18 +24629,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26704,18 +24664,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26745,18 +24699,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26786,18 +24734,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26827,18 +24769,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26868,18 +24804,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26909,18 +24839,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26950,18 +24874,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -26991,18 +24909,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27032,18 +24944,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27073,18 +24979,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27114,18 +25014,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27155,18 +25049,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27196,18 +25084,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27237,18 +25119,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27278,18 +25154,12 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27316,18 +25186,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27348,18 +25212,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27380,18 +25238,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27412,18 +25264,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27444,18 +25290,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27476,18 +25316,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27508,18 +25342,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27540,18 +25368,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27572,18 +25394,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27604,18 +25420,12 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27636,18 +25446,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27668,18 +25472,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27700,18 +25498,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27732,18 +25524,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27764,18 +25550,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27796,18 +25576,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27828,18 +25602,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27860,18 +25628,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27892,18 +25654,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27924,18 +25680,12 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -27955,9 +25705,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -27987,9 +25734,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28019,9 +25763,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28051,9 +25792,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28083,9 +25821,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28115,9 +25850,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28156,9 +25888,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28186,9 +25915,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28216,9 +25942,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28381,9 +26104,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(min(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28411,9 +26131,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(max(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28441,9 +26158,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28471,9 +26185,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28501,9 +26212,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28531,9 +26239,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28561,9 +26266,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28591,9 +26293,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28621,9 +26320,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28642,9 +26338,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28674,9 +26367,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28706,9 +26396,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28738,9 +26425,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28770,9 +26454,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28802,9 +26483,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -28843,9 +26521,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28873,9 +26548,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -28903,9 +26575,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29068,9 +26737,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Min(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29098,9 +26764,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Max(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29128,9 +26791,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Copysign(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29158,9 +26818,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29188,9 +26845,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29218,9 +26872,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29248,9 +26899,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29278,9 +26926,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29308,9 +26953,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -29329,9 +26971,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29361,9 +27000,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29393,9 +27029,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29425,9 +27058,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29457,9 +27087,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29489,9 +27116,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29533,9 +27157,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29572,9 +27193,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29611,9 +27229,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29650,9 +27265,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29689,9 +27301,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29728,9 +27337,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29767,9 +27373,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29806,9 +27409,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -29845,9 +27445,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30043,9 +27640,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30082,9 +27676,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30121,9 +27712,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30160,9 +27748,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30199,9 +27784,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30238,9 +27820,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30277,9 +27856,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30316,9 +27892,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30355,9 +27928,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30394,9 +27964,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30433,9 +28000,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30472,9 +28036,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30670,9 +28231,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30709,9 +28267,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30748,9 +28303,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30787,9 +28339,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30826,9 +28375,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30865,9 +28411,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30904,9 +28447,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30943,9 +28483,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -30982,9 +28519,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31021,9 +28555,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31060,9 +28591,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31099,9 +28627,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31342,9 +28867,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31381,9 +28903,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31420,9 +28939,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31458,9 +28974,6 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31495,9 +29008,6 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31532,9 +29042,6 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31570,9 +29077,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31609,9 +29113,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31648,9 +29149,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31687,9 +29185,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31726,9 +29221,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31765,9 +29257,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31804,9 +29293,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31843,9 +29329,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31882,9 +29365,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31921,9 +29401,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31960,9 +29437,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -31999,9 +29473,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32038,9 +29509,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32077,9 +29545,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32116,9 +29581,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32367,9 +29829,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32406,9 +29865,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32445,9 +29901,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32484,9 +29937,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32523,9 +29973,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32562,9 +30009,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32601,9 +30045,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32640,9 +30081,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32679,9 +30117,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32718,9 +30153,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32757,9 +30189,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32796,9 +30225,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32823,9 +30249,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -32858,9 +30281,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -32888,9 +30308,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -32918,9 +30335,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33120,9 +30534,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 << (v1 & 31))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33150,9 +30561,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 >> (v1 & 31))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33180,9 +30588,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33209,9 +30614,6 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33238,9 +30640,6 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33267,9 +30666,6 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33297,9 +30693,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33327,9 +30720,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33357,9 +30747,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33387,9 +30774,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33417,9 +30801,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33447,9 +30828,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33477,9 +30855,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33507,9 +30882,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33537,9 +30909,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33567,9 +30936,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33597,9 +30963,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33627,9 +30990,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -33648,9 +31008,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33680,9 +31037,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33712,9 +31066,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33744,9 +31095,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33776,9 +31124,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33808,9 +31153,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33840,9 +31182,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33872,9 +31211,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33904,9 +31240,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33936,9 +31269,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -33977,9 +31307,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34007,9 +31334,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34037,9 +31361,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34067,9 +31388,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34097,9 +31415,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34127,9 +31442,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34157,9 +31469,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34187,9 +31496,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34217,9 +31523,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34423,9 +31726,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 << (v1 & 63))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34453,9 +31753,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 >> (v1 & 63))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34483,9 +31780,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34513,9 +31807,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 ^ v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34543,9 +31834,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 & v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34573,9 +31861,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 | v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34603,9 +31888,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34633,9 +31915,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34663,9 +31942,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34693,9 +31969,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34723,9 +31996,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34753,9 +32023,6 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -34774,9 +32041,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34806,9 +32070,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34838,9 +32099,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34870,9 +32128,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34901,9 +32156,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34929,9 +32181,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34957,9 +32206,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -34985,9 +32231,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35013,9 +32256,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35041,9 +32281,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35069,9 +32306,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35097,9 +32331,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35125,9 +32356,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35267,9 +32495,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35295,9 +32520,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35323,9 +32545,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35351,9 +32570,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35379,9 +32595,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35407,9 +32620,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35435,9 +32645,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35463,9 +32670,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35491,9 +32695,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35519,9 +32720,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35547,9 +32745,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35575,9 +32770,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35717,9 +32909,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35745,9 +32934,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35773,9 +32959,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35801,9 +32984,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35829,9 +33009,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35857,9 +33034,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35885,9 +33059,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35913,9 +33084,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35941,9 +33109,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35969,9 +33134,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -35989,9 +33151,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36013,9 +33172,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36041,9 +33197,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36069,9 +33222,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36241,9 +33391,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36269,9 +33416,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36297,9 +33441,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36325,9 +33466,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36352,9 +33490,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36379,9 +33514,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36406,9 +33538,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36434,9 +33563,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36462,9 +33588,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36490,9 +33613,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36518,9 +33638,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36546,9 +33663,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36574,9 +33688,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36602,9 +33713,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36630,9 +33738,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36658,9 +33763,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36686,9 +33788,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36714,9 +33813,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36742,9 +33838,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36770,9 +33863,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36798,9 +33888,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -36974,9 +34061,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37002,9 +34086,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37030,9 +34111,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37058,9 +34136,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37086,9 +34161,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37114,9 +34186,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37142,9 +34211,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37170,9 +34236,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37198,9 +34261,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37226,9 +34286,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37254,9 +34311,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37282,9 +34336,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -37315,9 +34366,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37342,9 +34390,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37369,9 +34414,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37396,9 +34438,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37423,9 +34462,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37450,9 +34486,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37477,9 +34510,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37504,9 +34534,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37531,9 +34558,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37558,9 +34582,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37585,9 +34606,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37612,9 +34630,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37639,9 +34654,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37666,9 +34678,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37693,9 +34702,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37720,9 +34726,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37747,9 +34750,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37774,9 +34774,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37801,9 +34798,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37828,9 +34822,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37855,9 +34846,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37882,9 +34870,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37909,9 +34894,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37936,9 +34918,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37963,9 +34942,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -37990,9 +34966,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38017,9 +34990,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38044,9 +35014,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38071,9 +35038,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38098,9 +35062,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38125,9 +35086,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38152,9 +35110,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38186,9 +35141,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if r0.Ref() == 0 {
 						i.fr.ip += offset
 					}
@@ -38586,9 +35538,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38609,9 +35558,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38632,9 +35578,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38757,9 +35700,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38780,9 +35720,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38803,9 +35740,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38826,9 +35760,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38849,9 +35780,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38872,9 +35800,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38895,9 +35820,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38918,9 +35840,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38941,9 +35860,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38964,9 +35880,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -38987,9 +35900,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39010,9 +35920,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39135,9 +36042,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39158,9 +36062,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39181,9 +36082,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39204,9 +36102,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39227,9 +36122,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39250,9 +36142,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39273,9 +36162,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39296,9 +36182,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39319,9 +36202,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39342,9 +36222,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
@@ -39413,9 +36290,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
@@ -39490,9 +36364,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39513,9 +36384,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39536,9 +36404,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39687,9 +36552,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39710,9 +36572,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39733,9 +36592,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39756,9 +36612,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -39778,9 +36631,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -39800,9 +36650,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -39822,9 +36669,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39845,9 +36689,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39868,9 +36709,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39891,9 +36729,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39914,9 +36749,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39937,9 +36769,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39960,9 +36789,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -39983,9 +36809,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40006,9 +36829,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40029,9 +36849,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40052,9 +36869,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40075,9 +36889,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40098,9 +36909,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40121,9 +36929,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40144,9 +36949,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40167,9 +36969,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40190,9 +36989,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40213,9 +37009,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40236,9 +37029,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40259,9 +37049,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40282,9 +37069,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40433,9 +37217,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40456,9 +37237,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40479,9 +37257,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40502,9 +37277,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40525,9 +37297,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40548,9 +37317,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40571,9 +37337,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40594,9 +37357,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40617,9 +37377,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40640,9 +37397,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40663,9 +37417,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40686,9 +37437,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -40716,9 +37464,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					i.fr.ip += 4
 				}
 			}
@@ -40740,9 +37485,6 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					i.stack[i.sp] = types.BoxI1(r0.Ref() == 0)
 					i.sp++
 					i.fr.ip += 4
@@ -40765,17 +37507,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40796,17 +37532,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40827,17 +37557,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40858,17 +37582,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40889,17 +37607,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40920,17 +37632,11 @@ var (
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40951,17 +37657,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -40982,17 +37682,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -41013,17 +37707,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -41044,17 +37732,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -41075,17 +37757,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -41106,17 +37782,11 @@ var (
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -41140,17 +37810,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41179,17 +37843,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41218,17 +37876,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41257,17 +37909,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41296,17 +37942,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41335,17 +37975,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41374,17 +38008,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41413,17 +38041,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41452,17 +38074,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41491,17 +38107,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41530,17 +38140,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41569,17 +38173,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41608,17 +38206,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41647,17 +38239,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41686,17 +38272,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41725,17 +38305,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41764,17 +38338,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41803,17 +38371,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41842,17 +38404,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41881,17 +38437,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41920,17 +38470,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41959,17 +38503,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -41998,17 +38536,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42037,17 +38569,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42076,17 +38602,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42115,17 +38635,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42154,17 +38668,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42193,17 +38701,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42232,17 +38734,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42271,17 +38767,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42310,17 +38800,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42349,17 +38833,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -42388,17 +38866,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42428,17 +38900,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42468,17 +38934,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42508,17 +38968,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42548,17 +39002,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42588,17 +39036,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42628,17 +39070,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42668,17 +39104,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42708,17 +39138,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42748,17 +39172,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42788,17 +39206,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42828,17 +39240,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42868,17 +39274,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42908,17 +39308,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42948,17 +39342,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -42988,17 +39376,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43028,17 +39410,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43068,17 +39444,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43108,17 +39478,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43148,17 +39512,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43188,17 +39546,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43228,17 +39580,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43268,17 +39614,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43308,17 +39648,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43348,17 +39682,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43388,17 +39716,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43428,17 +39750,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43468,17 +39784,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43508,17 +39818,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43548,17 +39852,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43588,17 +39886,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43628,17 +39920,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -43668,17 +39954,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43707,17 +39987,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43746,17 +40020,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43785,17 +40053,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43824,17 +40086,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43863,17 +40119,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43902,17 +40152,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43941,17 +40185,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -43980,17 +40218,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44019,17 +40251,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44058,17 +40284,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44097,17 +40317,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44136,17 +40350,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44175,17 +40383,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44214,17 +40416,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44253,17 +40449,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44292,17 +40482,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44331,17 +40515,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44370,17 +40548,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44409,17 +40581,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44448,17 +40614,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44487,17 +40647,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44526,17 +40680,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44565,17 +40713,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44604,17 +40746,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44643,17 +40779,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44682,17 +40812,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44721,17 +40845,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44760,17 +40878,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44799,17 +40911,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44838,17 +40944,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44877,17 +40977,11 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -44913,17 +41007,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -44944,17 +41032,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -44975,17 +41057,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45006,17 +41082,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45037,17 +41107,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45068,17 +41132,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45099,17 +41157,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45130,17 +41182,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45161,17 +41207,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45192,17 +41232,11 @@ var (
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45223,17 +41257,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45254,17 +41282,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45285,17 +41307,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45316,17 +41332,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45347,17 +41357,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45378,17 +41382,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45409,17 +41407,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45440,17 +41432,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45471,17 +41457,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45502,17 +41482,11 @@ var (
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -45532,9 +41506,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -45563,9 +41534,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -45594,9 +41562,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -45625,9 +41590,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -45656,9 +41618,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -45687,9 +41646,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -45726,9 +41682,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -45755,9 +41708,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -45784,9 +41734,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -45945,9 +41892,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(min(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -45974,9 +41918,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(max(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46003,9 +41944,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46032,9 +41970,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46061,9 +41996,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46090,9 +42022,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46119,9 +42048,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46148,9 +42074,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46177,9 +42100,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46198,9 +42118,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46229,9 +42146,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46260,9 +42174,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46291,9 +42202,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46322,9 +42230,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46353,9 +42258,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46392,9 +42294,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46421,9 +42320,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46450,9 +42346,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46611,9 +42504,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Min(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46640,9 +42530,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Max(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46669,9 +42556,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxF64(math.Copysign(v0, v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46698,9 +42582,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46727,9 +42608,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46756,9 +42634,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46785,9 +42660,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46814,9 +42686,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46843,9 +42712,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -46864,9 +42730,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46895,9 +42758,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46937,9 +42797,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -46974,9 +42831,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47011,9 +42865,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47048,9 +42899,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47085,9 +42933,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47122,9 +42967,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47159,9 +43001,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47196,9 +43035,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47233,9 +43069,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47423,9 +43256,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47460,9 +43290,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47497,9 +43324,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47534,9 +43358,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47571,9 +43392,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47608,9 +43426,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47645,9 +43460,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47682,9 +43494,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47719,9 +43528,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47756,9 +43562,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47793,9 +43596,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -47830,9 +43630,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48020,9 +43817,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48057,9 +43851,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48094,9 +43885,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48131,9 +43919,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48168,9 +43953,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48205,9 +43987,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48242,9 +44021,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48279,9 +44055,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48316,9 +44089,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48353,9 +44123,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48390,9 +44157,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48427,9 +44191,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48660,9 +44421,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48697,9 +44455,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48734,9 +44489,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48770,9 +44522,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48805,9 +44554,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48840,9 +44586,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48876,9 +44619,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48913,9 +44653,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48950,9 +44687,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -48987,9 +44721,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49024,9 +44755,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49061,9 +44789,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49098,9 +44823,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49135,9 +44857,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49172,9 +44891,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49209,9 +44925,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49246,9 +44959,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49283,9 +44993,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49320,9 +45027,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49357,9 +45061,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49394,9 +45095,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49635,9 +45333,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49672,9 +45367,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49709,9 +45401,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49746,9 +45435,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49783,9 +45469,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49820,9 +45503,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49857,9 +45537,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49894,9 +45571,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49931,9 +45605,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -49968,9 +45639,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50005,9 +45673,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50042,9 +45707,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50068,9 +45730,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50099,9 +45758,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50130,9 +45786,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50161,9 +45814,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -50203,9 +45853,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50241,9 +45888,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50279,9 +45923,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50317,9 +45958,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50355,9 +45993,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50393,9 +46028,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50431,9 +46063,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50469,9 +46098,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50507,9 +46133,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50701,9 +46324,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50739,9 +46359,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50777,9 +46394,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50815,9 +46429,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50853,9 +46464,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50891,9 +46499,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50929,9 +46534,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -50967,9 +46569,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51005,9 +46604,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51043,9 +46639,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51081,9 +46674,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51119,9 +46709,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51313,9 +46900,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51351,9 +46935,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51389,9 +46970,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51427,9 +47005,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51465,9 +47040,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51503,9 +47075,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51541,9 +47110,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51579,9 +47145,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51617,9 +47180,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51655,9 +47215,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51693,9 +47250,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51731,9 +47285,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -51969,9 +47520,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52007,9 +47555,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52045,9 +47590,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52082,9 +47624,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52118,9 +47657,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52154,9 +47690,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52191,9 +47724,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52229,9 +47759,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52267,9 +47794,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52305,9 +47829,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52343,9 +47864,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52381,9 +47899,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52419,9 +47934,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52457,9 +47969,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52495,9 +48004,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52533,9 +48039,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52571,9 +48074,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52609,9 +48109,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52647,9 +48144,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52685,9 +48179,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52723,9 +48214,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -52969,9 +48457,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53007,9 +48492,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53045,9 +48527,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53083,9 +48562,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53121,9 +48597,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53159,9 +48632,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53197,9 +48667,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53235,9 +48702,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53273,9 +48737,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53311,9 +48772,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53349,9 +48807,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53387,9 +48842,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
@@ -53425,9 +48877,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53462,9 +48911,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53499,9 +48945,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53536,9 +48979,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53573,9 +49013,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53610,9 +49047,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53647,9 +49081,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53684,9 +49115,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53721,9 +49149,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53911,9 +49336,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53948,9 +49370,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -53985,9 +49404,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54022,9 +49438,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54059,9 +49472,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54096,9 +49506,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54133,9 +49540,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54170,9 +49574,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54207,9 +49608,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54244,9 +49642,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54281,9 +49676,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54318,9 +49710,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54508,9 +49897,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54545,9 +49931,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54582,9 +49965,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54619,9 +49999,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54656,9 +50033,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54693,9 +50067,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54730,9 +50101,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54767,9 +50135,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54804,9 +50169,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54841,9 +50203,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54878,9 +50237,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -54915,9 +50271,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55148,9 +50501,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55185,9 +50535,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55222,9 +50569,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55258,9 +50602,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55293,9 +50634,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55328,9 +50666,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55364,9 +50699,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55401,9 +50733,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55438,9 +50767,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55475,9 +50801,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55512,9 +50835,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55549,9 +50869,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55586,9 +50903,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55623,9 +50937,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55660,9 +50971,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55697,9 +51005,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55734,9 +51039,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55771,9 +51073,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55808,9 +51107,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55845,9 +51141,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -55882,9 +51175,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56123,9 +51413,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56160,9 +51447,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56197,9 +51481,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56234,9 +51515,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56271,9 +51549,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56308,9 +51583,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56345,9 +51617,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56382,9 +51651,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56419,9 +51685,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56456,9 +51719,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56493,9 +51753,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56530,9 +51787,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56556,9 +51810,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -56589,9 +51840,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56618,9 +51866,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56647,9 +51892,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56844,9 +52086,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 << (v1 & 31))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56873,9 +52112,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(v0 >> (v1 & 31))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56902,9 +52138,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56930,9 +52163,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56958,9 +52188,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -56986,9 +52213,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57015,9 +52239,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57044,9 +52265,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57073,9 +52291,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57102,9 +52317,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57131,9 +52343,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57160,9 +52369,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57189,9 +52395,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57218,9 +52421,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57247,9 +52447,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57276,9 +52473,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57305,9 +52499,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57334,9 +52525,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57355,9 +52543,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57386,9 +52571,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57417,9 +52599,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57448,9 +52627,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57479,9 +52655,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57510,9 +52683,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57541,9 +52711,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57572,9 +52739,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57603,9 +52767,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57634,9 +52795,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -57673,9 +52831,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57702,9 +52857,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57731,9 +52883,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57760,9 +52909,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57789,9 +52935,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57818,9 +52961,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57847,9 +52987,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 + v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57876,9 +53013,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 - v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -57905,9 +53039,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 * v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58106,9 +53237,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 << (v1 & 63))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58135,9 +53263,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 >> (v1 & 63))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58164,9 +53289,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58193,9 +53315,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 ^ v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58222,9 +53341,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 & v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58251,9 +53367,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(v0 | v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58280,9 +53393,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58309,9 +53419,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58338,9 +53445,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 == v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58367,9 +53471,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 != v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58396,9 +53497,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(v0 < v1)
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58425,9 +53523,6 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
@@ -58446,9 +53541,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58477,9 +53569,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58508,9 +53597,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58539,9 +53625,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58569,9 +53652,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58596,9 +53676,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58623,9 +53700,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58650,9 +53724,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58677,9 +53748,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58704,9 +53772,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58731,9 +53796,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58758,9 +53820,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58785,9 +53844,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58923,9 +53979,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58950,9 +54003,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -58977,9 +54027,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59004,9 +54051,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59031,9 +54075,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59058,9 +54099,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59085,9 +54123,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59112,9 +54147,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59139,9 +54171,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59166,9 +54195,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59193,9 +54219,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59220,9 +54243,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59358,9 +54378,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59385,9 +54402,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59412,9 +54426,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59439,9 +54450,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59466,9 +54474,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59493,9 +54498,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59520,9 +54522,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59547,9 +54546,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59574,9 +54570,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59601,9 +54594,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59621,9 +54611,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59644,9 +54631,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59671,9 +54655,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59698,9 +54679,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59865,9 +54843,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59892,9 +54867,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59919,9 +54891,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59946,9 +54915,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59972,9 +54938,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -59998,9 +54961,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60024,9 +54984,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60051,9 +55008,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60078,9 +55032,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60105,9 +55056,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60132,9 +55080,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60159,9 +55104,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60186,9 +55128,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60213,9 +55152,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60240,9 +55176,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60267,9 +55200,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60294,9 +55224,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60321,9 +55248,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60348,9 +55272,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60375,9 +55296,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60402,9 +55320,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60573,9 +55488,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60600,9 +55512,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60627,9 +55536,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60654,9 +55560,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60681,9 +55584,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60708,9 +55608,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60735,9 +55632,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60762,9 +55656,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60789,9 +55680,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60816,9 +55704,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60843,9 +55728,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60870,9 +55752,6 @@ var (
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
@@ -60948,9 +55827,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -60971,9 +55847,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -60994,9 +55867,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61017,9 +55887,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61040,9 +55907,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61063,9 +55927,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61086,9 +55947,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61109,9 +55967,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61132,9 +55987,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61155,9 +56007,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61177,9 +56026,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
@@ -61244,9 +56090,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
@@ -61317,9 +56160,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61336,9 +56176,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61355,9 +56192,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61486,9 +56320,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61505,9 +56336,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61524,9 +56352,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61543,9 +56368,6 @@ var (
 				r0 := types.BoxI32(int32(instr.Instruction(c.code[start:]).Operand(0)))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61562,9 +56384,6 @@ var (
 				r0 := types.BoxI32(int32(instr.Instruction(c.code[start:]).Operand(0)))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61581,9 +56400,6 @@ var (
 				r0 := types.BoxI32(int32(instr.Instruction(c.code[start:]).Operand(0)))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61600,9 +56416,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61619,9 +56432,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61638,9 +56448,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61657,9 +56464,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61676,9 +56480,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61695,9 +56496,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61715,9 +56513,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if v0 != 0 {
 						i.fr.ip += offset
 					}
@@ -61732,9 +56527,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61751,9 +56543,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61770,9 +56559,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61789,9 +56575,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61808,9 +56591,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -61827,9 +56607,6 @@ var (
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62104,9 +56881,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62127,9 +56901,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62150,9 +56921,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62173,9 +56941,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62196,9 +56961,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62219,9 +56981,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62242,9 +57001,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62265,9 +57021,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62288,9 +57041,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62311,9 +57061,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62333,9 +57080,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62352,9 +57096,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62371,9 +57112,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62390,9 +57128,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62409,9 +57144,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62428,9 +57160,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62447,9 +57176,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62466,9 +57192,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62485,9 +57208,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62616,9 +57336,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62635,9 +57352,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62654,9 +57368,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62673,9 +57384,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62692,9 +57400,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62711,9 +57416,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62730,9 +57432,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62749,9 +57448,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62768,9 +57464,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62787,9 +57480,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62806,9 +57496,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -62825,9 +57512,6 @@ var (
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63102,9 +57786,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63125,9 +57806,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63148,9 +57826,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63171,9 +57846,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63194,9 +57866,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63217,9 +57886,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63239,9 +57905,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63258,9 +57921,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63277,9 +57937,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63386,9 +58043,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63405,9 +58059,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63424,9 +58075,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63443,9 +58091,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63462,9 +58107,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63481,9 +58123,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63500,9 +58139,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63519,9 +58155,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63538,9 +58171,6 @@ var (
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63700,9 +58330,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63723,9 +58350,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63746,9 +58370,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63769,9 +58390,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63792,9 +58410,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63815,9 +58430,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63837,9 +58449,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63856,9 +58465,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63875,9 +58481,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -63984,9 +58587,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64003,9 +58603,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64022,9 +58619,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64041,9 +58635,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64060,9 +58651,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64079,9 +58667,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64098,9 +58683,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64117,9 +58699,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
@@ -64136,9 +58715,6 @@ var (
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
 				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}

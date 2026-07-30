@@ -13,6 +13,7 @@ type value struct {
 	op       instr.Opcode
 	head     instr.Opcode
 	compile  []jen.Code
+	room     []jen.Code
 	check    []jen.Code
 	body     []jen.Code
 	drop     []jen.Code
@@ -462,6 +463,7 @@ func (l loader) finish(result value, current step, indexed bool) (value, error) 
 		result.push = materialize(result, retain, l.width)
 		return result, nil
 	}
+	result.push = append(result.push, result.room...)
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
 	if current.op == instr.CONST_GET && current.kind == instr.KindAny {
@@ -696,7 +698,8 @@ func constHandler(current step, input value) jen.Code {
 }
 
 func materialize(input value, retain bool, advance int) []jen.Code {
-	body := append([]jen.Code(nil), input.check...)
+	body := append([]jen.Code(nil), input.room...)
+	body = append(body, input.check...)
 	body = append(body, input.body...)
 	if retain {
 		body = append(body, jen.Id("i").Dot("retainBox").Call(input.boxed))
@@ -1475,6 +1478,14 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	}
 
 	var compile, body []jen.Code
+	// delta is the operation's net effect on the operand stack: it grows only
+	// when every operand was folded into a temporary. Fused sources never
+	// push, so one room check for delta covers the whole handler, and a
+	// conditional consumer branches instead of pushing and needs none.
+	delta := len(inputs) - arity + 1
+	if !conditional && delta > 0 {
+		body = append(body, overflow())
+	}
 	for _, source := range inputs {
 		compile = append(compile, source.compile...)
 		body = append(body, source.check...)
@@ -1508,7 +1519,6 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	if conditional {
 		body = append(body, jump(jen.Id(result).Dot("Bool").Call(), missing, advance)...)
 	} else {
-		delta := len(inputs) - arity + 1
 		if delta > 0 {
 			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(result), jen.Id("i").Dot("sp").Op("++"))
 		} else {
@@ -1805,7 +1815,10 @@ func traps(op instr.Opcode) bool {
 func load(current step, slot, offset int, label string, standalone bool) (value, error) {
 	loader := newLoader(current.op, slot, offset, label, standalone)
 	result := value{op: current.op, head: current.op, boxed: jen.Id(loader.boxed)}
-	result.check = append(result.check, overflow())
+	// A source only needs stack room when it pushes on its own. Fused into a
+	// consumer it stays in a temporary, and the consumer checks the room its
+	// own net push needs.
+	result.room = append(result.room, overflow())
 
 	_, _, indexed := slotInfo(current.op)
 	loader.decode(&result, current.op)

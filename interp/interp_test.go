@@ -2186,6 +2186,41 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, i.sp)
 	})
 
+	t.Run("fused sources push once and need one free slot", func(t *testing.T) {
+		// Both operands stay in temporaries, so the fused handler grows the
+		// stack by exactly one slot no matter how many sources it folded.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 6),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_ADD),
+		}, program.WithGlobals(types.TypeI32))
+		i := New(prog, WithStack(1), WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(12), value)
+	})
+
+	t.Run("fused sources report overflow before reading their operands", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 6),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_ADD),
+		}, program.WithGlobals(types.TypeI32))
+		i := New(prog, WithStack(1), WithThreshold(-1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.Equal(t, 1, i.sp)
+	})
+
 	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
