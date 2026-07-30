@@ -1,9 +1,10 @@
-package types
+package types_test
 
 import (
 	"strings"
 	"testing"
 
+	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,11 +25,11 @@ func FuzzParseType(f *testing.F) {
 		if len(value) > 4096 {
 			t.Skip()
 		}
-		typ, err := Parse(value)
+		typ, err := types.Parse(value)
 		if err != nil {
 			return
 		}
-		roundTrip, err := Parse(typ.String())
+		roundTrip, err := types.Parse(typ.String())
 		require.NoError(t, err)
 		require.True(t, typ.Equals(roundTrip), "type %q formatted as %q", value, typ.String())
 	})
@@ -45,11 +46,11 @@ func FuzzParseFunction(f *testing.F) {
 			t.Skip()
 		}
 		lines := strings.Split(strings.TrimSuffix(value, "\n"), "\n")
-		fn, err := ParseFunction(lines)
+		fn, err := types.ParseFunction(lines)
 		if err != nil {
 			return
 		}
-		roundTrip, err := ParseFunction(strings.Split(strings.TrimSuffix(fn.String(), "\n"), "\n"))
+		roundTrip, err := types.ParseFunction(strings.Split(strings.TrimSuffix(fn.String(), "\n"), "\n"))
 		require.NoError(t, err)
 		require.Equal(t, fn.String(), roundTrip.String())
 	})

@@ -1,38 +1,39 @@
-package types
+package types_test
 
 import (
 	"testing"
 
+	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewIteratorType(t *testing.T) {
-	typ := NewIteratorType(TypeI32)
-	require.Equal(t, TypeI32, typ.Elem)
+	typ := types.NewIteratorType(types.TypeI32)
+	require.Equal(t, types.TypeI32, typ.Elem)
 }
 
 func TestIteratorType_Kind(t *testing.T) {
-	require.Equal(t, KindRef, NewIteratorType(TypeI32).Kind())
+	require.Equal(t, types.KindRef, types.NewIteratorType(types.TypeI32).Kind())
 }
 
 func TestIteratorType_String(t *testing.T) {
-	require.Equal(t, "iterator[i32]", NewIteratorType(TypeI32).String())
+	require.Equal(t, "iterator[i32]", types.NewIteratorType(types.TypeI32).String())
 }
 
 func TestIteratorType_Cast(t *testing.T) {
-	typ := NewIteratorType(TypeI32)
+	typ := types.NewIteratorType(types.TypeI32)
 
 	require.True(t, typ.Cast(typ))
-	require.True(t, typ.Cast(NewIteratorType(TypeI32)))
-	require.False(t, typ.Cast(NewIteratorType(TypeI64)))
-	require.False(t, typ.Cast(TypeRef))
+	require.True(t, typ.Cast(types.NewIteratorType(types.TypeI32)))
+	require.False(t, typ.Cast(types.NewIteratorType(types.TypeI64)))
+	require.False(t, typ.Cast(types.TypeRef))
 }
 
 func TestIteratorType_Equals(t *testing.T) {
-	typ := NewIteratorType(TypeI32)
+	typ := types.NewIteratorType(types.TypeI32)
 
 	require.True(t, typ.Equals(typ))
-	require.True(t, typ.Equals(NewIteratorType(TypeI32)))
-	require.False(t, typ.Equals(NewIteratorType(TypeI64)))
-	require.False(t, typ.Equals(TypeRef))
+	require.True(t, typ.Equals(types.NewIteratorType(types.TypeI32)))
+	require.False(t, typ.Equals(types.NewIteratorType(types.TypeI64)))
+	require.False(t, typ.Equals(types.TypeRef))
 }
