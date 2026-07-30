@@ -186,10 +186,10 @@ Violations cause silent corruption or invalid execution.
 Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §12.
 
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
-- Unit tests use the production package; reserve `_test` packages for public examples and genuine external conformance tests.
+- Every test package uses the production package name plus `_test` and acts as an importing client.
 - Put sub-cases under `t.Run`; do not split them into parallel top-level tests.
 - Keep setup, execution, and assertions visible unless specification §12 permits a real reusable abstraction.
-- Same-package white-box tests are limited to safety invariants or deterministic mechanics that stable public behavior cannot isolate.
+- Tests access no private symbol or representation; internal invariants are asserted through public observable behavior, generated output, or executable boundaries.
 - Use `require`, not `assert`.
 
 ## Documentation Maintenance
