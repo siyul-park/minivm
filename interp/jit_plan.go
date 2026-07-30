@@ -50,6 +50,7 @@ type plan struct {
 	kind    entryKind
 	root    int
 	blocks  []block
+	carried []int
 	hoist   *hoist
 	noSpill bool
 }
@@ -122,6 +123,7 @@ const (
 const (
 	noBlock      = -1
 	maxHoistSlot = 4095
+	maxCarried   = 7
 )
 
 func input(i *Interpreter, addr int) (*compileInput, bool) {
@@ -310,6 +312,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 		roots[block.anchor] = id
 	}
 	wire(&result, roots)
+	result.carried = loopCarried(input.function, result.blocks)
 	return []plan{result}, nil
 }
 
@@ -405,6 +408,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			}
 		}
 		wire(&planned, roots)
+		planned.carried = loopCarried(input.function, planned.blocks)
 		if kind == entryLoop {
 			planned.hoist = hoistable(input.function, planned.blocks)
 		}
@@ -412,6 +416,80 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		plans = append(plans, planned)
 	}
 	return plans, nil
+}
+
+// loopCarried returns the inline scalar locals that a call-free native loop
+// may keep authoritative in registers until an exit. The plan must contain a
+// real backward edge; straight-line prefixes keep the VM slots authoritative.
+// Refs and i64s stay slot-backed because their load and ownership guards can
+// deopt while the register set is only partly prepared.
+func loopCarried(fn *types.Function, blocks []block) []int {
+	if fn == nil {
+		return nil
+	}
+	type loopRange struct {
+		addr       int
+		start, end int
+	}
+	var loops []loopRange
+	for _, block := range blocks {
+		for _, edge := range block.term.edges {
+			if edge.block != noBlock && edge.anchor.addr == block.anchor.addr && edge.anchor.ip <= block.anchor.ip {
+				loops = append(loops, loopRange{addr: block.anchor.addr, start: edge.anchor.ip, end: block.anchor.ip})
+			}
+		}
+	}
+	if len(loops) == 0 {
+		return nil
+	}
+
+	locals := fn.Slots()
+	read := make([]bool, len(locals))
+	written := make([]bool, len(locals))
+	for _, block := range blocks {
+		inside := false
+		for _, loop := range loops {
+			if block.anchor.addr == loop.addr && block.anchor.ip >= loop.start && block.anchor.ip <= loop.end {
+				inside = true
+				break
+			}
+		}
+		for _, step := range block.steps {
+			if step.op == instr.CALL || step.op == instr.RETURN_CALL {
+				return nil
+			}
+			if !inside {
+				continue
+			}
+			switch step.op {
+			case instr.LOCAL_GET:
+				local := int(step.args[0])
+				if local >= 0 && local < len(read) {
+					read[local] = true
+				}
+			case instr.LOCAL_SET, instr.LOCAL_TEE:
+				local := int(step.args[0])
+				if local >= 0 && local < len(written) {
+					written[local] = true
+				}
+			}
+		}
+	}
+
+	var carried []int
+	for local, ok := range written {
+		if !ok || !read[local] || local > maxHoistSlot {
+			continue
+		}
+		switch locals[local] {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64:
+			carried = append(carried, local)
+		}
+	}
+	if len(carried) > maxCarried {
+		return nil
+	}
+	return carried
 }
 
 // hoistable picks the most-accessed loop-invariant container for a loop plan.

@@ -485,6 +485,88 @@ func TestTracePlan(t *testing.T) {
 	})
 }
 
+func TestLoopCarried(t *testing.T) {
+	loop := func(steps []step) []block {
+		return []block{{
+			steps: steps,
+			term:  terminator{kind: terminateBranch, edges: []edge{{block: 0}}},
+		}}
+	}
+
+	t.Run("selects read-written inline scalars", func(t *testing.T) {
+		fn := &types.Function{Locals: []types.Type{
+			types.TypeI32, types.TypeF64, types.TypeI64, types.TypeRef, types.TypeI32,
+		}}
+		blocks := loop([]step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_SET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_TEE, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.LOCAL_SET, args: [2]uint64{2}},
+			{op: instr.LOCAL_GET, args: [2]uint64{3}},
+			{op: instr.LOCAL_SET, args: [2]uint64{3}},
+			{op: instr.LOCAL_SET, args: [2]uint64{4}},
+		})
+
+		require.Equal(t, []int{0, 1}, loopCarried(fn, blocks))
+	})
+
+	t.Run("requires a root backedge", func(t *testing.T) {
+		fn := &types.Function{Locals: []types.Type{types.TypeI32}}
+		blocks := loop([]step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_SET, args: [2]uint64{0}},
+		})
+		blocks[0].term.edges[0].block = noBlock
+
+		require.Nil(t, loopCarried(fn, blocks))
+	})
+
+	t.Run("ignores initialization before the loop", func(t *testing.T) {
+		fn := &types.Function{Locals: []types.Type{types.TypeI32}}
+		blocks := []block{
+			{
+				anchor: anchor{ip: 0},
+				steps:  []step{{op: instr.LOCAL_SET, args: [2]uint64{0}}},
+				term:   terminator{kind: terminateBranch, edges: []edge{{anchor: anchor{ip: 4}, block: 1}}},
+			},
+			{
+				anchor: anchor{ip: 4},
+				steps:  []step{{op: instr.LOCAL_GET, args: [2]uint64{0}}},
+				term:   terminator{kind: terminateBranch, edges: []edge{{anchor: anchor{ip: 4}, block: 1}}},
+			},
+		}
+
+		require.Nil(t, loopCarried(fn, blocks))
+	})
+
+	t.Run("rejects calls", func(t *testing.T) {
+		fn := &types.Function{Locals: []types.Type{types.TypeI32}}
+		blocks := loop([]step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_SET, args: [2]uint64{0}},
+			{op: instr.CALL},
+		})
+
+		require.Nil(t, loopCarried(fn, blocks))
+	})
+
+	t.Run("rejects register overflow", func(t *testing.T) {
+		fn := &types.Function{Locals: make([]types.Type, maxCarried+1)}
+		steps := make([]step, 0, 2*len(fn.Locals))
+		for local := range fn.Locals {
+			fn.Locals[local] = types.TypeI32
+			steps = append(steps,
+				step{op: instr.LOCAL_GET, args: [2]uint64{uint64(local)}},
+				step{op: instr.LOCAL_SET, args: [2]uint64{uint64(local)}},
+			)
+		}
+
+		require.Nil(t, loopCarried(fn, loop(steps)))
+	})
+}
+
 func TestHoistable(t *testing.T) {
 	i32 := itab(types.TypedArray[int32](nil))
 	fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeI32}}

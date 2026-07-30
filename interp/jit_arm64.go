@@ -113,7 +113,7 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 // snapshot was flushed to its VM stack slot without a retain, and the
 // interpreter resuming there releases each stack ref it pops, so the stub
 // takes the retain here — on the cold path only.
-func (l arm64Lowerer) emitExits(ctx *lowering) {
+func (l arm64Lowerer) emitExits(ctx *lowering) bool {
 	// Every exit's cold stub is a mutually exclusive, straight-line block
 	// (each ends in trapFlushed, an unconditional trap/return), so the
 	// registers used to reload-and-retain a deferred value are safe to reuse
@@ -131,6 +131,9 @@ func (l arm64Lowerer) emitExits(ctx *lowering) {
 		ctx.assembler.Bind(exit.label)
 		if ctx.budget.Width() != asm.WidthUndefined {
 			ctx.assembler.Emit(arm64.STR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
+		}
+		if !l.commitCarried(ctx) {
+			return false
 		}
 		var addr asm.VReg
 		for j, v := range exit.values {
@@ -170,6 +173,7 @@ func (l arm64Lowerer) emitExits(ctx *lowering) {
 		}
 		l.trapFlushed(ctx, trapFallback, exit.resume, exit.id)
 	}
+	return true
 }
 
 func (l arm64Lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
@@ -190,7 +194,7 @@ func (l arm64Lowerer) emitBlock(ctx *lowering, id int, tail []int) bool {
 		for _, slot := range block.state {
 			ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, backing: slot.backing, slot: slot.slot})
 		}
-		clear(ctx.frame().state)
+		l.clearLocals(ctx)
 		l.reload(ctx)
 	}
 	done, ok := l.steps(ctx, block.steps)
@@ -296,8 +300,7 @@ func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, 
 			if ctx.hoist.live {
 				ctx.assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(ctx.hoist.dataPtr), Src2: asm.V(ctx.hoist.n)})
 			}
-			l.back(ctx, ctx.back, target.anchor.ip)
-			return true
+			return l.back(ctx, ctx.back, target.anchor.ip)
 		}
 		return l.path(ctx, from, target, tail, opcode)
 	}
@@ -916,7 +919,14 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 	if !vp.raw {
 		return false
 	}
-	f.locals[idx] = *vp
+	if carried := l.carried(ctx, f.base+idx); carried != nil {
+		if carried.value.reg.ID() != vp.reg.ID() {
+			ctx.assembler.Emit(arm64.MOV(carried.value.reg, vp.reg))
+		}
+		f.locals[idx] = carried.value
+	} else {
+		f.locals[idx] = *vp
+	}
 	f.state[idx] = f.state[idx]&^localStored | localLoaded | localDirty
 	if pop {
 		ctx.pop()
@@ -1095,7 +1105,7 @@ func (l arm64Lowerer) clean(ctx *lowering) bool {
 	for fi := range ctx.frames {
 		f := &ctx.frames[fi]
 		for idx := range f.state {
-			if f.state[idx]&localDirty != 0 {
+			if f.state[idx]&localDirty != 0 && l.carried(ctx, f.base+idx) == nil {
 				return false
 			}
 		}
@@ -1197,7 +1207,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
-	clear(ctx.frame().state)
+	l.clearLocals(ctx)
 	fail := ctx.queueExit(nil, op.ip, prof.ExitGuardValue, int(op.op))
 
 	a := ctx.assembler
@@ -1298,8 +1308,7 @@ func (l arm64Lowerer) path(ctx *lowering, from anchor, target edge, tail []int, 
 		return false
 	}
 	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
-		l.back(ctx, label, target.anchor.ip)
-		return true
+		return l.back(ctx, label, target.anchor.ip)
 	}
 	ctx.assembler.Emit(arm64.BLabel(label))
 	return true
@@ -1307,7 +1316,7 @@ func (l arm64Lowerer) path(ctx *lowering, from anchor, target edge, tail []int, 
 
 // back decrements the safepoint budget and continues at label while work remains.
 // Native loops keep the budget in a register; chained loops update its VM slot.
-func (l arm64Lowerer) back(ctx *lowering, label asm.Label, resume int) {
+func (l arm64Lowerer) back(ctx *lowering, label asm.Label, resume int) bool {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	budget := ctx.budget
@@ -1323,7 +1332,11 @@ func (l arm64Lowerer) back(ctx *lowering, label asm.Label, resume int) {
 	if ctx.budget.Width() != asm.WidthUndefined {
 		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
 	}
+	if !l.commitCarried(ctx) {
+		return false
+	}
 	l.trapFlushed(ctx, trapYield, resume, -1)
+	return true
 }
 
 func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) (asm.Label, bool) {
@@ -1525,9 +1538,7 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		regs[idx] = ctx.pinTo(arm64.IntRets[idx])
 	}
 	ctx.values = ctx.values[:len(ctx.values)-params]
-	for fi := range ctx.frames {
-		clear(ctx.frames[fi].state)
-	}
+	l.clearLocals(ctx)
 	l.reload(ctx)
 	for idx, typ := range rets {
 		ctx.push(value{reg: regs[idx], kind: typ.Kind(), raw: true})
@@ -2734,6 +2745,9 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
+	if !l.commitCarried(ctx) {
+		return false
+	}
 	// The wrapper preserves this top-level operand stack on trapNone (see
 	// start()), and the interpreter adopts each stack ref as owned, so a
 	// deferred ref left on the stack at module end must re-take its retain.
@@ -3361,9 +3375,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		if !l.flush(ctx, flushSnapshot) {
 			return false
 		}
-		for idx := range ctx.frames {
-			clear(ctx.frames[idx].state)
-		}
+		l.clearLocals(ctx)
 		ctx.reuseLocals = len(ctx.values) == 3
 		fail = ctx.queueExit(nil, op.ip, prof.ExitGuardShape, int(op.op))
 		bounds = ctx.queueExit(nil, op.ip, prof.ExitGuardBounds, int(op.op))
@@ -3628,9 +3640,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 		if !l.flush(ctx, flushSnapshot) {
 			return false
 		}
-		for idx := range ctx.frames {
-			clear(ctx.frames[idx].state)
-		}
+		l.clearLocals(ctx)
 		ctx.reuseLocals = len(ctx.values) == 3
 		fail = ctx.queueExit(nil, op.ip, prof.ExitGuardShape, int(op.op))
 		bounds = ctx.queueExit(nil, op.ip, prof.ExitGuardBounds, int(op.op))
@@ -3978,6 +3988,9 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReas
 	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
+	if !l.commitCarried(ctx) {
+		return false
+	}
 	id := -1
 	if kind == trapFallback {
 		// trapFallback hands the flushed operand stack to the threaded
@@ -4263,18 +4276,23 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 		}
 	}
 	a := ctx.assembler
-	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
+	var addr asm.VReg
 	for fi := range ctx.frames {
 		f := &ctx.frames[fi]
 		for idx := range f.kinds {
 			if f.state[idx]&localDirty == 0 {
 				continue
 			}
+			if l.carried(ctx, f.base+idx) != nil {
+				continue
+			}
 			if f.state[idx]&localStored == 0 {
 				boxed, ok := l.boxHome(ctx, f.locals[idx])
 				if !ok {
 					return false
+				}
+				if addr.Width() == asm.WidthUndefined {
+					addr = l.base(ctx, ctx.pin(scratchStack))
 				}
 				a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
 				f.state[idx] |= localStored
@@ -4291,6 +4309,9 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// emitExits). The commit pre-scan above already rejected any deferred
 	// backing, so those cases only run on a non-commit flush.
 	for j, v := range ctx.values {
+		if addr.Width() == asm.WidthUndefined {
+			addr = l.base(ctx, ctx.pin(scratchStack))
+		}
 		switch v.backing {
 		case backingStack:
 			boxed, ok := l.boxHome(ctx, v)
@@ -4309,12 +4330,81 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	return true
 }
 
+// carry loads each eligible root-frame local before the loop label and keeps
+// its register authoritative until a cold handoff commits it to the VM slot.
+func (l arm64Lowerer) carry(ctx *lowering, locals []int, ip int) bool {
+	regs := [...]asm.PReg{arm64.X19, arm64.X20, arm64.X21, arm64.X22, arm64.X23, arm64.X24, arm64.X25}
+	if len(locals) > len(regs) {
+		return false
+	}
+	f := ctx.frame()
+	for idx, local := range locals {
+		if local < 0 || local >= len(f.kinds) || !l.loadLocal(ctx, f, local, ip) {
+			return false
+		}
+		pinned := ctx.pinTo(regs[idx])
+		ctx.assembler.Emit(arm64.MOV(pinned, f.locals[local].reg))
+		f.locals[local].reg = pinned
+		ctx.carried = append(ctx.carried, carriedLocal{
+			value: f.locals[local],
+			local: local,
+			slot:  f.base + local,
+		})
+	}
+	return true
+}
+
+// commitCarried writes the authoritative loop registers to their VM homes.
+// Callers place it only on paths that return control to the interpreter.
+func (l arm64Lowerer) commitCarried(ctx *lowering) bool {
+	if len(ctx.carried) == 0 {
+		return true
+	}
+	addr := l.base(ctx, ctx.pin(scratchStack))
+	for _, carried := range ctx.carried {
+		boxed, ok := l.boxHome(ctx, carried.value)
+		if !ok {
+			return false
+		}
+		ctx.assembler.Emit(arm64.STR(boxed, addr, int16(carried.slot*8)))
+	}
+	return true
+}
+
+func (arm64Lowerer) carried(ctx *lowering, slot int) *carriedLocal {
+	for idx := range ctx.carried {
+		if ctx.carried[idx].slot == slot {
+			return &ctx.carried[idx]
+		}
+	}
+	return nil
+}
+
+// clearLocals invalidates ordinary local caches while preserving root-loop
+// registers whose values no longer come from their VM slots.
+func (l arm64Lowerer) clearLocals(ctx *lowering) {
+	for idx := range ctx.frames {
+		clear(ctx.frames[idx].state)
+	}
+	if len(ctx.frames) == 0 {
+		return
+	}
+	f := &ctx.frames[0]
+	for _, carried := range ctx.carried {
+		f.locals[carried.local] = carried.value
+		f.state[carried.local] = localLoaded | localDirty
+	}
+}
+
 // localScratch returns a flushed local register that is no longer live in the
 // operand stack, or an undefined register when none can be reused safely.
-func (arm64Lowerer) localScratch(ctx *lowering) asm.VReg {
+func (l arm64Lowerer) localScratch(ctx *lowering) asm.VReg {
 	for fi := range ctx.frames {
 		frame := &ctx.frames[fi]
-		for _, local := range frame.locals {
+		for idx, local := range frame.locals {
+			if l.carried(ctx, frame.base+idx) != nil {
+				continue
+			}
 			reg := local.reg
 			if reg.Width() == asm.WidthUndefined {
 				continue
@@ -4597,6 +4687,9 @@ func lower(ctx *lowering, plan plan) bool {
 		ctx.budget = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
 	}
+	if len(plan.carried) > 0 && !l.carry(ctx, plan.carried, plan.anchor.ip) {
+		return false
+	}
 	if plan.kind == entryLoop && plan.hoist != nil && !l.hoist(ctx, *plan.hoist, plan.anchor.ip) {
 		return false
 	}
@@ -4620,13 +4713,13 @@ func lower(ctx *lowering, plan plan) bool {
 		ctx.values = work.values
 		ctx.frames = work.frames
 		ctx.assembler.Bind(work.label)
+		l.clearLocals(ctx)
 		l.reload(ctx)
 		if !l.emitBlock(ctx, work.block, work.tail) {
 			return false
 		}
 	}
-	l.emitExits(ctx)
-	return true
+	return l.emitExits(ctx)
 }
 
 // hoist derives the plan's loop-invariant container once per native entry:
