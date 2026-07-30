@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -176,6 +177,125 @@ func TestARM64_Backedge(t *testing.T) {
 			}
 		})
 	}
+}
+
+// LoopCarriedLocals protects write-back scalar locals in native loops. Hot
+// backedges keep their slots stale; every side exit and safepoint yield must
+// commit current registers before threaded execution observes the frame.
+func TestARM64_LoopCarriedLocals(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	t.Run("folded side exits preserve accumulators", func(t *testing.T) {
+		const size = int32(16)
+		b := program.NewBuilder()
+		b.Locals(types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		odd := b.Label()
+		advance := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(odd)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(advance)
+		b.Bind(odd)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Bind(advance)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for iteration := 0; iteration < 32; iteration++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, types.BoxI32(size+size/2), got)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+	})
+
+	t.Run("yield commits before WithTick one safepoint", func(t *testing.T) {
+		const limit = int32(loopBudget + 3)
+		b := program.NewBuilder()
+		b.Locals(types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(limit))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		for iteration := 0; iteration < 12; iteration++ {
+			require.NoError(t, jit.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(limit), got)
+			jit.Reset()
+		}
+		require.NoError(t, jit.Close())
+
+		var yields float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_yields_total" {
+				yields += metric.Value
+			}
+		}
+		require.Greater(t, yields, float64(0))
+	})
+}
+
+// Flush protects the hot-backedge invariant directly: a dirty carried local
+// remains register-authoritative and emits no VM-slot materialization.
+func TestARM64_Flush(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	assembler := asm.New(arm64.New())
+	reg := assembler.Reg(asm.RegTypeInt, asm.Width64)
+	local := value{reg: reg, kind: types.KindI32, raw: true}
+	ctx := &lowering{
+		assembler: assembler,
+		frames: []activation{{
+			kinds:  []types.Kind{types.KindI32},
+			locals: []value{local},
+			state:  []localState{localLoaded | localDirty},
+		}},
+		carried: []carriedLocal{{value: local}},
+	}
+
+	require.True(t, (arm64Lowerer{}).flush(ctx, flushCommit))
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.Empty(t, code)
+	require.Equal(t, localLoaded|localDirty, ctx.frames[0].state[0])
 }
 
 // AbortedSideExitDoesNotComplete protects partial unsupported traces from

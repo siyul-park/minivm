@@ -78,6 +78,7 @@ type lowering struct {
 
 	reuseLocals bool
 	spare       asm.VReg
+	carried     []carriedLocal
 
 	// hoist caches one loop-invariant container's slice header, derived by a
 	// per-entry prologue (see arm64Lowerer.hoist). The registers are pure
@@ -143,6 +144,14 @@ type activation struct {
 	returns  int
 }
 
+// carriedLocal is one root-frame scalar whose register is authoritative until
+// a native loop exits. slot remains the VM home committed by cold paths.
+type carriedLocal struct {
+	value value
+	local int
+	slot  int
+}
+
 type localState uint8
 
 const (
@@ -152,10 +161,11 @@ const (
 )
 
 // work is a deferred block whose branch point produced its symbolic state:
-// VM stack slots are current, so the block re-enters at label with
-// every local unloaded and every operand awaiting reload. If the branch
-// returned from an inlined callee, tail keeps the caller path that must run
-// after the deferred block stitches back into the caller frame.
+// ordinary VM stack slots are current, so the block re-enters at label with
+// every ordinary local unloaded and every operand awaiting reload. Carried
+// loop locals reconnect to their authoritative registers instead. If the
+// branch returned from an inlined callee, tail keeps the caller path that must
+// run after the deferred block stitches back into the caller frame.
 type work struct {
 	label  asm.Label
 	block  int
@@ -322,7 +332,17 @@ func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend
 	}
 	nativeLoop := plan.kind == entryLoop
 	reason, err := c.emit(input, plan, mod, frontend, arch, nativeLoop)
-	if reason != prof.CompileReasonRegisterPressure || !nativeLoop {
+	if reason != prof.CompileReasonRegisterPressure {
+		return reason, err
+	}
+	if len(plan.carried) > 0 {
+		plan.carried = nil
+		reason, err = c.emit(input, plan, mod, frontend, arch, nativeLoop)
+		if reason != prof.CompileReasonRegisterPressure {
+			return reason, err
+		}
+	}
+	if !nativeLoop {
 		return reason, err
 	}
 	return c.emit(input, plan, mod, frontend, arch, false)
