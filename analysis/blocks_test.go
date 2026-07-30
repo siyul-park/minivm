@@ -1,8 +1,9 @@
-package analysis
+package analysis_test
 
 import (
 	"testing"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
@@ -10,27 +11,27 @@ import (
 )
 
 func TestNewBlocksAnalysis(t *testing.T) {
-	require.NotNil(t, NewBlocksAnalysis())
+	require.NotNil(t, analysis.NewBlocksAnalysis())
 }
 
 func TestBlocks(t *testing.T) {
 	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.NOP)).MustBuild()
-	got, err := Blocks(fn)
+	got, err := analysis.Blocks(fn)
 	require.NoError(t, err)
-	require.Equal(t, []*BasicBlock{{Start: 0, End: 1}}, got)
+	require.Equal(t, []*analysis.BasicBlock{{Start: 0, End: 1}}, got)
 }
 
 func TestBlocksAnalysis_Run(t *testing.T) {
 	tests := []struct {
 		fn     *types.Function
-		blocks []*BasicBlock
+		blocks []*analysis.BasicBlock
 		err    error
 	}{
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.NOP),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   1,
@@ -43,7 +44,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.UNREACHABLE),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   1,
@@ -56,7 +57,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.RETURN),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   1,
@@ -70,7 +71,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.RETURN_CALL),
 				instr.New(instr.I32_CONST, 1),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 1},
 				{Start: 1, End: 6},
 			},
@@ -81,7 +82,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   3,
@@ -109,7 +110,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   8,
@@ -138,7 +139,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   11,
@@ -165,7 +166,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR, uint64(uint16(-9+1<<16))),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   9,
@@ -181,7 +182,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.BR_IF, uint64(uint16(-9+1<<16))),
 				instr.New(instr.I32_CONST, 2),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   9,
@@ -202,7 +203,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
 				instr.New(instr.I32_CONST, 2),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{
 					Start: 0,
 					End:   11,
@@ -221,13 +222,13 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 10),
 			).MustBuild(),
-			err: ErrInvalidJump,
+			err: analysis.ErrInvalidJump,
 		},
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR_TABLE, 1, 0, 10),
 			).MustBuild(),
-			err: ErrInvalidJump,
+			err: analysis.ErrInvalidJump,
 		},
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
@@ -236,7 +237,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 18, Succs: []int{1}, Preds: nil},
 				{Start: 18, End: 23, Succs: nil, Preds: []int{0}},
 			},
@@ -248,7 +249,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 8, Succs: []int{1}, Preds: nil},
 				{Start: 8, End: 18, Succs: nil, Preds: []int{0}},
 			},
@@ -259,7 +260,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.BR_IF, 5),
 				instr.New(instr.I32_CONST, 2),
 			).MustBuild(),
-			blocks: []*BasicBlock{
+			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 8, Succs: []int{1}, Preds: nil},
 				{Start: 8, End: 13, Succs: nil, Preds: []int{0}},
 			},
@@ -268,16 +269,16 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 100),
 			).MustBuild(),
-			err: ErrInvalidJump,
+			err: analysis.ErrInvalidJump,
 		},
 	}
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*BasicBlock](m, NewBlocksAnalysis())
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
 
 		t.Run(tt.fn.String(), func(t *testing.T) {
-			actual, err := pass.GetResult[[]*BasicBlock](m, tt.fn)
+			actual, err := pass.GetResult[[]*analysis.BasicBlock](m, tt.fn)
 			if tt.err != nil {
 				require.ErrorIs(t, err, tt.err)
 				return
@@ -298,12 +299,12 @@ func BenchmarkBlocksAnalysis_Run(b *testing.B) {
 		fn := types.NewFunctionBuilder(nil).Emit(emit...).MustBuild()
 
 		m := pass.NewManager()
-		analysis := NewBlocksAnalysis()
+		blocksAnalysis := analysis.NewBlocksAnalysis()
 
 		var err error
 		b.ResetTimer()
 		for b.Loop() {
-			_, err = analysis.Run(m, fn)
+			_, err = blocksAnalysis.Run(m, fn)
 			if err != nil {
 				break
 			}

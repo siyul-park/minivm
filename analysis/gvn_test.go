@@ -1,8 +1,9 @@
-package analysis
+package analysis_test
 
 import (
 	"testing"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestNewGVNAnalysis(t *testing.T) {
-	require.NotNil(t, NewGVNAnalysis())
+	require.NotNil(t, analysis.NewGVNAnalysis())
 }
 
 func TestGVNAnalysis_Run(t *testing.T) {
@@ -28,9 +29,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		r := gvn.Redundant[9]
@@ -55,12 +56,12 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
-		var r Redundancy
+		var r analysis.Redundancy
 		for _, v := range gvn.Redundant {
 			r = v
 		}
@@ -80,12 +81,12 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
-		var r Redundancy
+		var r analysis.Redundancy
 		for _, v := range gvn.Redundant {
 			r = v
 		}
@@ -107,9 +108,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
@@ -125,9 +126,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant, "slot 2 is reassigned, so its value has no stable cross-block identity")
 	})
@@ -145,9 +146,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		for _, r := range gvn.Redundant {
@@ -167,9 +168,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 	})
@@ -186,9 +187,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
@@ -208,9 +209,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
@@ -229,9 +230,9 @@ func TestGVNAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBlocksAnalysis())
-		pass.Register(m, NewGVNAnalysis())
-		gvn, err := pass.GetResult[*GVN](m, fn)
+		pass.Register(m, analysis.NewBlocksAnalysis())
+		pass.Register(m, analysis.NewGVNAnalysis())
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
