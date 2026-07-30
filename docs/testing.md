@@ -10,7 +10,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 
 | Concern | Source |
 |---|---|
-| test shape and naming | `docs/coding-patterns.md` §6 |
+| test shape and naming | `docs/coding-patterns.md` (`MVM-RFC-0001`) §12 |
 | public API behavior | production owner test matching the defining file |
 | opcode metadata and mnemonic | `instr/type.go` and `TestValid` |
 | verifier policy | `program/verify.go` and `TestVerify/defines_a_policy_for_every_opcode` |
@@ -24,7 +24,6 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Public contract | production-matched package test file | exported constructors, functions, methods, options, errors, and lifecycle behavior |
 | Runtime specification | `interp.TestInterpreter_Run` | one visible bytecode fixture per opcode behavior, including traps and ownership |
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
-| Internal invariant | nearest implementation test file | only safety properties unavailable through public behavior |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
 
@@ -843,17 +842,6 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `ERROR_GET` | `error.get` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
 | `ERROR_CODE` | `error.code` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
 | `STRING_ITER` | `string.iter` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
-
-## Intentional White-Box Coverage
-
-White-box tests remain only when exported behavior cannot directly protect the invariant: reference counts and free-list reuse, generated handler completeness, verifier dataflow policies, trace/cache state transitions, journal materialization, register allocation, relocation encoding, executable-buffer W^X and pointer stability, and architecture ABI encoding.
-
-Within `interp`, `TestCache` protects request coalescing, side-exit priority,
-and shared attach/detach/close lifetime; `TestTracer_*` protects capture outcomes,
-root reuse, publication, snapshots, and concurrent recording; and
-`TestCoroutine_Refs` protects suspended ref-edge discovery. These are private
-GC/JIT invariants with no complete public observation point. Pool sharing and
-lifecycle remain covered through `TestNewPool` and `TestPool_*`.
 
 ## Automated Gates
 

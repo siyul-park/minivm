@@ -10,73 +10,76 @@ Keep this file terse and actionable. Put detailed coding rules in `docs/coding-p
 
 1. Follow the user's latest explicit request first.
 2. Follow the closest applicable repository instruction file.
-3. Use this file as the root repository contract.
-4. Use `docs/coding-patterns.md` as the coding-style authority.
-5. Match nearby code when it is stricter than this guide.
+3. Use this file as the root repository workflow contract.
+4. Apply `docs/coding-patterns.md` (`MVM-RFC-0001`) as the normative coding standard.
+5. Match nearby code only when it is more specific and RFC-compliant.
 
-If instructions conflict, choose the more specific instruction and mention the conflict in the final summary.
+If instructions conflict, choose the more specific instruction and record the conflict in the final summary.
 
 ## Quick Commands
 
 ```bash
-make init          # install goimports/godoc and go install ./...
-make test          # go test -race ./...
-make benchmark-pr  # quick pull-request benchmark report
-make benchmark-core # full canonical package + VM kernel suite
+make init              # install goimports/godoc and go install ./...
+make test              # go test -race ./...
+make benchmark-pr      # quick pull-request benchmark report
+make benchmark-core    # full canonical package + VM kernel suite
 make benchmark-compare # optional external runtime comparisons
-make fuzz          # bounded trust-boundary fuzz smoke
-make lint          # goimports -w . && go vet ./...
-make coverage      # CI-style full test run with coverage.out
-make coverage-check # enforce recorded total-coverage baseline
-make build         # build ./dist/minivm
+make fuzz              # bounded trust-boundary fuzz smoke
+make lint              # goimports -w . && go vet ./...
+make coverage          # CI-style full test run with coverage.out
+make coverage-check    # enforce recorded total-coverage baseline
+make build             # build ./dist/minivm
 
 go test -race ./...
 go test -race -run TestFoo ./interp/...
 go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp
 
-./dist/minivm      # interactive assembly REPL
+./dist/minivm          # interactive assembly REPL
 ```
 
 ## Required Workflow
 
-1. Run `git status --short`; never overwrite unrelated user changes.
-2. Prefer `codegraph` MCP tools for structural exploration; fall back to grep/read only for literal text or stale indexes.
+1. Run `git status --short`; never overwrite or commit unrelated user changes.
+2. Prefer structural tools for symbol ownership and call-flow exploration; use grep/read for literal text and final verification.
 3. Read task-relevant docs from the Task Router before changing code or tests.
-4. Read `docs/coding-patterns.md` through its Fast Path: always apply §0, then the task-specific sections from its When to Read table.
-5. Make the smallest correct change. Avoid speculative cleanup outside the task.
-6. Validate with the narrowest relevant tests first, then broader tests when the change warrants it.
-7. Run the Completion Gate before reporting done, opening a PR, or updating a PR.
+4. Apply `MVM-RFC-0001` §2 and §16 to every code/test change, plus sections selected by §1.3.
+5. Review top-down from package contract to mechanics and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
+6. Make the smallest correct change. Do not add speculative structure or preserve obsolete compatibility without an explicit contract.
+7. Validate the narrowest relevant behavior first, then race, static, generated, architecture, and benchmark checks warranted by the change.
+8. Run the Completion Gate before reporting done, committing a logical stage, opening a PR, or updating a PR.
 
 ## Completion Gate
 
 Do not call work complete until every item is true:
 
-1. Every touched code/test file was re-read against `docs/coding-patterns.md` §0.7-§0.9 plus the task-specific sections.
-2. Every touched symbol has a current reason to exist.
-3. Removable symbols were removed, inlined, merged, narrowed, made private, renamed by role, or replaced by direct local code.
-4. A simpler algorithm or control flow was considered; the chosen shape is the simplest correct option found.
+1. Every changed file was re-read against `MVM-RFC-0001` §2 and the task-specific sections.
+2. Top-down ownership and bottom-up symbol reviews are complete at the requested scope.
+3. Every affected symbol has a current reason to exist; removable symbols were removed, inlined, merged, narrowed, privatized, or renamed by role.
+4. The chosen algorithm and control flow are the simplest correct options found without a measured performance regression.
 5. Another simplification pass found no safe improvement.
-6. Declaration order follows `docs/coding-patterns.md` §1.3 and §2.4: callers before callees, except `With*` option functions may sit immediately above the constructor they configure.
-7. Tests follow `docs/coding-patterns.md` §6 and assert behavior rather than private shape.
-8. PR, commit, and documentation expectations follow `docs/coding-patterns.md` §7-§8.
-9. Any intentionally skipped simplification is recorded in the final summary with the reason.
+6. Declarations form a caller-before-callee staircase and follow RFC §9.
+7. Tests follow RFC §12 and assert only public observable behavior.
+8. Performance claims include the reproducible evidence required by RFC §14.
+9. Commits and documentation follow RFC §15, and unrelated user changes are absent.
+10. Any intentionally skipped simplification or validation is recorded with its reason.
 
-## Coding Pattern Map
+## Coding Standard Map
 
-`docs/coding-patterns.md` is the authority. Use this map only to choose what to read.
+`docs/coding-patterns.md` is normative. Use this map only for routing.
 
-| Need | Read in `docs/coding-patterns.md` |
+| Need | Read in `MVM-RFC-0001` |
 |---|---|
-| Before any code/test edit | When to Read, §0 |
-| Removing unnecessary structure | §0.1, §0.7-§0.9 |
-| Naming, helper extraction, method ownership | §1.2, §1.4, §1.5 |
-| File order, type/interface shape, struct fields | §2.1-§2.5 |
-| Public API, options, builders, parsers | §3 |
-| Errors, panic, recover | §4 |
-| Architecture build tags | §5 |
-| Tests | §6 |
-| Commits, PRs, final review | §7 |
-| Documentation updates | §8 |
+| Every code/test change | §2, §16 |
+| Functions, helpers, naming | §3-§4 |
+| Types, constructors, public APIs | §5 |
+| Package and runtime ownership | §6-§8 |
+| Declaration and field order | §9 |
+| Errors and panic/recover | §10 |
+| Concurrency and lifecycle | §11 |
+| Tests and public specifications | §12 |
+| Generated and architecture code | §13 |
+| Performance and benchmarks | §14 |
+| Commits and documentation | §15 |
 
 ## Task Router
 
@@ -179,16 +182,16 @@ Violations cause silent corruption or invalid execution.
 
 ## Tests
 
-Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §6.
+Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `MVM-RFC-0001` §12.
 
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
 - Put sub-cases under `t.Run`; do not split them into parallel top-level tests.
-- Inline setup, run sequence, and assertions unless §6.8 allows a helper.
+- Keep setup, execution, and assertions visible unless RFC §12 permits a real reusable abstraction.
 - Use `require`, not `assert`.
 
 ## Documentation Maintenance
 
-Update docs when behavior, invariants, commands, architecture, pitfalls, workflow, or conventions change. Use the owner matrix in `docs/coding-patterns.md` §8:
+Update docs when behavior, invariants, commands, architecture, pitfalls, workflow, or conventions change. Use the owner matrix in `MVM-RFC-0001` §15:
 
 - workflow / convention rules -> update both `AGENTS.md` and `.claude/CLAUDE.md`
 - invariants / pitfalls -> update `docs/architecture.md`

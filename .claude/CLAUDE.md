@@ -18,17 +18,19 @@ Use this file only for Claude-specific execution reminders.
 
 ## Claude Checklist
 
-Before reporting done, re-read every touched code/test file and verify:
+Before reporting done, re-read every changed code and test file and verify:
 
-- `docs/coding-patterns.md` §0.7-§0.9 was applied: every touched symbol has a reason, simpler algorithms were considered, and another simplification pass found no safe improvement.
-- Declaration order follows §1.3 and §2.4: callers before callees, with the allowed exception that `With*` option functions may sit immediately above the constructor they configure.
-- Private package functions used by one type became methods on that type, unless they are constructors, shared by multiple types, or clearer inline (§1.5).
-- Single-use helpers stayed inline unless extraction names real behavior or removes real duplication (§1.4).
-- Struct fields follow the semantic layers in §2.5.
-- Tests assert public behavior, use one top-level test per public symbol, inline setup/run/assertions by default, and use `require` (§6).
-- Documentation, workflow, or convention changes updated the owning docs listed in §8.
+- `MVM-RFC-0001` §2 and §16 were applied.
+- Top-down package/API/flow review and bottom-up review of every affected symbol are complete.
+- Every symbol has a current owner and reason; duplicate, wrapper, dead, mergeable, or private candidates were resolved.
+- Functions keep one abstraction level, single-use helpers remain inline unless they isolate real mechanics, and receiver-owned behavior is a method.
+- Declarations form a caller-before-callee staircase; fields and groups follow RFC §9.
+- Public APIs remain minimal and compatible unless the user explicitly authorized a change.
+- Tests use public observable behavior, isolated arrange per subtest, production-matched files, and `require` (RFC §12).
+- Performance work has a baseline, profile-guided owner, correctness checks, and reproducible before/after evidence (RFC §14).
+- Documentation, workflow, and conventions were updated in their RFC §15 owner documents.
 
-If any checklist item is intentionally not applied, record the reason in the final summary.
+Record any intentionally skipped simplification, validation, or benchmark target and its reason in the final summary.
 
 ## Verification Commands
 
