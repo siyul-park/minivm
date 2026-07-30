@@ -48,19 +48,19 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames    []frame
-	fr        *frame
-	stack     []types.Boxed
-	heap      []types.Value
-	base      int
-	target    int
-	interned  map[string]types.Ref
-	free      []int
-	rc        []int
-	trial     []int
-	work      []int
-	refbuf    []types.Ref
-	arrayPool []*types.Array
+	frames   []frame
+	fr       *frame
+	stack    []types.Boxed
+	heap     []types.Value
+	base     int
+	target   int
+	interned map[string]types.Ref
+	free     []int
+	rc       []int
+	trial    []int
+	work     []int
+	refbuf   []types.Ref
+	arrays   []*types.Array
 
 	fp  int
 	sp  int
@@ -653,7 +653,7 @@ func (i *Interpreter) Len() int {
 func (i *Interpreter) Close() error {
 	i.flush()
 	i.Reset()
-	i.arrayPool = nil
+	i.arrays = nil
 	var err error
 	if i.compiler != nil {
 		err = errors.Join(err, i.compiler.Close())
@@ -668,18 +668,20 @@ func (i *Interpreter) Close() error {
 
 func (i *Interpreter) Reset() {
 	dynamic := len(i.heap) - i.base
-	if len(i.arrayPool) > dynamic {
-		i.arrayPool = i.arrayPool[:dynamic]
+	if dynamic < len(i.arrays) {
+		clear(i.arrays[dynamic:])
+		i.arrays = i.arrays[:dynamic]
 	}
 	for addr := i.base; addr < len(i.heap); addr++ {
-		if i.rc[addr] > 0 {
-			if array, ok := i.heap[addr].(*types.Array); ok && len(i.arrayPool) < dynamic {
-				array.Typ = nil
-				array.Elems = nil
-				i.arrayPool = append(i.arrayPool, array)
-			}
-			i.finalize(addr, i.heap[addr])
+		if i.rc[addr] <= 0 {
+			continue
 		}
+		value := i.heap[addr]
+		if array, ok := value.(*types.Array); ok && len(i.arrays) < dynamic {
+			*array = types.Array{}
+			i.arrays = append(i.arrays, array)
+		}
+		i.finalize(addr, value)
 	}
 	for i.fp > 1 {
 		i.fp--
@@ -1799,14 +1801,14 @@ func (i *Interpreter) alloc(val types.Value) int {
 // newArray reuses only headers invalidated by Reset. Element storage remains
 // fresh so construction keeps its zeroing and memory-retention behavior.
 func (i *Interpreter) newArray(typ *types.ArrayType, elems []types.Boxed) *types.Array {
-	if len(i.arrayPool) == 0 {
+	if len(i.arrays) == 0 {
 		return &types.Array{Typ: typ, Elems: elems}
 	}
-	last := len(i.arrayPool) - 1
-	array := i.arrayPool[last]
-	i.arrayPool = i.arrayPool[:last]
-	array.Typ = typ
-	array.Elems = elems
+	last := len(i.arrays) - 1
+	array := i.arrays[last]
+	i.arrays[last] = nil
+	i.arrays = i.arrays[:last]
+	*array = types.Array{Typ: typ, Elems: elems}
 	return array
 }
 
