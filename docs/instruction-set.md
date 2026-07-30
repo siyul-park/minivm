@@ -322,6 +322,12 @@ Examples:
 - constant ref cell plus `ref.get`
 - structured-error creation followed by a raise
 
+A fused source stays in a temporary instead of being pushed, so a fused
+handler checks stack room once for its own net push rather than once per
+folded source. Bounds, segmentation, and underflow checks stay per source.
+Trapping arithmetic (`div`/`rem`/`mod`) still materializes its operands on the
+stack, so it keeps a check per push.
+
 ## Maintenance Notes
 
 When changing the instruction set:

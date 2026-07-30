@@ -58,7 +58,6 @@ type lowering struct {
 	globals   []types.Kind
 	heap      []types.Value
 	scratch   []asm.PReg
-	entry     asm.Label
 	head      asm.Label
 	back      asm.Label
 	budget    asm.VReg
@@ -349,7 +348,6 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 		globals:   input.globals,
 		heap:      input.heap,
 		scratch:   c.scratchRegs[:scratchCount],
-		entry:     asmb.Label(),
 		head:      asmb.Label(),
 		addr:      input.address,
 	}
@@ -371,17 +369,14 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 		}
 		return prof.CompileReasonError, err
 	}
-	linked, err := asm.Link(c.buffer, arch, []*asm.Code{code}, nil)
+	callable, err := asm.Link(c.buffer, arch, code)
 	if err != nil {
-		if errors.Is(err, asm.ErrBranchOutOfRange) {
-			return prof.CompileReasonBranchRange, nil
-		}
 		return prof.CompileReasonError, err
 	}
-	n.callable = linked[0].Callable
-	n.bytes = len(code.Bytes)
+	n.callable = callable
+	n.bytes = len(code)
 	mod.entries[a] = n
-	mod.bytes += len(code.Bytes)
+	mod.bytes += len(code)
 	return prof.CompileReasonNone, nil
 }
 

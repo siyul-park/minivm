@@ -1,10 +1,6 @@
 package prof
 
-import (
-	"strconv"
-
-	"github.com/siyul-park/minivm/instr"
-)
+import "strconv"
 
 // Collector records execution samples and named metrics.
 type Collector struct {
@@ -68,12 +64,12 @@ func (c *Collector) Metrics() []Metric {
 		}
 		out = append(out, Metric{
 			Name:   "vm_opcode_samples_total",
-			Labels: []Label{{Key: "opcode", Value: c.opcodeLabel(byte(code))}},
+			Labels: []Label{{Key: "opcode", Value: opcodeLabel(byte(code))}},
 			Value:  float64(n),
 		})
 	}
 	out = append(out, c.metrics...)
-	out = c.jit.appendMetrics(out, c)
+	out = c.jit.appendMetrics(out)
 	return out
 }
 
@@ -201,11 +197,4 @@ func (c *Collector) reset() {
 	clear(c.ops[:])
 	c.metrics = c.metrics[:0]
 	c.jit.reset()
-}
-
-func (c *Collector) opcodeLabel(code byte) string {
-	if typ := instr.TypeOf(instr.Opcode(code)); typ.Mnemonic != "" {
-		return typ.Mnemonic
-	}
-	return "0x" + strconv.FormatInt(int64(code), 16)
 }

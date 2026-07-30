@@ -52,11 +52,6 @@ func Imm(v int64) ImmOperand {
 	return ImmOperand{Value: v}
 }
 
-// LabelOp wraps a label id as an operand.
-func LabelOp(id Label) LabelOperand {
-	return LabelOperand{ID: id}
-}
-
 // Mem wraps a base + offset memory reference as an operand.
 func Mem(base Operand, offset int64) MemOperand {
 	return MemOperand{Base: base, Offset: offset}
