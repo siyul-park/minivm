@@ -318,6 +318,8 @@ Examples:
 - primitive constants feeding primitive binary operations
 - typed locals feeding primitive binary operations
 - typed locals plus primitive constants feeding binary operations
+- non-trapping primitive binary results stored directly into typed locals
+- typed-array constants plus scalar index producers feeding `array.get`
 - constant indexes feeding `array.get` or `struct.get`
 - constant ref cell plus `ref.get`
 - structured-error creation followed by a raise
@@ -326,7 +328,8 @@ A fused source stays in a temporary instead of being pushed, so a fused
 handler checks stack room once for its own net push rather than once per
 folded source. Bounds, segmentation, and underflow checks stay per source.
 Trapping arithmetic (`div`/`rem`/`mod`) still materializes its operands on the
-stack, so it keeps a check per push.
+stack, so it keeps a check per push. Typed-array constant loads validate the
+current heap value's concrete array type and bounds on every execution.
 
 ## Maintenance Notes
 

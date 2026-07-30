@@ -28,13 +28,13 @@ Every valid opcode has exactly one `lowerers` entry and one semantic emitter. Th
 
 The generator validates the concrete patterns returned by `catalog` in `internal/cmd/geninterp/pattern.go`.
 
-Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Trapping numeric operations materialize completed sources before evaluating the trap so stack ownership and instruction offsets match exact execution.
+Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, constant aggregate indexes, direct non-trapping arithmetic stores to typed locals, and typed-array constants indexed by scalar producers. Trapping numeric operations materialize completed sources before evaluating the trap so stack ownership and instruction offsets match exact execution.
 
 ## Threaded Compilation
 
 Threading checks the opcode-indexed fusion table before standalone opcode dispatch. Fusion preflight uses a local cursor and mutates nothing on a miss. A match installs one direct handler and advances compile-time IP by only the first opcode width. Absorbed offsets are still threaded separately, so branches into them execute standalone handlers. Exact threading disables fusion.
 
-Compile-time specialization resolves operands, declared slot kinds, constants, heap objects, and cached coroutine metadata. Final handlers do not dispatch source functions, decode operands, inspect concrete heap types, or rescan bytecode for yields.
+Compile-time specialization resolves operands, declared slot kinds, constants, heap objects, and cached coroutine metadata. Final handlers do not dispatch source functions, decode operands, or rescan bytecode for yields. A typed-array constant load still validates the current heap value's concrete slice type and bounds on every execution; specialization removes temporary stack materialization and balanced container retain/release work, not those runtime guards.
 
 ## JIT Separation
 

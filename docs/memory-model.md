@@ -124,6 +124,19 @@ do not block future allocations.
 
 Public host APIs that allocate, such as `Alloc`, `Push`, and `Marshal`, return `ErrHeapExhausted` as ordinary errors.
 
+### Reset-time reference-array header reuse
+
+`Reset` invalidates every live dynamic object. Before clearing those slots, the
+interpreter keeps released `*types.Array` headers in an interpreter-local pool
+capped by that run's dynamic heap size. VM array construction, slicing, and map
+key extraction may reuse those headers on the next run.
+
+Only the Go object header is reused. `Typ` and `Elems` are cleared at reset, and
+every new array receives a fresh element backing store, so zeroing and retained
+memory behavior stay unchanged. Arrays detached through `Pop` or reclaimed
+before reset are not pooled; their returned Go values remain intact. `Close`
+drops the pool.
+
 ## GC
 
 GC uses trial deletion to derive roots from exact reference counts instead of

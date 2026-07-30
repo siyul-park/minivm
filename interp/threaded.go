@@ -3409,10 +3409,7 @@ var (
 					if i.sp < size+1 {
 						panic(ErrStackUnderflow)
 					}
-					val := &types.Array{
-						Elems: make([]types.Boxed, size),
-						Typ:   typ,
-					}
+					val := i.newArray(typ, make([]types.Boxed, size))
 					copy(val.Elems, i.stack[i.sp-size-1:i.sp-1])
 					i.sp -= size
 					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -3522,10 +3519,7 @@ var (
 					if size < 0 {
 						panic(ErrSegmentationFault)
 					}
-					val := &types.Array{
-						Elems: make([]types.Boxed, size),
-						Typ:   typ,
-					}
+					val := i.newArray(typ, make([]types.Boxed, size))
 					for j := range val.Elems {
 						val.Elems[j] = types.BoxedNull
 					}
@@ -4264,10 +4258,7 @@ var (
 					for _, v := range elems {
 						i.retainBox(v)
 					}
-					out = &types.Array{
-						Elems: elems,
-						Typ:   arr.Typ,
-					}
+					out = i.newArray(arr.Typ, elems)
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -5248,10 +5239,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				arr := &types.Array{
-					Elems: elems,
-					Typ:   types.NewArrayType(keyType),
-				}
+				arr := i.newArray(types.NewArrayType(keyType), elems)
 				out := types.BoxRef(i.alloc(arr))
 				i.release(addr)
 				i.stack[i.sp-1] = out
@@ -23748,11 +23736,14 @@ var (
 		},
 		instr.LOCAL_GET: func(c *threader) func(*Interpreter) {
 			start := c.ip
-			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_EQ && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_ADD && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
 				goto l0
 			}
 			{
-				offset := instr.ParseI16(c.code, start+9)
+				dst, dstOK := c.local(start+9, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
 					goto l0
@@ -23766,19 +23757,25 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
-						i.fr.ip += offset
+					v2 := types.BoxF32(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
 					}
-					i.fr.ip += 11
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
 				}
 			}
 		l0:
-			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_NE && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_SUB && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
 				goto l1
 			}
 			{
-				offset := instr.ParseI16(c.code, start+9)
+				dst, dstOK := c.local(start+9, types.KindF32)
+				if !dstOK {
+					goto l1
+				}
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
 					goto l1
@@ -23792,19 +23789,25 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
-						i.fr.ip += offset
+					v2 := types.BoxF32(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
 					}
-					i.fr.ip += 11
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
 				}
 			}
 		l1:
-			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_LT && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MUL && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
 				goto l2
 			}
 			{
-				offset := instr.ParseI16(c.code, start+9)
+				dst, dstOK := c.local(start+9, types.KindF32)
+				if !dstOK {
+					goto l2
+				}
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
 					goto l2
@@ -23818,19 +23821,25 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
-						i.fr.ip += offset
+					v2 := types.BoxF32(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
 					}
-					i.fr.ip += 11
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
 				}
 			}
 		l2:
-			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_GT && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MIN && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
 				goto l3
 			}
 			{
-				offset := instr.ParseI16(c.code, start+9)
+				dst, dstOK := c.local(start+9, types.KindF32)
+				if !dstOK {
+					goto l3
+				}
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
 					goto l3
@@ -23844,19 +23853,25 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
-						i.fr.ip += offset
+					v2 := types.BoxF32(min(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
 					}
-					i.fr.ip += 11
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
 				}
 			}
 		l3:
-			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_LE && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MAX && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
 				goto l4
 			}
 			{
-				offset := instr.ParseI16(c.code, start+9)
+				dst, dstOK := c.local(start+9, types.KindF32)
+				if !dstOK {
+					goto l4
+				}
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
 					goto l4
@@ -23870,6 +23885,171 @@ var (
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
+					v2 := types.BoxF32(max(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l4:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_COPYSIGN && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l5
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindF32)
+				if !dstOK {
+					goto l5
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l5
+				}
+				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l5:
+			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_EQ && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+				goto l6
+			}
+			{
+				offset := instr.ParseI16(c.code, start+9)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l6
+				}
+				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					v2 := types.BoxI1(v0 == v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 11
+				}
+			}
+		l6:
+			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_NE && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+				goto l7
+			}
+			{
+				offset := instr.ParseI16(c.code, start+9)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l7
+				}
+				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					v2 := types.BoxI1(v0 != v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 11
+				}
+			}
+		l7:
+			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_LT && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+				goto l8
+			}
+			{
+				offset := instr.ParseI16(c.code, start+9)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l8
+				}
+				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					v2 := types.BoxI1(v0 < v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 11
+				}
+			}
+		l8:
+			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_GT && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+				goto l9
+			}
+			{
+				offset := instr.ParseI16(c.code, start+9)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l9
+				}
+				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					v2 := types.BoxI1(v0 > v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 11
+				}
+			}
+		l9:
+			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_LE && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
+				goto l10
+			}
+			{
+				offset := instr.ParseI16(c.code, start+9)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l10
+				}
+				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
@@ -23877,15 +24057,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l4:
+		l10:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_GE && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l5
+				goto l11
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l5
+					goto l11
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -23903,176 +24083,20 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l5:
-			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_EQ && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l6
-			}
-			{
-				offset := instr.ParseI16(c.code, start+13)
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l6
-				}
-				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 15
-				}
-			}
-		l6:
-			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_NE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l7
-			}
-			{
-				offset := instr.ParseI16(c.code, start+13)
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l7
-				}
-				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 15
-				}
-			}
-		l7:
-			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_LT && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l8
-			}
-			{
-				offset := instr.ParseI16(c.code, start+13)
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l8
-				}
-				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 15
-				}
-			}
-		l8:
-			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_GT && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l9
-			}
-			{
-				offset := instr.ParseI16(c.code, start+13)
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l9
-				}
-				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 15
-				}
-			}
-		l9:
-			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_LE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l10
-			}
-			{
-				offset := instr.ParseI16(c.code, start+13)
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l10
-				}
-				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 15
-				}
-			}
-		l10:
-			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_GE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l11
-			}
-			{
-				offset := instr.ParseI16(c.code, start+13)
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l11
-				}
-				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 15
-				}
-			}
 		l11:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_ADD && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
 				goto l12
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindI64)
+				dst, dstOK := c.local(start+13, types.KindF64)
+				if !dstOK {
+					goto l12
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l12
 				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l12
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24080,34 +24104,31 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
+					v0 := r0.F64()
+					v2 := types.BoxF64(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 8
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
 				}
 			}
 		l12:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_SUB && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
 				goto l13
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindI64)
+				dst, dstOK := c.local(start+13, types.KindF64)
+				if !dstOK {
+					goto l13
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l13
 				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l13
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24115,34 +24136,31 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
+					v0 := r0.F64()
+					v2 := types.BoxF64(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 8
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
 				}
 			}
 		l13:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MUL && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
 				goto l14
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindI64)
+				dst, dstOK := c.local(start+13, types.KindF64)
+				if !dstOK {
+					goto l14
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l14
 				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l14
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24150,34 +24168,31 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
+					v0 := r0.F64()
+					v2 := types.BoxF64(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 8
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
 				}
 			}
 		l14:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MIN && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
 				goto l15
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindI64)
+				dst, dstOK := c.local(start+13, types.KindF64)
+				if !dstOK {
+					goto l15
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l15
 				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l15
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24185,34 +24200,31 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
+					v0 := r0.F64()
+					v2 := types.BoxF64(math.Min(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 8
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
 				}
 			}
 		l15:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MAX && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
 				goto l16
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindI64)
+				dst, dstOK := c.local(start+13, types.KindF64)
+				if !dstOK {
+					goto l16
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l16
 				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l16
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24220,34 +24232,31 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
+					v0 := r0.F64()
+					v2 := types.BoxF64(math.Max(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 8
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
 				}
 			}
 		l16:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_COPYSIGN && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
 				goto l17
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindI64)
+				dst, dstOK := c.local(start+13, types.KindF64)
+				if !dstOK {
+					goto l17
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l17
 				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l17
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24255,34 +24264,28 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
+					v0 := r0.F64()
+					v2 := types.BoxF64(math.Copysign(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
-						i.fr.ip += offset
-					}
-					i.fr.ip += 8
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
 				}
 			}
 		l17:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_EQ && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_EQ && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
 				goto l18
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF32)
+				offset := instr.ParseI16(c.code, start+13)
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l18
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l18
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24290,34 +24293,25 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
+					v0 := r0.F64()
 					v2 := types.BoxI1(v0 == v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
-					i.fr.ip += 8
+					i.fr.ip += 15
 				}
 			}
 		l18:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_NE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_NE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
 				goto l19
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF32)
+				offset := instr.ParseI16(c.code, start+13)
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l19
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l19
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24325,34 +24319,25 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
+					v0 := r0.F64()
 					v2 := types.BoxI1(v0 != v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
-					i.fr.ip += 8
+					i.fr.ip += 15
 				}
 			}
 		l19:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LT && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_LT && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
 				goto l20
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF32)
+				offset := instr.ParseI16(c.code, start+13)
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l20
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l20
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24360,34 +24345,25 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
+					v0 := r0.F64()
 					v2 := types.BoxI1(v0 < v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
-					i.fr.ip += 8
+					i.fr.ip += 15
 				}
 			}
 		l20:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GT && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_GT && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
 				goto l21
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF32)
+				offset := instr.ParseI16(c.code, start+13)
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l21
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l21
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24395,34 +24371,25 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
+					v0 := r0.F64()
 					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
-					i.fr.ip += 8
+					i.fr.ip += 15
 				}
 			}
 		l21:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_LE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
 				goto l22
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF32)
+				offset := instr.ParseI16(c.code, start+13)
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l22
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l22
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24430,34 +24397,25 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
+					v0 := r0.F64()
 					v2 := types.BoxI1(v0 <= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
-					i.fr.ip += 8
+					i.fr.ip += 15
 				}
 			}
 		l22:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_GE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
 				goto l23
 			}
 			{
-				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF32)
+				offset := instr.ParseI16(c.code, start+13)
+				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
 					goto l23
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l23
-				}
+				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
@@ -24465,31 +24423,25 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
+					v0 := r0.F64()
 					v2 := types.BoxI1(v0 >= v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
-					i.fr.ip += 8
+					i.fr.ip += 15
 				}
 			}
 		l23:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_EQ && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
 				goto l24
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
-				i0, ok0 := c.local(start+1, types.KindF64)
+				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
 					goto l24
 				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
+				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
 					goto l24
 				}
@@ -24500,14 +24452,14 @@ var (
 					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					v0 := r0.F64()
+					v0 := i.borrowI64(r0)
 					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 == v1)
+					v1 := i.borrowI64(r1)
+					v2 := types.BoxI1(v0 > v1)
 					if v2.Bool() {
 						i.fr.ip += offset
 					}
@@ -24515,18 +24467,930 @@ var (
 				}
 			}
 		l24:
-			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_NE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
 				goto l25
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l25
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l25
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := types.BoxI1(uint64(v0) > uint64(v1))
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l25:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l26
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l26
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l26
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := types.BoxI1(v0 <= v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l26:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l27
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l27
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l27
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l27:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l28
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l28
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l28
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := types.BoxI1(v0 >= v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l28:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l29
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l29
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l29
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l29:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_ADD && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l30
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF32)
+				if !dstOK {
+					goto l30
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l30
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l30
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l30:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_SUB && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l31
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF32)
+				if !dstOK {
+					goto l31
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l31
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l31
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l31:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MUL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l32
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF32)
+				if !dstOK {
+					goto l32
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l32
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l32
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l32:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MIN && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l33
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF32)
+				if !dstOK {
+					goto l33
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l33
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l33
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(min(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l33:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MAX && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l34
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF32)
+				if !dstOK {
+					goto l34
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l34
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l34
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(max(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l34:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_COPYSIGN && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l35
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF32)
+				if !dstOK {
+					goto l35
+				}
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l35
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l35
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l35:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_EQ && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l36
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l36
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l36
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 == v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l36:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_NE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l37
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l37
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l37
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 != v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l37:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LT && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l38
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l38
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l38
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 < v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l38:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GT && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l39
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l39
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l39
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 > v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l39:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l40
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l40
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l40
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 <= v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l40:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l41
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l41
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l41
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 >= v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l41:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_ADD && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l42
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF64)
+				if !dstOK {
+					goto l42
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l42
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l42
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l42:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_SUB && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l43
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF64)
+				if !dstOK {
+					goto l43
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l43
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l43
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l43:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MUL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l44
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF64)
+				if !dstOK {
+					goto l44
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l44
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l44
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l44:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MIN && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l45
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF64)
+				if !dstOK {
+					goto l45
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l45
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l45
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(math.Min(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l45:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MAX && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l46
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF64)
+				if !dstOK {
+					goto l46
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l46
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l46
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(math.Max(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l46:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_COPYSIGN && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l47
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindF64)
+				if !dstOK {
+					goto l47
+				}
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l47
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l47
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(math.Copysign(v0, v1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l47:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_EQ && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l48
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l25
+					goto l48
 				}
 				i1, ok1 := c.local(start+2+1, types.KindF64)
 				if !ok1 {
-					goto l25
+					goto l48
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 == v1)
+					if v2.Bool() {
+						i.fr.ip += offset
+					}
+					i.fr.ip += 8
+				}
+			}
+		l48:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_NE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
+				goto l49
+			}
+			{
+				offset := instr.ParseI16(c.code, start+6)
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l49
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l49
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24549,19 +25413,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l25:
+		l49:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_LT && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l26
+				goto l50
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l26
+					goto l50
 				}
 				i1, ok1 := c.local(start+2+1, types.KindF64)
 				if !ok1 {
-					goto l26
+					goto l50
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24584,19 +25448,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l26:
+		l50:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_GT && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l27
+				goto l51
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l27
+					goto l51
 				}
 				i1, ok1 := c.local(start+2+1, types.KindF64)
 				if !ok1 {
-					goto l27
+					goto l51
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24619,19 +25483,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l27:
+		l51:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_LE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l28
+				goto l52
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l28
+					goto l52
 				}
 				i1, ok1 := c.local(start+2+1, types.KindF64)
 				if !ok1 {
-					goto l28
+					goto l52
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24654,19 +25518,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l28:
+		l52:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_GE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l29
+				goto l53
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l29
+					goto l53
 				}
 				i1, ok1 := c.local(start+2+1, types.KindF64)
 				if !ok1 {
-					goto l29
+					goto l53
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24689,19 +25553,464 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l29:
+		l53:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ADD && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l54
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l54
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l54
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l54
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l54:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SUB && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l55
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l55
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l55
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l55
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l55:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_MUL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l56
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l56
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l56
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l56
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l56:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l57
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l57
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l57
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l57
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 << (v1 & 31))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l57:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHR_S && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l58
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l58
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l58
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l58
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 >> (v1 & 31))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l58:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHR_U && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l59
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l59
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l59
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l59
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l59:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_XOR && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l60
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l60
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l60
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l60
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l60:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_AND && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l61
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l61
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l61
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l61
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v2 := types.Boxed(uint64(r0) & uint64(r1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l61:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_OR && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l62
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l62
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l62
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l62
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l62:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ROTL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l63
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l63
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l63
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l63
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l63:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ROTR && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l64
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI32)
+				if !dstOK {
+					goto l64
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l64
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l64
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l64:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_EQ && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l30
+				goto l65
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l30
+					goto l65
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l30
+					goto l65
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24724,19 +26033,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l30:
+		l65:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_NE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l31
+				goto l66
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l31
+					goto l66
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l31
+					goto l66
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24759,19 +26068,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l31:
+		l66:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LT_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l32
+				goto l67
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l32
+					goto l67
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l32
+					goto l67
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24794,19 +26103,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l32:
+		l67:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LT_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l33
+				goto l68
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l33
+					goto l68
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l33
+					goto l68
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24829,19 +26138,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l33:
+		l68:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GT_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l34
+				goto l69
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l34
+					goto l69
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l34
+					goto l69
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24864,19 +26173,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l34:
+		l69:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GT_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l35
+				goto l70
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l35
+					goto l70
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l35
+					goto l70
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24899,19 +26208,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l35:
+		l70:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LE_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l36
+				goto l71
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l36
+					goto l71
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l36
+					goto l71
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24934,19 +26243,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l36:
+		l71:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LE_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l37
+				goto l72
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l37
+					goto l72
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l37
+					goto l72
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -24969,19 +26278,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l37:
+		l72:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GE_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l38
+				goto l73
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l38
+					goto l73
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l38
+					goto l73
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25004,19 +26313,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l38:
+		l73:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GE_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l39
+				goto l74
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l39
+					goto l74
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI32)
 				if !ok1 {
-					goto l39
+					goto l74
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25039,19 +26348,514 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l39:
+		l74:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ADD && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l75
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l75
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l75
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l75
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l75:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SUB && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l76
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l76
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l76
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l76
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l76:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_MUL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l77
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l77
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l77
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l77
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l77:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l78
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l78
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l78
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l78
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 << (v1 & 63))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l78:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHR_S && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l79
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l79
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l79
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l79
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 >> (v1 & 63))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l79:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHR_U && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l80
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l80
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l80
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l80
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l80:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_XOR && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l81
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l81
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l81
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l81
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 ^ v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l81:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_AND && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l82
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l82
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l82
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l82
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 & v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l82:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_OR && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l83
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l83
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l83
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l83
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 | v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l83:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ROTL && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l84
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l84
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l84
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l84
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l84:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ROTR && instr.Opcode(c.code[start+5]) == instr.LOCAL_SET) {
+				goto l85
+			}
+			{
+				dst, dstOK := c.local(start+6, types.KindI64)
+				if !dstOK {
+					goto l85
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l85
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l85
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 7
+				}
+			}
+		l85:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_EQ && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l40
+				goto l86
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l40
+					goto l86
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l40
+					goto l86
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25074,19 +26878,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l40:
+		l86:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_NE && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l41
+				goto l87
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l41
+					goto l87
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l41
+					goto l87
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25109,19 +26913,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l41:
+		l87:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LT_S && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l42
+				goto l88
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l42
+					goto l88
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l42
+					goto l88
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25144,19 +26948,19 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l42:
+		l88:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LT_U && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
-				goto l43
+				goto l89
 			}
 			{
 				offset := instr.ParseI16(c.code, start+6)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l43
+					goto l89
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l43
+					goto l89
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25179,15 +26983,364 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l43:
+		l89:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_ADD && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l90
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l90
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l90
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l90:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SUB && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l91
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l91
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l91
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l91:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_MUL && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l92
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l92
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l92
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l92:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SHL && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l93
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l93
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l93
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(v0 << (v1 & 31))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l93:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SHR_S && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l94
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l94
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l94
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(v0 >> (v1 & 31))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l94:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SHR_U && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l95
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l95
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l95
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l95:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_XOR && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l96
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l96
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l96
+				}
+				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l96:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_AND && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l97
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l97
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l97
+				}
+				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v2 := types.Boxed(uint64(r0) & uint64(r1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l97:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_OR && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l98
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l98
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l98
+				}
+				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l98:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_ROTL && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l99
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l99
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l99
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l99:
+			if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_ROTR && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
+				goto l100
+			}
+			{
+				dst, dstOK := c.local(start+9, types.KindI32)
+				if !dstOK {
+					goto l100
+				}
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l100
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 10
+				}
+			}
+		l100:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_EQ && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l44
+				goto l101
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l44
+					goto l101
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25205,15 +27358,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l44:
+		l101:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_NE && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l45
+				goto l102
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l45
+					goto l102
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25231,15 +27384,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l45:
+		l102:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LT_S && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l46
+				goto l103
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l46
+					goto l103
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25257,15 +27410,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l46:
+		l103:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LT_U && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l47
+				goto l104
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l47
+					goto l104
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25283,15 +27436,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l47:
+		l104:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GT_S && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l48
+				goto l105
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l48
+					goto l105
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25309,15 +27462,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l48:
+		l105:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GT_U && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l49
+				goto l106
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l49
+					goto l106
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25335,15 +27488,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l49:
+		l106:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LE_S && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l50
+				goto l107
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l50
+					goto l107
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25361,15 +27514,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l50:
+		l107:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LE_U && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l51
+				goto l108
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l51
+					goto l108
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25387,15 +27540,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l51:
+		l108:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GE_S && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l52
+				goto l109
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l52
+					goto l109
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25413,15 +27566,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l52:
+		l109:
 			if !(start+11 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GE_U && instr.Opcode(c.code[start+8]) == instr.BR_IF) {
-				goto l53
+				goto l110
 			}
 			{
 				offset := instr.ParseI16(c.code, start+9)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l53
+					goto l110
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25439,15 +27592,15 @@ var (
 					i.fr.ip += 11
 				}
 			}
-		l53:
+		l110:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GT_S && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l54
+				goto l111
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l54
+					goto l111
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25465,15 +27618,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l54:
+		l111:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GT_U && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l55
+				goto l112
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l55
+					goto l112
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25491,15 +27644,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l55:
+		l112:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LE_S && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l56
+				goto l113
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l56
+					goto l113
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25517,15 +27670,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l56:
+		l113:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LE_U && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l57
+				goto l114
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l57
+					goto l114
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25543,15 +27696,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l57:
+		l114:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GE_S && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l58
+				goto l115
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l58
+					goto l115
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25569,15 +27722,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l58:
+		l115:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GE_U && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l59
+				goto l116
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l59
+					goto l116
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25595,15 +27748,411 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l59:
+		l116:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_ADD && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l117
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l117
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l117
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 + v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l117:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SUB && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l118
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l118
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l118
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 - v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l118:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_MUL && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l119
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l119
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l119
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 * v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l119:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SHL && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l120
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l120
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l120
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 << (v1 & 63))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l120:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SHR_S && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l121
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l121
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l121
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 >> (v1 & 63))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l121:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SHR_U && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l122
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l122
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l122
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l122:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_XOR && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l123
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l123
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l123
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 ^ v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l123:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_AND && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l124
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l124
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l124
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 & v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l124:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_OR && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l125
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l125
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l125
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(v0 | v1)
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l125:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_ROTL && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l126
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l126
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l126
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l126:
+			if !(start+14 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_ROTR && instr.Opcode(c.code[start+12]) == instr.LOCAL_SET) {
+				goto l127
+			}
+			{
+				dst, dstOK := c.local(start+13, types.KindI64)
+				if !dstOK {
+					goto l127
+				}
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l127
+				}
+				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v2 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v2
+					i.sp -= 0
+					i.fr.ip += 14
+				}
+			}
+		l127:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_EQ && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l60
+				goto l128
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l60
+					goto l128
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25621,15 +28170,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l60:
+		l128:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_NE && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l61
+				goto l129
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l61
+					goto l129
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25647,15 +28196,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l61:
+		l129:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LT_S && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l62
+				goto l130
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l62
+					goto l130
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25673,15 +28222,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l62:
+		l130:
 			if !(start+15 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LT_U && instr.Opcode(c.code[start+12]) == instr.BR_IF) {
-				goto l63
+				goto l131
 			}
 			{
 				offset := instr.ParseI16(c.code, start+13)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l63
+					goto l131
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -25699,15 +28248,15 @@ var (
 					i.fr.ip += 15
 				}
 			}
-		l63:
+		l131:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l64
+				goto l132
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l64
+					goto l132
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25728,15 +28277,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l64:
+		l132:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l65
+				goto l133
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l65
+					goto l133
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25757,15 +28306,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l65:
+		l133:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LE_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l66
+				goto l134
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l66
+					goto l134
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25786,15 +28335,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l66:
+		l134:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LE_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l67
+				goto l135
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l67
+					goto l135
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25815,15 +28364,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l67:
+		l135:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GE_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l68
+				goto l136
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l68
+					goto l136
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25844,15 +28393,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l68:
+		l136:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GE_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l69
+				goto l137
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l69
+					goto l137
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -25873,14 +28422,14 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l69:
+		l137:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_ADD) {
-				goto l70
+				goto l138
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l70
+					goto l138
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -25900,14 +28449,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l70:
+		l138:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_SUB) {
-				goto l71
+				goto l139
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l71
+					goto l139
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -25927,14 +28476,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l71:
+		l139:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MUL) {
-				goto l72
+				goto l140
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l72
+					goto l140
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -25954,14 +28503,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l72:
+		l140:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_DIV) {
-				goto l73
+				goto l141
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l73
+					goto l141
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -25997,14 +28546,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l73:
+		l141:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_REM) {
-				goto l74
+				goto l142
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l74
+					goto l142
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26040,14 +28589,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l74:
+		l142:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MOD) {
-				goto l75
+				goto l143
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l75
+					goto l143
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26089,14 +28638,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l75:
+		l143:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MIN) {
-				goto l76
+				goto l144
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l76
+					goto l144
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26116,14 +28665,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l76:
+		l144:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_MAX) {
-				goto l77
+				goto l145
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l77
+					goto l145
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26143,14 +28692,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l77:
+		l145:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_COPYSIGN) {
-				goto l78
+				goto l146
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l78
+					goto l146
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26170,14 +28719,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l78:
+		l146:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_EQ) {
-				goto l79
+				goto l147
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l79
+					goto l147
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26197,14 +28746,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l79:
+		l147:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_NE) {
-				goto l80
+				goto l148
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l80
+					goto l148
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26224,14 +28773,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l80:
+		l148:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_LT) {
-				goto l81
+				goto l149
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l81
+					goto l149
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26251,14 +28800,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l81:
+		l149:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_GT) {
-				goto l82
+				goto l150
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l82
+					goto l150
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26278,14 +28827,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l82:
+		l150:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_LE) {
-				goto l83
+				goto l151
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l83
+					goto l151
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26305,14 +28854,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l83:
+		l151:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_GE) {
-				goto l84
+				goto l152
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l84
+					goto l152
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
@@ -26332,15 +28881,15 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l84:
+		l152:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_EQ && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l85
+				goto l153
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l85
+					goto l153
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26361,15 +28910,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l85:
+		l153:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_NE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l86
+				goto l154
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l86
+					goto l154
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26390,15 +28939,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l86:
+		l154:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_LT && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l87
+				goto l155
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l87
+					goto l155
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26419,15 +28968,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l87:
+		l155:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_GT && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l88
+				goto l156
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l88
+					goto l156
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26448,15 +28997,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l88:
+		l156:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_LE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l89
+				goto l157
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l89
+					goto l157
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26477,15 +29026,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l89:
+		l157:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_GE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l90
+				goto l158
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l90
+					goto l158
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26506,14 +29055,14 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l90:
+		l158:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_ADD) {
-				goto l91
+				goto l159
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l91
+					goto l159
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26533,14 +29082,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l91:
+		l159:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_SUB) {
-				goto l92
+				goto l160
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l92
+					goto l160
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26560,14 +29109,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l92:
+		l160:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MUL) {
-				goto l93
+				goto l161
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l93
+					goto l161
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26587,14 +29136,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l93:
+		l161:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_DIV) {
-				goto l94
+				goto l162
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l94
+					goto l162
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26630,14 +29179,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l94:
+		l162:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_REM) {
-				goto l95
+				goto l163
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l95
+					goto l163
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26673,14 +29222,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l95:
+		l163:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MOD) {
-				goto l96
+				goto l164
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l96
+					goto l164
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26722,14 +29271,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l96:
+		l164:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MIN) {
-				goto l97
+				goto l165
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l97
+					goto l165
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26749,14 +29298,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l97:
+		l165:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_MAX) {
-				goto l98
+				goto l166
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l98
+					goto l166
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26776,14 +29325,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l98:
+		l166:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_COPYSIGN) {
-				goto l99
+				goto l167
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l99
+					goto l167
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26803,14 +29352,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l99:
+		l167:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_EQ) {
-				goto l100
+				goto l168
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l100
+					goto l168
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26830,14 +29379,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l100:
+		l168:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_NE) {
-				goto l101
+				goto l169
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l101
+					goto l169
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26857,14 +29406,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l101:
+		l169:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_LT) {
-				goto l102
+				goto l170
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l102
+					goto l170
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26884,14 +29433,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l102:
+		l170:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_GT) {
-				goto l103
+				goto l171
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l103
+					goto l171
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26911,14 +29460,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l103:
+		l171:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_LE) {
-				goto l104
+				goto l172
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l104
+					goto l172
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26938,14 +29487,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l104:
+		l172:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_CONST && instr.Opcode(c.code[start+11]) == instr.F64_GE) {
-				goto l105
+				goto l173
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l105
+					goto l173
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
@@ -26965,15 +29514,15 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l105:
+		l173:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_EQ && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l106
+				goto l174
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l106
+					goto l174
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -26994,15 +29543,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l106:
+		l174:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_NE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l107
+				goto l175
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l107
+					goto l175
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -27023,15 +29572,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l107:
+		l175:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_LT && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l108
+				goto l176
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l108
+					goto l176
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -27052,15 +29601,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l108:
+		l176:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_GT && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l109
+				goto l177
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l109
+					goto l177
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -27081,15 +29630,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l109:
+		l177:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_LE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l110
+				goto l178
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l110
+					goto l178
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -27110,15 +29659,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l110:
+		l178:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_GE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l111
+				goto l179
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l111
+					goto l179
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -27139,2680 +29688,8 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l111:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_S) {
-				goto l112
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l112
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l112
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(v0 > v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l112:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_U) {
-				goto l113
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l113
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l113
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l113:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_S) {
-				goto l114
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l114
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l114
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(v0 <= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l114:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_U) {
-				goto l115
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l115
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l115
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l115:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_S) {
-				goto l116
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l116
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l116
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(v0 >= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l116:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_U) {
-				goto l117
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l117
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l117
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l117:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_ADD) {
-				goto l118
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l118
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l118
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxF32(v0 + v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l118:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_SUB) {
-				goto l119
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l119
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l119
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxF32(v0 - v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l119:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MUL) {
-				goto l120
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l120
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l120
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxF32(v0 * v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l120:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_DIV) {
-				goto l121
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l121
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l121
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].F32()
-					lhs := i.stack[i.sp-2].F32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxF32(lhs / rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l121:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_REM) {
-				goto l122
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l122
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l122
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].F32()
-					lhs := i.stack[i.sp-2].F32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxF32(float32(math.Mod(float64(lhs), float64(rhs))))
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l122:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MOD) {
-				goto l123
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l123
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l123
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].F32()
-					lhs := i.stack[i.sp-2].F32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := func(lhs, rhs float32) types.Boxed {
-						m := math.Mod(float64(lhs), float64(rhs))
-						if m != 0 && (m < 0) != (rhs < 0) {
-							m += float64(rhs)
-						}
-						return types.BoxF32(float32(m))
-					}(lhs, rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l123:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MIN) {
-				goto l124
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l124
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l124
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxF32(min(v0, v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l124:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MAX) {
-				goto l125
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l125
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l125
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxF32(max(v0, v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l125:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_COPYSIGN) {
-				goto l126
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l126
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l126
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l126:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_EQ) {
-				goto l127
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l127
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l127
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxI1(v0 == v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l127:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_NE) {
-				goto l128
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l128
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l128
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxI1(v0 != v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l128:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LT) {
-				goto l129
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l129
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l129
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxI1(v0 < v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l129:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GT) {
-				goto l130
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l130
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l130
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxI1(v0 > v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l130:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LE) {
-				goto l131
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l131
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l131
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxI1(v0 <= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l131:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GE) {
-				goto l132
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF32)
-				if !ok0 {
-					goto l132
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF32)
-				if !ok1 {
-					goto l132
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F32()
-					v2 := types.BoxI1(v0 >= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l132:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_ADD) {
-				goto l133
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l133
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l133
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxF64(v0 + v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l133:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_SUB) {
-				goto l134
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l134
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l134
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxF64(v0 - v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l134:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MUL) {
-				goto l135
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l135
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l135
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxF64(v0 * v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l135:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_DIV) {
-				goto l136
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l136
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l136
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].F64()
-					lhs := i.stack[i.sp-2].F64()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxF64(lhs / rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l136:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_REM) {
-				goto l137
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l137
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l137
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].F64()
-					lhs := i.stack[i.sp-2].F64()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxF64(math.Mod(lhs, rhs))
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l137:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MOD) {
-				goto l138
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l138
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l138
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].F64()
-					lhs := i.stack[i.sp-2].F64()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := func(lhs, rhs float64) types.Boxed {
-						m := math.Mod(lhs, rhs)
-						if m != 0 && (m < 0) != (rhs < 0) {
-							m += rhs
-						}
-						return types.BoxF64(m)
-					}(lhs, rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l138:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MIN) {
-				goto l139
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l139
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l139
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxF64(math.Min(v0, v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l139:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MAX) {
-				goto l140
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l140
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l140
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxF64(math.Max(v0, v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l140:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_COPYSIGN) {
-				goto l141
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l141
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l141
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxF64(math.Copysign(v0, v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l141:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_EQ) {
-				goto l142
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l142
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l142
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 == v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l142:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_NE) {
-				goto l143
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l143
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l143
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 != v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l143:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_LT) {
-				goto l144
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l144
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l144
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 < v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l144:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_GT) {
-				goto l145
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l145
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l145
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 > v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l145:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_LE) {
-				goto l146
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l146
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l146
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 <= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l146:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_GE) {
-				goto l147
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindF64)
-				if !ok0 {
-					goto l147
-				}
-				i1, ok1 := c.local(start+2+1, types.KindF64)
-				if !ok1 {
-					goto l147
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.F64()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.F64()
-					v2 := types.BoxI1(v0 >= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l147:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ADD) {
-				goto l148
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l148
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l148
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(v0 + v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l148:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SUB) {
-				goto l149
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l149
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l149
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(v0 - v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l149:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_MUL) {
-				goto l150
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l150
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l150
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(v0 * v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l150:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_DIV_S) {
-				goto l151
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l151
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l151
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].I32()
-					lhs := i.stack[i.sp-2].I32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxI32(lhs / rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l151:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_DIV_U) {
-				goto l152
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l152
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l152
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].I32()
-					lhs := i.stack[i.sp-2].I32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxI32(int32(uint32(lhs) / uint32(rhs)))
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l152:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_REM_S) {
-				goto l153
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l153
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l153
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].I32()
-					lhs := i.stack[i.sp-2].I32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxI32(lhs % rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l153:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_REM_U) {
-				goto l154
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l154
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l154
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.stack[i.sp-1].I32()
-					lhs := i.stack[i.sp-2].I32()
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := types.BoxI32(int32(uint32(lhs) % uint32(rhs)))
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l154:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHL) {
-				goto l155
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l155
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l155
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(v0 << (v1 & 31))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l155:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHR_S) {
-				goto l156
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l156
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l156
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(v0 >> (v1 & 31))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l156:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHR_U) {
-				goto l157
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l157
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l157
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l157:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_XOR) {
-				goto l158
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l158
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l158
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l158:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_AND) {
-				goto l159
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l159
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l159
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v2 := types.Boxed(uint64(r0) & uint64(r1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l159:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_OR) {
-				goto l160
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l160
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l160
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v2 := types.Boxed(uint64(r0) | uint64(r1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l160:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ROTL) {
-				goto l161
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l161
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l161
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l161:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ROTR) {
-				goto l162
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l162
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l162
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l162:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_EQ) {
-				goto l163
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l163
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l163
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(v0 == v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l163:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_NE) {
-				goto l164
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l164
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l164
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(v0 != v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l164:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LT_S) {
-				goto l165
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l165
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l165
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(v0 < v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l165:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LT_U) {
-				goto l166
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l166
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l166
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l166:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GT_S) {
-				goto l167
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l167
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l167
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(v0 > v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l167:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GT_U) {
-				goto l168
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l168
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l168
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l168:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LE_S) {
-				goto l169
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l169
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l169
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(v0 <= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l169:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LE_U) {
-				goto l170
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l170
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l170
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l170:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GE_S) {
-				goto l171
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l171
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l171
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(v0 >= v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l171:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GE_U) {
-				goto l172
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI32)
-				if !ok0 {
-					goto l172
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI32)
-				if !ok1 {
-					goto l172
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := r0.I32()
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := r1.I32()
-					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l172:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ADD) {
-				goto l173
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l173
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l173
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 + v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l173:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SUB) {
-				goto l174
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l174
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l174
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 - v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l174:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_MUL) {
-				goto l175
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l175
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l175
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					v0 := i.borrowI64(r0)
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 * v1)
-					i.stack[i.sp] = v2
-					i.sp++
-					i.fr.ip += 5
-				}
-			}
-		l175:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_DIV_S) {
-				goto l176
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l176
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l176
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.retainBox(r0)
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.retainBox(r1)
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.unboxI64(i.stack[i.sp-1])
-					lhs := i.unboxI64(i.stack[i.sp-2])
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := i.boxI64(lhs / rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l176:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_DIV_U) {
-				goto l177
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l177
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l177
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.retainBox(r0)
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.retainBox(r1)
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.unboxI64(i.stack[i.sp-1])
-					lhs := i.unboxI64(i.stack[i.sp-2])
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := i.boxI64(int64(uint64(lhs) / uint64(rhs)))
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l177:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_REM_S) {
-				goto l178
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l178
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l178
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.retainBox(r0)
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.retainBox(r1)
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.unboxI64(i.stack[i.sp-1])
-					lhs := i.unboxI64(i.stack[i.sp-2])
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := i.boxI64(lhs % rhs)
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
-		l178:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_REM_U) {
-				goto l179
-			}
-			{
-				i0, ok0 := c.local(start+1, types.KindI64)
-				if !ok0 {
-					goto l179
-				}
-				i1, ok1 := c.local(start+2+1, types.KindI64)
-				if !ok1 {
-					goto l179
-				}
-				c.ip += 2
-				return func(i *Interpreter) {
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i0 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i2 := i.fr.bp + i0
-					r0 := i.stack[i2]
-					i.retainBox(r0)
-					i.stack[i.sp] = r0
-					i.sp++
-					i.fr.ip += 2
-					if i.sp == len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					if i.fr.bp+i1 >= i.sp {
-						panic(ErrSegmentationFault)
-					}
-					i3 := i.fr.bp + i1
-					r1 := i.stack[i3]
-					i.retainBox(r1)
-					i.stack[i.sp] = r1
-					i.sp++
-					i.fr.ip += 2
-					if i.sp < 2 {
-						panic(ErrStackUnderflow)
-					}
-					rhs := i.unboxI64(i.stack[i.sp-1])
-					lhs := i.unboxI64(i.stack[i.sp-2])
-					if rhs == 0 {
-						panic(ErrDivideByZero)
-					}
-					result := i.boxI64(int64(uint64(lhs) % uint64(rhs)))
-					i.sp--
-					i.stack[i.sp-1] = result
-					i.fr.ip++
-				}
-			}
 		l179:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHL) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_S) {
 				goto l180
 			}
 			{
@@ -29841,14 +29718,14 @@ var (
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 << (v1 & 63))
+					v2 := types.BoxI1(v0 > v1)
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
 				}
 			}
 		l180:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHR_S) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GT_U) {
 				goto l181
 			}
 			{
@@ -29877,14 +29754,14 @@ var (
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 >> (v1 & 63))
+					v2 := types.BoxI1(uint64(v0) > uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
 				}
 			}
 		l181:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHR_U) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_S) {
 				goto l182
 			}
 			{
@@ -29913,14 +29790,14 @@ var (
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
+					v2 := types.BoxI1(v0 <= v1)
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
 				}
 			}
 		l182:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_XOR) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LE_U) {
 				goto l183
 			}
 			{
@@ -29949,14 +29826,14 @@ var (
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 ^ v1)
+					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
 				}
 			}
 		l183:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_AND) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_S) {
 				goto l184
 			}
 			{
@@ -29985,14 +29862,14 @@ var (
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 & v1)
+					v2 := types.BoxI1(v0 >= v1)
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
 				}
 			}
 		l184:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_OR) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_GE_U) {
 				goto l185
 			}
 			{
@@ -30021,24 +29898,2696 @@ var (
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
-					v2 := i.boxI64(v0 | v1)
+					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
 				}
 			}
 		l185:
-			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ROTL) {
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_ADD) {
 				goto l186
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l186
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l186
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(v0 + v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l186:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_SUB) {
+				goto l187
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l187
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l187
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(v0 - v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l187:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MUL) {
+				goto l188
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l188
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l188
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(v0 * v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l188:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_DIV) {
+				goto l189
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l189
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l189
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].F32()
+					lhs := i.stack[i.sp-2].F32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxF32(lhs / rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l189:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_REM) {
+				goto l190
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l190
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l190
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].F32()
+					lhs := i.stack[i.sp-2].F32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxF32(float32(math.Mod(float64(lhs), float64(rhs))))
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l190:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MOD) {
+				goto l191
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l191
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l191
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].F32()
+					lhs := i.stack[i.sp-2].F32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := func(lhs, rhs float32) types.Boxed {
+						m := math.Mod(float64(lhs), float64(rhs))
+						if m != 0 && (m < 0) != (rhs < 0) {
+							m += float64(rhs)
+						}
+						return types.BoxF32(float32(m))
+					}(lhs, rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l191:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MIN) {
+				goto l192
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l192
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l192
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(min(v0, v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l192:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_MAX) {
+				goto l193
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l193
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l193
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(max(v0, v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l193:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_COPYSIGN) {
+				goto l194
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l194
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l194
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l194:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_EQ) {
+				goto l195
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l195
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l195
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 == v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l195:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_NE) {
+				goto l196
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l196
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l196
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 != v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l196:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LT) {
+				goto l197
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l197
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l197
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 < v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l197:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GT) {
+				goto l198
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l198
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l198
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 > v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l198:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_LE) {
+				goto l199
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l199
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l199
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 <= v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l199:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F32_GE) {
+				goto l200
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF32)
+				if !ok0 {
+					goto l200
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF32)
+				if !ok1 {
+					goto l200
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F32()
+					v2 := types.BoxI1(v0 >= v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l200:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_ADD) {
+				goto l201
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l201
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l201
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(v0 + v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l201:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_SUB) {
+				goto l202
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l202
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l202
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(v0 - v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l202:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MUL) {
+				goto l203
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l203
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l203
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(v0 * v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l203:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_DIV) {
+				goto l204
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l204
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l204
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].F64()
+					lhs := i.stack[i.sp-2].F64()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxF64(lhs / rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l204:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_REM) {
+				goto l205
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l205
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l205
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].F64()
+					lhs := i.stack[i.sp-2].F64()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxF64(math.Mod(lhs, rhs))
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l205:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MOD) {
+				goto l206
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l206
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l206
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].F64()
+					lhs := i.stack[i.sp-2].F64()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := func(lhs, rhs float64) types.Boxed {
+						m := math.Mod(lhs, rhs)
+						if m != 0 && (m < 0) != (rhs < 0) {
+							m += rhs
+						}
+						return types.BoxF64(m)
+					}(lhs, rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l206:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MIN) {
+				goto l207
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l207
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l207
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(math.Min(v0, v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l207:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_MAX) {
+				goto l208
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l208
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l208
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(math.Max(v0, v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l208:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_COPYSIGN) {
+				goto l209
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l209
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l209
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxF64(math.Copysign(v0, v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l209:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_EQ) {
+				goto l210
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l210
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l210
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 == v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l210:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_NE) {
+				goto l211
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l211
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l211
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 != v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l211:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_LT) {
+				goto l212
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l212
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l212
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 < v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l212:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_GT) {
+				goto l213
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l213
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l213
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 > v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l213:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_LE) {
+				goto l214
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l214
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l214
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 <= v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l214:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.F64_GE) {
+				goto l215
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindF64)
+				if !ok0 {
+					goto l215
+				}
+				i1, ok1 := c.local(start+2+1, types.KindF64)
+				if !ok1 {
+					goto l215
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.F64()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.F64()
+					v2 := types.BoxI1(v0 >= v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l215:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ADD) {
+				goto l216
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l216
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l216
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 + v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l216:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SUB) {
+				goto l217
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l217
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l217
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 - v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l217:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_MUL) {
+				goto l218
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l218
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l218
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 * v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l218:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_DIV_S) {
+				goto l219
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l219
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l219
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].I32()
+					lhs := i.stack[i.sp-2].I32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxI32(lhs / rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l219:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_DIV_U) {
+				goto l220
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l220
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l220
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].I32()
+					lhs := i.stack[i.sp-2].I32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxI32(int32(uint32(lhs) / uint32(rhs)))
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l220:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_REM_S) {
+				goto l221
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l221
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l221
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].I32()
+					lhs := i.stack[i.sp-2].I32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxI32(lhs % rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l221:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_REM_U) {
+				goto l222
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l222
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l222
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.stack[i.sp-1].I32()
+					lhs := i.stack[i.sp-2].I32()
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := types.BoxI32(int32(uint32(lhs) % uint32(rhs)))
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l222:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHL) {
+				goto l223
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l223
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l223
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 << (v1 & 31))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l223:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHR_S) {
+				goto l224
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l224
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l224
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(v0 >> (v1 & 31))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l224:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_SHR_U) {
+				goto l225
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l225
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l225
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l225:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_XOR) {
+				goto l226
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l226
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l226
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l226:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_AND) {
+				goto l227
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l227
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l227
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v2 := types.Boxed(uint64(r0) & uint64(r1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l227:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_OR) {
+				goto l228
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l228
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l228
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l228:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ROTL) {
+				goto l229
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l229
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l229
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l229:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_ROTR) {
+				goto l230
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l230
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l230
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l230:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_EQ) {
+				goto l231
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l231
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l231
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(v0 == v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l231:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_NE) {
+				goto l232
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l232
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l232
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(v0 != v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l232:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LT_S) {
+				goto l233
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l233
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l233
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(v0 < v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l233:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LT_U) {
+				goto l234
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l234
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l234
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(uint32(v0) < uint32(v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l234:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GT_S) {
+				goto l235
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l235
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l235
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(v0 > v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l235:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GT_U) {
+				goto l236
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l236
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l236
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(uint32(v0) > uint32(v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l236:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LE_S) {
+				goto l237
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l237
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l237
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(v0 <= v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l237:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_LE_U) {
+				goto l238
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l238
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l238
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l238:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GE_S) {
+				goto l239
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l239
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l239
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(v0 >= v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l239:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I32_GE_U) {
+				goto l240
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI32)
+				if !ok0 {
+					goto l240
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l240
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := r0.I32()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l240:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ADD) {
+				goto l241
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l186
+					goto l241
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l186
+					goto l241
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 + v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l241:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SUB) {
+				goto l242
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l242
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l242
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 - v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l242:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_MUL) {
+				goto l243
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l243
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l243
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 * v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l243:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_DIV_S) {
+				goto l244
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l244
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l244
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.retainBox(r0)
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.retainBox(r1)
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.unboxI64(i.stack[i.sp-1])
+					lhs := i.unboxI64(i.stack[i.sp-2])
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := i.boxI64(lhs / rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l244:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_DIV_U) {
+				goto l245
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l245
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l245
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.retainBox(r0)
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.retainBox(r1)
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.unboxI64(i.stack[i.sp-1])
+					lhs := i.unboxI64(i.stack[i.sp-2])
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := i.boxI64(int64(uint64(lhs) / uint64(rhs)))
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l245:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_REM_S) {
+				goto l246
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l246
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l246
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.retainBox(r0)
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.retainBox(r1)
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.unboxI64(i.stack[i.sp-1])
+					lhs := i.unboxI64(i.stack[i.sp-2])
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := i.boxI64(lhs % rhs)
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l246:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_REM_U) {
+				goto l247
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l247
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l247
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					i.retainBox(r0)
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					i.retainBox(r1)
+					i.stack[i.sp] = r1
+					i.sp++
+					i.fr.ip += 2
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					rhs := i.unboxI64(i.stack[i.sp-1])
+					lhs := i.unboxI64(i.stack[i.sp-2])
+					if rhs == 0 {
+						panic(ErrDivideByZero)
+					}
+					result := i.boxI64(int64(uint64(lhs) % uint64(rhs)))
+					i.sp--
+					i.stack[i.sp-1] = result
+					i.fr.ip++
+				}
+			}
+		l247:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHL) {
+				goto l248
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l248
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l248
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 << (v1 & 63))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l248:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHR_S) {
+				goto l249
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l249
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l249
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 >> (v1 & 63))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l249:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_SHR_U) {
+				goto l250
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l250
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l250
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l250:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_XOR) {
+				goto l251
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l251
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l251
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 ^ v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l251:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_AND) {
+				goto l252
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l252
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l252
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 & v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l252:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_OR) {
+				goto l253
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l253
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l253
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i0 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					v0 := i.borrowI64(r0)
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := i.borrowI64(r1)
+					v2 := i.boxI64(v0 | v1)
+					i.stack[i.sp] = v2
+					i.sp++
+					i.fr.ip += 5
+				}
+			}
+		l253:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ROTL) {
+				goto l254
+			}
+			{
+				i0, ok0 := c.local(start+1, types.KindI64)
+				if !ok0 {
+					goto l254
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI64)
+				if !ok1 {
+					goto l254
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30063,18 +32612,18 @@ var (
 					i.fr.ip += 5
 				}
 			}
-		l186:
+		l254:
 			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_ROTR) {
-				goto l187
+				goto l255
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l187
+					goto l255
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l187
+					goto l255
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30099,18 +32648,18 @@ var (
 					i.fr.ip += 5
 				}
 			}
-		l187:
+		l255:
 			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_EQ) {
-				goto l188
+				goto l256
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l188
+					goto l256
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l188
+					goto l256
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30135,18 +32684,18 @@ var (
 					i.fr.ip += 5
 				}
 			}
-		l188:
+		l256:
 			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_NE) {
-				goto l189
+				goto l257
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l189
+					goto l257
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l189
+					goto l257
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30171,18 +32720,18 @@ var (
 					i.fr.ip += 5
 				}
 			}
-		l189:
+		l257:
 			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LT_S) {
-				goto l190
+				goto l258
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l190
+					goto l258
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l190
+					goto l258
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30207,18 +32756,18 @@ var (
 					i.fr.ip += 5
 				}
 			}
-		l190:
+		l258:
 			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.I64_LT_U) {
-				goto l191
+				goto l259
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l191
+					goto l259
 				}
 				i1, ok1 := c.local(start+2+1, types.KindI64)
 				if !ok1 {
-					goto l191
+					goto l259
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30243,15 +32792,15 @@ var (
 					i.fr.ip += 5
 				}
 			}
-		l191:
+		l259:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.REF_IS_NULL && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l192
+				goto l260
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindRef)
 				if !ok0 {
-					goto l192
+					goto l260
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -30266,14 +32815,14 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l192:
+		l260:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_ADD) {
-				goto l193
+				goto l261
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l193
+					goto l261
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30293,14 +32842,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l193:
+		l261:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SUB) {
-				goto l194
+				goto l262
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l194
+					goto l262
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30320,14 +32869,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l194:
+		l262:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_MUL) {
-				goto l195
+				goto l263
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l195
+					goto l263
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30347,14 +32896,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l195:
+		l263:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_DIV_S) {
-				goto l196
+				goto l264
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l196
+					goto l264
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30390,14 +32939,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l196:
+		l264:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_DIV_U) {
-				goto l197
+				goto l265
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l197
+					goto l265
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30433,14 +32982,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l197:
+		l265:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_REM_S) {
-				goto l198
+				goto l266
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l198
+					goto l266
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30476,14 +33025,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l198:
+		l266:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_REM_U) {
-				goto l199
+				goto l267
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l199
+					goto l267
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30519,14 +33068,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l199:
+		l267:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SHL) {
-				goto l200
+				goto l268
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l200
+					goto l268
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30546,14 +33095,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l200:
+		l268:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SHR_S) {
-				goto l201
+				goto l269
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l201
+					goto l269
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30573,14 +33122,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l201:
+		l269:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_SHR_U) {
-				goto l202
+				goto l270
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l202
+					goto l270
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30600,14 +33149,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l202:
+		l270:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_XOR) {
-				goto l203
+				goto l271
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l203
+					goto l271
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
 				c.ip += 2
@@ -30626,14 +33175,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l203:
+		l271:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_AND) {
-				goto l204
+				goto l272
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l204
+					goto l272
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
 				c.ip += 2
@@ -30652,14 +33201,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l204:
+		l272:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_OR) {
-				goto l205
+				goto l273
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l205
+					goto l273
 				}
 				r1 := types.BoxI32(int32(instr.Instruction(c.code[start+2:]).Operand(0)))
 				c.ip += 2
@@ -30678,14 +33227,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l205:
+		l273:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_ROTL) {
-				goto l206
+				goto l274
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l206
+					goto l274
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30705,14 +33254,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l206:
+		l274:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_ROTR) {
-				goto l207
+				goto l275
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l207
+					goto l275
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30732,14 +33281,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l207:
+		l275:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_EQ) {
-				goto l208
+				goto l276
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l208
+					goto l276
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30759,14 +33308,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l208:
+		l276:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_NE) {
-				goto l209
+				goto l277
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l209
+					goto l277
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30786,14 +33335,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l209:
+		l277:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LT_S) {
-				goto l210
+				goto l278
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l210
+					goto l278
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30813,14 +33362,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l210:
+		l278:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LT_U) {
-				goto l211
+				goto l279
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l211
+					goto l279
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30840,14 +33389,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l211:
+		l279:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GT_S) {
-				goto l212
+				goto l280
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l212
+					goto l280
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30867,14 +33416,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l212:
+		l280:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GT_U) {
-				goto l213
+				goto l281
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l213
+					goto l281
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30894,14 +33443,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l213:
+		l281:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LE_S) {
-				goto l214
+				goto l282
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l214
+					goto l282
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30921,14 +33470,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l214:
+		l282:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_LE_U) {
-				goto l215
+				goto l283
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l215
+					goto l283
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30948,14 +33497,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l215:
+		l283:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GE_S) {
-				goto l216
+				goto l284
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l216
+					goto l284
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -30975,14 +33524,14 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l216:
+		l284:
 			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.I32_GE_U) {
-				goto l217
+				goto l285
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l217
+					goto l285
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31002,15 +33551,15 @@ var (
 					i.fr.ip += 8
 				}
 			}
-		l217:
+		l285:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_EQ && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l218
+				goto l286
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l218
+					goto l286
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31031,15 +33580,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l218:
+		l286:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_NE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l219
+				goto l287
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l219
+					goto l287
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31060,15 +33609,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l219:
+		l287:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LT_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l220
+				goto l288
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l220
+					goto l288
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31089,15 +33638,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l220:
+		l288:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LT_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l221
+				goto l289
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l221
+					goto l289
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31118,15 +33667,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l221:
+		l289:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GT_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l222
+				goto l290
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l222
+					goto l290
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31147,15 +33696,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l222:
+		l290:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GT_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l223
+				goto l291
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l223
+					goto l291
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31176,15 +33725,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l223:
+		l291:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LE_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l224
+				goto l292
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l224
+					goto l292
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31205,15 +33754,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l224:
+		l292:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LE_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l225
+				goto l293
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l225
+					goto l293
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31234,15 +33783,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l225:
+		l293:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GE_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l226
+				goto l294
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l226
+					goto l294
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31263,15 +33812,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l226:
+		l294:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GE_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l227
+				goto l295
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l227
+					goto l295
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -31292,14 +33841,14 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l227:
+		l295:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GT_S) {
-				goto l228
+				goto l296
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l228
+					goto l296
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31319,14 +33868,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l228:
+		l296:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GT_U) {
-				goto l229
+				goto l297
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l229
+					goto l297
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31346,14 +33895,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l229:
+		l297:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LE_S) {
-				goto l230
+				goto l298
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l230
+					goto l298
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31373,14 +33922,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l230:
+		l298:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LE_U) {
-				goto l231
+				goto l299
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l231
+					goto l299
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31400,14 +33949,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l231:
+		l299:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GE_S) {
-				goto l232
+				goto l300
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l232
+					goto l300
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31427,14 +33976,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l232:
+		l300:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_GE_U) {
-				goto l233
+				goto l301
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l233
+					goto l301
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31454,14 +34003,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l233:
+		l301:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_ADD) {
-				goto l234
+				goto l302
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l234
+					goto l302
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31481,14 +34030,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l234:
+		l302:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SUB) {
-				goto l235
+				goto l303
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l235
+					goto l303
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31508,14 +34057,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l235:
+		l303:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_MUL) {
-				goto l236
+				goto l304
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l236
+					goto l304
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31535,14 +34084,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l236:
+		l304:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_DIV_S) {
-				goto l237
+				goto l305
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l237
+					goto l305
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31579,14 +34128,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l237:
+		l305:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_DIV_U) {
-				goto l238
+				goto l306
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l238
+					goto l306
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31623,14 +34172,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l238:
+		l306:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_REM_S) {
-				goto l239
+				goto l307
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l239
+					goto l307
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31667,14 +34216,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l239:
+		l307:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_REM_U) {
-				goto l240
+				goto l308
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l240
+					goto l308
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31711,14 +34260,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l240:
+		l308:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SHL) {
-				goto l241
+				goto l309
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l241
+					goto l309
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31738,14 +34287,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l241:
+		l309:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SHR_S) {
-				goto l242
+				goto l310
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l242
+					goto l310
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31765,14 +34314,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l242:
+		l310:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_SHR_U) {
-				goto l243
+				goto l311
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l243
+					goto l311
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31792,14 +34341,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l243:
+		l311:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_XOR) {
-				goto l244
+				goto l312
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l244
+					goto l312
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31819,14 +34368,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l244:
+		l312:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_AND) {
-				goto l245
+				goto l313
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l245
+					goto l313
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31846,14 +34395,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l245:
+		l313:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_OR) {
-				goto l246
+				goto l314
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l246
+					goto l314
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31873,14 +34422,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l246:
+		l314:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_ROTL) {
-				goto l247
+				goto l315
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l247
+					goto l315
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31900,14 +34449,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l247:
+		l315:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_ROTR) {
-				goto l248
+				goto l316
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l248
+					goto l316
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31927,14 +34476,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l248:
+		l316:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_EQ) {
-				goto l249
+				goto l317
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l249
+					goto l317
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31954,14 +34503,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l249:
+		l317:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_NE) {
-				goto l250
+				goto l318
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l250
+					goto l318
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -31981,14 +34530,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l250:
+		l318:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LT_S) {
-				goto l251
+				goto l319
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l251
+					goto l319
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -32008,14 +34557,14 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l251:
+		l319:
 			if !(start+12 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_CONST && instr.Opcode(c.code[start+11]) == instr.I64_LT_U) {
-				goto l252
+				goto l320
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l252
+					goto l320
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
@@ -32035,15 +34584,15 @@ var (
 					i.fr.ip += 12
 				}
 			}
-		l252:
+		l320:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_EQ && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l253
+				goto l321
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l253
+					goto l321
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32064,15 +34613,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l253:
+		l321:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_NE && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l254
+				goto l322
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l254
+					goto l322
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32093,15 +34642,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l254:
+		l322:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LT_S && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l255
+				goto l323
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l255
+					goto l323
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32122,15 +34671,15 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l255:
+		l323:
 			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LT_U && instr.Opcode(c.code[start+3]) == instr.BR_IF) {
-				goto l256
+				goto l324
 			}
 			{
 				offset := instr.ParseI16(c.code, start+4)
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l256
+					goto l324
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32151,14 +34700,14 @@ var (
 					i.fr.ip += 6
 				}
 			}
-		l256:
+		l324:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_S) {
-				goto l257
+				goto l325
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l257
+					goto l325
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32176,14 +34725,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l257:
+		l325:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_U) {
-				goto l258
+				goto l326
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l258
+					goto l326
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32201,14 +34750,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l258:
+		l326:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LE_S) {
-				goto l259
+				goto l327
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l259
+					goto l327
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32226,14 +34775,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l259:
+		l327:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LE_U) {
-				goto l260
+				goto l328
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l260
+					goto l328
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32251,14 +34800,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l260:
+		l328:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GE_S) {
-				goto l261
+				goto l329
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l261
+					goto l329
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32276,14 +34825,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l261:
+		l329:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GE_U) {
-				goto l262
+				goto l330
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l262
+					goto l330
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32301,14 +34850,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l262:
+		l330:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_ADD) {
-				goto l263
+				goto l331
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l263
+					goto l331
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32326,14 +34875,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l263:
+		l331:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_SUB) {
-				goto l264
+				goto l332
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l264
+					goto l332
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32351,14 +34900,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l264:
+		l332:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MUL) {
-				goto l265
+				goto l333
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l265
+					goto l333
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32376,14 +34925,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l265:
+		l333:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_DIV) {
-				goto l266
+				goto l334
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l266
+					goto l334
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32412,14 +34961,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l266:
+		l334:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_REM) {
-				goto l267
+				goto l335
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l267
+					goto l335
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32448,14 +34997,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l267:
+		l335:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MOD) {
-				goto l268
+				goto l336
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l268
+					goto l336
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32490,14 +35039,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l268:
+		l336:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MIN) {
-				goto l269
+				goto l337
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l269
+					goto l337
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32515,14 +35064,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l269:
+		l337:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MAX) {
-				goto l270
+				goto l338
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l270
+					goto l338
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32540,14 +35089,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l270:
+		l338:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_COPYSIGN) {
-				goto l271
+				goto l339
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l271
+					goto l339
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32565,14 +35114,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l271:
+		l339:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_EQ) {
-				goto l272
+				goto l340
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l272
+					goto l340
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32590,14 +35139,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l272:
+		l340:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_NE) {
-				goto l273
+				goto l341
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l273
+					goto l341
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32615,14 +35164,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l273:
+		l341:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_LT) {
-				goto l274
+				goto l342
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l274
+					goto l342
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32640,14 +35189,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l274:
+		l342:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_GT) {
-				goto l275
+				goto l343
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l275
+					goto l343
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32665,14 +35214,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l275:
+		l343:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_LE) {
-				goto l276
+				goto l344
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l276
+					goto l344
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32690,14 +35239,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l276:
+		l344:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_GE) {
-				goto l277
+				goto l345
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF32)
 				if !ok0 {
-					goto l277
+					goto l345
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32715,14 +35264,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l277:
+		l345:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_ADD) {
-				goto l278
+				goto l346
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l278
+					goto l346
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32740,14 +35289,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l278:
+		l346:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_SUB) {
-				goto l279
+				goto l347
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l279
+					goto l347
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32765,14 +35314,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l279:
+		l347:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MUL) {
-				goto l280
+				goto l348
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l280
+					goto l348
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32790,14 +35339,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l280:
+		l348:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_DIV) {
-				goto l281
+				goto l349
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l281
+					goto l349
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32826,14 +35375,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l281:
+		l349:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_REM) {
-				goto l282
+				goto l350
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l282
+					goto l350
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32862,14 +35411,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l282:
+		l350:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MOD) {
-				goto l283
+				goto l351
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l283
+					goto l351
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32904,14 +35453,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l283:
+		l351:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MIN) {
-				goto l284
+				goto l352
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l284
+					goto l352
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32929,14 +35478,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l284:
+		l352:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MAX) {
-				goto l285
+				goto l353
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l285
+					goto l353
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32954,14 +35503,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l285:
+		l353:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_COPYSIGN) {
-				goto l286
+				goto l354
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l286
+					goto l354
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -32979,14 +35528,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l286:
+		l354:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_EQ) {
-				goto l287
+				goto l355
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l287
+					goto l355
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33004,14 +35553,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l287:
+		l355:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_NE) {
-				goto l288
+				goto l356
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l288
+					goto l356
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33029,14 +35578,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l288:
+		l356:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_LT) {
-				goto l289
+				goto l357
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l289
+					goto l357
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33054,14 +35603,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l289:
+		l357:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_GT) {
-				goto l290
+				goto l358
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l290
+					goto l358
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33079,14 +35628,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l290:
+		l358:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_LE) {
-				goto l291
+				goto l359
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l291
+					goto l359
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33104,14 +35653,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l291:
+		l359:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_GE) {
-				goto l292
+				goto l360
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindF64)
 				if !ok0 {
-					goto l292
+					goto l360
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33129,14 +35678,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l292:
+		l360:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.DROP) {
-				goto l293
+				goto l361
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindRef)
 				if !ok0 {
-					goto l293
+					goto l361
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33146,14 +35695,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l293:
+		l361:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.REF_IS_NULL) {
-				goto l294
+				goto l362
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindRef)
 				if !ok0 {
-					goto l294
+					goto l362
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33170,14 +35719,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l294:
+		l362:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_ADD) {
-				goto l295
+				goto l363
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l295
+					goto l363
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33195,14 +35744,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l295:
+		l363:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SUB) {
-				goto l296
+				goto l364
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l296
+					goto l364
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33220,14 +35769,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l296:
+		l364:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_MUL) {
-				goto l297
+				goto l365
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l297
+					goto l365
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33245,14 +35794,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l297:
+		l365:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_DIV_S) {
-				goto l298
+				goto l366
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l298
+					goto l366
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33281,14 +35830,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l298:
+		l366:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_DIV_U) {
-				goto l299
+				goto l367
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l299
+					goto l367
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33317,14 +35866,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l299:
+		l367:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_REM_S) {
-				goto l300
+				goto l368
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l300
+					goto l368
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33353,14 +35902,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l300:
+		l368:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_REM_U) {
-				goto l301
+				goto l369
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l301
+					goto l369
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33389,14 +35938,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l301:
+		l369:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SHL) {
-				goto l302
+				goto l370
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l302
+					goto l370
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33414,14 +35963,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l302:
+		l370:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SHR_S) {
-				goto l303
+				goto l371
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l303
+					goto l371
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33439,14 +35988,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l303:
+		l371:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SHR_U) {
-				goto l304
+				goto l372
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l304
+					goto l372
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33464,14 +36013,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l304:
+		l372:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_XOR) {
-				goto l305
+				goto l373
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l305
+					goto l373
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33488,14 +36037,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l305:
+		l373:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_AND) {
-				goto l306
+				goto l374
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l306
+					goto l374
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33512,14 +36061,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l306:
+		l374:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_OR) {
-				goto l307
+				goto l375
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l307
+					goto l375
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33536,14 +36085,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l307:
+		l375:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_ROTL) {
-				goto l308
+				goto l376
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l308
+					goto l376
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33561,14 +36110,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l308:
+		l376:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_ROTR) {
-				goto l309
+				goto l377
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l309
+					goto l377
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33586,14 +36135,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l309:
+		l377:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_EQ) {
-				goto l310
+				goto l378
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l310
+					goto l378
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33611,14 +36160,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l310:
+		l378:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_NE) {
-				goto l311
+				goto l379
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l311
+					goto l379
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33636,14 +36185,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l311:
+		l379:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LT_S) {
-				goto l312
+				goto l380
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l312
+					goto l380
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33661,14 +36210,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l312:
+		l380:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LT_U) {
-				goto l313
+				goto l381
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l313
+					goto l381
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33686,14 +36235,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l313:
+		l381:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GT_S) {
-				goto l314
+				goto l382
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l314
+					goto l382
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33711,14 +36260,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l314:
+		l382:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GT_U) {
-				goto l315
+				goto l383
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l315
+					goto l383
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33736,14 +36285,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l315:
+		l383:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LE_S) {
-				goto l316
+				goto l384
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l316
+					goto l384
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33761,14 +36310,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l316:
+		l384:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LE_U) {
-				goto l317
+				goto l385
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l317
+					goto l385
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33786,14 +36335,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l317:
+		l385:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GE_S) {
-				goto l318
+				goto l386
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l318
+					goto l386
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33811,14 +36360,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l318:
+		l386:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GE_U) {
-				goto l319
+				goto l387
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI32)
 				if !ok0 {
-					goto l319
+					goto l387
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33836,14 +36385,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l319:
+		l387:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_ADD) {
-				goto l320
+				goto l388
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l320
+					goto l388
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33861,14 +36410,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l320:
+		l388:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SUB) {
-				goto l321
+				goto l389
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l321
+					goto l389
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33886,14 +36435,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l321:
+		l389:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_MUL) {
-				goto l322
+				goto l390
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l322
+					goto l390
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33911,14 +36460,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l322:
+		l390:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_DIV_S) {
-				goto l323
+				goto l391
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l323
+					goto l391
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33948,14 +36497,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l323:
+		l391:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_DIV_U) {
-				goto l324
+				goto l392
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l324
+					goto l392
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -33985,14 +36534,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l324:
+		l392:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_REM_S) {
-				goto l325
+				goto l393
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l325
+					goto l393
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34022,14 +36571,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l325:
+		l393:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_REM_U) {
-				goto l326
+				goto l394
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l326
+					goto l394
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34059,14 +36608,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l326:
+		l394:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SHL) {
-				goto l327
+				goto l395
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l327
+					goto l395
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34084,14 +36633,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l327:
+		l395:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SHR_S) {
-				goto l328
+				goto l396
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l328
+					goto l396
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34109,14 +36658,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l328:
+		l396:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SHR_U) {
-				goto l329
+				goto l397
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l329
+					goto l397
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34134,14 +36683,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l329:
+		l397:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_XOR) {
-				goto l330
+				goto l398
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l330
+					goto l398
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34159,14 +36708,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l330:
+		l398:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_AND) {
-				goto l331
+				goto l399
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l331
+					goto l399
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34184,14 +36733,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l331:
+		l399:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_OR) {
-				goto l332
+				goto l400
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l332
+					goto l400
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34209,14 +36758,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l332:
+		l400:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_ROTL) {
-				goto l333
+				goto l401
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l333
+					goto l401
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34234,14 +36783,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l333:
+		l401:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_ROTR) {
-				goto l334
+				goto l402
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l334
+					goto l402
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34259,14 +36808,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l334:
+		l402:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_EQ) {
-				goto l335
+				goto l403
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l335
+					goto l403
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34284,14 +36833,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l335:
+		l403:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_NE) {
-				goto l336
+				goto l404
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l336
+					goto l404
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34309,14 +36858,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l336:
+		l404:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LT_S) {
-				goto l337
+				goto l405
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l337
+					goto l405
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34334,14 +36883,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l337:
+		l405:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LT_U) {
-				goto l338
+				goto l406
 			}
 			{
 				i0, ok0 := c.local(start+1, types.KindI64)
 				if !ok0 {
-					goto l338
+					goto l406
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -34359,7 +36908,7 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l338:
+		l406:
 			return nil
 		},
 		instr.CONST_GET: func(c *threader) func(*Interpreter) {
@@ -35132,11 +37681,10 @@ var (
 				}
 			}
 		l31:
-			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.REF_IS_NULL && instr.Opcode(c.code[start+4]) == instr.BR_IF) {
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
 				goto l32
 			}
 			{
-				offset := instr.ParseI16(c.code, start+5)
 				r0, ok0 := c.constant(start+1, types.KindRef)
 				if !ok0 {
 					goto l32
@@ -35145,8 +37693,1293 @@ var (
 				if c0 < 0 || c0 >= len(c.heap) {
 					goto l32
 				}
-				if _, ok := c.heap[c0].(types.String); ok {
+				_, ok := c.heap[c0].(types.TypedArray[bool])
+				if !ok {
 					goto l32
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l32
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[bool])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI1(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l32:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l33
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l33
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l33
+				}
+				_, ok := c.heap[c0].(types.TypedArray[bool])
+				if !ok {
+					goto l33
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l33
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[bool])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI1(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l33:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l34
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l34
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l34
+				}
+				_, ok := c.heap[c0].(types.TypedArray[bool])
+				if !ok {
+					goto l34
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l34
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[bool])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI1(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l34:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l35
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l35
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l35
+				}
+				_, ok := c.heap[c0].(types.TypedArray[bool])
+				if !ok {
+					goto l35
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l35
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[bool])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI1(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l35:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l36
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l36
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l36
+				}
+				_, ok := c.heap[c0].(types.TypedArray[bool])
+				if !ok {
+					goto l36
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					array, ok := i.heap[c0].(types.TypedArray[bool])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI1(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 9
+				}
+			}
+		l36:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l37
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l37
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l37
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float32])
+				if !ok {
+					goto l37
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l37
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l37:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l38
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l38
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l38
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float32])
+				if !ok {
+					goto l38
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l38
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l38:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l39
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l39
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l39
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float32])
+				if !ok {
+					goto l39
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l39
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l39:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l40
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l40
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l40
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float32])
+				if !ok {
+					goto l40
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l40
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l40:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l41
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l41
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l41
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float32])
+				if !ok {
+					goto l41
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					array, ok := i.heap[c0].(types.TypedArray[float32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 9
+				}
+			}
+		l41:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l42
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l42
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l42
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float64])
+				if !ok {
+					goto l42
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l42
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l42:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l43
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l43
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l43
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float64])
+				if !ok {
+					goto l43
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l43
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l43:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l44
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l44
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l44
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float64])
+				if !ok {
+					goto l44
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l44
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l44:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l45
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l45
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l45
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float64])
+				if !ok {
+					goto l45
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l45
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[float64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l45:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l46
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l46
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l46
+				}
+				_, ok := c.heap[c0].(types.TypedArray[float64])
+				if !ok {
+					goto l46
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					array, ok := i.heap[c0].(types.TypedArray[float64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxF64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 9
+				}
+			}
+		l46:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l47
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l47
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l47
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int32])
+				if !ok {
+					goto l47
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l47
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l47:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l48
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l48
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l48
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int32])
+				if !ok {
+					goto l48
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l48
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l48:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l49
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l49
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l49
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int32])
+				if !ok {
+					goto l49
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l49
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l49:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l50
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l50
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l50
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int32])
+				if !ok {
+					goto l50
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l50
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l50:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l51
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l51
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l51
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int32])
+				if !ok {
+					goto l51
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					array, ok := i.heap[c0].(types.TypedArray[int32])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI32(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 9
+				}
+			}
+		l51:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l52
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l52
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l52
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int64])
+				if !ok {
+					goto l52
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l52
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := i.boxI64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l52:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l53
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l53
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l53
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int64])
+				if !ok {
+					goto l53
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l53
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := i.boxI64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l53:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l54
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l54
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l54
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int64])
+				if !ok {
+					goto l54
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l54
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := i.boxI64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l54:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l55
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l55
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l55
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int64])
+				if !ok {
+					goto l55
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l55
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := i.boxI64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l55:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l56
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l56
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l56
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int64])
+				if !ok {
+					goto l56
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					array, ok := i.heap[c0].(types.TypedArray[int64])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := i.boxI64(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 9
+				}
+			}
+		l56:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l57
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l57
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l57
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int8])
+				if !ok {
+					goto l57
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l57
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int8])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI8(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l57:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l58
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l58
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l58
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int8])
+				if !ok {
+					goto l58
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l58
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int8])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI8(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l58:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l59
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l59
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l59
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int8])
+				if !ok {
+					goto l59
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l59
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int8])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI8(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 7
+				}
+			}
+		l59:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l60
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l60
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l60
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int8])
+				if !ok {
+					goto l60
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l60
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					array, ok := i.heap[c0].(types.TypedArray[int8])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI8(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 6
+				}
+			}
+		l60:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l61
+			}
+			{
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l61
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l61
+				}
+				_, ok := c.heap[c0].(types.TypedArray[int8])
+				if !ok {
+					goto l61
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					array, ok := i.heap[c0].(types.TypedArray[int8])
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if at < 0 || at+1 > len(array) {
+						panic(ErrIndexOutOfRange)
+					}
+					result := types.BoxI8(array[at])
+					i.stack[i.sp] = result
+					i.sp++
+					i.fr.ip += 9
+				}
+			}
+		l61:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.REF_IS_NULL && instr.Opcode(c.code[start+4]) == instr.BR_IF) {
+				goto l62
+			}
+			{
+				offset := instr.ParseI16(c.code, start+5)
+				r0, ok0 := c.constant(start+1, types.KindRef)
+				if !ok0 {
+					goto l62
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l62
+				}
+				if _, ok := c.heap[c0].(types.String); ok {
+					goto l62
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35156,23 +38989,23 @@ var (
 					i.fr.ip += 7
 				}
 			}
-		l32:
+		l62:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN_CALL) {
-				goto l33
+				goto l63
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindRef)
 				if !ok0 {
-					goto l33
+					goto l63
 				}
 				addr := r0.Ref()
 				if addr < 0 || addr >= len(c.heap) {
-					goto l33
+					goto l63
 				}
 				switch fn := c.heap[addr].(type) {
 				case *types.Function:
 					if addr < len(c.coros) && c.coros[addr] {
-						goto l33
+						goto l63
 					}
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
@@ -35236,10 +39069,10 @@ var (
 				case *types.Closure:
 					tmpl, ok := c.heap[fn.Fn].(*types.Function)
 					if !ok {
-						goto l33
+						goto l63
 					}
 					if int(fn.Fn) < len(c.coros) && c.coros[fn.Fn] {
-						goto l33
+						goto l63
 					}
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
@@ -35358,21 +39191,21 @@ var (
 						}
 					}
 				default:
-					goto l33
+					goto l63
 				}
 			}
-		l33:
+		l63:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CLOSURE_NEW) {
-				goto l34
+				goto l64
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindRef)
 				if !ok0 {
-					goto l34
+					goto l64
 				}
 				addr := r0.Ref()
 				if addr < 0 || addr >= len(c.heap) {
-					goto l34
+					goto l64
 				}
 				switch fn := c.heap[addr].(type) {
 				case *types.Function:
@@ -35395,26 +39228,26 @@ var (
 						i.fr.ip += 4
 					}
 				default:
-					goto l34
+					goto l64
 				}
 			}
-		l34:
+		l64:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CALL) {
-				goto l35
+				goto l65
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindRef)
 				if !ok0 {
-					goto l35
+					goto l65
 				}
 				addr := r0.Ref()
 				if addr < 0 || addr >= len(c.heap) {
-					goto l35
+					goto l65
 				}
 				switch fn := c.heap[addr].(type) {
 				case *types.Function:
 					if addr < len(c.coros) && c.coros[addr] {
-						goto l35
+						goto l65
 					}
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
@@ -35454,10 +39287,10 @@ var (
 				case *types.Closure:
 					tmpl, ok := c.heap[fn.Fn].(*types.Function)
 					if !ok {
-						goto l35
+						goto l65
 					}
 					if int(fn.Fn) < len(c.coros) && c.coros[fn.Fn] {
-						goto l35
+						goto l65
 					}
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
@@ -35533,17 +39366,17 @@ var (
 						i.fr.ip += 4
 					}
 				default:
-					goto l35
+					goto l65
 				}
 			}
-		l35:
+		l65:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_ADD) {
-				goto l36
+				goto l66
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l36
+					goto l66
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35556,14 +39389,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l36:
+		l66:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_SUB) {
-				goto l37
+				goto l67
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l37
+					goto l67
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35576,14 +39409,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l37:
+		l67:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MUL) {
-				goto l38
+				goto l68
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l38
+					goto l68
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35596,14 +39429,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l38:
+		l68:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_DIV) {
-				goto l39
+				goto l69
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l39
+					goto l69
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35628,14 +39461,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l39:
+		l69:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_REM) {
-				goto l40
+				goto l70
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l40
+					goto l70
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35660,14 +39493,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l40:
+		l70:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MOD) {
-				goto l41
+				goto l71
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l41
+					goto l71
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35698,14 +39531,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l41:
+		l71:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MIN) {
-				goto l42
+				goto l72
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l42
+					goto l72
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35718,14 +39551,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l42:
+		l72:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MAX) {
-				goto l43
+				goto l73
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l43
+					goto l73
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35738,14 +39571,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l43:
+		l73:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_COPYSIGN) {
-				goto l44
+				goto l74
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l44
+					goto l74
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35758,14 +39591,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l44:
+		l74:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_EQ) {
-				goto l45
+				goto l75
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l45
+					goto l75
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35778,14 +39611,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l45:
+		l75:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_NE) {
-				goto l46
+				goto l76
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l46
+					goto l76
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35798,14 +39631,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l46:
+		l76:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_LT) {
-				goto l47
+				goto l77
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l47
+					goto l77
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35818,14 +39651,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l47:
+		l77:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_GT) {
-				goto l48
+				goto l78
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l48
+					goto l78
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35838,14 +39671,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l48:
+		l78:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_LE) {
-				goto l49
+				goto l79
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l49
+					goto l79
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35858,14 +39691,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l49:
+		l79:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_GE) {
-				goto l50
+				goto l80
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF32)
 				if !ok0 {
-					goto l50
+					goto l80
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35878,14 +39711,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l50:
+		l80:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_ADD) {
-				goto l51
+				goto l81
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l51
+					goto l81
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35898,14 +39731,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l51:
+		l81:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_SUB) {
-				goto l52
+				goto l82
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l52
+					goto l82
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35918,14 +39751,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l52:
+		l82:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MUL) {
-				goto l53
+				goto l83
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l53
+					goto l83
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35938,14 +39771,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l53:
+		l83:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_DIV) {
-				goto l54
+				goto l84
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l54
+					goto l84
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -35970,14 +39803,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l54:
+		l84:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_REM) {
-				goto l55
+				goto l85
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l55
+					goto l85
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36002,14 +39835,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l55:
+		l85:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MOD) {
-				goto l56
+				goto l86
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l56
+					goto l86
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36040,14 +39873,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l56:
+		l86:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MIN) {
-				goto l57
+				goto l87
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l57
+					goto l87
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36060,14 +39893,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l57:
+		l87:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MAX) {
-				goto l58
+				goto l88
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l58
+					goto l88
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36080,14 +39913,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l58:
+		l88:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_COPYSIGN) {
-				goto l59
+				goto l89
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l59
+					goto l89
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36100,14 +39933,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l59:
+		l89:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_EQ) {
-				goto l60
+				goto l90
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l60
+					goto l90
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36120,14 +39953,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l60:
+		l90:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_NE) {
-				goto l61
+				goto l91
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l61
+					goto l91
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36140,14 +39973,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l61:
+		l91:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_LT) {
-				goto l62
+				goto l92
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l62
+					goto l92
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36160,14 +39993,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l62:
+		l92:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_GT) {
-				goto l63
+				goto l93
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l63
+					goto l93
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36180,14 +40013,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l63:
+		l93:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_LE) {
-				goto l64
+				goto l94
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l64
+					goto l94
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36200,14 +40033,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l64:
+		l94:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_GE) {
-				goto l65
+				goto l95
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindF64)
 				if !ok0 {
-					goto l65
+					goto l95
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36220,14 +40053,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l65:
+		l95:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.ARRAY_GET) {
-				goto l66
+				goto l96
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l66
+					goto l96
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36288,14 +40121,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l66:
+		l96:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.STRUCT_GET) {
-				goto l67
+				goto l97
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l67
+					goto l97
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36362,14 +40195,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l67:
+		l97:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ADD) {
-				goto l68
+				goto l98
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l68
+					goto l98
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36382,14 +40215,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l68:
+		l98:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SUB) {
-				goto l69
+				goto l99
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l69
+					goto l99
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36402,14 +40235,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l69:
+		l99:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_MUL) {
-				goto l70
+				goto l100
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l70
+					goto l100
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36422,14 +40255,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l70:
+		l100:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_DIV_S) {
-				goto l71
+				goto l101
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l71
+					goto l101
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36454,14 +40287,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l71:
+		l101:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_DIV_U) {
-				goto l72
+				goto l102
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l72
+					goto l102
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36486,14 +40319,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l72:
+		l102:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_REM_S) {
-				goto l73
+				goto l103
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l73
+					goto l103
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36518,14 +40351,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l73:
+		l103:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_REM_U) {
-				goto l74
+				goto l104
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l74
+					goto l104
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36550,14 +40383,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l74:
+		l104:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHL) {
-				goto l75
+				goto l105
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l75
+					goto l105
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36570,14 +40403,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l75:
+		l105:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHR_S) {
-				goto l76
+				goto l106
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l76
+					goto l106
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36590,14 +40423,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l76:
+		l106:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHR_U) {
-				goto l77
+				goto l107
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l77
+					goto l107
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36610,14 +40443,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l77:
+		l107:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_XOR) {
-				goto l78
+				goto l108
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l78
+					goto l108
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36629,14 +40462,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l78:
+		l108:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_AND) {
-				goto l79
+				goto l109
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l79
+					goto l109
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36648,14 +40481,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l79:
+		l109:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_OR) {
-				goto l80
+				goto l110
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l80
+					goto l110
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36667,14 +40500,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l80:
+		l110:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ROTL) {
-				goto l81
+				goto l111
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l81
+					goto l111
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36687,14 +40520,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l81:
+		l111:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ROTR) {
-				goto l82
+				goto l112
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l82
+					goto l112
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36707,14 +40540,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l82:
+		l112:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_EQ) {
-				goto l83
+				goto l113
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l83
+					goto l113
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36727,14 +40560,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l83:
+		l113:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_NE) {
-				goto l84
+				goto l114
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l84
+					goto l114
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36747,14 +40580,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l84:
+		l114:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LT_S) {
-				goto l85
+				goto l115
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l85
+					goto l115
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36767,14 +40600,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l85:
+		l115:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LT_U) {
-				goto l86
+				goto l116
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l86
+					goto l116
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36787,14 +40620,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l86:
+		l116:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GT_S) {
-				goto l87
+				goto l117
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l87
+					goto l117
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36807,14 +40640,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l87:
+		l117:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GT_U) {
-				goto l88
+				goto l118
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l88
+					goto l118
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36827,14 +40660,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l88:
+		l118:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LE_S) {
-				goto l89
+				goto l119
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l89
+					goto l119
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36847,14 +40680,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l89:
+		l119:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LE_U) {
-				goto l90
+				goto l120
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l90
+					goto l120
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36867,14 +40700,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l90:
+		l120:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GE_S) {
-				goto l91
+				goto l121
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l91
+					goto l121
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36887,14 +40720,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l91:
+		l121:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GE_U) {
-				goto l92
+				goto l122
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI32)
 				if !ok0 {
-					goto l92
+					goto l122
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36907,14 +40740,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l92:
+		l122:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_S) {
-				goto l93
+				goto l123
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l93
+					goto l123
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36927,14 +40760,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l93:
+		l123:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_U) {
-				goto l94
+				goto l124
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l94
+					goto l124
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36947,14 +40780,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l94:
+		l124:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LE_S) {
-				goto l95
+				goto l125
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l95
+					goto l125
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36967,14 +40800,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l95:
+		l125:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LE_U) {
-				goto l96
+				goto l126
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l96
+					goto l126
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -36987,14 +40820,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l96:
+		l126:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GE_S) {
-				goto l97
+				goto l127
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l97
+					goto l127
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37007,14 +40840,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l97:
+		l127:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GE_U) {
-				goto l98
+				goto l128
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l98
+					goto l128
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37027,14 +40860,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l98:
+		l128:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ADD) {
-				goto l99
+				goto l129
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l99
+					goto l129
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37047,14 +40880,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l99:
+		l129:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SUB) {
-				goto l100
+				goto l130
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l100
+					goto l130
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37067,14 +40900,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l100:
+		l130:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_MUL) {
-				goto l101
+				goto l131
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l101
+					goto l131
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37087,14 +40920,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l101:
+		l131:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_DIV_S) {
-				goto l102
+				goto l132
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l102
+					goto l132
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37119,14 +40952,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l102:
+		l132:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_DIV_U) {
-				goto l103
+				goto l133
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l103
+					goto l133
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37151,14 +40984,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l103:
+		l133:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_REM_S) {
-				goto l104
+				goto l134
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l104
+					goto l134
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37183,14 +41016,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l104:
+		l134:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_REM_U) {
-				goto l105
+				goto l135
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l105
+					goto l135
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37215,14 +41048,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l105:
+		l135:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHL) {
-				goto l106
+				goto l136
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l106
+					goto l136
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37235,14 +41068,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l106:
+		l136:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHR_S) {
-				goto l107
+				goto l137
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l107
+					goto l137
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37255,14 +41088,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l107:
+		l137:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHR_U) {
-				goto l108
+				goto l138
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l108
+					goto l138
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37275,14 +41108,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l108:
+		l138:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_XOR) {
-				goto l109
+				goto l139
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l109
+					goto l139
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37295,14 +41128,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l109:
+		l139:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_AND) {
-				goto l110
+				goto l140
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l110
+					goto l140
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37315,14 +41148,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l110:
+		l140:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_OR) {
-				goto l111
+				goto l141
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l111
+					goto l141
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37335,14 +41168,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l111:
+		l141:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ROTL) {
-				goto l112
+				goto l142
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l112
+					goto l142
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37355,14 +41188,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l112:
+		l142:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ROTR) {
-				goto l113
+				goto l143
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l113
+					goto l143
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37375,14 +41208,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l113:
+		l143:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_EQ) {
-				goto l114
+				goto l144
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l114
+					goto l144
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37395,14 +41228,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l114:
+		l144:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_NE) {
-				goto l115
+				goto l145
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l115
+					goto l145
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37415,14 +41248,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l115:
+		l145:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LT_S) {
-				goto l116
+				goto l146
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l116
+					goto l146
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37435,14 +41268,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l116:
+		l146:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LT_U) {
-				goto l117
+				goto l147
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindI64)
 				if !ok0 {
-					goto l117
+					goto l147
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37455,42 +41288,42 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l117:
+		l147:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.DROP) {
-				goto l118
+				goto l148
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindRef)
 				if !ok0 {
-					goto l118
+					goto l148
 				}
 				c0 := r0.Ref()
 				if c0 < 0 || c0 >= len(c.heap) {
-					goto l118
+					goto l148
 				}
 				if _, ok := c.heap[c0].(types.String); ok {
-					goto l118
+					goto l148
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
 					i.fr.ip += 4
 				}
 			}
-		l118:
+		l148:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.REF_IS_NULL) {
-				goto l119
+				goto l149
 			}
 			{
 				r0, ok0 := c.constant(start+1, types.KindRef)
 				if !ok0 {
-					goto l119
+					goto l149
 				}
 				c0 := r0.Ref()
 				if c0 < 0 || c0 >= len(c.heap) {
-					goto l119
+					goto l149
 				}
 				if _, ok := c.heap[c0].(types.String); ok {
-					goto l119
+					goto l149
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -37502,7 +41335,7 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l119:
+		l149:
 			return nil
 		},
 		instr.UPVAL_GET: func(c *threader) func(*Interpreter) {
@@ -56633,6 +60466,314 @@ var (
 		l37:
 			return nil
 		},
+		instr.I32_ADD: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(i.stack[i.sp-2].I32() + i.stack[i.sp-1].I32())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_SUB: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(i.stack[i.sp-2].I32() - i.stack[i.sp-1].I32())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_MUL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(i.stack[i.sp-2].I32() * i.stack[i.sp-1].I32())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_SHL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(i.stack[i.sp-2].I32() << (i.stack[i.sp-1].I32() & 31))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_SHR_S: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(i.stack[i.sp-2].I32() >> (i.stack[i.sp-1].I32() & 31))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_SHR_U: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(int32(uint32(i.stack[i.sp-2].I32()) >> (i.stack[i.sp-1].I32() & 31)))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_XOR: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.Boxed(uint64(i.stack[i.sp-2])&uint64(i.stack[i.sp-1]) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-2]) ^ uint64(i.stack[i.sp-1])&types.VMask))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_AND: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.Boxed(uint64(i.stack[i.sp-2]) & uint64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_OR: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.Boxed(uint64(i.stack[i.sp-2]) | uint64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_ROTL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I32_ROTR: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), -int(i.stack[i.sp-1].I32()))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
 		instr.I32_EQZ: func(c *threader) func(*Interpreter) {
 			start := c.ip
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.BR_IF) {
@@ -57538,6 +61679,358 @@ var (
 		l34:
 			return nil
 		},
+		instr.I64_ADD: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) + i.unboxI64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_SUB: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) - i.unboxI64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_MUL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) * i.unboxI64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_SHL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) << (i.unboxI64(i.stack[i.sp-1]) & 63))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_SHR_S: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) >> (i.unboxI64(i.stack[i.sp-1]) & 63))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_SHR_U: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(int64(uint64(i.unboxI64(i.stack[i.sp-2])) >> (i.unboxI64(i.stack[i.sp-1]) & 63)))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_XOR: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) ^ i.unboxI64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_AND: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) & i.unboxI64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_OR: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) | i.unboxI64(i.stack[i.sp-1]))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_ROTL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), int(i.unboxI64(i.stack[i.sp-1])))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.I64_ROTR: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindI64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), -int(i.unboxI64(i.stack[i.sp-1])))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					old := i.stack[addr]
+					if old != v0 {
+						i.releaseBox(old)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
 		instr.I64_EQZ: func(c *threader) func(*Interpreter) {
 			start := c.ip
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.BR_IF) {
@@ -58197,6 +62690,174 @@ var (
 		l20:
 			return nil
 		},
+		instr.F32_ADD: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF32(i.stack[i.sp-2].F32() + i.stack[i.sp-1].F32())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F32_SUB: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF32(i.stack[i.sp-2].F32() - i.stack[i.sp-1].F32())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F32_MUL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF32(i.stack[i.sp-2].F32() * i.stack[i.sp-1].F32())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F32_MIN: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF32(min(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F32_MAX: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF32(max(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F32_COPYSIGN: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF32)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-2].F32()), float64(i.stack[i.sp-1].F32()))))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
 		instr.F32_EQ: func(c *threader) func(*Interpreter) {
 			start := c.ip
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.BR_IF) {
@@ -58739,6 +63400,174 @@ var (
 				}
 			}
 		l20:
+			return nil
+		},
+		instr.F64_ADD: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF64(i.stack[i.sp-2].F64() + i.stack[i.sp-1].F64())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F64_SUB: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF64(i.stack[i.sp-2].F64() - i.stack[i.sp-1].F64())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F64_MUL: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF64(i.stack[i.sp-2].F64() * i.stack[i.sp-1].F64())
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F64_MIN: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF64(math.Min(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F64_MAX: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF64(math.Max(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
+			return nil
+		},
+		instr.F64_COPYSIGN: func(c *threader) func(*Interpreter) {
+			start := c.ip
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
+				goto l0
+			}
+			{
+				dst, dstOK := c.local(start+2, types.KindF64)
+				if !dstOK {
+					goto l0
+				}
+				c.ip += 1
+				return func(i *Interpreter) {
+					if i.sp < 2 {
+						panic(ErrStackUnderflow)
+					}
+					v0 := types.BoxF64(math.Copysign(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
+					addr := i.fr.bp + dst
+					if addr >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = v0
+					i.sp -= 2
+					i.fr.ip += 3
+				}
+			}
+		l0:
 			return nil
 		},
 		instr.F64_EQ: func(c *threader) func(*Interpreter) {

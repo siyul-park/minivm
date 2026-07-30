@@ -48,18 +48,19 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames   []frame
-	fr       *frame
-	stack    []types.Boxed
-	heap     []types.Value
-	base     int
-	target   int
-	interned map[string]types.Ref
-	free     []int
-	rc       []int
-	trial    []int
-	work     []int
-	refbuf   []types.Ref
+	frames    []frame
+	fr        *frame
+	stack     []types.Boxed
+	heap      []types.Value
+	base      int
+	target    int
+	interned  map[string]types.Ref
+	free      []int
+	rc        []int
+	trial     []int
+	work      []int
+	refbuf    []types.Ref
+	arrayPool []*types.Array
 
 	fp  int
 	sp  int
@@ -652,6 +653,7 @@ func (i *Interpreter) Len() int {
 func (i *Interpreter) Close() error {
 	i.flush()
 	i.Reset()
+	i.arrayPool = nil
 	var err error
 	if i.compiler != nil {
 		err = errors.Join(err, i.compiler.Close())
@@ -665,8 +667,17 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
+	dynamic := len(i.heap) - i.base
+	if len(i.arrayPool) > dynamic {
+		i.arrayPool = i.arrayPool[:dynamic]
+	}
 	for addr := i.base; addr < len(i.heap); addr++ {
 		if i.rc[addr] > 0 {
+			if array, ok := i.heap[addr].(*types.Array); ok && len(i.arrayPool) < dynamic {
+				array.Typ = nil
+				array.Elems = nil
+				i.arrayPool = append(i.arrayPool, array)
+			}
 			i.finalize(addr, i.heap[addr])
 		}
 	}
@@ -737,6 +748,15 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 
 	f := i.fr
 	code := f.code
+	if i.threshold < 0 && i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
+		for f.ip < len(code) {
+			code[f.ip](i)
+			f = i.fr
+			code = f.code
+		}
+		return false, nil
+	}
+
 	tick := i.tick
 	quiet := i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil
 
@@ -1774,6 +1794,20 @@ func (i *Interpreter) alloc(val types.Value) int {
 	i.heap = append(i.heap, val)
 	i.rc = append(i.rc, 1)
 	return len(i.heap) - 1
+}
+
+// newArray reuses only headers invalidated by Reset. Element storage remains
+// fresh so construction keeps its zeroing and memory-retention behavior.
+func (i *Interpreter) newArray(typ *types.ArrayType, elems []types.Boxed) *types.Array {
+	if len(i.arrayPool) == 0 {
+		return &types.Array{Typ: typ, Elems: elems}
+	}
+	last := len(i.arrayPool) - 1
+	array := i.arrayPool[last]
+	i.arrayPool = i.arrayPool[:last]
+	array.Typ = typ
+	array.Elems = elems
+	return array
 }
 
 func (i *Interpreter) reuse(val types.Value) (int, bool) {

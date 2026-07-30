@@ -118,6 +118,29 @@ func TestGenerate(t *testing.T) {
 		require.NotContains(t, source, "types.KindI32")
 	})
 
+	t.Run("stores local arithmetic without stack materialization", func(t *testing.T) {
+		pattern := seq(op(instr.LOCAL_GET), op(instr.I32_CONST), op(instr.I32_ADD), op(instr.LOCAL_SET))
+		body, err := compose(pattern, pattern.width(), "")
+		require.NoError(t, err)
+		file := jen.NewFile("review")
+		file.Func().Id("render").Params().Block(body...)
+		source := file.GoString()
+		require.Contains(t, source, "stack[addr] = v2")
+		require.NotContains(t, source, "stack[i.sp] = v2")
+	})
+
+	t.Run("loads typed arrays without materializing the container", func(t *testing.T) {
+		pattern := seq(constant[types.TypedArray[int32]](), op(instr.LOCAL_GET), op(instr.ARRAY_GET))
+		body, err := compose(pattern, pattern.width(), "")
+		require.NoError(t, err)
+		file := jen.NewFile("review")
+		file.Func().Id("render").Params().Block(body...)
+		source := file.GoString()
+		require.Contains(t, source, "array, ok := i.heap[c0].(types.TypedArray[int32])")
+		require.NotContains(t, source, "i.retain(")
+		require.NotContains(t, source, "i.release(")
+	})
+
 	t.Run("accepts the catalog", func(t *testing.T) {
 		require.NoError(t, validate(catalog()))
 	})

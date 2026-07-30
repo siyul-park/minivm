@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"sort"
 
 	"github.com/siyul-park/minivm/instr"
@@ -86,6 +87,9 @@ func scalars() []pattern {
 		consumers := make([]pattern, 0, len(ops)+len(family.compare))
 		for _, consumer := range ops {
 			consumers = append(consumers, op(consumer))
+			if !traps(consumer) && slices.Contains(family.binary, consumer) {
+				patterns = append(patterns, seq(op(consumer), op(instr.LOCAL_SET)))
+			}
 		}
 		for _, compare := range family.compare {
 			consumers = append(consumers, seq(op(compare), op(instr.BR_IF)))
@@ -97,6 +101,9 @@ func scalars() []pattern {
 		for _, rhs := range []pattern{immediate, op(instr.LOCAL_GET)} {
 			for _, consumer := range ops {
 				patterns = append(patterns, seq(op(instr.LOCAL_GET), rhs, op(consumer)))
+				if !traps(consumer) && slices.Contains(family.binary, consumer) {
+					patterns = append(patterns, seq(op(instr.LOCAL_GET), rhs, op(consumer), op(instr.LOCAL_SET)))
+				}
 			}
 			for _, compare := range family.compare {
 				patterns = append(patterns, seq(op(instr.LOCAL_GET), rhs, op(compare), op(instr.BR_IF)))
@@ -113,6 +120,19 @@ func scalars() []pattern {
 					patterns = append(patterns, seq(lhs, rhs, op(compare), op(instr.BR_IF)))
 				}
 			}
+		}
+	}
+	typedArrays := []pattern{
+		constant[types.TypedArray[bool]](),
+		constant[types.TypedArray[int8]](),
+		constant[types.TypedArray[int32]](),
+		constant[types.TypedArray[int64]](),
+		constant[types.TypedArray[float32]](),
+		constant[types.TypedArray[float64]](),
+	}
+	for _, array := range typedArrays {
+		for _, index := range producers[types.I32](instr.I32_CONST) {
+			patterns = append(patterns, seq(array, index, op(instr.ARRAY_GET)))
 		}
 	}
 	patterns = append(patterns, cross(

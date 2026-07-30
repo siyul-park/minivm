@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/types"
 )
 
 type value struct {
@@ -20,6 +22,8 @@ type value struct {
 	push     []jen.Code
 	raw      jen.Code
 	boxed    jen.Code
+	object   jen.Code
+	typ      reflect.Type
 	resident bool
 	handler  jen.Code
 }
@@ -224,7 +228,7 @@ var lowerers = [256]lowerer{
 	instr.I64_TO_I32:          bind(i64ToI32),
 	instr.I64_XOR:             scalar,
 	instr.LOCAL_GET:           source,
-	instr.LOCAL_SET:           bind(localSet),
+	instr.LOCAL_SET:           store,
 	instr.LOCAL_TEE:           bind(localTee),
 	instr.MAP_CLEAR:           bind(mapClear),
 	instr.MAP_DELETE:          bind(mapDelete),
@@ -422,6 +426,8 @@ func (l loader) constantGuard(result *value, current step) error {
 		result.compile = append(result.compile, jen.If(guard, jen.Id("ok")).Block(reject(l.label)))
 	} else {
 		result.compile = append(result.compile, guard, jen.If(jen.Op("!").Id("ok")).Block(reject(l.label)))
+		result.object = jen.Id(ref)
+		result.typ = current.typ
 	}
 	return nil
 }
@@ -556,6 +562,10 @@ func resolve(pattern pattern) ([]step, error) {
 	}
 
 	consumerAt := len(steps) - 1
+	stored := steps[consumerAt].op == instr.LOCAL_SET
+	if stored {
+		consumerAt--
+	}
 	branch := steps[consumerAt].op == instr.BR_IF
 	if branch {
 		consumerAt--
@@ -565,6 +575,12 @@ func resolve(pattern pattern) ([]step, error) {
 	}
 	consumer := steps[consumerAt].op
 	if consumerAt == 0 {
+		if stored {
+			if _, ok := numericKind(consumer); !ok {
+				return nil, fmt.Errorf("%s cannot feed local.set", instr.TypeOf(consumer).Mnemonic)
+			}
+			return steps, nil
+		}
 		if !branch {
 			return nil, fmt.Errorf("fusion pattern has no source")
 		}
@@ -573,6 +589,16 @@ func resolve(pattern pattern) ([]step, error) {
 			return nil, fmt.Errorf("%s cannot feed br_if", instr.TypeOf(consumer).Mnemonic)
 		}
 		steps[0].kind = push[len(push)-1].Repr()
+		return steps, nil
+	}
+	if consumer == instr.ARRAY_GET && consumerAt == 2 {
+		kind, ok := arrayKind(steps[0].typ)
+		if !ok {
+			return nil, fmt.Errorf("array.get cannot resolve element kind")
+		}
+		steps[0].kind = instr.KindRef
+		steps[1].kind = instr.KindI32
+		steps[2].kind = kind
 		return steps, nil
 	}
 
@@ -850,6 +876,31 @@ func index(state *state, current step) (value, error) {
 		body = append(body, lookup(current.op, jen.Id("index"), width(current.op))...)
 		return value{op: current.op, head: current.op, handler: handler(current.op, nil, body)}, nil
 	}
+	if len(state.stack) == 2 && current.op == instr.ARRAY_GET && state.stack[0].object != nil {
+		container := state.stack[0]
+		index := state.stack[1]
+		compile := append([]jen.Code(nil), container.compile...)
+		compile = append(compile, index.compile...)
+		body := []jen.Code{overflow()}
+		body = append(body, index.check...)
+		body = append(body, index.body...)
+		body = append(body,
+			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.object).Assert(typeName(container.typ)),
+			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("at").Op(":=").Int().Call(index.raw),
+			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
+			jen.Id("result").Op(":=").Add(boxArray(current.kind, jen.Id("array"), jen.Id("at"))),
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id("result"),
+			jen.Id("i").Dot("sp").Op("++"),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+		)
+		compile = append(compile,
+			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
+			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+		)
+		state.stack = nil
+		return value{op: current.op, head: container.head, compile: compile}, nil
+	}
 	if len(state.stack) != 1 {
 		return value{}, fmt.Errorf("%s needs one constant index", instr.TypeOf(current.op).Mnemonic)
 	}
@@ -999,12 +1050,39 @@ func scalar(state *state, current step) (value, error) {
 		state.stack = append(state.stack, result)
 		return result, nil
 	}
-	body, err := numeric(current.op, state.stack, state.width, state.label, false)
+	body, err := numeric(current.op, state.stack, state.width, state.label, false, nil)
 	if err != nil {
 		return value{}, err
 	}
 	state.stack = nil
 	return value{op: current.op, head: head, compile: body}, nil
+}
+
+func store(state *state, current step) (value, error) {
+	if state.standalone {
+		return value{op: current.op, head: current.op, handler: localSet()}, nil
+	}
+	if len(state.stack) == 0 {
+		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
+	}
+	consumer := state.stack[len(state.stack)-1]
+	if _, ok := numericKind(consumer.op); !ok {
+		return value{}, fmt.Errorf("%s cannot store %s", instr.TypeOf(current.op).Mnemonic, instr.TypeOf(consumer.op).Mnemonic)
+	}
+	result := instr.TypeOf(consumer.op).Push[0].Repr()
+	compile := []jen.Code{
+		jen.List(jen.Id("dst"), jen.Id("dstOK")).Op(":=").Id("c").Dot("local").Call(
+			add(jen.Id("start"), state.offset+1),
+			jen.Qual("github.com/siyul-park/minivm/types", "Kind"+mustKindName(result)),
+		),
+		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
+	}
+	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, jen.Id("dst"))
+	if err != nil {
+		return value{}, err
+	}
+	state.stack = nil
+	return value{op: current.op, head: consumer.head, compile: append(compile, body...)}, nil
 }
 
 func branch(state *state, current step) (value, error) {
@@ -1024,7 +1102,7 @@ func branch(state *state, current step) (value, error) {
 	}
 	consumer := state.stack[len(state.stack)-1]
 	if _, ok := arity(consumer.op); ok {
-		body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, true)
+		body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, true, nil)
 		if err != nil {
 			return value{}, err
 		}
@@ -1473,7 +1551,7 @@ func bounds(offset, size, length jen.Code) jen.Code {
 }
 
 // numeric emits one numeric operation from virtual and resident operands.
-func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool) ([]jen.Code, error) {
+func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool, local jen.Code) ([]jen.Code, error) {
 	arity, ok := arity(consumer)
 	if !ok {
 		return nil, fmt.Errorf("unsupported numeric consumer %s", instr.TypeOf(consumer).Mnemonic)
@@ -1485,8 +1563,11 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	if !ok {
 		return nil, fmt.Errorf("unsupported numeric kind for %s", instr.TypeOf(consumer).Mnemonic)
 	}
-	if traps(consumer) {
+	if traps(consumer) && local == nil {
 		return checked(consumer, inputs, kind)
+	}
+	if traps(consumer) {
+		return nil, fmt.Errorf("%s cannot fuse with local.set", instr.TypeOf(consumer).Mnemonic)
 	}
 
 	var compile, body []jen.Code
@@ -1495,7 +1576,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	// push, so one room check for delta covers the whole handler, and a
 	// conditional consumer branches instead of pushing and needs none.
 	delta := len(inputs) - arity + 1
-	if !conditional && delta > 0 {
+	if !conditional && local == nil && delta > 0 {
 		body = append(body, overflow())
 	}
 	for _, source := range inputs {
@@ -1530,6 +1611,22 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	body = append(body, jen.Id(result).Op(":=").Add(apply(consumer, operands...)))
 	if conditional {
 		body = append(body, jump(jen.Id(result).Dot("Bool").Call(), missing, advance)...)
+	} else if local != nil {
+		body = append(body,
+			jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Add(local),
+			jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+		)
+		if instr.TypeOf(consumer).Push[0].Repr() == instr.KindI64 {
+			body = append(body,
+				jen.Id("old").Op(":=").Id("i").Dot("stack").Index(jen.Id("addr")),
+				jen.If(jen.Id("old").Op("!=").Id(result)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("old"))),
+			)
+		}
+		body = append(body,
+			jen.Id("i").Dot("stack").Index(jen.Id("addr")).Op("=").Id(result),
+			jen.Id("i").Dot("sp").Op("-=").Lit(missing),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+		)
 	} else {
 		if delta > 0 {
 			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(result), jen.Id("i").Dot("sp").Op("++"))
@@ -1936,6 +2033,57 @@ func kindName(kind instr.Kind) (string, bool) {
 	}
 }
 
+func arrayKind(typ reflect.Type) (instr.Kind, bool) {
+	switch typ {
+	case reflect.TypeFor[types.TypedArray[bool]]():
+		return instr.KindI1, true
+	case reflect.TypeFor[types.TypedArray[int8]]():
+		return instr.KindI8, true
+	case reflect.TypeFor[types.TypedArray[int32]]():
+		return instr.KindI32, true
+	case reflect.TypeFor[types.TypedArray[int64]]():
+		return instr.KindI64, true
+	case reflect.TypeFor[types.TypedArray[float32]]():
+		return instr.KindF32, true
+	case reflect.TypeFor[types.TypedArray[float64]]():
+		return instr.KindF64, true
+	default:
+		return instr.KindAny, false
+	}
+}
+
+func typeName(typ reflect.Type) jen.Code {
+	return jen.Qual(typ.PkgPath(), typ.Name())
+}
+
+func boxArray(kind instr.Kind, array, index jen.Code) jen.Code {
+	elem := jen.Add(array).Index(index)
+	switch kind {
+	case instr.KindI1:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(elem)
+	case instr.KindI8:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxI8").Call(elem)
+	case instr.KindI32:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(elem)
+	case instr.KindI64:
+		return jen.Id("i").Dot("boxI64").Call(elem)
+	case instr.KindF32:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(elem)
+	case instr.KindF64:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(elem)
+	default:
+		panic(fmt.Sprintf("unsupported array element kind %s", kind))
+	}
+}
+
+func mustKindName(kind instr.Kind) string {
+	name, ok := kindName(kind)
+	if !ok {
+		panic(fmt.Sprintf("unsupported kind %s", kind))
+	}
+	return name
+}
+
 func immediate(kind instr.Kind, at jen.Code) jen.Code {
 	operand := jen.Qual("github.com/siyul-park/minivm/instr", "Instruction").Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op(":"))).Dot("Operand").Call(jen.Lit(0))
 	switch kind.Repr() {
@@ -2290,7 +2438,7 @@ func arrayNew() jen.Code {
 			jen.Default().Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 				jen.List(jen.Id("size")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call())),
 				jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Id("size").Op("+").Add(jen.Lit(1)))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
-				jen.List(jen.Id("val")).Op(":=").List(jen.Op("&").Add(jen.Id("types").Dot("Array").Values(jen.Dict{jen.Id("Typ"): jen.Id("typ"), jen.Id("Elems"): jen.Id("make").Call(jen.Index().Add(jen.Id("types").Dot("Boxed")), jen.Id("size"))}))),
+				jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("newArray").Call(jen.Id("typ"), jen.Id("make").Call(jen.Index().Add(jen.Id("types").Dot("Boxed")), jen.Id("size")))),
 				jen.Id("copy").Call(jen.Id("val").Dot("Elems"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Id("size")).Op("-").Add(jen.Lit(1)).Op(":").Add(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
 				jen.List(jen.Id("i").Dot("sp")).Op("-=").List(jen.Id("size")),
 				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("val")))),
@@ -2342,7 +2490,7 @@ func arrayNewDefault() jen.Code {
 			jen.Default().Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 				jen.List(jen.Id("size")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
 				jen.If(jen.Id("size").Op("<").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
-				jen.List(jen.Id("val")).Op(":=").List(jen.Op("&").Add(jen.Id("types").Dot("Array").Values(jen.Dict{jen.Id("Typ"): jen.Id("typ"), jen.Id("Elems"): jen.Id("make").Call(jen.Index().Add(jen.Id("types").Dot("Boxed")), jen.Id("size"))}))),
+				jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("newArray").Call(jen.Id("typ"), jen.Id("make").Call(jen.Index().Add(jen.Id("types").Dot("Boxed")), jen.Id("size")))),
 				jen.For(jen.List(jen.Id("j")).Op(":=").Range().Add(jen.Id("val").Dot("Elems"))).Block(jen.List(jen.Id("val").Dot("Elems").Index(jen.Id("j"))).Op("=").List(jen.Id("types").Dot("BoxedNull"))),
 				jen.Id("i").Dot("retains").Call(jen.Lit(0), jen.Id("int").Call(jen.Id("size"))),
 				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("val")))),
@@ -2437,7 +2585,7 @@ func arraySlice() jen.Code {
 					jen.List(jen.Id("elems")).Op(":=").List(jen.Id("make").Call(jen.Index().Add(jen.Id("types").Dot("Boxed")), jen.Id("end").Op("-").Add(jen.Id("start")))),
 					jen.Id("copy").Call(jen.Id("elems"), jen.Id("arr").Dot("Elems").Index(jen.Id("start").Op(":").Add(jen.Id("end")))),
 					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(jen.Id("elems"))).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("v"))),
-					jen.List(jen.Id("out")).Op("=").List(jen.Op("&").Add(jen.Id("types").Dot("Array").Values(jen.Dict{jen.Id("Typ"): jen.Id("arr").Dot("Typ"), jen.Id("Elems"): jen.Id("elems")})))),
+					jen.List(jen.Id("out")).Op("=").List(jen.Id("i").Dot("newArray").Call(jen.Id("arr").Dot("Typ"), jen.Id("elems")))),
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
 			jen.List(jen.Id("newAddr")).Op(":=").List(jen.Id("i").Dot("alloc").Call(jen.Id("out"))),
 			jen.Id("i").Dot("release").Call(jen.Id("addr")),
@@ -3265,7 +3413,7 @@ func mapKeys() jen.Code {
 					jen.Id("m").Dot("Range").Call(jen.Func().Params(jen.Id("_").Add(jen.Id("types").Dot("MapKey")), jen.Id("entry").Add(jen.Id("types").Dot("MapEntry"))).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("entry").Dot("Key")),
 						jen.List(jen.Id("elems")).Op("=").List(jen.Id("append").Call(jen.Id("elems"), jen.Id("entry").Dot("Key")))))),
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
-			jen.List(jen.Id("arr")).Op(":=").List(jen.Op("&").Add(jen.Id("types").Dot("Array").Values(jen.Dict{jen.Id("Typ"): jen.Id("types").Dot("NewArrayType").Call(jen.Id("keyType")), jen.Id("Elems"): jen.Id("elems")}))),
+			jen.List(jen.Id("arr")).Op(":=").List(jen.Id("i").Dot("newArray").Call(jen.Id("types").Dot("NewArrayType").Call(jen.Id("keyType")), jen.Id("elems"))),
 			jen.List(jen.Id("out")).Op(":=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("arr")))),
 			jen.Id("i").Dot("release").Call(jen.Id("addr")),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("out")),
