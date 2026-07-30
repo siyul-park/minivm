@@ -1,4 +1,4 @@
-package transform
+package transform_test
 
 import (
 	"context"
@@ -8,12 +8,13 @@ import (
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
+	transform "github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewDedupPass(t *testing.T) {
-	require.NotNil(t, NewDedupPass())
+	require.NotNil(t, transform.NewDedupPass())
 }
 
 func TestDedupPass_Run(t *testing.T) {
@@ -129,7 +130,7 @@ func TestDedupPass_Run(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			actual := tt.program
-			_, err := NewDedupPass().Run(m, actual)
+			_, err := transform.NewDedupPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -150,7 +151,7 @@ func TestDedupPass_Run(t *testing.T) {
 		want, err := before.Pop()
 		require.NoError(t, err)
 
-		_, err = NewDedupPass().Run(pass.NewManager(), prog)
+		_, err = transform.NewDedupPass().Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

@@ -1,4 +1,4 @@
-package transform
+package transform_test
 
 import (
 	"context"
@@ -9,12 +9,13 @@ import (
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
+	transform "github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewAlgebraicPass(t *testing.T) {
-	require.NotNil(t, NewAlgebraicPass())
+	require.NotNil(t, transform.NewAlgebraicPass())
 }
 
 func TestAlgebraicPass_Run(t *testing.T) {
@@ -140,7 +141,7 @@ func TestAlgebraicPass_Run(t *testing.T) {
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			actual := tt.program
-			_, err := NewAlgebraicPass().Run(m, actual)
+			_, err := transform.NewAlgebraicPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -160,7 +161,7 @@ func TestAlgebraicPass_Run(t *testing.T) {
 
 		manager := pass.NewManager()
 		pass.Register(manager, analysis.NewBlocksAnalysis())
-		_, err = NewAlgebraicPass().Run(manager, prog)
+		_, err = transform.NewAlgebraicPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

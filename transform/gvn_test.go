@@ -1,4 +1,4 @@
-package transform
+package transform_test
 
 import (
 	"context"
@@ -10,12 +10,13 @@ import (
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
+	transform "github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewGVNPass(t *testing.T) {
-	require.NotNil(t, NewGVNPass())
+	require.NotNil(t, transform.NewGVNPass())
 }
 
 func TestGVNPass_Run(t *testing.T) {
@@ -37,7 +38,7 @@ func TestGVNPass_Run(t *testing.T) {
 		manager := pass.NewManager()
 		pass.Register(manager, analysis.NewBlocksAnalysis())
 		pass.Register(manager, analysis.NewGVNAnalysis())
-		_, err := NewGVNPass().Run(manager, prog)
+		_, err := transform.NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 
 		want := instr.Marshal([]instr.Instruction{
@@ -71,7 +72,7 @@ func TestGVNPass_Run(t *testing.T) {
 		manager := pass.NewManager()
 		pass.Register(manager, analysis.NewBlocksAnalysis())
 		pass.Register(manager, analysis.NewGVNAnalysis())
-		_, err := NewGVNPass().Run(manager, prog)
+		_, err := transform.NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 
 		code := instr.Format(fn.Code)
@@ -97,7 +98,7 @@ func TestGVNPass_Run(t *testing.T) {
 		manager := pass.NewManager()
 		pass.Register(manager, analysis.NewBlocksAnalysis())
 		pass.Register(manager, analysis.NewGVNAnalysis())
-		_, err := NewGVNPass().Run(manager, prog)
+		_, err := transform.NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 		require.Equal(t, before, instr.Format(prog.Code), "no locals to allocate at the top level")
 	})
@@ -126,7 +127,7 @@ func TestGVNPass_Run(t *testing.T) {
 		manager := pass.NewManager()
 		pass.Register(manager, analysis.NewBlocksAnalysis())
 		pass.Register(manager, analysis.NewGVNAnalysis())
-		_, err = NewGVNPass().Run(manager, prog)
+		_, err = transform.NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

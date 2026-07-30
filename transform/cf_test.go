@@ -1,22 +1,22 @@
-package transform
+package transform_test
 
 import (
 	"context"
 	"math"
 	"testing"
 
-	"github.com/siyul-park/minivm/interp"
-	"github.com/siyul-park/minivm/types"
-
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
+	transform "github.com/siyul-park/minivm/transform"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewFoldPass(t *testing.T) {
-	require.NotNil(t, NewFoldPass())
+	require.NotNil(t, transform.NewFoldPass())
 }
 
 func TestFoldPass_Run(t *testing.T) {
@@ -2068,7 +2068,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			actual := tt.program
-			_, err := NewFoldPass().Run(m, actual)
+			_, err := transform.NewFoldPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -2088,7 +2088,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 		manager := pass.NewManager()
 		pass.Register(manager, analysis.NewBlocksAnalysis())
-		_, err = NewFoldPass().Run(manager, prog)
+		_, err = transform.NewFoldPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()
