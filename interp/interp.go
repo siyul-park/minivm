@@ -1345,6 +1345,11 @@ func (i *Interpreter) sample(f *frame) uint64 {
 // enableBackedges rethreads one hot function with exact unconditional
 // back-edge observation. Cold functions keep the original zero-overhead BR
 // handler until periodic sampling reaches the configured threshold.
+//
+// The rethreaded handlers are copied into the table already installed rather
+// than replacing it. Compile emits one handler per code byte, so both tables
+// describe the same function at the same length, and keeping that slice live
+// rewires every frame currently executing addr in place.
 func (i *Interpreter) enableBackedges(addr int) {
 	if addr < 0 || addr >= len(i.backedges) || i.backedges[addr] {
 		return
@@ -1354,27 +1359,22 @@ func (i *Interpreter) enableBackedges(addr int) {
 		return
 	}
 	c := i.threader(true)
-	previous := i.code[addr]
+	installed := i.code[addr]
 	compiled := c.Compile(fn.Code, fn.Slots(), types.Kinds(fn.Captures))
 	// Rethreading replaces only interpreted handlers. Installed native entries
 	// stay live while their saved fallbacks advance to the exact-backedge table.
 	for root := range i.exits {
-		if root.addr != addr || root.ip < 0 || root.ip >= len(compiled) || root.ip >= len(previous) {
+		if root.addr != addr || root.ip < 0 || root.ip >= len(compiled) || root.ip >= len(installed) {
 			continue
 		}
 		i.exits[root] = compiled[root.ip]
 		if root.ip == 0 {
 			i.stubs[addr] = compiled[root.ip]
 		}
-		compiled[root.ip] = previous[root.ip]
+		compiled[root.ip] = installed[root.ip]
 	}
-	i.code[addr] = compiled
+	copy(installed, compiled)
 	i.backedges[addr] = true
-	for idx := 0; idx < i.fp; idx++ {
-		if i.frames[idx].addr == addr {
-			i.frames[idx].code = i.code[addr]
-		}
-	}
 }
 
 func (i *Interpreter) stub(addr int) func(*Interpreter) {
