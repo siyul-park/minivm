@@ -21,11 +21,10 @@ For implementation details, see `docs/jit-internals.md`. For profiling counters,
 
 ## Measurement Environment
 
-The cross-runtime comparison table was measured on July 30, 2026. Its
-`minivm/default` rows were re-measured the same day after loop-carried scalar
-write-back using five interleaved baseline/current pairs. The other
-cross-runtime rows use three sequential samples. The public API cost tables
-below it were measured on July 16, 2026:
+The external-runtime rows were measured on July 30, 2026 with three sequential
+samples. Every minivm row was re-measured on July 31, 2026 from five
+interleaved baseline/current pairs against commit `10d6adf`. The public API
+cost tables below were measured on July 16, 2026:
 
 - Apple M4 Pro, 12 cores
 - `darwin/arm64`
@@ -44,13 +43,10 @@ slower there than in a focused single-kernel run.
 cd benchmarks
 go test -tags=compare -run='^$' -bench='.' -benchmem -benchtime=300ms -count=3 ./...
 
-# Issue #163 A/B: alternate this command between the baseline and current
-# checkout five times, then take each side's median.
+# Issue #164 A/B: alternate this command between commit 10d6adf and the
+# current checkout five times, then take each side's median.
 go test -run='^$' \
-  -bench='^(BenchmarkControl_IterativeFib|BenchmarkControl_Sieve|BenchmarkCall_IndirectRecursiveFib|BenchmarkCall_ClosureCounter|BenchmarkMemory_TypedArraySum|BenchmarkMemory_AllocationGraph|BenchmarkNumeric_BranchTree)$/^default$' \
-  -benchmem -benchtime=300ms -count=1 .
-go test -run='^$' \
-  -bench='^BenchmarkCall_RecursiveFib$/^(20|35)$/^default$' \
+  -bench='^(BenchmarkControl_IterativeFib|BenchmarkControl_Sieve|BenchmarkCall_RecursiveFib|BenchmarkCall_IndirectRecursiveFib|BenchmarkCall_ClosureCounter|BenchmarkMemory_TypedArraySum|BenchmarkMemory_AllocationGraph|BenchmarkNumeric_BranchTree)$' \
   -benchmem -benchtime=300ms -count=1 .
 
 # Public interpreter and pool API costs
@@ -73,16 +69,20 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
 
 ## Summary
 
-- `RecursiveFib(35)` places `minivm/default` at **46.95 ms**, within about **5.6%** of wazero's **44.45 ms**, while remaining allocation-free after warmup.
-- Adaptive native traces reduce `IterativeFib(30)` from **746.3 ns** threaded to **36.75 ns**, `TypedArraySum(256)` from **6.313 us** to **307.7 ns**, and `BranchTree(96)` from **952.0 ns** to **264.4 ns**.
+- `RecursiveFib(35)` places `minivm/default` at **45.90 ms**, within about **3.3%** of wazero's **44.45 ms**, while remaining allocation-free after warmup.
+- Generic threaded improvements close the final three cross-runtime gaps: `IterativeFib(30)` is **484.4 ns** versus gopher-lua's **513.9 ns**, `TypedArraySum(256)` is **2.820 us** versus gopher-lua's **3.413 us**, and `AllocationGraph(128)` is **4.816 us** versus gpython's **5.715 us**.
+- Interleaved A/B (median of five) cuts those threaded kernels from **711.5 -> 484.4 ns (-31.9%)**, **6.152 -> 2.820 us (-54.2%)**, and **7.260 -> 4.816 us (-33.7%)**. Every other threaded kernel improves by **14.8-33.2%**; every `default` and `jit` median stays within **1.6%** or improves.
+- The gains come from a feature-free threaded dispatch loop, bounded scalar arithmetic-to-local fusion, guarded typed-array constant loads, and reset-time reference-array header reuse. These are opcode-family and lifecycle optimizations rather than fixture-specific superinstructions.
+- Reset-time reference-array header reuse halves `AllocationGraph(128)` from **256** to **128 allocs/op** and **5,120** to **1,024 B/op** in every minivm mode. Element backing stores remain fresh, and headers detached through `Pop` are not reused.
+- Adaptive native traces reduce `IterativeFib(30)` from **484.4 ns** threaded to **19.69 ns**, `TypedArraySum(256)` from **2.820 us** to **289.2 ns**, and `BranchTree(96)` from **603.8 ns** to **230.9 ns**.
 - Loop-carried scalar write-back keeps eligible call-free locals authoritative in registers and commits their VM slots only on native exit paths. Interleaved A/B (median of five) cuts `IterativeFib(30)` **91.75 -> 36.75 ns (-59.9%)**, `TypedArraySum(256)` **673.2 -> 307.7 ns (-54.3%)**, and `Sieve(256)` **2,645 -> 1,626 ns (-38.5%)**. Every other canonical `default` median stays within **0.9%**, and allocation counts are unchanged.
 - Fused threaded handlers check stack room once for their own net push instead of once per folded source. That removes about 5,400 generated lines and cuts threaded time on every fusion-heavy kernel: `BranchTree(96)` **-4.3%**, `TypedArraySum(256)` **-4.1%**, `IterativeFib(30)` **-3.6%**, and `Sieve(256)` **-2.8%** (interleaved A/B, median of five). Native and adaptive modes are unchanged within noise.
 - Primitive array mutation stays on the native loop path in `Sieve(256)`: deferred-ownership elision drops the per-element retain/release pair, so a runtime-allocated array reaches the same cheap native path a typed-array constant already used. All three modes allocate `1,048 B` in `2` allocations.
 - Loop-invariant container hoisting (issue #153) removes the per-access heap-cell derivation, itab guard, and slice-header reload from hoisted loop bodies. It shrinks the loop callables but leaves wall time unchanged: the removed loads sat off the out-of-order critical path.
-- Branch-leg folding (issue #155) records native loop exits as branches and folds hot legs that rejoin the header back into the native loop as real back-edges. Combined with loop-carried scalar write-back, `Sieve(256)` now runs at **1.626 us** versus **16.2 us** threaded and **687.3 ns** in wazero.
+- Branch-leg folding (issue #155) records native loop exits as branches and folds hot legs that rejoin the header back into the native loop as real back-edges. Combined with loop-carried scalar write-back, `Sieve(256)` now runs at **1.508 us** versus **11.77 us** threaded and **687.3 ns** in wazero.
 - Threshold-zero `jit` is not a warmed-JIT guarantee. It matches `default` on Sieve and BranchTree, but is slower on IterativeFib, TypedArraySum, and recursive Fibonacci because it can compile before representative traces are learned.
-- Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **7.774 us**; adaptive and eager modes add profiling cost without native coverage.
-- Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **54.85 us** in `default`, versus **576 us** threaded and **43.3 us** in wazero. Eager `jit` stays at **594 us**, consistent with the threshold-zero note above.
+- Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **4.816 us**; adaptive and eager modes add profiling cost without native coverage.
+- Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **53.56 us** in `default`, versus **478 us** threaded and **43.3 us** in wazero. Eager `jit` stays at **584 us**, consistent with the threshold-zero note above.
 
 These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, host-call conventions, and compilation strategies.
 
@@ -104,9 +104,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 
 | Workload | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| IterativeFib(30) | minivm/default | 36.75 | 0 | 0 |
-| IterativeFib(30) | minivm/threaded | 746.3 | 0 | 0 |
-| IterativeFib(30) | minivm/jit | 95.07 | 0 | 0 |
+| IterativeFib(30) | minivm/default | 19.69 | 0 | 0 |
+| IterativeFib(30) | minivm/threaded | 484.4 | 0 | 0 |
+| IterativeFib(30) | minivm/jit | 34.30 | 0 | 0 |
 | IterativeFib(30) | native Go | 9.256 | 0 | 0 |
 | IterativeFib(30) | wazero | 52.63 | 8 | 1 |
 | IterativeFib(30) | Tengo | 9,406 | 90,592 | 61 |
@@ -114,9 +114,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | IterativeFib(30) | Goja | 2,226 | 368 | 20 |
 | IterativeFib(30) | gpython | 2,599 | 2,448 | 88 |
 | IterativeFib(30) | Yaegi | 2,856 | 2,036 | 101 |
-| Sieve(256) | minivm/default | 1,626 | 1,048 | 2 |
-| Sieve(256) | minivm/threaded | 16,239 | 1,048 | 2 |
-| Sieve(256) | minivm/jit | 2,696 | 1,048 | 2 |
+| Sieve(256) | minivm/default | 1,508 | 1,048 | 2 |
+| Sieve(256) | minivm/threaded | 11,770 | 1,048 | 2 |
+| Sieve(256) | minivm/jit | 1,508 | 1,048 | 2 |
 | Sieve(256) | native Go | 237.2 | 0 | 0 |
 | Sieve(256) | wazero | 687.3 | 8 | 1 |
 | Sieve(256) | Tengo | 53,630 | 122,504 | 1,611 |
@@ -124,9 +124,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | Sieve(256) | Goja | 43,140 | 1,872 | 25 |
 | Sieve(256) | gpython | 35,636 | 5,704 | 30 |
 | Sieve(256) | Yaegi | 18,762 | 1,800 | 37 |
-| RecursiveFib(20) | minivm/default | 38,280 | 0 | 0 |
-| RecursiveFib(20) | minivm/threaded | 357,450 | 0 | 0 |
-| RecursiveFib(20) | minivm/jit | 368,423 | 0 | 0 |
+| RecursiveFib(20) | minivm/default | 38,368 | 0 | 0 |
+| RecursiveFib(20) | minivm/threaded | 303,238 | 0 | 0 |
+| RecursiveFib(20) | minivm/jit | 376,672 | 0 | 0 |
 | RecursiveFib(20) | native Go | 14,455 | 0 | 0 |
 | RecursiveFib(20) | wazero | 31,077 | 8 | 1 |
 | RecursiveFib(20) | Tengo | 809,410 | 319,346 | 28,655 |
@@ -134,9 +134,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | RecursiveFib(20) | Goja | 1,456,275 | 4,680 | 39 |
 | RecursiveFib(20) | gpython | 3,701,017 | 9,807,924 | 109,494 |
 | RecursiveFib(20) | Yaegi | 3,791,815 | 8,302,126 | 192,840 |
-| RecursiveFib(35) | minivm/default | 46,951,773 | 0 | 0 |
-| RecursiveFib(35) | minivm/threaded | 499,079,076 | 0 | 0 |
-| RecursiveFib(35) | minivm/jit | 522,672,192 | 0 | 0 |
+| RecursiveFib(35) | minivm/default | 45,904,831 | 0 | 0 |
+| RecursiveFib(35) | minivm/threaded | 410,581,243 | 0 | 0 |
+| RecursiveFib(35) | minivm/jit | 513,509,366 | 0 | 0 |
 | RecursiveFib(35) | native Go | 20,107,461 | 0 | 0 |
 | RecursiveFib(35) | wazero | 44,453,238 | 9 | 1 |
 | RecursiveFib(35) | Tengo | 1,168,612,000 | 312,797,584 | 39,088,176 |
@@ -144,9 +144,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | RecursiveFib(35) | Goja | 2,099,479,958 | 375,360 | 46,373 |
 | RecursiveFib(35) | gpython | 5,578,092,292 | 13,378,028,656 | 149,350,236 |
 | RecursiveFib(35) | Yaegi | 5,903,047,625 | 11,324,344,728 | 263,043,676 |
-| IndirectRecursiveFib(20) | minivm/default | 54,763 | 0 | 0 |
-| IndirectRecursiveFib(20) | minivm/threaded | 576,182 | 0 | 0 |
-| IndirectRecursiveFib(20) | minivm/jit | 594,117 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/default | 53,559 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/threaded | 478,185 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/jit | 583,934 | 0 | 0 |
 | IndirectRecursiveFib(20) | native Go | 15,981 | 0 | 0 |
 | IndirectRecursiveFib(20) | wazero | 43,260 | 8 | 1 |
 | IndirectRecursiveFib(20) | Tengo | 953,537 | 319,346 | 28,655 |
@@ -154,9 +154,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | IndirectRecursiveFib(20) | Goja | 1,377,150 | 4,680 | 39 |
 | IndirectRecursiveFib(20) | gpython | 4,018,147 | 10,158,201 | 109,494 |
 | IndirectRecursiveFib(20) | Yaegi | 11,430,601 | 13,059,854 | 394,041 |
-| ClosureCounter(128) | minivm/default | 3,387 | 64 | 2 |
-| ClosureCounter(128) | minivm/threaded | 2,978 | 64 | 2 |
-| ClosureCounter(128) | minivm/jit | 3,372 | 64 | 2 |
+| ClosureCounter(128) | minivm/default | 3,286 | 64 | 2 |
+| ClosureCounter(128) | minivm/threaded | 2,438 | 64 | 2 |
+| ClosureCounter(128) | minivm/jit | 3,291 | 64 | 2 |
 | ClosureCounter(128) | native Go | 38.22 | 0 | 0 |
 | ClosureCounter(128) | wazero | N/A | N/A | N/A |
 | ClosureCounter(128) | Tengo | 13,503 | 92,272 | 261 |
@@ -164,9 +164,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | ClosureCounter(128) | Goja | 10,173 | 1,264 | 13 |
 | ClosureCounter(128) | gpython | 28,235 | 58,312 | 659 |
 | ClosureCounter(128) | Yaegi | 34,704 | 34,784 | 786 |
-| TypedArraySum(256) | minivm/default | 307.7 | 0 | 0 |
-| TypedArraySum(256) | minivm/threaded | 6,313 | 0 | 0 |
-| TypedArraySum(256) | minivm/jit | 621.5 | 0 | 0 |
+| TypedArraySum(256) | minivm/default | 289.2 | 0 | 0 |
+| TypedArraySum(256) | minivm/threaded | 2,820 | 0 | 0 |
+| TypedArraySum(256) | minivm/jit | 489.3 | 0 | 0 |
 | TypedArraySum(256) | native Go | 73.2 | 0 | 0 |
 | TypedArraySum(256) | wazero | 157 | 8 | 1 |
 | TypedArraySum(256) | Tengo | 15,507 | 94,208 | 513 |
@@ -174,9 +174,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | TypedArraySum(256) | Goja | 13,399 | 2,080 | 238 |
 | TypedArraySum(256) | gpython | 7,652 | 2,496 | 246 |
 | TypedArraySum(256) | Yaegi | 4,246 | 296 | 8 |
-| AllocationGraph(128) | minivm/default | 9,301 | 5,120 | 256 |
-| AllocationGraph(128) | minivm/threaded | 7,774 | 5,120 | 256 |
-| AllocationGraph(128) | minivm/jit | 9,362 | 5,120 | 256 |
+| AllocationGraph(128) | minivm/default | 6,722 | 1,024 | 128 |
+| AllocationGraph(128) | minivm/threaded | 4,816 | 1,024 | 128 |
+| AllocationGraph(128) | minivm/jit | 6,737 | 1,024 | 128 |
 | AllocationGraph(128) | native Go | 943.8 | 1,024 | 128 |
 | AllocationGraph(128) | wazero | N/A | N/A | N/A |
 | AllocationGraph(128) | Tengo | 14,516 | 96,288 | 388 |
@@ -184,9 +184,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | AllocationGraph(128) | Goja | 26,551 | 78,016 | 770 |
 | AllocationGraph(128) | gpython | 5,715 | 5,712 | 266 |
 | AllocationGraph(128) | Yaegi | 12,190 | 1,492 | 142 |
-| BranchTree(96) | minivm/default | 264.4 | 0 | 0 |
-| BranchTree(96) | minivm/threaded | 952 | 0 | 0 |
-| BranchTree(96) | minivm/jit | 264.7 | 0 | 0 |
+| BranchTree(96) | minivm/default | 230.9 | 0 | 0 |
+| BranchTree(96) | minivm/threaded | 603.8 | 0 | 0 |
+| BranchTree(96) | minivm/jit | 230.5 | 0 | 0 |
 | BranchTree(96) | native Go | 79.98 | 0 | 0 |
 | BranchTree(96) | wazero | 172.1 | 16 | 1 |
 | BranchTree(96) | Tengo | 18,088 | 95,384 | 660 |
@@ -302,7 +302,7 @@ Do not infer native execution solely from the `jit` sub-benchmark name. A benchm
 - External parsing, compilation, module creation, and function lookup remain outside the timer where the runtime API permits.
 - Wazero uses its default compiler runtime; module compilation and instantiation are excluded from timing.
 - Cross-runtime comparisons live in the separate `benchmarks/` module and require the `compare` build tag.
-- Output was grouped by exact benchmark name, and each documented value is the median of exactly three samples.
+- Output was grouped by exact benchmark name. Minivm rows use the median of five interleaved samples; external rows use the median of three sequential samples.
 
 Cross-runtime library versions:
 

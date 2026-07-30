@@ -1901,6 +1901,18 @@ func TestInterpreter_Run(t *testing.T) {
 			}),
 		},
 		{
+			name: "local arithmetic store",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.LOCAL_GET, 0),
+			}, program.WithLocals(types.TypeI32)),
+		},
+		{
 			name: "global mutation",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 7),
@@ -4026,6 +4038,109 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.NoError(t, i.Close())
 		require.Equal(t, 1, value.closed)
 	})
+
+	t.Run("reuses only array headers invalidated by reset", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeRef)
+		prog := program.New(
+			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			program.WithTypes(typ),
+		)
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		ref, err := i.Peek(0)
+		require.NoError(t, err)
+		value, err := i.Load(ref.Ref())
+		require.NoError(t, err)
+		first := value.(*types.Array)
+
+		i.Reset()
+		require.Nil(t, first.Typ)
+		require.Nil(t, first.Elems)
+
+		require.NoError(t, i.Run(context.Background()))
+		ref, err = i.Peek(0)
+		require.NoError(t, err)
+		value, err = i.Load(ref.Ref())
+		require.NoError(t, err)
+		second := value.(*types.Array)
+		require.Same(t, first, second)
+		require.Same(t, typ, second.Typ)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, second.Elems)
+	})
+
+	t.Run("preserves arrays detached by pop", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeRef)
+		prog := program.New(
+			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			program.WithTypes(typ),
+		)
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		first := value.(*types.Array)
+		i.Reset()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err = i.Pop()
+		require.NoError(t, err)
+		second := value.(*types.Array)
+		require.NotSame(t, first, second)
+		require.Same(t, typ, first.Typ)
+		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
+	})
+
+	t.Run("preserves arrays reclaimed before reset", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeRef)
+		prog := program.New(
+			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			program.WithTypes(typ),
+		)
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		ref, err := i.PopBoxed()
+		require.NoError(t, err)
+		value, err := i.Load(ref.Ref())
+		require.NoError(t, err)
+		first := value.(*types.Array)
+		require.NoError(t, i.Release(ref.Ref()))
+		i.Reset()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err = i.Pop()
+		require.NoError(t, err)
+		second := value.(*types.Array)
+		require.NotSame(t, first, second)
+		require.Same(t, typ, first.Typ)
+		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
+	})
+
+	t.Run("caps retained array headers at dynamic heap size", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		typ := types.NewArrayType(types.TypeRef)
+		for range 3 {
+			_, err := i.Alloc(types.NewArray(typ))
+			require.NoError(t, err)
+		}
+		i.Reset()
+		require.Len(t, i.arrays, 3)
+
+		_, err := i.Alloc(types.String("value"))
+		require.NoError(t, err)
+		i.Reset()
+		require.Len(t, i.arrays, 1)
+		for _, array := range i.arrays[:cap(i.arrays)][1:] {
+			require.Nil(t, array)
+		}
+	})
 }
 
 func TestNew(t *testing.T) {
@@ -4057,18 +4172,55 @@ func TestNew(t *testing.T) {
 }
 
 func TestWithHook(t *testing.T) {
-	calls := 0
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
-	})
-	i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
-		calls++
-		return nil
-	}))
-	defer i.Close()
+	tests := []struct {
+		name string
+		prog *program.Program
+		want types.Value
+		ops  int
+	}{
+		{
+			name: "arithmetic",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+			}),
+			want: types.I32(3),
+			ops:  3,
+		},
+		{
+			name: "local arithmetic store",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.LOCAL_GET, 0),
+			}, program.WithLocals(types.TypeI32)),
+			want: types.I32(8),
+			ops:  7,
+		},
+		{
+			name: "typed array load",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{3, 5})),
+			want: types.I32(5),
+			ops:  3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			i := New(tt.prog, WithTick(1), WithThreshold(-1), WithHook(func(*Interpreter) error {
+				calls++
+				return nil
+			}))
+			defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	require.Equal(t, 3, calls)
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, value)
+			require.Equal(t, tt.ops, calls)
+		})
+	}
 }
 
 func TestWithCodec(t *testing.T) {

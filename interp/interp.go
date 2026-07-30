@@ -60,6 +60,7 @@ type Interpreter struct {
 	trial    []int
 	work     []int
 	refbuf   []types.Ref
+	arrays   []*types.Array
 
 	fp  int
 	sp  int
@@ -652,6 +653,7 @@ func (i *Interpreter) Len() int {
 func (i *Interpreter) Close() error {
 	i.flush()
 	i.Reset()
+	i.arrays = nil
 	var err error
 	if i.compiler != nil {
 		err = errors.Join(err, i.compiler.Close())
@@ -665,10 +667,21 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
+	dynamic := len(i.heap) - i.base
+	if dynamic < len(i.arrays) {
+		clear(i.arrays[dynamic:])
+		i.arrays = i.arrays[:dynamic]
+	}
 	for addr := i.base; addr < len(i.heap); addr++ {
-		if i.rc[addr] > 0 {
-			i.finalize(addr, i.heap[addr])
+		if i.rc[addr] <= 0 {
+			continue
 		}
+		value := i.heap[addr]
+		if array, ok := value.(*types.Array); ok && len(i.arrays) < dynamic {
+			*array = types.Array{}
+			i.arrays = append(i.arrays, array)
+		}
+		i.finalize(addr, value)
 	}
 	for i.fp > 1 {
 		i.fp--
@@ -737,6 +750,15 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 
 	f := i.fr
 	code := f.code
+	if i.threshold < 0 && i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
+		for f.ip < len(code) {
+			code[f.ip](i)
+			f = i.fr
+			code = f.code
+		}
+		return false, nil
+	}
+
 	tick := i.tick
 	quiet := i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil
 
@@ -1774,6 +1796,20 @@ func (i *Interpreter) alloc(val types.Value) int {
 	i.heap = append(i.heap, val)
 	i.rc = append(i.rc, 1)
 	return len(i.heap) - 1
+}
+
+// newArray reuses only headers invalidated by Reset. Element storage remains
+// fresh so construction keeps its zeroing and memory-retention behavior.
+func (i *Interpreter) newArray(typ *types.ArrayType, elems []types.Boxed) *types.Array {
+	if len(i.arrays) == 0 {
+		return &types.Array{Typ: typ, Elems: elems}
+	}
+	last := len(i.arrays) - 1
+	array := i.arrays[last]
+	i.arrays[last] = nil
+	i.arrays = i.arrays[:last]
+	*array = types.Array{Typ: typ, Elems: elems}
+	return array
 }
 
 func (i *Interpreter) reuse(val types.Value) (int, bool) {
