@@ -394,11 +394,12 @@ The JIT is an optimization over threaded semantics.
 memory lifecycle. Architecture packages own concrete instruction encoding and
 ABI details.
 
-Executable buffers MUST own their own write/execute transition, so a buffer is
-executable whenever no install is in flight and installs serialize internally.
-Relaxation MUST terminate, and each replacement MUST already be encodable at
-its final range. Resource cleanup MUST be explicit and idempotent where the
-public contract permits repeated cleanup.
+Executable buffers MUST own their write/execute transition. Each install MUST
+write into unpublished memory, seal that mapping executable, and only then
+publish it; published mappings MUST remain immutable and executable while later
+installs serialize. Relaxation MUST terminate, and each replacement MUST already
+be encodable at its final range. Resource cleanup MUST be explicit and
+idempotent where the public contract permits repeated cleanup.
 
 ### 7.5 Profiling
 
@@ -537,6 +538,9 @@ a single recovery boundary. Other runtime failures MUST return errors.
 ### 12.1 Placement and Ownership
 
 - Unit tests live beside production code as `*_test.go`.
+- Unit-test packages MUST match the production package. The `_test` suffix is
+  reserved for public examples and genuine external conformance tests that
+  intentionally act as an importing client.
 - Each test file MUST match the production file owning the symbol.
 - Catch-all concept files and `test_helpers_test.go` MUST NOT be created.
 - Black-box, conformance, and external fixtures belong under `test/` or the
@@ -550,11 +554,19 @@ the setter owner.
 
 ### 12.2 Public Contract Only
 
-Tests are executable specifications of the public contract. They MUST construct
+Tests are executable specifications. Public-contract tests MUST construct
 exported types through exported constructors, builders, or options and verify
 behavior through exported functions and methods or an observable boundary.
 
-Tests MUST NOT:
+A same-package white-box test MAY access private symbols only when it owns a
+safety invariant or deterministic internal mechanism that no stable public
+behavior can isolate. The test MUST live beside the owning production file,
+state the invariant rather than incidental representation, and have no
+equivalent public-contract case. Architecture, timing, or heuristic convenience
+alone is not sufficient. Production proxies solely for testing remain
+forbidden.
+
+Outside that exception, tests MUST NOT:
 
 - construct literals naming unexported fields;
 - read or write unexported state;

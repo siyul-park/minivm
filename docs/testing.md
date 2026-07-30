@@ -24,8 +24,27 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Public contract | production-matched package test file | exported constructors, functions, methods, options, errors, and lifecycle behavior |
 | Runtime specification | `interp.TestInterpreter_Run` | one visible bytecode fixture per opcode behavior, including traps and ownership |
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
+| Internal invariant | nearest implementation test file | safety or deterministic mechanics unavailable through stable public behavior |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
+
+Unit tests use the production package name. External `_test` packages are
+limited to public examples and genuine importing-client conformance tests.
+`asm/assembler_test.go` and `asm/link_test.go` are such conformance tests:
+they consume `asm/arm64`, which itself imports `asm`, so using package `asm`
+would create an import cycle.
+
+### JIT Harness Migration
+
+The former `internal/jitcheck` package has no remaining contract. Its cases are
+owned by the normal specification layers:
+
+| Removed harness case | Current owner | Contract |
+|---|---|---|
+| iterative loop | `interp.TestInterpreter_Run/jits top-level loop` | loop result plus native emission |
+| recursive calls | `interp.TestARM64_SelfCallWithRefArg` and `asm.TestAssembler_Build/resolves a backward call within the build` | recursive native entry plus in-build backward `BL` resolution |
+| wide live ranges | `asm.TestAssembler_Build/spills under register pressure` and `interp.TestPool_Get/runs a spilled shared native entry from fresh goroutines` | oversubscribed register bank, balanced spill frame, and emitted native execution |
+| threaded recursion | threaded oracle in `interp.TestARM64_SelfCallWithRefArg` | recursive result with JIT disabled |
 
 ## Public API Ownership
 
@@ -40,7 +59,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | Package | Exported owners | Owned | Shared family | Missing |
 |---|---:|---:|---:|---:|
 | `analysis` | 5 | 5 | 0 | 0 |
-| `asm` | 44 | 44 | 0 | 0 |
+| `asm` | 37 | 37 | 0 | 0 |
 | `asm/amd64` | 1 | 1 | 0 | 0 |
 | `asm/arm64` | 155 | 155 | 152 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
@@ -63,50 +82,43 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `analysis/blocks.go` | `TestNewBlocksAnalysis` | ✅ |
 | `analysis/gvn.go` | `TestGVNAnalysis_Run` | ✅ |
 | `analysis/gvn.go` | `TestNewGVNAnalysis` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Bind` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Build` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Emit` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Entry` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Label` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Pin` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Reg` | ✅ |
 | `asm/assembler.go` | `TestNew` | ✅ |
-| `asm/buffer.go` | `TestBuffer_Free` | ✅ |
-| `asm/buffer.go` | `TestBuffer_Write` | ✅ |
+| `asm/assembler.go` | `TestAssembler_Reg` | ✅ |
+| `asm/assembler.go` | `TestAssembler_Label` | ✅ |
+| `asm/assembler.go` | `TestAssembler_Bind` | ✅ |
+| `asm/assembler.go` | `TestAssembler_Pin` | ✅ |
+| `asm/assembler.go` | `TestAssembler_Emit` | ✅ |
+| `asm/assembler.go` | `TestAssembler_Build` | ✅ |
 | `asm/buffer.go` | `TestNewBuffer` | ✅ |
-| `asm/instr.go` | `TestInstruction_Def` | ✅ |
+| `asm/buffer.go` | `TestBuffer_Free` | ✅ |
 | `asm/instr.go` | `TestInstruction_String` | ✅ |
-| `asm/instr.go` | `TestInstruction_Uses` | ✅ |
 | `asm/link.go` | `TestLink` | ✅ |
-| `asm/operand.go` | `TestImm` | ✅ |
-| `asm/operand.go` | `TestImmOperand_String` | ✅ |
-| `asm/operand.go` | `TestLabelOp` | ✅ |
-| `asm/operand.go` | `TestLabelOperand_String` | ✅ |
-| `asm/operand.go` | `TestMem` | ✅ |
-| `asm/operand.go` | `TestMemOperand_String` | ✅ |
-| `asm/operand.go` | `TestP` | ✅ |
-| `asm/operand.go` | `TestPRegOperand_String` | ✅ |
 | `asm/operand.go` | `TestV` | ✅ |
+| `asm/operand.go` | `TestP` | ✅ |
+| `asm/operand.go` | `TestImm` | ✅ |
+| `asm/operand.go` | `TestMem` | ✅ |
 | `asm/operand.go` | `TestVRegOperand_String` | ✅ |
+| `asm/operand.go` | `TestPRegOperand_String` | ✅ |
+| `asm/operand.go` | `TestImmOperand_String` | ✅ |
+| `asm/operand.go` | `TestLabelOperand_String` | ✅ |
+| `asm/operand.go` | `TestMemOperand_String` | ✅ |
 | `asm/reg.go` | `TestNewPReg` | ✅ |
+| `asm/reg.go` | `TestNewVReg` | ✅ |
 | `asm/reg.go` | `TestNewRegInfo` | ✅ |
 | `asm/reg.go` | `TestNewRegMask` | ✅ |
-| `asm/reg.go` | `TestNewVReg` | ✅ |
 | `asm/reg.go` | `TestPReg_ID` | ✅ |
-| `asm/reg.go` | `TestPReg_String` | ✅ |
 | `asm/reg.go` | `TestPReg_Type` | ✅ |
 | `asm/reg.go` | `TestPReg_Width` | ✅ |
-| `asm/reg.go` | `TestRegInfo_Allocatable` | ✅ |
-| `asm/reg.go` | `TestRegMask_Clear` | ✅ |
-| `asm/reg.go` | `TestRegMask_Contains` | ✅ |
-| `asm/reg.go` | `TestRegMask_Count` | ✅ |
-| `asm/reg.go` | `TestRegMask_First` | ✅ |
-| `asm/reg.go` | `TestRegMask_PopFirst` | ✅ |
-| `asm/reg.go` | `TestRegMask_Set` | ✅ |
+| `asm/reg.go` | `TestPReg_String` | ✅ |
 | `asm/reg.go` | `TestVReg_ID` | ✅ |
-| `asm/reg.go` | `TestVReg_String` | ✅ |
 | `asm/reg.go` | `TestVReg_Type` | ✅ |
 | `asm/reg.go` | `TestVReg_Width` | ✅ |
+| `asm/reg.go` | `TestVReg_String` | ✅ |
+| `asm/reg.go` | `TestRegMask_Set` | ✅ |
+| `asm/reg.go` | `TestRegMask_Clear` | ✅ |
+| `asm/reg.go` | `TestRegMask_Contains` | ✅ |
+| `asm/reg.go` | `TestRegMask_First` | ✅ |
+| `asm/reg.go` | `TestRegInfo_Allocatable` | ✅ |
 | `asm/amd64/arch.go` | `TestNew` | ✅ |
 | `asm/arm64/arch.go` | `TestNew` | ✅ |
 | `asm/arm64/encoder.go` | `TestEncoder_Encode` | ✅ |

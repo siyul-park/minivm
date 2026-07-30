@@ -9,7 +9,7 @@ import (
 // registers into one whose operands reference physical registers. It owns
 // both the physical-register pool and the linear-scan policy: bind each
 // vreg as it is used or defined, release it at its last use, and — when the
-// bank is exhausted — spill the value whose next use is farthest away to a
+// bank is exhausted — spill the value whose final use is farthest away to a
 // stack slot, reloading it on demand.
 //
 // Virtual registers are dense, so every per-vreg fact lives in one indexed
@@ -97,6 +97,9 @@ func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int)
 		if err := r.check(id); err != nil {
 			return nil, err
 		}
+		if !info.valid(preg) {
+			return nil, fmt.Errorf("%w: pin virtual register %d to %v", ErrInvalidOperand, id, preg)
+		}
 		r.regs[id].pin = preg
 		r.regs[id].pinned = true
 		r.regs[id].width = preg.Width()
@@ -129,6 +132,9 @@ func (r *rewriter) scan(insts []Instruction) error {
 func (r *rewriter) note(v VReg, at int) error {
 	if err := r.check(v.ID()); err != nil {
 		return err
+	}
+	if v.Type() != RegTypeInt && v.Type() != RegTypeFloat {
+		return fmt.Errorf("%w: virtual register %d type %d", ErrInvalidOperand, v.ID(), v.Type())
 	}
 	s := &r.regs[v.ID()]
 	s.last = at
@@ -178,9 +184,10 @@ func (r *rewriter) step(i int, inst Instruction) error {
 	}
 	dst, defines := inst.def()
 	if defines {
-		if err := r.define(dst, i); err != nil {
+		if _, err := r.bind(dst, i); err != nil {
 			return err
 		}
+		r.regs[dst.ID()].spilled = false
 	}
 
 	r.out = append(r.out, r.substitute(inst))
@@ -212,16 +219,6 @@ func (r *rewriter) use(v VReg, at int) error {
 		r.out = append(r.out, r.frame.Reload(preg, s.slot))
 	}
 	s.spilled = false
-	return nil
-}
-
-// define ensures v's destination register exists before the instruction
-// that writes it. The new definition supersedes any spilled copy.
-func (r *rewriter) define(v VReg, at int) error {
-	if _, err := r.bind(v, at); err != nil {
-		return err
-	}
-	r.regs[v.ID()].spilled = false
 	return nil
 }
 
@@ -439,7 +436,7 @@ func (r *rewriter) resolve(v VReg) (PReg, bool) {
 // area after it would double-adjust SP.
 func (r *rewriter) inject(labels map[Label]int, moved []int) ([]Instruction, map[Label]int) {
 	rebased := make(map[Label]int, len(labels))
-	if r.slots == 0 || r.frame == nil {
+	if r.slots == 0 {
 		for id, idx := range labels {
 			rebased[id] = moved[idx]
 		}

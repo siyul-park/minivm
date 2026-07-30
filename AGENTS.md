@@ -172,7 +172,7 @@ Violations cause silent corruption or invalid execution.
 - Compile-time threaded code advances `c.ip`; runtime threaded execution advances `f.ip`.
 - JIT handlers return `true` only after lowering the opcode and advancing `s.ip` by its exact width.
 - On JIT type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.
-- Executable buffers own their write/execute transition inside `asm.Buffer.install`, which must sync the instruction cache on Darwin/ARM64 before resealing; a full buffer is replaced by a larger mapping and the old one is retained so entry pointers stay valid.
+- Executable buffers publish each code block from a fresh mapping inside `asm.Buffer.install`; it must sync the instruction cache on Darwin/ARM64 before sealing, and published mappings remain immutable and executable until `Buffer.Free`.
 - Offset-preserving passes must preserve byte offsets; `GVNPass` and `DCEPass` are the known exceptions and must repair branches/handlers.
 - `asm.Relaxer.Relax` implementations must return a replacement sequence that is already in range; `asm.Assembler.encode`'s fixpoint loop relies on this to relax each branch at most once and terminate.
 - A JIT trace fragment's own `status`, not the root trace's, decides how its ops lower when they run out; `tracePlan` must skip any `aborted` root or branch, so a fragment that recorded a partial, unsupported prefix is never planned or inlined into a parent trace.
@@ -185,8 +185,10 @@ Violations cause silent corruption or invalid execution.
 Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §12.
 
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
+- Unit tests use the production package; reserve `_test` packages for public examples and genuine external conformance tests.
 - Put sub-cases under `t.Run`; do not split them into parallel top-level tests.
 - Keep setup, execution, and assertions visible unless specification §12 permits a real reusable abstraction.
+- Same-package white-box tests are limited to safety invariants or deterministic mechanics that stable public behavior cannot isolate.
 - Use `require`, not `assert`.
 
 ## Documentation Maintenance

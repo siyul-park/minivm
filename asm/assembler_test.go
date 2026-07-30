@@ -5,10 +5,9 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/asm/arm64"
+	"github.com/stretchr/testify/require"
 )
 
 // noFrameArch disables spilling so register exhaustion stays observable.
@@ -58,15 +57,50 @@ func TestAssembler_Bind(t *testing.T) {
 }
 
 func TestAssembler_Pin(t *testing.T) {
-	assembler := asm.New(arm64.New())
-	v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+	t.Run("records conflicting pins", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
 
-	require.NoError(t, assembler.Pin(v, arm64.X0))
-	require.NoError(t, assembler.Pin(v, arm64.X0))
-	require.ErrorIs(t, assembler.Pin(v, arm64.X1), asm.ErrConflictingPin)
+		require.NoError(t, assembler.Pin(v, arm64.X0))
+		require.NoError(t, assembler.Pin(v, arm64.X0))
+		require.ErrorIs(t, assembler.Pin(v, arm64.X1), asm.ErrConflictingPin)
 
-	_, err := assembler.Build()
-	require.ErrorIs(t, err, asm.ErrConflictingPin)
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrConflictingPin)
+	})
+
+	t.Run("rejects a physical register outside the architecture", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+
+		require.ErrorIs(t, assembler.Pin(v, asm.NewPReg(64, asm.RegTypeInt, asm.Width64)), asm.ErrInvalidOperand)
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrInvalidOperand)
+	})
+
+	t.Run("rejects a reserved physical register", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+
+		require.ErrorIs(t, assembler.Pin(v, arm64.X28), asm.ErrInvalidOperand)
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrInvalidOperand)
+	})
+
+	t.Run("allows an architecture scratch register", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+
+		require.NoError(t, assembler.Pin(v, arm64.X10))
+	})
+
+	t.Run("rejects a virtual register it did not allocate", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+
+		require.ErrorIs(t, assembler.Pin(asm.NewVReg(7, asm.RegTypeInt, asm.Width64), arm64.X0), asm.ErrInvalidOperand)
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrInvalidOperand)
+	})
 }
 
 func TestAssembler_Emit(t *testing.T) {
@@ -136,12 +170,26 @@ func TestAssembler_Build(t *testing.T) {
 		require.ErrorIs(t, err, asm.ErrInvalidOperand)
 	})
 
+	t.Run("resolves a backward call within the build", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		head := assembler.Label()
+		assembler.Bind(head)
+		assembler.Emit(arm64.NOP())
+		assembler.Emit(arm64.BLLabel(head))
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+		// BL is the second four-byte instruction and targets the first, so its
+		// signed imm26 displacement is -4: 0x97ffffff, little endian.
+		require.Equal(t, []byte{0xff, 0xff, 0xff, 0x97}, code[4:8])
+	})
+
 	t.Run("arch without a frame rejects spilling", func(t *testing.T) {
 		// An Arch whose Frame() returns nil disables spilling: allocation
-		// fails with ErrNoRegistersAvailable instead of inserting a spill
+		// fails with asm.ErrNoRegistersAvailable instead of inserting a spill
 		// frame. Callers that need this (e.g. interp's JIT policy for a
 		// trace ending in a terminal heap mutation) wrap an existing Arch
-		// rather than the Assembler exposing a dedicated toggle.
+		// rather than the asm.Assembler exposing a dedicated toggle.
 		assembler := asm.New(noFrameArch{arm64.New()})
 		emitWideSum(assembler, 64)
 
@@ -175,9 +223,9 @@ func TestAssembler_Build(t *testing.T) {
 
 		buffer, err := asm.NewBuffer(4096)
 		require.NoError(t, err)
-		defer buffer.Free()
+		defer func() { require.NoError(t, buffer.Free()) }()
 
-		callable, err := asm.Link(buffer, arch, code)
+		callable, err := asm.Link(buffer, arch.ABI(), code)
 		require.NoError(t, err)
 
 		values := [3]uint64{3, 4, 0}
@@ -237,9 +285,9 @@ func TestAssembler_Build(t *testing.T) {
 
 				buffer, err := asm.NewBuffer(len(code) + 4096)
 				require.NoError(t, err)
-				defer buffer.Free()
+				defer func() { require.NoError(t, buffer.Free()) }()
 
-				callable, err := asm.Link(buffer, arch, code)
+				callable, err := asm.Link(buffer, arch.ABI(), code)
 				require.NoError(t, err)
 
 				notTaken := []uint64{1, 0xFF}
@@ -273,9 +321,9 @@ func TestAssembler_Build(t *testing.T) {
 
 		buffer, err := asm.NewBuffer(4096)
 		require.NoError(t, err)
-		defer buffer.Free()
+		defer func() { require.NoError(t, buffer.Free()) }()
 
-		callable, err := asm.Link(buffer, arch, code)
+		callable, err := asm.Link(buffer, arch.ABI(), code)
 		require.NoError(t, err)
 
 		want := uint64(0)

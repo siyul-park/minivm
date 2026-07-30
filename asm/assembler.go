@@ -64,13 +64,16 @@ func (a *Assembler) Bind(id Label) {
 // Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
 // conflicting Pin records an error returned from Build.
 func (a *Assembler) Pin(v VReg, preg PReg) error {
+	if a.arch == nil {
+		return a.fail(fmt.Errorf("%w: nil architecture", ErrInvalidArgs))
+	}
+	if v.ID() < 0 || v.ID() >= a.nextVReg || v.Type() != preg.Type() || !a.arch.Registers().valid(preg) {
+		return a.fail(fmt.Errorf("%w: pin %v to %v", ErrInvalidOperand, v, preg))
+	}
 	if existing, ok := a.pins[v.ID()]; ok && (existing.ID() != preg.ID() || existing.Type() != preg.Type()) {
 		err := fmt.Errorf("%w: %v already pinned to %v, got %v",
 			ErrConflictingPin, v, existing, preg)
-		if a.err == nil {
-			a.err = err
-		}
-		return err
+		return a.fail(err)
 	}
 	a.pins[v.ID()] = preg
 	return nil
@@ -89,6 +92,9 @@ func (a *Assembler) Build() ([]byte, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
+	if a.arch == nil {
+		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
+	}
 
 	rw, err := newRewriter(a.arch, a.insts, a.pins, int(a.nextVReg))
 	if err != nil {
@@ -99,6 +105,13 @@ func (a *Assembler) Build() ([]byte, error) {
 		return nil, err
 	}
 	return a.encode(insts, labels)
+}
+
+func (a *Assembler) fail(err error) error {
+	if a.err == nil {
+		a.err = err
+	}
+	return err
 }
 
 // encode turns phys-allocated instructions into the final byte stream.

@@ -369,7 +369,7 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 		}
 		return prof.CompileReasonError, err
 	}
-	callable, err := asm.Link(c.buffer, arch, code)
+	callable, err := asm.Link(c.buffer, arch.ABI(), code)
 	if err != nil {
 		return prof.CompileReasonError, err
 	}

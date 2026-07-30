@@ -26,7 +26,7 @@ Before reporting done, re-read every changed code and test file and verify:
 - Functions keep one abstraction level, single-use helpers remain inline unless they isolate real mechanics, and receiver-owned behavior is a method.
 - Declarations form a caller-before-callee staircase; fields and groups follow specification §9.
 - Public APIs remain minimal and compatible unless the user explicitly authorized a change.
-- Tests use public observable behavior, isolated arrange per subtest, production-matched files, and `require` (specification §12).
+- Unit tests use the production package, tests use public observable behavior except for specification §12's narrow internal-invariant allowance, arrange is isolated per subtest, files match production owners, and assertions use `require`.
 - Performance work has a baseline, profile-guided owner, correctness checks, and reproducible before/after evidence (specification §14).
 - Documentation, workflow, and conventions were updated in their specification §15 owner documents.
 

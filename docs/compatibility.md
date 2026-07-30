@@ -47,7 +47,9 @@ JIT stubs compile cleanly but do not emit native code. `asm/amd64` is currently 
 
 CGO is optional except for Darwin/ARM64 with JIT enabled.
 
-On Apple Silicon, Darwin requires explicit instruction-cache synchronization after writable code pages are sealed for execution. minivm performs this flush through CGO in `asm/icache_darwin_arm64.go`.
+On Apple Silicon, Darwin requires explicit instruction-cache synchronization
+after code is written and before its pages are sealed for execution. minivm
+performs this flush through CGO in `asm/icache_darwin_arm64.go`.
 
 | Build | CGO | Icache behavior |
 |---|---:|---|
@@ -81,9 +83,13 @@ The memory flow is:
 
 1. allocate anonymous private memory
 2. write code while pages are writable
-3. seal pages as executable
-4. flush instruction cache when required
+3. flush the instruction cache when required
+4. seal pages as executable
 5. call generated code through the platform ABI bridge
+
+Each published code block keeps its own immutable executable mapping until
+`asm.Buffer.Free`, so a later install never removes execute permission from a
+running block.
 
 Platforms without executable-memory support use `asm/memory_stub.go`. In that case, `asm.NewBuffer` returns `ErrMmapFailed`.
 
@@ -91,7 +97,8 @@ Platforms without executable-memory support use `asm/memory_stub.go`. In that ca
 
 Low-level packages may use direct memory or bytecode access when required.
 
-Current areas include executable memory, code patching, ABI bridges, fixed-width bytecode reads, interpreter scratch state, and host-object field access.
+Current areas include executable memory, ABI bridges, fixed-width bytecode
+reads, interpreter scratch state, and host-object field access.
 
 There is no low-level direct memory use in `types`, `program`, `pass`, `analysis`, `transform`, or `optimize`.
 

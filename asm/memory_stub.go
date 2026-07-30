@@ -24,13 +24,6 @@ func (m memory) executable() error {
 	return fmt.Errorf("%w: unsupported platform %s/%s", ErrMprotectFailed, runtime.GOOS, runtime.GOARCH)
 }
 
-func (m memory) writable() error {
-	if len(m) == 0 {
-		return nil
-	}
-	return fmt.Errorf("%w: unsupported platform %s/%s", ErrMprotectFailed, runtime.GOOS, runtime.GOARCH)
-}
-
 func (m memory) free() error {
 	if len(m) == 0 {
 		return nil

@@ -7,100 +7,98 @@ import (
 	"unsafe"
 )
 
-// Buffer is an mmap'd executable memory region. Link installs machine code
-// into it; the Buffer owns the W^X transition around every install, so code
-// is executable whenever no install is in flight. Installs serialize on an
-// internal lock, and executing installed code concurrently is safe.
+// Buffer owns mmap'd executable memory. Link installs each machine-code block
+// into a fresh mapping and seals it executable before publication. Installs
+// serialize, while published mappings remain immutable and executable.
 //
-// A region that runs out of space is replaced by a larger mapping and
-// retained, so entry pointers callers already hold stay valid and
-// executable.
+// Free must not run until every Callable installed in the Buffer is idle and
+// no longer needed.
 type Buffer struct {
-	old    []memory
+	maps   []memory
 	mem    memory
-	offset int
+	size   int
+	sealed bool
 
 	mu sync.Mutex
 }
 
 var ErrBufferFull = errors.New("buffer full")
 
-// NewBuffer allocates a fresh executable buffer with the given byte
+// NewBuffer allocates an executable buffer with the given initial mapping
 // capacity, rounded up to a page boundary.
 func NewBuffer(size int) (*Buffer, error) {
 	mem, err := allocMemory(size)
 	if err != nil {
 		return nil, err
 	}
-	return &Buffer{mem: mem}, nil
+	return &Buffer{mem: mem, size: len(mem)}, nil
 }
 
-// Free releases the current and retained mmap mappings.
+// Free releases every mapping. Repeated calls are no-ops; a freed Buffer
+// cannot be reused.
 func (b *Buffer) Free() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for _, m := range b.old {
-		if err := m.free(); err != nil {
-			return err
+	b.size = 0
+	var err error
+	maps := b.maps
+	kept := b.maps[:0]
+	for _, m := range b.maps {
+		if freeErr := m.free(); freeErr != nil {
+			err = errors.Join(err, freeErr)
+			kept = append(kept, m)
 		}
 	}
-	b.old = nil
-	return b.mem.free()
+	clear(maps[len(kept):])
+	b.maps = kept
+	if freeErr := b.mem.free(); freeErr != nil {
+		err = errors.Join(err, freeErr)
+	} else {
+		b.mem = nil
+		b.sealed = false
+	}
+	return err
 }
 
-// install appends code to the buffer and returns the address it starts at.
-// The buffer is executable on return, whether or not the append succeeded.
+// install publishes code in an immutable executable mapping and returns its
+// entry address.
 func (b *Buffer) install(code []byte) (unsafe.Pointer, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if err := b.mem.writable(); err != nil {
-		return nil, err
+	if b.size == 0 {
+		return nil, fmt.Errorf("%w: freed buffer", ErrInvalidArgs)
 	}
-	addr, err := b.append(code)
-	if sealErr := b.mem.executable(); err == nil {
-		err = sealErr
-	}
-	if err != nil {
-		return nil, err
-	}
-	return addr, nil
-}
-
-// append copies code at the current offset, growing the mapping first when
-// it no longer fits. The caller must hold b.mu and have made the current
-// mapping writable.
-func (b *Buffer) append(code []byte) (unsafe.Pointer, error) {
-	end := b.offset + len(code)
-	if end > len(b.mem) {
-		if err := b.grow(len(code)); err != nil {
-			return nil, fmt.Errorf("%w: grow to %d", ErrBufferFull, end)
+	mem := b.mem
+	replace := b.sealed || len(code) > len(mem)
+	if replace {
+		size := max(b.size, len(code))
+		var err error
+		mem, err = allocMemory(size)
+		if err != nil {
+			return nil, fmt.Errorf("%w: allocate %d bytes: %w", ErrBufferFull, size, err)
 		}
-		end = len(code)
 	}
 
-	copy(b.mem[b.offset:end], code)
-	addr := unsafe.Pointer(&b.mem[b.offset])
-	b.offset = end
-	return addr, nil
-}
-
-// grow retains the current mapping — sealed executable so pointers into it
-// keep working — and installs a freshly mapped writable region at least need
-// bytes long. The caller must hold b.mu.
-func (b *Buffer) grow(need int) error {
-	size := max(len(b.mem)*2, need)
-	mem, err := allocMemory(size)
-	if err != nil {
-		return err
+	copy(mem, code)
+	if err := mem.executable(); err != nil {
+		if replace {
+			if freeErr := mem.free(); freeErr != nil {
+				b.maps = append(b.maps, mem)
+				err = errors.Join(err, freeErr)
+			}
+		}
+		return nil, err
 	}
-	if err := b.mem.executable(); err != nil {
-		_ = mem.free()
-		return err
+	if replace {
+		if b.sealed {
+			b.maps = append(b.maps, b.mem)
+		} else if err := b.mem.free(); err != nil {
+			b.maps = append(b.maps, b.mem)
+		}
+		b.mem = mem
 	}
-	b.old = append(b.old, b.mem)
-	b.mem = mem
-	b.offset = 0
-	return nil
+	b.sealed = true
+	return unsafe.Pointer(&mem[0]), nil
 }

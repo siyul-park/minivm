@@ -28,8 +28,8 @@ func TestNew(t *testing.T) {
 	require.NoError(t, err)
 	buf, err := asm.NewBuffer(4096)
 	require.NoError(t, err)
-	defer buf.Free()
-	linked, err := asm.Link(buf, New(), code)
+	defer func() { require.NoError(t, buf.Free()) }()
+	linked, err := asm.Link(buf, New().ABI(), code)
 	require.NoError(t, err)
 	// Use the concrete caller so escape analysis keeps the fresh goroutine's
 	// context on its stack while invoke grows and relocates that stack.

@@ -623,8 +623,7 @@ func BR(reg asm.Reg) asm.Instruction  { return newReg1(OpBR, reg) }
 func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
 func RET() asm.Instruction            { return newInst(OpRET, nil) }
 
-// Resolved immediately if the label is already placed; otherwise becomes a
-// Relocation patched by Link.
+// Build resolves label branches after every label is bound.
 func BLabel(id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
 }

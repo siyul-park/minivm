@@ -24,9 +24,7 @@ type ImmOperand struct {
 	Value int64
 }
 
-// LabelOperand references a Label by id. Inside the same Code, the offset
-// is resolved during Build. References to labels bound in other Codes
-// survive in Code.Relocs until Link patches them.
+// LabelOperand references a Label whose byte displacement Build resolves.
 type LabelOperand struct {
 	ID Label
 }

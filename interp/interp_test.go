@@ -2186,6 +2186,32 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, i.sp)
 	})
 
+	t.Run("CONST_GET reports overflow before retaining a ref", func(t *testing.T) {
+		fn := types.NewFunction(&types.FunctionType{}, nil, nil)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.CONST_GET, 0),
+		}, program.WithConstants(fn))
+		i := New(prog, WithStack(1), WithThreshold(-1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("fused REF_IS_NULL reports overflow before pushing", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.REF_IS_NULL),
+		}, program.WithGlobals(types.TypeRef))
+		i := New(prog, WithStack(1), WithThreshold(-1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.Equal(t, 1, i.Len())
+	})
+
 	t.Run("fused sources push once and need one free slot", func(t *testing.T) {
 		// Both operands stay in temporaries, so the fused handler grows the
 		// stack by exactly one slot no matter how many sources it folded.

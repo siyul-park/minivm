@@ -13,7 +13,7 @@ type value struct {
 	op       instr.Opcode
 	head     instr.Opcode
 	compile  []jen.Code
-	room     []jen.Code
+	room     bool
 	check    []jen.Code
 	body     []jen.Code
 	drop     []jen.Code
@@ -463,7 +463,9 @@ func (l loader) finish(result value, current step, indexed bool) (value, error) 
 		result.push = materialize(result, retain, l.width)
 		return result, nil
 	}
-	result.push = append(result.push, result.room...)
+	if result.room {
+		result.push = append(result.push, overflow())
+	}
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
 	if current.op == instr.CONST_GET && current.kind == instr.KindAny {
@@ -665,7 +667,11 @@ func constHandler(current step, input value) jen.Code {
 	compile := append([]jen.Code(nil), input.compile...)
 	boxed := input.boxed
 	scalar := materialize(input, false, width(current.op))
-	owned := append([]jen.Code(nil), input.check...)
+	var owned []jen.Code
+	if input.room {
+		owned = append(owned, overflow())
+	}
+	owned = append(owned, input.check...)
 	owned = append(owned, input.body...)
 	owned = append(owned,
 		jen.Id("i").Dot("retain").Call(jen.Id("addr")),
@@ -698,7 +704,10 @@ func constHandler(current step, input value) jen.Code {
 }
 
 func materialize(input value, retain bool, advance int) []jen.Code {
-	body := append([]jen.Code(nil), input.room...)
+	var body []jen.Code
+	if input.room {
+		body = append(body, overflow())
+	}
 	body = append(body, input.check...)
 	body = append(body, input.body...)
 	if retain {
@@ -795,6 +804,9 @@ func consume(state *state, current step) (value, error) {
 		}
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
 	case instr.REF_IS_NULL:
+		if !input.resident && input.room {
+			body = append(body, overflow())
+		}
 		body = append(body, input.body...)
 		condition := jen.Add(input.boxed).Dot("Ref").Call().Op("==").Lit(0)
 		if !state.standalone && state.offset+width(current.op) < state.width {
@@ -1818,7 +1830,7 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	// A source only needs stack room when it pushes on its own. Fused into a
 	// consumer it stays in a temporary, and the consumer checks the room its
 	// own net push needs.
-	result.room = append(result.room, overflow())
+	result.room = true
 
 	_, _, indexed := slotInfo(current.op)
 	loader.decode(&result, current.op)

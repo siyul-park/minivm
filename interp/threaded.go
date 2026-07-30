@@ -1015,6 +1015,9 @@ var (
 					}
 				}
 				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
 					i.retain(addr)
 					i.stack[i.sp] = r0
 					i.sp++
@@ -22586,6 +22589,9 @@ var (
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
 					r0 := i.globals[i0]
 					i.stack[i.sp] = types.BoxI1(r0.Ref() == 0)
 					i.sp++
@@ -33154,6 +33160,9 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
 					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.stack[i.sp] = types.BoxI1(r0.Ref() == 0)
@@ -37485,6 +37494,9 @@ var (
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
 					i.stack[i.sp] = types.BoxI1(r0.Ref() == 0)
 					i.sp++
 					i.fr.ip += 4
@@ -54613,6 +54625,9 @@ var (
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
+					}
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
 					}
 					r0 := i.fr.upvals[i0]
 					i.stack[i.sp] = types.BoxI1(r0.Ref() == 0)

@@ -160,3 +160,20 @@ func (ri RegInfo) Allocatable(typ RegType) RegMask {
 	mask &^= reserved
 	return mask
 }
+
+func (ri RegInfo) valid(reg PReg) bool {
+	var count uint8
+	var reserved RegMask
+	switch reg.Type() {
+	case RegTypeInt:
+		count = ri.NumInt
+		reserved = ri.IntReserved
+	case RegTypeFloat:
+		count = ri.NumFloat
+		reserved = ri.FloatReserved
+	default:
+		return false
+	}
+	return count <= 64 && reg.ID() < count && !reserved.Contains(reg.ID()) &&
+		(reg.Width() == Width32 || reg.Width() == Width64)
+}

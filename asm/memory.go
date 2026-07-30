@@ -36,22 +36,6 @@ func (m memory) executable() error {
 	return nil
 }
 
-func (m memory) writable() error {
-	if len(m) == 0 {
-		return nil
-	}
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_MPROTECT,
-		uintptr(unsafe.Pointer(&m[0])),
-		uintptr(len(m)),
-		uintptr(syscall.PROT_READ|syscall.PROT_WRITE),
-	)
-	if errno != 0 {
-		return fmt.Errorf("%w: %w", ErrMprotectFailed, errno)
-	}
-	return nil
-}
-
 func (m memory) free() error {
 	if len(m) == 0 {
 		return nil

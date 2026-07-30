@@ -240,7 +240,7 @@ func appendRows[K key[K]](out []Metric, name string, rows map[K]*Counter) []Metr
 	return out
 }
 
-func mergeRows[K key[K]](rows *map[K]*Counter, source map[K]*Counter) {
+func mergeRows[K comparable](rows *map[K]*Counter, source map[K]*Counter) {
 	for row, counter := range source {
 		if counter.value > 0 {
 			register(rows, row).value += counter.value
@@ -248,7 +248,7 @@ func mergeRows[K key[K]](rows *map[K]*Counter, source map[K]*Counter) {
 	}
 }
 
-func resetRows[K key[K]](rows map[K]*Counter) {
+func resetRows[K comparable](rows map[K]*Counter) {
 	for _, counter := range rows {
 		counter.value = 0
 	}
@@ -256,7 +256,7 @@ func resetRows[K key[K]](rows map[K]*Counter) {
 
 // register returns row's counter, creating the table and the counter on first
 // use. The handle is stable, so a caller may keep it and increment it directly.
-func register[K key[K]](rows *map[K]*Counter, row K) *Counter {
+func register[K comparable](rows *map[K]*Counter, row K) *Counter {
 	if *rows == nil {
 		*rows = make(map[K]*Counter)
 	}

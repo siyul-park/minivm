@@ -1039,16 +1039,23 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 	)
 
 	profile := prof.New()
-	i := New(prog, WithProfiler(profile))
+	jit := New(prog, WithProfiler(profile))
+	threaded := New(prog, WithThreshold(-1))
 
 	for range 64 {
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.PopBoxed()
+		require.NoError(t, jit.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.PopBoxed()
 		require.NoError(t, err)
-		require.Equal(t, types.BoxI32(6765), value)
-		i.Reset()
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Equal(t, types.BoxI32(6765), got)
+		jit.Reset()
+		threaded.Reset()
 	}
-	require.NoError(t, i.Close())
+	require.NoError(t, threaded.Close())
+	require.NoError(t, jit.Close())
 
 	var entries float64
 	for _, metric := range profile.Metrics() {
