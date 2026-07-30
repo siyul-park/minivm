@@ -1,23 +1,24 @@
-package instr
+package instr_test
 
 import (
 	"encoding/binary"
 	"testing"
 
+	instr "github.com/siyul-park/minivm/instr"
 	"github.com/stretchr/testify/require"
 )
 
 func FuzzInstructionRoundTrip(f *testing.F) {
-	f.Add(byte(I32_CONST), []byte{1, 2, 3, 4})
-	f.Add(byte(BR_TABLE), []byte{2, 0, 1, 0})
-	f.Add(byte(STRING_ITER), []byte(nil))
+	f.Add(byte(instr.I32_CONST), []byte{1, 2, 3, 4})
+	f.Add(byte(instr.BR_TABLE), []byte{2, 0, 1, 0})
+	f.Add(byte(instr.STRING_ITER), []byte(nil))
 
 	f.Fuzz(func(t *testing.T, code byte, data []byte) {
 		if len(data) > 64 {
 			t.Skip()
 		}
-		op := Opcode(code)
-		if !Valid(op) {
+		op := instr.Opcode(code)
+		if !instr.Valid(op) {
 			t.Skip()
 		}
 
@@ -33,7 +34,7 @@ func FuzzInstructionRoundTrip(f *testing.F) {
 
 		var operands []uint64
 		offset := 0
-		for _, width := range TypeOf(op).Widths {
+		for _, width := range instr.TypeOf(op).Widths {
 			if width > 0 {
 				operands = append(operands, read(offset))
 				offset += width
@@ -50,11 +51,11 @@ func FuzzInstructionRoundTrip(f *testing.F) {
 			offset += 1 + count*(-width)
 		}
 
-		inst := New(op, operands...)
+		inst := instr.New(op, operands...)
 		require.NotNil(t, inst)
-		require.Equal(t, []Instruction{inst}, Unmarshal(Marshal([]Instruction{inst})))
+		require.Equal(t, []instr.Instruction{inst}, instr.Unmarshal(instr.Marshal([]instr.Instruction{inst})))
 
-		parsed, err := Parse(inst.String())
+		parsed, err := instr.Parse(inst.String())
 		require.NoError(t, err)
 		require.Equal(t, inst, parsed)
 	})
@@ -69,11 +70,11 @@ func FuzzParse(f *testing.F) {
 		if len(line) > 4096 {
 			t.Skip()
 		}
-		inst, err := Parse(line)
+		inst, err := instr.Parse(line)
 		if err != nil || inst == nil {
 			return
 		}
-		roundTrip, err := Parse(inst.String())
+		roundTrip, err := instr.Parse(inst.String())
 		require.NoError(t, err)
 		require.Equal(t, inst, roundTrip)
 	})

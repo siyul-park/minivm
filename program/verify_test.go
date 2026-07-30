@@ -1,10 +1,11 @@
-package program
+package program_test
 
 import (
 	"math"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	program "github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
@@ -44,12 +45,12 @@ func TestVerify(t *testing.T) {
 		}
 	})
 	t.Run("valid/arithmetic", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
 		})
-		require.NoError(t, Verify(prog))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("valid/narrow int operands", func(t *testing.T) {
@@ -66,8 +67,8 @@ func TestVerify(t *testing.T) {
 				instr.New(instr.RETURN),
 			}),
 		}
-		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
-		require.NoError(t, Verify(prog))
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("valid/narrow bitwise operands", func(t *testing.T) {
@@ -85,8 +86,8 @@ func TestVerify(t *testing.T) {
 				instr.New(instr.RETURN),
 			}),
 		}
-		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
-		require.NoError(t, Verify(prog))
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("calls/function returns", func(t *testing.T) {
@@ -94,8 +95,8 @@ func TestVerify(t *testing.T) {
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 			Code: instr.Marshal([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)}),
 		}
-		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
-		require.NoError(t, Verify(prog))
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("calls/direct call", func(t *testing.T) {
@@ -103,16 +104,16 @@ func TestVerify(t *testing.T) {
 			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 			Code: instr.Marshal([]instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)}),
 		}
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		}, WithConstants(fn))
-		require.NoError(t, Verify(prog))
+		}, program.WithConstants(fn))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("control/balanced merge", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		els, end := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0)
 		b.BrIf(els)
@@ -124,48 +125,48 @@ func TestVerify(t *testing.T) {
 		b.Emit(instr.DROP)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		require.NoError(t, Verify(prog))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("control/loop fixpoint", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		loop := b.Label()
 		b.Bind(loop)
 		b.Emit(instr.I32_CONST, 1)
 		b.BrIf(loop)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		require.NoError(t, Verify(prog))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("valid/top-level locals", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.DROP),
-		}, WithLocals(types.TypeI32))
-		require.NoError(t, Verify(prog))
+		}, program.WithLocals(types.TypeI32))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("bounds/top-level local", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.DROP),
 		})
-		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
 	})
 
 	t.Run("stack/underflow", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.I32_ADD)})
-		require.ErrorIs(t, Verify(prog), ErrStackUnderflow)
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_ADD)})
+		require.ErrorIs(t, program.Verify(prog), program.ErrStackUnderflow)
 	})
 
 	t.Run("valid/array mutation", func(t *testing.T) {
 		// ARRAY_APPEND is variable-arity, so the verifier treats it as
 		// indeterminate (stopping dataflow); ARRAY_DELETE/ARRAY_SLICE verify by
 		// their fixed operand kinds.
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 10),
@@ -177,100 +178,100 @@ func TestVerify(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.ARRAY_DELETE),
 			instr.New(instr.DROP),
-		}, WithTypes(types.NewArrayType(types.TypeI32)))
-		require.NoError(t, Verify(prog))
+		}, program.WithTypes(types.NewArrayType(types.TypeI32)))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("stack/array delete underflow", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.ARRAY_DELETE)})
-		require.ErrorIs(t, Verify(prog), ErrStackUnderflow)
+		prog := program.New([]instr.Instruction{instr.New(instr.ARRAY_DELETE)})
+		require.ErrorIs(t, program.Verify(prog), program.ErrStackUnderflow)
 	})
 
 	t.Run("types/operand mismatch", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
 		})
-		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 	})
 
 	t.Run("structure/unknown opcode", func(t *testing.T) {
-		prog := &Program{Code: []byte{0xFE}}
-		require.ErrorIs(t, Verify(prog), ErrUnknownOpcode)
+		prog := &program.Program{Code: []byte{0xFE}}
+		require.ErrorIs(t, program.Verify(prog), program.ErrUnknownOpcode)
 	})
 
 	t.Run("structure/truncated instruction", func(t *testing.T) {
-		prog := &Program{Code: []byte{byte(instr.I32_CONST), 0x01}}
-		require.ErrorIs(t, Verify(prog), ErrTruncated)
+		prog := &program.Program{Code: []byte{byte(instr.I32_CONST), 0x01}}
+		require.ErrorIs(t, program.Verify(prog), program.ErrTruncated)
 	})
 
 	t.Run("bounds/constant index", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.CONST_GET, 5)})
-		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 5)})
+		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
 	})
 
 	t.Run("bounds/local index", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.LOCAL_GET, 9)})
-		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+		prog := program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 9)})
+		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
 	})
 
 	t.Run("valid/global index", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.DROP),
-		}, WithGlobals(types.TypeI32))
-		require.NoError(t, Verify(prog))
+		}, program.WithGlobals(types.TypeI32))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("types/global set mismatch", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
 			instr.New(instr.GLOBAL_SET, 0),
-		}, WithGlobals(types.TypeI32))
-		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+		}, program.WithGlobals(types.TypeI32))
+		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 	})
 
 	t.Run("types/global tee mismatch", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
 			instr.New(instr.GLOBAL_TEE, 0),
-		}, WithGlobals(types.TypeI32))
-		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+		}, program.WithGlobals(types.TypeI32))
+		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 	})
 
 	t.Run("types/dynamic global accepts scalar", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.GLOBAL_SET, 0),
-		}, WithGlobals(types.TypeRef))
-		require.NoError(t, Verify(prog))
+		}, program.WithGlobals(types.TypeRef))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("types/global concrete ref mismatch", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.GLOBAL_SET, 0),
-		}, WithConstants(types.TypedArray[float32]{1}), WithGlobals(types.NewArrayType(types.TypeI32)))
-		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+		}, program.WithConstants(types.TypedArray[float32]{1}), program.WithGlobals(types.NewArrayType(types.TypeI32)))
+		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 	})
 
 	t.Run("bounds/global index", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, WithGlobals(types.TypeI32))
-		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+		prog := program.New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, program.WithGlobals(types.TypeI32))
+		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
 	})
 
 	t.Run("control/invalid jump", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.BR, 100)})
-		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
+		prog := program.New([]instr.Instruction{instr.New(instr.BR, 100)})
+		require.ErrorIs(t, program.Verify(prog), program.ErrInvalidJump)
 	})
 
 	t.Run("control/branch table target inside instruction", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.BR_TABLE, 0, 7),
 			instr.New(instr.I64_CONST, uint64(7)<<48),
 		})
-		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
+		require.ErrorIs(t, program.Verify(prog), program.ErrInvalidJump)
 	})
 
 	t.Run("control/function branch to end", func(t *testing.T) {
@@ -281,8 +282,8 @@ func TestVerify(t *testing.T) {
 				instr.New(instr.BR_IF, 0),
 			}),
 		}
-		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
-		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
+		require.ErrorIs(t, program.Verify(prog), program.ErrInvalidJump)
 	})
 
 	t.Run("control/function falls through", func(t *testing.T) {
@@ -290,16 +291,16 @@ func TestVerify(t *testing.T) {
 			Typ:  &types.FunctionType{},
 			Code: instr.Marshal([]instr.Instruction{instr.New(instr.I32_CONST, 1)}),
 		}
-		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
 
-		var ve *VerifyError
-		require.ErrorAs(t, Verify(prog), &ve)
-		require.ErrorIs(t, ve.Err, ErrFallThrough)
+		var ve *program.VerifyError
+		require.ErrorAs(t, program.Verify(prog), &ve)
+		require.ErrorIs(t, ve.Err, program.ErrFallThrough)
 		require.Equal(t, 1, ve.Slot)
 	})
 
 	t.Run("stack/unbalanced merge", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		els, end := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0)
 		b.BrIf(els)
@@ -312,11 +313,11 @@ func TestVerify(t *testing.T) {
 		b.Emit(instr.DROP)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		require.ErrorIs(t, Verify(prog), ErrStackMismatch)
+		require.ErrorIs(t, program.Verify(prog), program.ErrStackMismatch)
 	})
 
 	t.Run("handlers/valid protected region", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		start, end, catch := b.Label(), b.Label(), b.Label()
 		b.Bind(start)
 		b.Emit(instr.I32_CONST, 1)
@@ -327,32 +328,32 @@ func TestVerify(t *testing.T) {
 		b.Try(start, end, catch, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		require.NoError(t, Verify(prog))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("handlers/target off instruction boundary", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.THROW),
-		}, WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 1}))
-		require.ErrorIs(t, Verify(prog), ErrHandlerTarget)
+		}, program.WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 1}))
+		require.ErrorIs(t, program.Verify(prog), program.ErrHandlerTarget)
 	})
 
 	t.Run("handlers/range out of bounds", func(t *testing.T) {
-		prog := New([]instr.Instruction{
+		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.THROW),
-		}, WithHandlers(instr.Handler{Start: 0, End: 99, Catch: 5}))
-		require.ErrorIs(t, Verify(prog), ErrHandlerRange)
+		}, program.WithHandlers(instr.Handler{Start: 0, End: 99, Catch: 5}))
+		require.ErrorIs(t, program.Verify(prog), program.ErrHandlerRange)
 	})
 }
 
 func TestVerifyError_Error(t *testing.T) {
-	err := &VerifyError{Slot: 2, IP: 7, Opcode: instr.I32_ADD, Err: ErrStackUnderflow}
+	err := &program.VerifyError{Slot: 2, IP: 7, Opcode: instr.I32_ADD, Err: program.ErrStackUnderflow}
 	require.Equal(t, "verify: slot 2, ip 7, i32.add: stack underflow", err.Error())
 }
 
 func TestVerifyError_Unwrap(t *testing.T) {
-	err := &VerifyError{Err: ErrTypeMismatch}
-	require.ErrorIs(t, err, ErrTypeMismatch)
+	err := &program.VerifyError{Err: program.ErrTypeMismatch}
+	require.ErrorIs(t, err, program.ErrTypeMismatch)
 }

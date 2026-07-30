@@ -1,25 +1,26 @@
-package instr
+package instr_test
 
 import (
 	"testing"
 
+	instr "github.com/siyul-park/minivm/instr"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOpcode_IsBranch(t *testing.T) {
 	tests := []struct {
-		op   Opcode
+		op   instr.Opcode
 		want bool
 	}{
-		{op: BR, want: true},
-		{op: BR_IF, want: true},
-		{op: BR_TABLE, want: true},
-		{op: RETURN, want: false},
-		{op: UNREACHABLE, want: false},
-		{op: I32_ADD, want: false},
+		{op: instr.BR, want: true},
+		{op: instr.BR_IF, want: true},
+		{op: instr.BR_TABLE, want: true},
+		{op: instr.RETURN, want: false},
+		{op: instr.UNREACHABLE, want: false},
+		{op: instr.I32_ADD, want: false},
 	}
 	for _, tt := range tests {
-		t.Run(TypeOf(tt.op).Mnemonic, func(t *testing.T) {
+		t.Run(instr.TypeOf(tt.op).Mnemonic, func(t *testing.T) {
 			require.Equal(t, tt.want, tt.op.IsBranch())
 		})
 	}

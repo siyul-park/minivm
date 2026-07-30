@@ -1,21 +1,22 @@
-package program
+package program_test
 
 import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	program "github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewBuilder(t *testing.T) {
-	prog, err := NewBuilder().Build()
+	prog, err := program.NewBuilder().Build()
 	require.NoError(t, err)
 	require.Empty(t, prog.Code)
 }
 
 func TestBuilder_Emit(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	require.Same(t, b, b.Emit(instr.I32_CONST, 42).Emit(instr.DROP))
 	prog, err := b.Build()
 	require.NoError(t, err)
@@ -23,12 +24,12 @@ func TestBuilder_Emit(t *testing.T) {
 }
 
 func TestBuilder_Label(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	require.NotEqual(t, b.Label(), b.Label())
 }
 
 func TestBuilder_Bind(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	end := b.Label()
 	b.Br(end)
 	_, err := b.Build()
@@ -37,40 +38,40 @@ func TestBuilder_Bind(t *testing.T) {
 	require.Same(t, b, b.Bind(end))
 	prog, err := b.Build()
 	require.NoError(t, err)
-	require.NoError(t, Verify(prog))
+	require.NoError(t, program.Verify(prog))
 }
 
 func TestBuilder_Br(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	end := b.Label()
 	require.Same(t, b, b.Br(end))
 	prog, err := b.Emit(instr.NOP).Bind(end).Build()
 	require.NoError(t, err)
-	require.NoError(t, Verify(prog))
+	require.NoError(t, program.Verify(prog))
 }
 
 func TestBuilder_BrIf(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	end := b.Label()
 	b.Emit(instr.I32_CONST, 1)
 	require.Same(t, b, b.BrIf(end))
 	prog, err := b.Emit(instr.NOP).Bind(end).Build()
 	require.NoError(t, err)
-	require.NoError(t, Verify(prog))
+	require.NoError(t, program.Verify(prog))
 }
 
 func TestBuilder_BrTable(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	first, def := b.Label(), b.Label()
 	b.Emit(instr.I32_CONST, 0)
 	require.Same(t, b, b.BrTable(def, first))
 	prog, err := b.Bind(first).Emit(instr.NOP).Bind(def).Build()
 	require.NoError(t, err)
-	require.NoError(t, Verify(prog))
+	require.NoError(t, program.Verify(prog))
 }
 
 func TestBuilder_Try(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	start, end, catch := b.Label(), b.Label(), b.Label()
 	require.Same(t, b, b.Bind(start).Emit(instr.NOP).Bind(end).Emit(instr.RETURN).Bind(catch).Try(start, end, catch, 2))
 	prog, err := b.Build()
@@ -79,7 +80,7 @@ func TestBuilder_Try(t *testing.T) {
 }
 
 func TestBuilder_ConstGet(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	b.ConstGet(types.String("x")).ConstGet(types.String("x"))
 
 	prog, err := b.Build()
@@ -94,7 +95,7 @@ func TestBuilder_ConstGet(t *testing.T) {
 
 func TestBuilder_Const(t *testing.T) {
 	t.Run("reuses comparable values", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 
 		require.Equal(t, 0, b.Const(types.String("a")))
 		require.Equal(t, 1, b.Const(types.String("b")))
@@ -102,11 +103,11 @@ func TestBuilder_Const(t *testing.T) {
 	})
 
 	t.Run("rejects nil", func(t *testing.T) {
-		require.Equal(t, -1, NewBuilder().Const(nil))
+		require.Equal(t, -1, program.NewBuilder().Const(nil))
 	})
 
 	t.Run("uses pointer identity", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		first := &types.Function{}
 		second := &types.Function{}
 
@@ -117,7 +118,7 @@ func TestBuilder_Const(t *testing.T) {
 }
 
 func TestBuilder_Type(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 
 	require.Equal(t, -1, b.Type(nil))
 	require.Equal(t, 0, b.Type(types.TypeI32))
@@ -126,7 +127,7 @@ func TestBuilder_Type(t *testing.T) {
 }
 
 func TestBuilder_Locals(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	b.Locals(types.TypeI32, types.TypeI64).Emit(instr.LOCAL_GET, 0).Emit(instr.DROP)
 
 	prog, err := b.Build()
@@ -135,7 +136,7 @@ func TestBuilder_Locals(t *testing.T) {
 }
 
 func TestBuilder_Globals(t *testing.T) {
-	b := NewBuilder()
+	b := program.NewBuilder()
 	b.Globals(types.TypeI32, types.NewArrayType(types.TypeF64)).Emit(instr.GLOBAL_GET, 0).Emit(instr.DROP)
 
 	prog, err := b.Build()
@@ -145,7 +146,7 @@ func TestBuilder_Globals(t *testing.T) {
 
 func TestBuilder_Build(t *testing.T) {
 	t.Run("assembles code and pools", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		skip := b.Label()
 		b.Emit(instr.I32_CONST, 1).
 			BrIf(skip).
@@ -157,11 +158,11 @@ func TestBuilder_Build(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 		require.Equal(t, []types.Value{types.String("x")}, prog.Constants)
-		require.NoError(t, Verify(prog))
+		require.NoError(t, program.Verify(prog))
 	})
 
 	t.Run("unbound label", func(t *testing.T) {
-		b := NewBuilder()
+		b := program.NewBuilder()
 		b.Br(b.Label())
 
 		_, err := b.Build()
