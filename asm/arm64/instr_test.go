@@ -1,4 +1,4 @@
-package arm64
+package arm64_test
 
 import (
 	"fmt"
@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/siyul-park/minivm/asm"
+	arm64 "github.com/siyul-park/minivm/asm/arm64"
 )
 
 func TestLDI(t *testing.T) {
@@ -22,35 +23,29 @@ func TestLDI(t *testing.T) {
 	}{
 		{
 			val:  0,
-			want: []asm.Instruction{MOVZ(X0, 0, 0)},
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0, 0)},
 		},
 		{
 			val:  0x1234,
-			want: []asm.Instruction{MOVZ(X0, 0x1234, 0)},
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x1234, 0)},
 		},
 		{
 			val:  0x7FF6000000000000,
-			want: []asm.Instruction{MOVZ(X0, 0x7FF6, 48)},
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x7FF6, 48)},
 		},
 		{
-			val: 0x1234000056780000,
-			want: []asm.Instruction{
-				MOVZ(X0, 0x5678, 16),
-				MOVK(X0, 0x1234, 48),
-			},
+			val:  0x1234000056780000,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x5678, 16), arm64.MOVK(arm64.X0, 0x1234, 48)},
 		},
 		{
-			val: 0x12345678,
-			want: []asm.Instruction{
-				MOVZ(X0, 0x5678, 0),
-				MOVK(X0, 0x1234, 16),
-			},
+			val:  0x12345678,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x5678, 0), arm64.MOVK(arm64.X0, 0x1234, 16)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%#x", tt.val), func(t *testing.T) {
-			require.Equal(t, tt.want, LDI(X0, tt.val))
+			require.Equal(t, tt.want, arm64.LDI(arm64.X0, tt.val))
 		})
 	}
 }
@@ -58,75 +53,75 @@ func TestLDI(t *testing.T) {
 func TestInstructionFactories(t *testing.T) {
 	tests := []struct {
 		name string
-		op   Op
+		op   arm64.Op
 		inst asm.Instruction
 	}{
-		{name: "NEG", op: OpNEG, inst: NEG(X0, X1)},
-		{name: "NEGS", op: OpNEGS, inst: NEGS(X0, X1)},
-		{name: "MVN", op: OpMVN, inst: MVN(X0, X1)},
-		{name: "TST", op: OpTST, inst: TST(X0, X1)},
-		{name: "TSTI", op: OpTSTI, inst: TSTI(X0, 1)},
-		{name: "LSLI", op: OpLSLI, inst: LSLI(X0, X1, 1)},
-		{name: "LSRI", op: OpLSRI, inst: LSRI(X0, X1, 1)},
-		{name: "ASRI", op: OpASRI, inst: ASRI(X0, X1, 1)},
-		{name: "RORI", op: OpRORI, inst: RORI(X0, X1, 1)},
-		{name: "REV", op: OpREV, inst: REV(X0, X1)},
-		{name: "SXTB", op: OpSXTB, inst: SXTB(X0, X1)},
-		{name: "SXTH", op: OpSXTH, inst: SXTH(X0, X1)},
-		{name: "SXTW", op: OpSXTW, inst: SXTW(X0, X1)},
-		{name: "UXTB", op: OpUXTB, inst: UXTB(X0, X1)},
-		{name: "UXTH", op: OpUXTH, inst: UXTH(X0, X1)},
-		{name: "UXTW", op: OpUXTW, inst: UXTW(X0, X1)},
-		{name: "MOV", op: OpMOV, inst: MOV(X0, X1)},
-		{name: "MOVI", op: OpMOVI, inst: MOVI(X0, 1)},
-		{name: "CMP", op: OpCMP, inst: CMP(X0, X1)},
-		{name: "CMPI", op: OpCMPI, inst: CMPI(X0, 1)},
-		{name: "CMN", op: OpCMN, inst: CMN(X0, X1)},
-		{name: "CMNI", op: OpCMNI, inst: CMNI(X0, 1)},
-		{name: "CCMP", op: OpCCMP, inst: CCMP(X0, X1, 1, 1)},
-		{name: "CCMPI", op: OpCCMPI, inst: CCMPI(X0, 1, 1, 1)},
-		{name: "LDP", op: OpLDP, inst: LDP(X0, X1, X2, 1)},
-		{name: "STP", op: OpSTP, inst: STP(X0, X1, X2, 1)},
-		{name: "FCVT", op: OpFCVT, inst: FCVT(X0, X1)},
-		{name: "FABS", op: OpFABS, inst: FABS(X0, X1)},
-		{name: "FNEG", op: OpFNEG, inst: FNEG(X0, X1)},
-		{name: "FSQRT", op: OpFSQRT, inst: FSQRT(X0, X1)},
-		{name: "FRINTN", op: OpFRINTN, inst: FRINTN(X0, X1)},
-		{name: "FRINTM", op: OpFRINTM, inst: FRINTM(X0, X1)},
-		{name: "FRINTP", op: OpFRINTP, inst: FRINTP(X0, X1)},
-		{name: "FRINTZ", op: OpFRINTZ, inst: FRINTZ(X0, X1)},
-		{name: "FMOV", op: OpFMOV, inst: FMOV(X0, X1)},
-		{name: "FCMP", op: OpFCMP, inst: FCMP(X0, X1)},
-		{name: "FCMPE", op: OpFCMPE, inst: FCMPE(X0, X1)},
-		{name: "BL", op: OpBL, inst: BL(1)},
-		{name: "BR", op: OpBR, inst: BR(X0)},
-		{name: "BLR", op: OpBLR, inst: BLR(X0)},
-		{name: "BLabel", op: OpB, inst: BLabel(asm.Label(1))},
-		{name: "BLLabel", op: OpBL, inst: BLLabel(asm.Label(1))},
-		{name: "CBNZ", op: OpCBNZ, inst: CBNZ(X0, 1)},
-		{name: "BNE", op: OpBNE, inst: BNE(1)},
-		{name: "BLT", op: OpBLT, inst: BLT(1)},
-		{name: "BGT", op: OpBGT, inst: BGT(1)},
-		{name: "BLE", op: OpBLE, inst: BLE(1)},
-		{name: "BGE", op: OpBGE, inst: BGE(1)},
-		{name: "BMI", op: OpBMI, inst: BMI(1)},
-		{name: "BPL", op: OpBPL, inst: BPL(1)},
-		{name: "BVS", op: OpBVS, inst: BVS(1)},
-		{name: "BVC", op: OpBVC, inst: BVC(1)},
-		{name: "BHI", op: OpBHI, inst: BHI(1)},
-		{name: "BLS", op: OpBLS, inst: BLS(1)},
-		{name: "BCS", op: OpBCS, inst: BCS(1)},
-		{name: "BCC", op: OpBCC, inst: BCC(1)},
-		{name: "NOP", op: OpNOP, inst: NOP()},
-		{name: "HLT", op: OpHLT, inst: HLT()},
-		{name: "BRK", op: OpBRK, inst: BRK(1)},
-		{name: "SVC", op: OpSVC, inst: SVC(1)},
-		{name: "ERET", op: OpERET, inst: ERET()},
-		{name: "MRS", op: OpMRS, inst: MRS(X0, 1)},
-		{name: "MSR", op: OpMSR, inst: MSR(1, X0)},
-		{name: "ISB", op: OpISB, inst: ISB()},
-		{name: "DSB", op: OpDSB, inst: DSB()},
-		{name: "DMB", op: OpDMB, inst: DMB()},
+		{name: "NEG", op: arm64.OpNEG, inst: arm64.NEG(arm64.X0, arm64.X1)},
+		{name: "NEGS", op: arm64.OpNEGS, inst: arm64.NEGS(arm64.X0, arm64.X1)},
+		{name: "MVN", op: arm64.OpMVN, inst: arm64.MVN(arm64.X0, arm64.X1)},
+		{name: "TST", op: arm64.OpTST, inst: arm64.TST(arm64.X0, arm64.X1)},
+		{name: "TSTI", op: arm64.OpTSTI, inst: arm64.TSTI(arm64.X0, 1)},
+		{name: "LSLI", op: arm64.OpLSLI, inst: arm64.LSLI(arm64.X0, arm64.X1, 1)},
+		{name: "LSRI", op: arm64.OpLSRI, inst: arm64.LSRI(arm64.X0, arm64.X1, 1)},
+		{name: "ASRI", op: arm64.OpASRI, inst: arm64.ASRI(arm64.X0, arm64.X1, 1)},
+		{name: "RORI", op: arm64.OpRORI, inst: arm64.RORI(arm64.X0, arm64.X1, 1)},
+		{name: "REV", op: arm64.OpREV, inst: arm64.REV(arm64.X0, arm64.X1)},
+		{name: "SXTB", op: arm64.OpSXTB, inst: arm64.SXTB(arm64.X0, arm64.X1)},
+		{name: "SXTH", op: arm64.OpSXTH, inst: arm64.SXTH(arm64.X0, arm64.X1)},
+		{name: "SXTW", op: arm64.OpSXTW, inst: arm64.SXTW(arm64.X0, arm64.X1)},
+		{name: "UXTB", op: arm64.OpUXTB, inst: arm64.UXTB(arm64.X0, arm64.X1)},
+		{name: "UXTH", op: arm64.OpUXTH, inst: arm64.UXTH(arm64.X0, arm64.X1)},
+		{name: "UXTW", op: arm64.OpUXTW, inst: arm64.UXTW(arm64.X0, arm64.X1)},
+		{name: "MOV", op: arm64.OpMOV, inst: arm64.MOV(arm64.X0, arm64.X1)},
+		{name: "MOVI", op: arm64.OpMOVI, inst: arm64.MOVI(arm64.X0, 1)},
+		{name: "CMP", op: arm64.OpCMP, inst: arm64.CMP(arm64.X0, arm64.X1)},
+		{name: "CMPI", op: arm64.OpCMPI, inst: arm64.CMPI(arm64.X0, 1)},
+		{name: "CMN", op: arm64.OpCMN, inst: arm64.CMN(arm64.X0, arm64.X1)},
+		{name: "CMNI", op: arm64.OpCMNI, inst: arm64.CMNI(arm64.X0, 1)},
+		{name: "CCMP", op: arm64.OpCCMP, inst: arm64.CCMP(arm64.X0, arm64.X1, 1, 1)},
+		{name: "CCMPI", op: arm64.OpCCMPI, inst: arm64.CCMPI(arm64.X0, 1, 1, 1)},
+		{name: "LDP", op: arm64.OpLDP, inst: arm64.LDP(arm64.X0, arm64.X1, arm64.X2, 1)},
+		{name: "STP", op: arm64.OpSTP, inst: arm64.STP(arm64.X0, arm64.X1, arm64.X2, 1)},
+		{name: "FCVT", op: arm64.OpFCVT, inst: arm64.FCVT(arm64.X0, arm64.X1)},
+		{name: "FABS", op: arm64.OpFABS, inst: arm64.FABS(arm64.X0, arm64.X1)},
+		{name: "FNEG", op: arm64.OpFNEG, inst: arm64.FNEG(arm64.X0, arm64.X1)},
+		{name: "FSQRT", op: arm64.OpFSQRT, inst: arm64.FSQRT(arm64.X0, arm64.X1)},
+		{name: "FRINTN", op: arm64.OpFRINTN, inst: arm64.FRINTN(arm64.X0, arm64.X1)},
+		{name: "FRINTM", op: arm64.OpFRINTM, inst: arm64.FRINTM(arm64.X0, arm64.X1)},
+		{name: "FRINTP", op: arm64.OpFRINTP, inst: arm64.FRINTP(arm64.X0, arm64.X1)},
+		{name: "FRINTZ", op: arm64.OpFRINTZ, inst: arm64.FRINTZ(arm64.X0, arm64.X1)},
+		{name: "FMOV", op: arm64.OpFMOV, inst: arm64.FMOV(arm64.X0, arm64.X1)},
+		{name: "FCMP", op: arm64.OpFCMP, inst: arm64.FCMP(arm64.X0, arm64.X1)},
+		{name: "FCMPE", op: arm64.OpFCMPE, inst: arm64.FCMPE(arm64.X0, arm64.X1)},
+		{name: "BL", op: arm64.OpBL, inst: arm64.BL(1)},
+		{name: "BR", op: arm64.OpBR, inst: arm64.BR(arm64.X0)},
+		{name: "BLR", op: arm64.OpBLR, inst: arm64.BLR(arm64.X0)},
+		{name: "BLabel", op: arm64.OpB, inst: arm64.BLabel(asm.Label(1))},
+		{name: "BLLabel", op: arm64.OpBL, inst: arm64.BLLabel(asm.Label(1))},
+		{name: "CBNZ", op: arm64.OpCBNZ, inst: arm64.CBNZ(arm64.X0, 1)},
+		{name: "BNE", op: arm64.OpBNE, inst: arm64.BNE(1)},
+		{name: "BLT", op: arm64.OpBLT, inst: arm64.BLT(1)},
+		{name: "BGT", op: arm64.OpBGT, inst: arm64.BGT(1)},
+		{name: "BLE", op: arm64.OpBLE, inst: arm64.BLE(1)},
+		{name: "BGE", op: arm64.OpBGE, inst: arm64.BGE(1)},
+		{name: "BMI", op: arm64.OpBMI, inst: arm64.BMI(1)},
+		{name: "BPL", op: arm64.OpBPL, inst: arm64.BPL(1)},
+		{name: "BVS", op: arm64.OpBVS, inst: arm64.BVS(1)},
+		{name: "BVC", op: arm64.OpBVC, inst: arm64.BVC(1)},
+		{name: "BHI", op: arm64.OpBHI, inst: arm64.BHI(1)},
+		{name: "BLS", op: arm64.OpBLS, inst: arm64.BLS(1)},
+		{name: "BCS", op: arm64.OpBCS, inst: arm64.BCS(1)},
+		{name: "BCC", op: arm64.OpBCC, inst: arm64.BCC(1)},
+		{name: "NOP", op: arm64.OpNOP, inst: arm64.NOP()},
+		{name: "HLT", op: arm64.OpHLT, inst: arm64.HLT()},
+		{name: "BRK", op: arm64.OpBRK, inst: arm64.BRK(1)},
+		{name: "SVC", op: arm64.OpSVC, inst: arm64.SVC(1)},
+		{name: "ERET", op: arm64.OpERET, inst: arm64.ERET()},
+		{name: "MRS", op: arm64.OpMRS, inst: arm64.MRS(arm64.X0, 1)},
+		{name: "MSR", op: arm64.OpMSR, inst: arm64.MSR(1, arm64.X0)},
+		{name: "ISB", op: arm64.OpISB, inst: arm64.ISB()},
+		{name: "DSB", op: arm64.OpDSB, inst: arm64.DSB()},
+		{name: "DMB", op: arm64.OpDMB, inst: arm64.DMB()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1,52 +1,53 @@
-package asm
+package asm_test
 
 import (
 	"testing"
 
+	asm "github.com/siyul-park/minivm/asm"
 	"github.com/stretchr/testify/require"
 )
 
 func TestV(t *testing.T) {
-	reg := NewVReg(1, RegTypeInt, Width64)
+	reg := asm.NewVReg(1, asm.RegTypeInt, asm.Width64)
 
-	require.Equal(t, VRegOperand{Reg: reg}, V(reg))
+	require.Equal(t, asm.VRegOperand{Reg: reg}, asm.V(reg))
 }
 
 func TestP(t *testing.T) {
-	reg := NewPReg(1, RegTypeInt, Width64)
+	reg := asm.NewPReg(1, asm.RegTypeInt, asm.Width64)
 
-	require.Equal(t, PRegOperand{Reg: reg}, P(reg))
+	require.Equal(t, asm.PRegOperand{Reg: reg}, asm.P(reg))
 }
 
 func TestImm(t *testing.T) {
-	require.Equal(t, ImmOperand{Value: -1}, Imm(-1))
+	require.Equal(t, asm.ImmOperand{Value: -1}, asm.Imm(-1))
 }
 
 func TestMem(t *testing.T) {
-	base := P(NewPReg(1, RegTypeInt, Width64))
+	base := asm.P(asm.NewPReg(1, asm.RegTypeInt, asm.Width64))
 
-	require.Equal(t, MemOperand{Base: base, Offset: 8}, Mem(base, 8))
+	require.Equal(t, asm.MemOperand{Base: base, Offset: 8}, asm.Mem(base, 8))
 }
 
 func TestVRegOperand_String(t *testing.T) {
-	require.Equal(t, "vr1", V(NewVReg(1, RegTypeInt, Width64)).String())
+	require.Equal(t, "vr1", asm.V(asm.NewVReg(1, asm.RegTypeInt, asm.Width64)).String())
 }
 
 func TestPRegOperand_String(t *testing.T) {
-	require.Equal(t, "x1", P(NewPReg(1, RegTypeInt, Width64)).String())
+	require.Equal(t, "x1", asm.P(asm.NewPReg(1, asm.RegTypeInt, asm.Width64)).String())
 }
 
 func TestImmOperand_String(t *testing.T) {
-	require.Equal(t, "#-1", Imm(-1).String())
+	require.Equal(t, "#-1", asm.Imm(-1).String())
 }
 
 func TestLabelOperand_String(t *testing.T) {
-	require.Equal(t, "label1", LabelOperand{ID: 1}.String())
+	require.Equal(t, "label1", asm.LabelOperand{ID: 1}.String())
 }
 
 func TestMemOperand_String(t *testing.T) {
-	base := P(NewPReg(1, RegTypeInt, Width64))
+	base := asm.P(asm.NewPReg(1, asm.RegTypeInt, asm.Width64))
 
-	require.Equal(t, "[x1]", Mem(base, 0).String())
-	require.Equal(t, "[x1, #8]", Mem(base, 8).String())
+	require.Equal(t, "[x1]", asm.Mem(base, 0).String())
+	require.Equal(t, "[x1, #8]", asm.Mem(base, 8).String())
 }

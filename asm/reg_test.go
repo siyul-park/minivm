@@ -1,29 +1,30 @@
-package asm
+package asm_test
 
 import (
 	"testing"
 
+	asm "github.com/siyul-park/minivm/asm"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewPReg(t *testing.T) {
-	reg := NewPReg(1, RegTypeFloat, Width64)
+	reg := asm.NewPReg(1, asm.RegTypeFloat, asm.Width64)
 
 	require.Equal(t, uint8(1), reg.ID())
-	require.Equal(t, RegTypeFloat, reg.Type())
-	require.Equal(t, Width64, reg.Width())
+	require.Equal(t, asm.RegTypeFloat, reg.Type())
+	require.Equal(t, asm.Width64, reg.Width())
 }
 
 func TestNewVReg(t *testing.T) {
-	reg := NewVReg(1, RegTypeFloat, Width32)
+	reg := asm.NewVReg(1, asm.RegTypeFloat, asm.Width32)
 
 	require.Equal(t, int32(1), reg.ID())
-	require.Equal(t, RegTypeFloat, reg.Type())
-	require.Equal(t, Width32, reg.Width())
+	require.Equal(t, asm.RegTypeFloat, reg.Type())
+	require.Equal(t, asm.Width32, reg.Width())
 }
 
 func TestNewRegInfo(t *testing.T) {
-	info := NewRegInfo(8, 4, []uint8{0, 1}, []uint8{2}, []uint8{7})
+	info := asm.NewRegInfo(8, 4, []uint8{0, 1}, []uint8{2}, []uint8{7})
 
 	require.Equal(t, uint8(8), info.NumInt)
 	require.Equal(t, uint8(4), info.NumFloat)
@@ -33,7 +34,7 @@ func TestNewRegInfo(t *testing.T) {
 }
 
 func TestNewRegMask(t *testing.T) {
-	mask := NewRegMask([]uint8{1, 3})
+	mask := asm.NewRegMask([]uint8{1, 3})
 
 	require.True(t, mask.Contains(1))
 	require.True(t, mask.Contains(3))
@@ -42,26 +43,26 @@ func TestNewRegMask(t *testing.T) {
 }
 
 func TestPReg_ID(t *testing.T) {
-	require.Equal(t, uint8(3), NewPReg(3, RegTypeInt, Width64).ID())
+	require.Equal(t, uint8(3), asm.NewPReg(3, asm.RegTypeInt, asm.Width64).ID())
 }
 
 func TestPReg_Type(t *testing.T) {
-	require.Equal(t, RegTypeFloat, NewPReg(3, RegTypeFloat, Width64).Type())
+	require.Equal(t, asm.RegTypeFloat, asm.NewPReg(3, asm.RegTypeFloat, asm.Width64).Type())
 }
 
 func TestPReg_Width(t *testing.T) {
-	require.Equal(t, Width32, NewPReg(3, RegTypeInt, Width32).Width())
+	require.Equal(t, asm.Width32, asm.NewPReg(3, asm.RegTypeInt, asm.Width32).Width())
 }
 
 func TestPReg_String(t *testing.T) {
 	tests := []struct {
-		reg PReg
+		reg asm.PReg
 		str string
 	}{
-		{NewPReg(1, RegTypeInt, Width32), "w1"},
-		{NewPReg(1, RegTypeInt, Width64), "x1"},
-		{NewPReg(1, RegTypeFloat, Width32), "s1"},
-		{NewPReg(1, RegTypeFloat, Width64), "d1"},
+		{asm.NewPReg(1, asm.RegTypeInt, asm.Width32), "w1"},
+		{asm.NewPReg(1, asm.RegTypeInt, asm.Width64), "x1"},
+		{asm.NewPReg(1, asm.RegTypeFloat, asm.Width32), "s1"},
+		{asm.NewPReg(1, asm.RegTypeFloat, asm.Width64), "d1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.str, func(t *testing.T) {
@@ -71,24 +72,24 @@ func TestPReg_String(t *testing.T) {
 }
 
 func TestVReg_ID(t *testing.T) {
-	require.Equal(t, int32(3), NewVReg(3, RegTypeInt, Width64).ID())
+	require.Equal(t, int32(3), asm.NewVReg(3, asm.RegTypeInt, asm.Width64).ID())
 }
 
 func TestVReg_Type(t *testing.T) {
-	require.Equal(t, RegTypeFloat, NewVReg(3, RegTypeFloat, Width64).Type())
+	require.Equal(t, asm.RegTypeFloat, asm.NewVReg(3, asm.RegTypeFloat, asm.Width64).Type())
 }
 
 func TestVReg_Width(t *testing.T) {
-	require.Equal(t, Width32, NewVReg(3, RegTypeInt, Width32).Width())
+	require.Equal(t, asm.Width32, asm.NewVReg(3, asm.RegTypeInt, asm.Width32).Width())
 }
 
 func TestVReg_String(t *testing.T) {
 	tests := []struct {
-		reg VReg
+		reg asm.VReg
 		str string
 	}{
-		{NewVReg(1, RegTypeInt, Width64), "vr1"},
-		{NewVReg(1, RegTypeFloat, Width64), "vf1"},
+		{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), "vr1"},
+		{asm.NewVReg(1, asm.RegTypeFloat, asm.Width64), "vf1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.str, func(t *testing.T) {
@@ -98,19 +99,19 @@ func TestVReg_String(t *testing.T) {
 }
 
 func TestRegMask_Set(t *testing.T) {
-	require.True(t, RegMask(0).Set(1).Contains(1))
-	require.False(t, RegMask(0).Set(64).Contains(64))
+	require.True(t, asm.RegMask(0).Set(1).Contains(1))
+	require.False(t, asm.RegMask(0).Set(64).Contains(64))
 }
 
 func TestRegMask_Clear(t *testing.T) {
-	mask := NewRegMask([]uint8{1})
+	mask := asm.NewRegMask([]uint8{1})
 
 	require.False(t, mask.Clear(1).Contains(1))
 	require.True(t, mask.Clear(64).Contains(1))
 }
 
 func TestRegMask_Contains(t *testing.T) {
-	mask := NewRegMask([]uint8{1})
+	mask := asm.NewRegMask([]uint8{1})
 
 	require.True(t, mask.Contains(1))
 	require.False(t, mask.Contains(2))
@@ -118,13 +119,13 @@ func TestRegMask_Contains(t *testing.T) {
 }
 
 func TestRegMask_First(t *testing.T) {
-	require.Equal(t, uint8(1), NewRegMask([]uint8{3, 1}).First())
-	require.Equal(t, uint8(0xFF), RegMask(0).First())
+	require.Equal(t, uint8(1), asm.NewRegMask([]uint8{3, 1}).First())
+	require.Equal(t, uint8(0xFF), asm.RegMask(0).First())
 }
 
 func TestRegInfo_Allocatable(t *testing.T) {
-	info := NewRegInfo(4, 3, []uint8{1}, []uint8{2}, nil)
+	info := asm.NewRegInfo(4, 3, []uint8{1}, []uint8{2}, nil)
 
-	require.Equal(t, NewRegMask([]uint8{0, 2, 3}), info.Allocatable(RegTypeInt))
-	require.Equal(t, NewRegMask([]uint8{0, 1}), info.Allocatable(RegTypeFloat))
+	require.Equal(t, asm.NewRegMask([]uint8{0, 2, 3}), info.Allocatable(asm.RegTypeInt))
+	require.Equal(t, asm.NewRegMask([]uint8{0, 1}), info.Allocatable(asm.RegTypeFloat))
 }
