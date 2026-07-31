@@ -448,6 +448,68 @@ func TestPool_Close(t *testing.T) {
 		p.Put(vm)
 		require.Equal(t, 1, resource.closed)
 	})
+
+	t.Run("keeps native code alive for an outstanding interpreter", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT requires arm64")
+		}
+		var code []instr.Instruction
+		for range 64 {
+			code = append(code,
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.DROP),
+			)
+		}
+		code = append(code, instr.New(instr.I32_CONST, 42))
+		metrics := prof.New()
+		p := interp.NewPool(program.New(code), 1,
+			interp.WithProfiler(metrics),
+			interp.WithTick(1),
+			interp.WithThreshold(0),
+		)
+		var vm *interp.Interpreter
+		defer func() {
+			p.Put(vm)
+			require.NoError(t, p.Close())
+		}()
+
+		var err error
+		vm, err = p.Get(context.Background())
+		require.NoError(t, err)
+		for range 16 {
+			vm.Reset()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), value)
+		}
+		p.Put(vm)
+		vm = nil
+
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.Greater(t, emits, float64(0))
+		var nativeEntries float64
+		for _, metric := range metrics.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				nativeEntries += metric.Value
+			}
+		}
+		require.Greater(t, nativeEntries, float64(0))
+
+		vm, err = p.Get(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, p.Close())
+		require.NoError(t, vm.Run(context.Background()))
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+
+		p.Put(vm)
+		vm = nil
+	})
 }
 
 func BenchmarkPool_Get(b *testing.B) {
