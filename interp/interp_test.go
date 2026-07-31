@@ -21,6 +21,21 @@ type upperCodec byte
 
 type contextKey byte
 
+type optionCustom int32
+
+func (v optionCustom) MarshalVM(*Interpreter) (types.Value, error) {
+	return types.I32(v), nil
+}
+
+func (v *optionCustom) UnmarshalVM(_ *Interpreter, value types.Value) error {
+	n, ok := value.(types.I32)
+	if !ok {
+		return ErrTypeMismatch
+	}
+	*v = optionCustom(n)
+	return nil
+}
+
 type trackedValue struct {
 	refs   []types.Ref
 	closed int
@@ -4267,20 +4282,20 @@ func TestWithConverter(t *testing.T) {
 				return types.I64(99), nil
 			},
 			Unmarshal: func(_ *Interpreter, _ types.Value, dst any) error {
-				*dst.(*marshalCustom) = 99
+				*dst.(*optionCustom) = 99
 				return nil
 			},
 		}
-		i := New(program.New(nil), WithConverter(reflect.TypeOf(marshalCustom(0)), conv))
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(optionCustom(0)), conv))
 		defer i.Close()
 
-		v, err := i.Marshal(marshalCustom(5))
+		v, err := i.Marshal(optionCustom(5))
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), v)
 
-		var dst marshalCustom
+		var dst optionCustom
 		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
-		require.Equal(t, marshalCustom(7), dst)
+		require.Equal(t, optionCustom(7), dst)
 	})
 }
 
