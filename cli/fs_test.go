@@ -1,4 +1,4 @@
-package cli
+package cli_test
 
 import (
 	"io"
@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	cli "github.com/siyul-park/minivm/cli"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,13 +15,13 @@ func TestOS(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "hello.txt")
 
-		w, err := OS().Create(path)
+		w, err := cli.OS().Create(path)
 		require.NoError(t, err)
 		_, err = io.WriteString(w, "hi")
 		require.NoError(t, err)
 		require.NoError(t, w.Close())
 
-		f, err := OS().Open(path)
+		f, err := cli.OS().Open(path)
 		require.NoError(t, err)
 		defer f.Close()
 
@@ -30,7 +31,7 @@ func TestOS(t *testing.T) {
 	})
 
 	t.Run("Open returns error for missing file", func(t *testing.T) {
-		_, err := OS().Open(filepath.Join(t.TempDir(), "missing"))
+		_, err := cli.OS().Open(filepath.Join(t.TempDir(), "missing"))
 		require.True(t, os.IsNotExist(err))
 	})
 }
