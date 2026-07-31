@@ -543,6 +543,10 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 		return ErrTypeMismatch
 	}
 	old := i.heap[addr]
+	switch old.(type) {
+	case *types.Function, *types.Closure, *coroutine:
+		return ErrTypeMismatch
+	}
 	i.heap[addr] = val
 	i.dispose(addr, old)
 	if fn, ok := val.(*types.Function); ok {

@@ -296,20 +296,24 @@ var (
 				if i.fp == 1 {
 					panic(ErrFrameUnderflow)
 				}
-				if i.fr.coro != 0 {
-					{
-						f := i.fr
+				{
+					f := i.fr
+					if i.sp < f.returns {
+						panic(ErrStackUnderflow)
+					}
+					if f.coro != 0 {
 						coAddr := f.coro
 						co, ok := i.heap[coAddr].(*coroutine)
 						if !ok {
 							panic(ErrTypeMismatch)
 						}
-						if i.sp < f.returns {
-							panic(ErrStackUnderflow)
-						}
 						if f.returns > 0 {
+							for _, value := range i.stack[i.sp-f.returns : i.sp-1] {
+								i.releaseBox(value)
+							}
 							co.value = i.stack[i.sp-1]
 						} else {
+							i.retain(0)
 							co.value = types.BoxedNull
 						}
 						co.done = true
@@ -328,13 +332,7 @@ var (
 						i.fr = &i.frames[i.fp-1]
 						i.stack[bp] = types.BoxRef(coAddr)
 						i.sp = bp + 1
-					}
-					return
-				}
-				{
-					f := i.fr
-					if i.sp < f.returns {
-						panic(ErrStackUnderflow)
+						return
 					}
 					switch f.returns {
 					case 0:
@@ -393,6 +391,7 @@ var (
 							f.bp = i.sp - params - 1
 							f.returns = returns
 							f.release = true
+							f.coro = 0
 							i.sp = f.bp + params + locals
 							i.fr.ip += 1
 							i.fp++
@@ -419,7 +418,6 @@ var (
 						f.bp = base
 						f.returns = returns
 						f.release = true
-						f.coro = 0
 						i.sp = base + params + locals
 					inlineTail2:
 					}
@@ -459,6 +457,7 @@ var (
 							f.bp = i.sp - params - 1
 							f.returns = returns
 							f.release = true
+							f.coro = 0
 							i.sp = f.bp + params + locals
 							i.fr.ip += 1
 							i.fp++
@@ -485,7 +484,6 @@ var (
 						f.bp = base
 						f.returns = returns
 						f.release = true
-						f.coro = 0
 						i.sp = base + params + locals
 					inlineTail3:
 					}
@@ -543,6 +541,39 @@ var (
 						f := i.fr
 						if i.sp < f.returns {
 							panic(ErrStackUnderflow)
+						}
+						if f.coro != 0 {
+							coAddr := f.coro
+							co, ok := i.heap[coAddr].(*coroutine)
+							if !ok {
+								panic(ErrTypeMismatch)
+							}
+							if f.returns > 0 {
+								for _, value := range i.stack[i.sp-f.returns : i.sp-1] {
+									i.releaseBox(value)
+								}
+								co.value = i.stack[i.sp-1]
+							} else {
+								i.retain(0)
+								co.value = types.BoxedNull
+							}
+							co.done = true
+							co.image = co.image[:0]
+							co.upvals = nil
+							if f.release {
+								i.release(f.ref)
+							}
+							co.ref = 0
+							co.release = false
+							bp := f.bp
+							f.code = nil
+							f.upvals = nil
+							f.coro = 0
+							i.fp--
+							i.fr = &i.frames[i.fp-1]
+							i.stack[bp] = types.BoxRef(coAddr)
+							i.sp = bp + 1
+							return
 						}
 						switch f.returns {
 						case 0:
@@ -632,6 +663,8 @@ var (
 							if base+len(co.image)+1 > len(i.stack) {
 								panic(ErrStackOverflow)
 							}
+							i.releaseBox(co.value)
+							co.value = types.Boxed(0)
 							copy(i.stack[base:], co.image)
 							i.sp = base + len(co.image)
 							i.stack[i.sp] = in
@@ -1143,7 +1176,7 @@ var (
 					}
 					addr := ref.Ref()
 					switch i.heap[addr].(type) {
-					case types.I32, types.I64, types.F32, types.F64:
+					case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
 					default:
 						panic(ErrTypeMismatch)
 					}
@@ -1172,6 +1205,11 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				addr := ref.Ref()
+				switch i.heap[addr].(type) {
+				case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
+				default:
+					panic(ErrTypeMismatch)
+				}
 				i.heap[addr] = types.Unbox(value)
 				i.sp -= 2
 				i.release(addr)
@@ -39063,7 +39101,6 @@ var (
 						f.ip = 0
 						f.returns = returns
 						f.release = false
-						f.coro = 0
 						i.sp = base + params + locals
 					}
 				case *types.Closure:
@@ -39130,7 +39167,6 @@ var (
 						f.ip = 0
 						f.returns = returns
 						f.release = false
-						f.coro = 0
 						i.sp = base + params + locals
 					}
 				case *HostFunction:
@@ -39173,6 +39209,39 @@ var (
 							f := i.fr
 							if i.sp < f.returns {
 								panic(ErrStackUnderflow)
+							}
+							if f.coro != 0 {
+								coAddr := f.coro
+								co, ok := i.heap[coAddr].(*coroutine)
+								if !ok {
+									panic(ErrTypeMismatch)
+								}
+								if f.returns > 0 {
+									for _, value := range i.stack[i.sp-f.returns : i.sp-1] {
+										i.releaseBox(value)
+									}
+									co.value = i.stack[i.sp-1]
+								} else {
+									i.retain(0)
+									co.value = types.BoxedNull
+								}
+								co.done = true
+								co.image = co.image[:0]
+								co.upvals = nil
+								if f.release {
+									i.release(f.ref)
+								}
+								co.ref = 0
+								co.release = false
+								bp := f.bp
+								f.code = nil
+								f.upvals = nil
+								f.coro = 0
+								i.fp--
+								i.fr = &i.frames[i.fp-1]
+								i.stack[bp] = types.BoxRef(coAddr)
+								i.sp = bp + 1
+								return
 							}
 							switch f.returns {
 							case 0:

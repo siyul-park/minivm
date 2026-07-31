@@ -285,6 +285,14 @@ var runTests = []struct {
 		values: []types.Value{types.I32(77)},
 	},
 	{
+		name: "const.get closure.new dup i32.const ref.set rejects callable mutation",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.DUP),
+			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
+		}, program.WithConstants(types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild())),
+		err: ErrTypeMismatch,
+	},
+	{
 		name:    "i32.const ref.test returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_TEST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I1(true)},
@@ -1540,6 +1548,41 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		require.Empty(t, missing)
 	})
+
+	for _, tt := range []struct {
+		name        string
+		typ         types.Type
+		initial     types.Boxed
+		replacement types.Boxed
+		want        types.Value
+	}{
+		{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
+		{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
+		{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
+		{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
+		{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
+		{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
+	} {
+		t.Run("ref set and get round-trip "+tt.name, func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.GLOBAL_GET, 1),
+				instr.New(instr.REF_SET),
+				instr.New(instr.REF_GET),
+			}, program.WithGlobals(tt.typ, tt.typ))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			require.NoError(t, i.SetGlobal(0, tt.initial))
+			require.NoError(t, i.SetGlobal(1, tt.replacement))
+
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 
 	t.Run("keeps cold backedges on ordinary dispatch", func(t *testing.T) {
 		b := program.NewBuilder()

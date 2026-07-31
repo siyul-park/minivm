@@ -60,6 +60,7 @@ Reference counting is handled by threaded handlers and host APIs.
 | overwrite ref field/element | retain or transfer new ref, release old ref |
 | map replace/delete/clear | release map-owned refs |
 | `CLOSURE_NEW` | transfer popped function and upvalues into closure |
+| suspend closure coroutine | transfer callable, stack image, and yielded value; trace upvalues through callable |
 
 `retain(addr)` increments `rc[addr]`.
 
@@ -242,6 +243,8 @@ Rules:
 - `Alloc` of an existing ref creates another ownership of the same address
 - `Load` reads an object without changing ownership
 - `Store` overwrites an existing heap slot and finalizes the old value
+- function, closure, and coroutine slots are immutable after allocation because
+  runtime frames borrow their code, captures, and suspension state
 - `Store` accepts the destination's own ref as a no-op but rejects a different
   heap address; share objects through `Alloc(existingRef)` instead
 - concrete pointer values transferred into heap or stack slots must have unique
