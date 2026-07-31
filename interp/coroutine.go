@@ -6,8 +6,8 @@ import "github.com/siyul-park/minivm/types"
 // function. Calling a coroutine-function (one whose body contains a YIELD)
 // produces a coroutine handle instead of plain return values; RESUME continues
 // it, delivering a value back as the result of the pending YIELD. A coroutine
-// owns one reference to its function, captured stack image, upvalues, and last
-// value, reported via Refs so the collector keeps them live while suspended.
+// owns one reference to its callable, captured stack image, and last value.
+// upvals alias the callable closure's storage and are kept live through ref.
 type coroutine struct {
 	typ *types.FunctionType
 
@@ -45,11 +45,6 @@ func (c *coroutine) Refs(dst []types.Ref) []types.Ref {
 		dst = append(dst, types.Ref(c.ref))
 	}
 	for _, v := range c.image {
-		if v.Kind() == types.KindRef {
-			dst = append(dst, types.Ref(v.Ref()))
-		}
-	}
-	for _, v := range c.upvals {
 		if v.Kind() == types.KindRef {
 			dst = append(dst, types.Ref(v.Ref()))
 		}

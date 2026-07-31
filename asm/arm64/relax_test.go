@@ -1,4 +1,4 @@
-package arm64
+package arm64_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/siyul-park/minivm/asm"
+	arm64 "github.com/siyul-park/minivm/asm/arm64"
 )
 
 // TestArch_Relax covers the structural contract of asm.Relaxer.Relax:
@@ -16,7 +17,7 @@ import (
 // replacement B would be out of range is rejected so Build falls back to
 // ErrBranchOutOfRange.
 func TestArch_Relax(t *testing.T) {
-	relaxer, ok := New().(asm.Relaxer)
+	relaxer, ok := arm64.New().(asm.Relaxer)
 	require.True(t, ok)
 
 	label := asm.Label(7)
@@ -26,79 +27,79 @@ func TestArch_Relax(t *testing.T) {
 	skip := asm.Imm(8)
 
 	t.Run("in-range branch is left alone", func(t *testing.T) {
-		_, relaxed := relaxer.Relax(BCondLabel(OpBEQ, label), 1<<10)
+		_, relaxed := relaxer.Relax(arm64.BCondLabel(arm64.OpBEQ, label), 1<<10)
 		require.False(t, relaxed)
 
-		_, relaxed = relaxer.Relax(CBZLabel(X1, label), 1<<10)
+		_, relaxed = relaxer.Relax(arm64.CBZLabel(arm64.X1, label), 1<<10)
 		require.False(t, relaxed)
 	})
 
 	t.Run("out-of-range B.cond inverts condition and preserves target", func(t *testing.T) {
-		pairs := [][2]Op{
-			{OpBEQ, OpBNE}, {OpBNE, OpBEQ},
-			{OpBCS, OpBCC}, {OpBCC, OpBCS},
-			{OpBMI, OpBPL}, {OpBPL, OpBMI},
-			{OpBVS, OpBVC}, {OpBVC, OpBVS},
-			{OpBHI, OpBLS}, {OpBLS, OpBHI},
-			{OpBGE, OpBLT}, {OpBLT, OpBGE},
-			{OpBGT, OpBLE}, {OpBLE, OpBGT},
+		pairs := [][2]arm64.Op{
+			{arm64.OpBEQ, arm64.OpBNE}, {arm64.OpBNE, arm64.OpBEQ},
+			{arm64.OpBCS, arm64.OpBCC}, {arm64.OpBCC, arm64.OpBCS},
+			{arm64.OpBMI, arm64.OpBPL}, {arm64.OpBPL, arm64.OpBMI},
+			{arm64.OpBVS, arm64.OpBVC}, {arm64.OpBVC, arm64.OpBVS},
+			{arm64.OpBHI, arm64.OpBLS}, {arm64.OpBLS, arm64.OpBHI},
+			{arm64.OpBGE, arm64.OpBLT}, {arm64.OpBLT, arm64.OpBGE},
+			{arm64.OpBGT, arm64.OpBLE}, {arm64.OpBLE, arm64.OpBGT},
 		}
 		for _, pair := range pairs {
-			repl, relaxed := relaxer.Relax(BCondLabel(pair[0], label), 1<<20)
+			repl, relaxed := relaxer.Relax(arm64.BCondLabel(pair[0], label), 1<<20)
 			require.True(t, relaxed, pair[0])
 			require.Len(t, repl, 2, pair[0])
 			require.Equal(t, uint16(pair[1]), repl[0].Op, pair[0])
 			require.Equal(t, skip, repl[0].Src2, pair[0])
-			require.Equal(t, uint16(OpB), repl[1].Op, pair[0])
+			require.Equal(t, uint16(arm64.OpB), repl[1].Op, pair[0])
 			require.Equal(t, target, repl[1].Src2, pair[0])
 		}
 	})
 
 	t.Run("out-of-range CBZ/CBNZ inverts comparison and preserves register", func(t *testing.T) {
-		repl, relaxed := relaxer.Relax(CBZLabel(X3, label), 1<<20)
+		repl, relaxed := relaxer.Relax(arm64.CBZLabel(arm64.X3, label), 1<<20)
 		require.True(t, relaxed)
 		require.Len(t, repl, 2)
-		require.Equal(t, uint16(OpCBNZ), repl[0].Op)
-		require.Equal(t, asm.P(X3), repl[0].Src1)
+		require.Equal(t, uint16(arm64.OpCBNZ), repl[0].Op)
+		require.Equal(t, asm.P(arm64.X3), repl[0].Src1)
 		require.Equal(t, skip, repl[0].Src2)
-		require.Equal(t, uint16(OpB), repl[1].Op)
+		require.Equal(t, uint16(arm64.OpB), repl[1].Op)
 		require.Equal(t, target, repl[1].Src2)
 
-		repl, relaxed = relaxer.Relax(CBNZLabel(X3, label), -(1 << 21))
+		repl, relaxed = relaxer.Relax(arm64.CBNZLabel(arm64.X3, label), -(1 << 21))
 		require.True(t, relaxed)
-		require.Equal(t, uint16(OpCBZ), repl[0].Op)
-		require.Equal(t, asm.P(X3), repl[0].Src1)
+		require.Equal(t, uint16(arm64.OpCBZ), repl[0].Op)
+		require.Equal(t, asm.P(arm64.X3), repl[0].Src1)
 	})
 
 	t.Run("TBZ/TBNZ never carry a label operand and are never relaxed", func(t *testing.T) {
-		_, relaxed := relaxer.Relax(TBZ(X1, 3, 1<<17), 1<<17)
+		_, relaxed := relaxer.Relax(arm64.TBZ(arm64.X1, 3, 1<<17), 1<<17)
 		require.False(t, relaxed)
 
-		_, relaxed = relaxer.Relax(TBNZ(X1, 3, 1<<17), 1<<17)
+		_, relaxed = relaxer.Relax(arm64.TBNZ(arm64.X1, 3, 1<<17), 1<<17)
 		require.False(t, relaxed)
 	})
 
 	t.Run("target beyond the B's own imm26 range is rejected", func(t *testing.T) {
-		_, relaxed := relaxer.Relax(BCondLabel(OpBEQ, label), 1<<28)
+		_, relaxed := relaxer.Relax(arm64.BCondLabel(arm64.OpBEQ, label), 1<<28)
 		require.False(t, relaxed)
 	})
 
 	t.Run("replacement B observes exact directional imm26 boundaries", func(t *testing.T) {
-		_, relaxed := relaxer.Relax(BCondLabel(OpBEQ, label), (1<<27)-4)
+		_, relaxed := relaxer.Relax(arm64.BCondLabel(arm64.OpBEQ, label), (1<<27)-4)
 		require.True(t, relaxed)
 
-		_, relaxed = relaxer.Relax(BCondLabel(OpBEQ, label), 1<<27)
+		_, relaxed = relaxer.Relax(arm64.BCondLabel(arm64.OpBEQ, label), 1<<27)
 		require.False(t, relaxed)
 
-		_, relaxed = relaxer.Relax(BCondLabel(OpBEQ, label), -(1<<27)+4)
+		_, relaxed = relaxer.Relax(arm64.BCondLabel(arm64.OpBEQ, label), -(1<<27)+4)
 		require.True(t, relaxed)
 
-		_, relaxed = relaxer.Relax(BCondLabel(OpBEQ, label), -(1 << 27))
+		_, relaxed = relaxer.Relax(arm64.BCondLabel(arm64.OpBEQ, label), -(1 << 27))
 		require.False(t, relaxed)
 	})
 
 	t.Run("non-branch instruction is never relaxed", func(t *testing.T) {
-		_, relaxed := relaxer.Relax(ADD(X1, X2, X3), 1<<20)
+		_, relaxed := relaxer.Relax(arm64.ADD(arm64.X1, arm64.X2, arm64.X3), 1<<20)
 		require.False(t, relaxed)
 	})
 }

@@ -1,52 +1,53 @@
-package types
+package types_test
 
 import (
 	"fmt"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewFunctionBuilder(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	fn, err := b.Build()
 	require.NoError(t, err)
-	require.Equal(t, &FunctionType{}, fn.Typ)
+	require.Equal(t, &types.FunctionType{}, fn.Typ)
 }
 
 func TestFunctionBuilder_Params(t *testing.T) {
-	fn := NewFunctionBuilder(nil).Params(TypeI32, TypeRef).MustBuild()
-	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Typ.Params)
+	fn := types.NewFunctionBuilder(nil).Params(types.TypeI32, types.TypeRef).MustBuild()
+	require.Equal(t, []types.Type{types.TypeI32, types.TypeRef}, fn.Typ.Params)
 }
 
 func TestFunctionBuilder_Returns(t *testing.T) {
-	fn := NewFunctionBuilder(nil).Returns(TypeI32, TypeRef).MustBuild()
-	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Typ.Returns)
+	fn := types.NewFunctionBuilder(nil).Returns(types.TypeI32, types.TypeRef).MustBuild()
+	require.Equal(t, []types.Type{types.TypeI32, types.TypeRef}, fn.Typ.Returns)
 }
 
 func TestFunctionBuilder_Locals(t *testing.T) {
-	fn := NewFunctionBuilder(nil).Locals(TypeI32, TypeRef).MustBuild()
-	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Locals)
+	fn := types.NewFunctionBuilder(nil).Locals(types.TypeI32, types.TypeRef).MustBuild()
+	require.Equal(t, []types.Type{types.TypeI32, types.TypeRef}, fn.Locals)
 }
 
 func TestFunctionBuilder_Captures(t *testing.T) {
-	fn := NewFunctionBuilder(nil).Captures(TypeI32, TypeF64).MustBuild()
-	require.Equal(t, []Type{TypeI32, TypeF64}, fn.Captures)
+	fn := types.NewFunctionBuilder(nil).Captures(types.TypeI32, types.TypeF64).MustBuild()
+	require.Equal(t, []types.Type{types.TypeI32, types.TypeF64}, fn.Captures)
 }
 
 func TestFunctionBuilder_Emit(t *testing.T) {
-	fn := NewFunctionBuilder(nil).Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).MustBuild()
+	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).MustBuild()
 	require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)}, instr.Unmarshal(fn.Code))
 }
 
 func TestFunctionBuilder_Label(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	require.NotEqual(t, b.Label(), b.Label())
 }
 
 func TestFunctionBuilder_Bind(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	end := b.Label()
 	require.Same(t, b, b.Br(end).Emit(instr.New(instr.NOP)).Bind(end).Emit(instr.New(instr.RETURN)))
 	fn := b.MustBuild()
@@ -54,21 +55,21 @@ func TestFunctionBuilder_Bind(t *testing.T) {
 }
 
 func TestFunctionBuilder_Br(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	end := b.Label()
 	fn := b.Br(end).Emit(instr.New(instr.NOP)).Bind(end).MustBuild()
 	require.Equal(t, instr.BR, instr.Instruction(fn.Code).Opcode())
 }
 
 func TestFunctionBuilder_BrIf(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	end := b.Label()
 	fn := b.BrIf(end).Emit(instr.New(instr.NOP)).Bind(end).MustBuild()
 	require.Equal(t, instr.BR_IF, instr.Instruction(fn.Code).Opcode())
 }
 
 func TestFunctionBuilder_BrTable(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	first, def := b.Label(), b.Label()
 	fn := b.BrTable(def, first).Bind(first).Emit(instr.New(instr.NOP)).Bind(def).MustBuild()
 	require.Equal(t, instr.BR_TABLE, instr.Instruction(fn.Code).Opcode())
@@ -76,7 +77,7 @@ func TestFunctionBuilder_BrTable(t *testing.T) {
 }
 
 func TestFunctionBuilder_Try(t *testing.T) {
-	b := NewFunctionBuilder(nil)
+	b := types.NewFunctionBuilder(nil)
 	start, end, catch := b.Label(), b.Label(), b.Label()
 	require.Same(t, b, b.Bind(start).Emit(instr.New(instr.NOP)).Bind(end).Emit(instr.New(instr.RETURN)).Bind(catch).Try(start, end, catch, 2))
 	fn := b.MustBuild()
@@ -85,11 +86,11 @@ func TestFunctionBuilder_Try(t *testing.T) {
 
 func TestFunctionBuilder_MustBuild(t *testing.T) {
 	t.Run("valid body", func(t *testing.T) {
-		require.NotNil(t, NewFunctionBuilder(nil).MustBuild())
+		require.NotNil(t, types.NewFunctionBuilder(nil).MustBuild())
 	})
 
 	t.Run("invalid body", func(t *testing.T) {
-		b := NewFunctionBuilder(nil)
+		b := types.NewFunctionBuilder(nil)
 		b.Br(b.Label())
 		require.Panics(t, func() { b.MustBuild() })
 	})
@@ -97,13 +98,13 @@ func TestFunctionBuilder_MustBuild(t *testing.T) {
 
 func TestFunctionBuilder_Build(t *testing.T) {
 	t.Run("valid body", func(t *testing.T) {
-		fn, err := NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).Build()
+		fn, err := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).Build()
 		require.NoError(t, err)
 		require.Equal(t, []instr.Instruction{instr.New(instr.RETURN)}, instr.Unmarshal(fn.Code))
 	})
 
 	t.Run("unbound label", func(t *testing.T) {
-		b := NewFunctionBuilder(nil)
+		b := types.NewFunctionBuilder(nil)
 		b.Br(b.Label())
 		fn, err := b.Build()
 		require.Nil(t, fn)
@@ -112,37 +113,37 @@ func TestFunctionBuilder_Build(t *testing.T) {
 }
 
 func TestNewFunction(t *testing.T) {
-	typ := &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}
-	locals := []Type{TypeRef}
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}
+	locals := []types.Type{types.TypeRef}
 	body := []instr.Instruction{instr.New(instr.RETURN)}
-	fn := NewFunction(typ, locals, body)
+	fn := types.NewFunction(typ, locals, body)
 	require.Same(t, typ, fn.Typ)
 	require.Equal(t, locals, fn.Locals)
 	require.Equal(t, body, instr.Unmarshal(fn.Code))
 
-	require.Equal(t, &FunctionType{}, NewFunction(nil, nil, nil).Typ)
+	require.Equal(t, &types.FunctionType{}, types.NewFunction(nil, nil, nil).Typ)
 }
 
 func TestFunction_Kind(t *testing.T) {
-	fn := NewFunction(nil, nil, nil)
-	require.Equal(t, KindRef, fn.Kind())
+	fn := types.NewFunction(nil, nil, nil)
+	require.Equal(t, types.KindRef, fn.Kind())
 }
 
 func TestFunction_Type(t *testing.T) {
-	fn := NewFunction(nil, nil, nil)
-	require.Equal(t, &FunctionType{}, fn.Type())
+	fn := types.NewFunction(nil, nil, nil)
+	require.Equal(t, &types.FunctionType{}, fn.Type())
 }
 
 func TestFunction_String(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
-		fn := NewFunction(nil, nil, nil)
+		fn := types.NewFunction(nil, nil, nil)
 		require.Equal(t, "func()\n", fn.String())
 	})
 
 	t.Run("with captures", func(t *testing.T) {
-		fn := NewFunctionBuilder(&FunctionType{Returns: []Type{TypeI32}}).
-			Captures(TypeI32, TypeRef).
-			Locals(TypeI64).
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32, types.TypeRef).
+			Locals(types.TypeI64).
 			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
 			MustBuild()
 		require.Contains(t, fn.String(), "capture i32\ncapture ref\n")
@@ -151,13 +152,13 @@ func TestFunction_String(t *testing.T) {
 
 func TestFunction_Slots(t *testing.T) {
 	tests := []struct {
-		fn   *Function
-		want []Kind
+		fn   *types.Function
+		want []types.Kind
 	}{
-		{fn: NewFunction(nil, nil, nil)},
-		{fn: NewFunction(nil, []Type{TypeI32, TypeRef}, nil), want: []Kind{KindI32, KindRef}},
-		{fn: NewFunction(&FunctionType{Params: []Type{TypeI64}}, nil, nil), want: []Kind{KindI64}},
-		{fn: NewFunction(&FunctionType{Params: []Type{TypeI64}}, []Type{TypeF32}, nil), want: []Kind{KindI64, KindF32}},
+		{fn: types.NewFunction(nil, nil, nil)},
+		{fn: types.NewFunction(nil, []types.Type{types.TypeI32, types.TypeRef}, nil), want: []types.Kind{types.KindI32, types.KindRef}},
+		{fn: types.NewFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}}, nil, nil), want: []types.Kind{types.KindI64}},
+		{fn: types.NewFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}}, []types.Type{types.TypeF32}, nil), want: []types.Kind{types.KindI64, types.KindF32}},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("params=%v,locals=%v", tt.fn.Typ.Params, tt.fn.Locals), func(t *testing.T) {
@@ -167,17 +168,17 @@ func TestFunction_Slots(t *testing.T) {
 }
 
 func TestFunctionType_Kind(t *testing.T) {
-	require.Equal(t, KindRef, (&FunctionType{}).Kind())
+	require.Equal(t, types.KindRef, (&types.FunctionType{}).Kind())
 }
 
 func TestFunctionType_String(t *testing.T) {
 	tests := []struct {
-		typ  *FunctionType
+		typ  *types.FunctionType
 		want string
 	}{
-		{typ: &FunctionType{}, want: "func()"},
-		{typ: &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}, want: "func(i32) i64"},
-		{typ: &FunctionType{Params: []Type{TypeI32, TypeRef}, Returns: []Type{TypeI64, TypeF32}}, want: "func(i32, ref) (i64, f32)"},
+		{typ: &types.FunctionType{}, want: "func()"},
+		{typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}, want: "func(i32) i64"},
+		{typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeRef}, Returns: []types.Type{types.TypeI64, types.TypeF32}}, want: "func(i32, ref) (i64, f32)"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("params=%v,returns=%v", tt.typ.Params, tt.typ.Returns), func(t *testing.T) {
@@ -187,20 +188,20 @@ func TestFunctionType_String(t *testing.T) {
 }
 
 func TestFunctionType_Cast(t *testing.T) {
-	typ := &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeRef}}
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeRef}}
 
-	require.True(t, typ.Cast(&FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeRef}}))
-	require.False(t, typ.Cast(&FunctionType{Params: []Type{TypeI64}, Returns: []Type{TypeRef}}))
-	require.False(t, typ.Cast(TypeI32))
+	require.True(t, typ.Cast(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeRef}}))
+	require.False(t, typ.Cast(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeRef}}))
+	require.False(t, typ.Cast(types.TypeI32))
 }
 
 func TestFunctionType_Equals(t *testing.T) {
-	typ := &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeRef}}
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeRef}}
 
 	require.True(t, typ.Equals(typ))
-	require.True(t, typ.Equals(&FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeRef}}))
-	require.False(t, typ.Equals(&FunctionType{Params: []Type{TypeI64}, Returns: []Type{TypeRef}}))
-	require.False(t, typ.Equals(&FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}))
-	require.False(t, typ.Equals(&FunctionType{Params: []Type{TypeI32}}))
-	require.False(t, typ.Equals(TypeI32))
+	require.True(t, typ.Equals(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeRef}}))
+	require.False(t, typ.Equals(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeRef}}))
+	require.False(t, typ.Equals(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}))
+	require.False(t, typ.Equals(&types.FunctionType{Params: []types.Type{types.TypeI32}}))
+	require.False(t, typ.Equals(types.TypeI32))
 }

@@ -1,4 +1,4 @@
-package optimize
+package optimize_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,7 @@ func FuzzOptimizerParity(f *testing.F) {
 		}
 
 		want := run(prog)
-		optimized, err := New(O3).Optimize(prog)
+		optimized, err := optimize.New(optimize.O3).Optimize(prog)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 		require.Equal(t, want, run(optimized))

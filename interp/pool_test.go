@@ -1,4 +1,4 @@
-package interp
+package interp_test
 
 import (
 	"context"
@@ -10,29 +10,29 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	interp "github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
+type poolTrackedValue struct {
+	closed int
+}
+
+func (*poolTrackedValue) Kind() types.Kind { return types.KindRef }
+func (*poolTrackedValue) Type() types.Type { return types.TypeRef }
+func (*poolTrackedValue) String() string   { return "tracked" }
+
+func (v *poolTrackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
 func TestNewPool(t *testing.T) {
-	t.Run("constructs members lazily", func(t *testing.T) {
-		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 2)
-		defer p.Close()
-		require.Zero(t, p.live.Load())
-
-		first, err := p.Get(context.Background())
-		require.NoError(t, err)
-		second, err := p.Get(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, int64(2), p.live.Load())
-		p.Put(first)
-		p.Put(second)
-	})
-
 	t.Run("normalizes non-positive size", func(t *testing.T) {
-		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
+		p := interp.NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
 		defer p.Close()
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestPool_Get(t *testing.T) {
 
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
+		p := interp.NewPool(prog, 1)
 		defer p.Close()
 
 		i1, err := p.Get(context.Background())
@@ -63,7 +63,7 @@ func TestPool_Get(t *testing.T) {
 
 	t.Run("returns context error while waiting", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
+		p := interp.NewPool(prog, 1)
 		defer p.Close()
 
 		i, err := p.Get(context.Background())
@@ -86,11 +86,11 @@ func TestPool_Get(t *testing.T) {
 
 	t.Run("returns ErrPoolClosed once closed", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
+		p := interp.NewPool(prog, 1)
 		require.NoError(t, p.Close())
 
 		_, err := p.Get(context.Background())
-		require.ErrorIs(t, err, ErrPoolClosed)
+		require.ErrorIs(t, err, interp.ErrPoolClosed)
 	})
 
 	t.Run("compiles a shared branch tree concurrently without racing", func(t *testing.T) {
@@ -117,7 +117,7 @@ func TestPool_Get(t *testing.T) {
 			Emit(instr.New(instr.I32_CONST, 2)).
 			Emit(instr.New(instr.RETURN)).
 			Bind(neg).
-			Emit(instr.New(instr.I32_CONST, i32operand(-1))).
+			Emit(instr.New(instr.I32_CONST, 0xffffffff)).
 			Emit(instr.New(instr.RETURN)).
 			Bind(small).
 			Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -137,7 +137,7 @@ func TestPool_Get(t *testing.T) {
 		}, program.WithConstants(eval))
 
 		metrics := prof.New()
-		p := NewPool(prog, 12, WithTick(1), WithThreshold(0), WithProfiler(metrics))
+		p := interp.NewPool(prog, 12, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(metrics))
 		defer p.Close()
 
 		var wg sync.WaitGroup
@@ -198,7 +198,7 @@ func TestPool_Get(t *testing.T) {
 		require.NoError(t, err)
 
 		metrics := prof.New()
-		p := NewPool(prog, workers, WithTick(1), WithThreshold(0), WithProfiler(metrics))
+		p := interp.NewPool(prog, workers, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(metrics))
 		defer p.Close()
 		for range rounds {
 			ready := make(chan struct{}, workers)
@@ -242,6 +242,8 @@ func TestPool_Get(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		const runs = 64
+
 		b := program.NewBuilder()
 		loop := b.Label()
 		b.Locals(types.TypeI32).
@@ -259,9 +261,9 @@ func TestPool_Get(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 		metrics := prof.New()
-		p := NewPool(prog, 1, WithTick(1), WithThreshold(0), WithProfiler(metrics))
+		p := interp.NewPool(prog, 1, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(metrics))
 
-		for range exitThreshold * 8 {
+		for range runs {
 			i, err := p.Get(context.Background())
 			require.NoError(t, err)
 			require.NoError(t, i.Run(context.Background()))
@@ -280,6 +282,8 @@ func TestPool_Get(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		const guardFailuresPerMember = 8
+
 		b := types.NewFunctionBuilder(nil).Params(types.TypeI32, types.TypeI32).Returns(types.TypeI32)
 		b.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.LOCAL_GET, 1)).
@@ -291,13 +295,13 @@ func TestPool_Get(t *testing.T) {
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(divide))
 		metrics := prof.New()
-		p := NewPool(prog, 2, WithProfiler(metrics), WithTick(1), WithThreshold(0))
+		p := interp.NewPool(prog, 2, interp.WithProfiler(metrics), interp.WithTick(1), interp.WithThreshold(0))
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
 		second, err := p.Get(context.Background())
 		require.NoError(t, err)
 
-		run := func(i *Interpreter, divisor int32) (types.Value, error) {
+		run := func(i *interp.Interpreter, divisor int32) (types.Value, error) {
 			i.Reset()
 			if err := i.Push(types.I32(8)); err != nil {
 				return nil, err
@@ -314,8 +318,8 @@ func TestPool_Get(t *testing.T) {
 		ready := make(chan struct{}, 2)
 		start := make(chan struct{})
 		results := make(chan error, 2)
-		for _, i := range []*Interpreter{first, second} {
-			go func(i *Interpreter) {
+		for _, i := range []*interp.Interpreter{first, second} {
+			go func(i *interp.Interpreter) {
 				ready <- struct{}{}
 				<-start
 				value, err := run(i, 2)
@@ -330,12 +334,12 @@ func TestPool_Get(t *testing.T) {
 		close(start)
 		require.NoError(t, <-results)
 		require.NoError(t, <-results)
-		for range exitThreshold {
+		for range guardFailuresPerMember {
 			ready := make(chan struct{}, 2)
 			start := make(chan struct{})
 			results := make(chan error, 2)
-			for _, i := range []*Interpreter{first, second} {
-				go func(i *Interpreter) {
+			for _, i := range []*interp.Interpreter{first, second} {
+				go func(i *interp.Interpreter) {
 					ready <- struct{}{}
 					<-start
 					_, err := run(i, 0)
@@ -345,8 +349,8 @@ func TestPool_Get(t *testing.T) {
 			<-ready
 			<-ready
 			close(start)
-			require.ErrorIs(t, <-results, ErrDivideByZero)
-			require.ErrorIs(t, <-results, ErrDivideByZero)
+			require.ErrorIs(t, <-results, interp.ErrDivideByZero)
+			require.ErrorIs(t, <-results, interp.ErrDivideByZero)
 		}
 		resultValue, err := run(second, 2)
 		require.NoError(t, err)
@@ -379,7 +383,7 @@ func TestPool_Get(t *testing.T) {
 		}
 		require.Equal(t, 2.0, hotCompiles)
 		require.Equal(t, 2.0, sideExitCompiles)
-		require.Equal(t, float64(exitThreshold*2), guardExits)
+		require.Equal(t, float64(guardFailuresPerMember*2), guardExits)
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
 		require.Equal(t, hotCompiles+sideExitCompiles, attempts)
@@ -394,7 +398,7 @@ func TestPool_Get(t *testing.T) {
 func TestPool_Put(t *testing.T) {
 	t.Run("returns interpreter to idle after resetting state", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
-		p := NewPool(prog, 1)
+		p := interp.NewPool(prog, 1)
 		defer p.Close()
 
 		i, err := p.Get(context.Background())
@@ -411,42 +415,16 @@ func TestPool_Put(t *testing.T) {
 	})
 
 	t.Run("nil is a no-op", func(t *testing.T) {
-		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 1)
+		p := interp.NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 1)
 		defer p.Close()
 		p.Put(nil)
-	})
-
-	t.Run("drops interpreter beyond idle capacity", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		i, err := p.Get(context.Background())
-		require.NoError(t, err)
-
-		p.Put(i)
-		p.Put(i)
-
-		require.Equal(t, int64(0), p.live.Load())
-	})
-
-	t.Run("closes interpreter when pool is closed", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
-
-		i, err := p.Get(context.Background())
-		require.NoError(t, err)
-		require.NoError(t, p.Close())
-
-		p.Put(i)
-		require.Equal(t, int64(0), p.live.Load())
 	})
 }
 
 func TestPool_Close(t *testing.T) {
 	t.Run("releases idle interpreters and is idempotent", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
+		p := interp.NewPool(prog, 1)
 
 		i, err := p.Get(context.Background())
 		require.NoError(t, err)
@@ -456,22 +434,87 @@ func TestPool_Close(t *testing.T) {
 		require.NoError(t, p.Close())
 	})
 
-	t.Run("outstanding interpreter closes on its next Put", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1)
-
-		i, err := p.Get(context.Background())
+	t.Run("closes an outstanding interpreter when returned", func(t *testing.T) {
+		p := interp.NewPool(program.New(nil), 1)
+		vm, err := p.Get(context.Background())
+		require.NoError(t, err)
+		resource := &poolTrackedValue{}
+		_, err = vm.Alloc(resource)
 		require.NoError(t, err)
 
 		require.NoError(t, p.Close())
-		p.Put(i)
-		require.Equal(t, int64(0), p.live.Load())
+		require.Zero(t, resource.closed)
+
+		p.Put(vm)
+		require.Equal(t, 1, resource.closed)
+	})
+
+	t.Run("keeps native code alive for an outstanding interpreter", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT requires arm64")
+		}
+		var code []instr.Instruction
+		for range 64 {
+			code = append(code,
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.DROP),
+			)
+		}
+		code = append(code, instr.New(instr.I32_CONST, 42))
+		metrics := prof.New()
+		p := interp.NewPool(program.New(code), 1,
+			interp.WithProfiler(metrics),
+			interp.WithTick(1),
+			interp.WithThreshold(0),
+		)
+		var vm *interp.Interpreter
+		defer func() {
+			p.Put(vm)
+			require.NoError(t, p.Close())
+		}()
+
+		var err error
+		vm, err = p.Get(context.Background())
+		require.NoError(t, err)
+		for range 16 {
+			vm.Reset()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), value)
+		}
+		p.Put(vm)
+		vm = nil
+
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.Greater(t, emits, float64(0))
+		var nativeEntries float64
+		for _, metric := range metrics.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				nativeEntries += metric.Value
+			}
+		}
+		require.Greater(t, nativeEntries, float64(0))
+
+		vm, err = p.Get(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, p.Close())
+		require.NoError(t, vm.Run(context.Background()))
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+
+		p.Put(vm)
+		vm = nil
 	})
 }
 
 func BenchmarkPool_Get(b *testing.B) {
 	b.Run("Uncontended", func(b *testing.B) {
-		pool := NewPool(program.New(nil), 1)
+		pool := interp.NewPool(program.New(nil), 1)
 		defer pool.Close()
 		vm, err := pool.Get(context.Background())
 		require.NoError(b, err)
@@ -491,7 +534,7 @@ func BenchmarkPool_Get(b *testing.B) {
 	})
 
 	b.Run("Miss", func(b *testing.B) {
-		var vm *Interpreter
+		var vm *interp.Interpreter
 		var err error
 		var elapsed time.Duration
 		var bytes, allocs uint64
@@ -499,7 +542,7 @@ func BenchmarkPool_Get(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			pool := NewPool(program.New(nil), 1)
+			pool := interp.NewPool(program.New(nil), 1)
 			var before runtime.MemStats
 			if !sampled {
 				runtime.ReadMemStats(&before)
@@ -538,55 +581,69 @@ func BenchmarkPool_Get(b *testing.B) {
 		}
 		code = append(code, instr.New(instr.I32_CONST, 42))
 		prog := program.New(code)
-		var second *Interpreter
-		var getErr error
-		var elapsed time.Duration
-		var bytes, allocs uint64
-		var sampled bool
+		var second *interp.Interpreter
 		b.ReportAllocs()
 		b.ResetTimer()
-		for b.Loop() {
-			pool := NewPool(prog, 2, WithThreshold(0))
+		b.StopTimer()
+		for range b.N {
+			metrics := prof.New()
+			pool := interp.NewPool(prog, 2, interp.WithProfiler(metrics), interp.WithTick(1), interp.WithThreshold(0))
 			first, err := pool.Get(context.Background())
 			require.NoError(b, err)
 			for range 16 {
 				first.Reset()
 				require.NoError(b, first.Run(context.Background()))
-				_, err := first.Pop()
+				value, err := first.Pop()
 				require.NoError(b, err)
-				if first.stub(0) != nil {
-					break
+				require.Equal(b, types.I32(42), value)
+			}
+			pool.Put(first)
+			emits, ok := metrics.Metric("vm_jit_emits_total")
+			require.True(b, ok)
+			require.Greater(b, emits, float64(0))
+			attempts, ok := metrics.Metric("vm_jit_attempts_total")
+			require.True(b, ok)
+
+			first, err = pool.Get(context.Background())
+			require.NoError(b, err)
+			var nativeEntriesBefore float64
+			for _, metric := range metrics.Metrics() {
+				if metric.Name == "vm_jit_native_entries_total" {
+					nativeEntriesBefore += metric.Value
 				}
 			}
-			require.NotNil(b, first.stub(0))
-			var before runtime.MemStats
-			if !sampled {
-				runtime.ReadMemStats(&before)
+			require.Greater(b, nativeEntriesBefore, float64(0))
+
+			b.StartTimer()
+			second, err = pool.Get(context.Background())
+			b.StopTimer()
+			require.NoError(b, err)
+			for range 2 {
+				second.Reset()
+				require.NoError(b, second.Run(context.Background()))
+				value, err := second.Pop()
+				require.NoError(b, err)
+				require.Equal(b, types.I32(42), value)
 			}
-			start := time.Now()
-			second, getErr = pool.Get(context.Background())
-			elapsed += time.Since(start)
-			if !sampled {
-				var after runtime.MemStats
-				runtime.ReadMemStats(&after)
-				bytes = after.TotalAlloc - before.TotalAlloc
-				allocs = after.Mallocs - before.Mallocs
-				sampled = true
-			}
-			require.NoError(b, getErr)
-			second.sync()
-			require.NotNil(b, second.stub(0))
 			pool.Put(first)
 			pool.Put(second)
 			require.NoError(b, pool.Close())
+
+			attemptsAfter, ok := metrics.Metric("vm_jit_attempts_total")
+			require.True(b, ok)
+			require.Equal(b, attempts, attemptsAfter)
+			var nativeEntriesAfter float64
+			for _, metric := range metrics.Metrics() {
+				if metric.Name == "vm_jit_native_entries_total" {
+					nativeEntriesAfter += metric.Value
+				}
+			}
+			require.Greater(b, nativeEntriesAfter, nativeEntriesBefore)
 		}
-		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
-		b.ReportMetric(float64(bytes), "B/op")
-		b.ReportMetric(float64(allocs), "allocs/op")
 	})
 
 	b.Run("ParallelRoundTrip", func(b *testing.B) {
-		pool := NewPool(program.New(nil), runtime.GOMAXPROCS(0))
+		pool := interp.NewPool(program.New(nil), runtime.GOMAXPROCS(0))
 		defer pool.Close()
 		var failed atomic.Bool
 		b.ReportAllocs()
@@ -606,7 +663,7 @@ func BenchmarkPool_Get(b *testing.B) {
 
 func BenchmarkPool_Put(b *testing.B) {
 	b.Run("Uncontended", func(b *testing.B) {
-		pool := NewPool(program.New(nil), 1)
+		pool := interp.NewPool(program.New(nil), 1)
 		defer pool.Close()
 		vm, err := pool.Get(context.Background())
 		require.NoError(b, err)

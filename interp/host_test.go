@@ -1,4 +1,4 @@
-package interp
+package interp_test
 
 import (
 	"context"
@@ -8,10 +8,41 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+type hostContextKey byte
+
+type rejectingHostCodec struct{}
+
+type hostTrackedValue struct {
+	refs   []types.Ref
+	closed int
+}
+
+func (rejectingHostCodec) Marshal(*interp.Interpreter, any) (types.Value, error) {
+	return nil, interp.ErrUnsupportedMarshalType
+}
+
+func (rejectingHostCodec) Unmarshal(*interp.Interpreter, types.Value, any) error {
+	return interp.ErrInvalidUnmarshalTarget
+}
+
+func (v *hostTrackedValue) Kind() types.Kind { return types.KindRef }
+func (v *hostTrackedValue) Type() types.Type { return types.TypeRef }
+func (v *hostTrackedValue) String() string   { return "tracked" }
+
+func (v *hostTrackedValue) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, v.refs...)
+}
+
+func (v *hostTrackedValue) Close() error {
+	v.closed++
+	return nil
+}
 
 type hostFields struct {
 	Count  int32
@@ -35,7 +66,7 @@ type hostFields struct {
 }
 
 func (*hostFields) Context(ctx context.Context) int32 {
-	if ctx.Value(contextKey(0)) == "value" {
+	if ctx.Value(hostContextKey(0)) == "value" {
 		return 7
 	}
 	return 0
@@ -95,7 +126,7 @@ func TestNewHostFunction(t *testing.T) {
 			Params:  []types.Type{types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
 		}
-		fn := NewHostFunction(typ, func(_ *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+		fn := interp.NewHostFunction(typ, func(_ *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return []types.Boxed{types.BoxI32(params[0].I32() * 2)}, nil
 		})
 
@@ -107,9 +138,9 @@ func TestNewHostFunction(t *testing.T) {
 
 	t.Run("public fields", func(t *testing.T) {
 		typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-		fn := &HostFunction{
+		fn := &interp.HostFunction{
 			Typ: typ,
-			Fn: func(*Interpreter, []types.Boxed) ([]types.Boxed, error) {
+			Fn: func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(7)}, nil
 			},
 		}
@@ -123,10 +154,10 @@ func TestNewHostFunction(t *testing.T) {
 
 func TestNewHostObject(t *testing.T) {
 	t.Run("copies, binds, tracks refs, and round-trips", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		original := hostFields{Count: 1}
-		host, err := NewHostObject(i, original)
+		host, err := interp.NewHostObject(i, original)
 		require.NoError(t, err)
 
 		require.Equal(t, types.BoxI32(1), host.Field(host.Typ.FieldIndex("Count")))
@@ -136,14 +167,14 @@ func TestNewHostObject(t *testing.T) {
 		require.Equal(t, []types.Ref{types.Ref(bump.Ref()), types.Ref(context.Ref()), types.Ref(touch.Ref())}, host.Refs(nil))
 		fn, err := i.Load(bump.Ref())
 		require.NoError(t, err)
-		returns, err := fn.(*HostFunction).Fn(i, []types.Boxed{types.BoxI32(4)})
+		returns, err := fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxI32(4)})
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(5)}, returns)
 		host.SetField(host.Typ.FieldIndex("Count"), types.BoxI32(9))
 		require.Equal(t, types.BoxI32(9), host.Field(host.Typ.FieldIndex("Count")))
 		require.Equal(t, int32(1), original.Count)
 		pointer := &hostFields{Count: 2}
-		pointerHost, err := NewHostObject(i, pointer)
+		pointerHost, err := interp.NewHostObject(i, pointer)
 		require.NoError(t, err)
 		pointerHost.SetField(pointerHost.Typ.FieldIndex("Count"), types.BoxI32(8))
 		require.Equal(t, int32(2), pointer.Count)
@@ -155,37 +186,37 @@ func TestNewHostObject(t *testing.T) {
 
 	t.Run("uses built-in planner and converters with a custom codec", func(t *testing.T) {
 		funcType := reflect.TypeOf(hostCodecDuration(0))
-		conv := Converter{VMType: types.TypeF32,
-			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+		conv := interp.Converter{VMType: types.TypeF32,
+			Marshal: func(_ *interp.Interpreter, v any) (types.Value, error) {
 				return types.F32(float32(v.(hostCodecDuration))), nil
 			},
-			Unmarshal: func(_ *Interpreter, v types.Value, dst any) error {
+			Unmarshal: func(_ *interp.Interpreter, v types.Value, dst any) error {
 				*dst.(*hostCodecDuration) = hostCodecDuration(v.(types.F32))
 				return nil
 			},
 		}
-		i := New(program.New(nil), WithCodec(upperCodec(0)), WithConverter(funcType, conv))
+		i := interp.New(program.New(nil), interp.WithCodec(rejectingHostCodec{}), interp.WithConverter(funcType, conv))
 		defer i.Close()
 
-		host, err := NewHostObject(i, hostCodecReceiver{})
+		host, err := interp.NewHostObject(i, hostCodecReceiver{})
 		require.NoError(t, err)
 		fn := host.Typ.Fields[host.Typ.FieldIndex("Duration")].Type.(*types.FunctionType)
 		require.Equal(t, []types.Type{types.TypeF32}, fn.Returns)
 	})
 
 	t.Run("uses converters for data fields with a custom codec", func(t *testing.T) {
-		conv := Converter{VMType: types.TypeF32,
-			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+		conv := interp.Converter{VMType: types.TypeF32,
+			Marshal: func(_ *interp.Interpreter, v any) (types.Value, error) {
 				return types.F32(float32(v.(hostCodecDuration))), nil
 			},
-			Unmarshal: func(_ *Interpreter, v types.Value, dst any) error {
+			Unmarshal: func(_ *interp.Interpreter, v types.Value, dst any) error {
 				*dst.(*hostCodecDuration) = hostCodecDuration(v.(types.F32))
 				return nil
 			},
 		}
-		i := New(program.New(nil), WithCodec(upperCodec(0)), WithConverter(reflect.TypeOf(hostCodecDuration(0)), conv))
+		i := interp.New(program.New(nil), interp.WithCodec(rejectingHostCodec{}), interp.WithConverter(reflect.TypeOf(hostCodecDuration(0)), conv))
 		defer i.Close()
-		host, err := NewHostObject(i, hostCodecFields{Duration: hostCodecDuration(3)})
+		host, err := interp.NewHostObject(i, hostCodecFields{Duration: hostCodecDuration(3)})
 		require.NoError(t, err)
 		field := host.Typ.FieldIndex("Duration")
 
@@ -201,12 +232,12 @@ func TestNewHostObject(t *testing.T) {
 	})
 
 	t.Run("round-trips converted i64 fields through threaded access", func(t *testing.T) {
-		conv := Converter{
+		conv := interp.Converter{
 			VMType: types.TypeI64,
-			Marshal: func(_ *Interpreter, value any) (types.Value, error) {
+			Marshal: func(_ *interp.Interpreter, value any) (types.Value, error) {
 				return types.I64(value.(hostI64)), nil
 			},
-			Unmarshal: func(_ *Interpreter, value types.Value, dst any) error {
+			Unmarshal: func(_ *interp.Interpreter, value types.Value, dst any) error {
 				*dst.(*hostI64) = hostI64(value.(types.I64))
 				return nil
 			},
@@ -220,8 +251,8 @@ func TestNewHostObject(t *testing.T) {
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
 			}, program.WithConstants(types.I64(value)))
-			i := New(prog, WithConverter(reflect.TypeOf(hostI64(0)), conv))
-			host, err := NewHostObject(i, hostI64Fields{})
+			i := interp.New(prog, interp.WithConverter(reflect.TypeOf(hostI64(0)), conv))
+			host, err := interp.NewHostObject(i, hostI64Fields{})
 			require.NoError(t, err, value)
 			require.NoError(t, i.Push(host), value)
 
@@ -235,12 +266,12 @@ func TestNewHostObject(t *testing.T) {
 	})
 
 	t.Run("releases converted ref reads and writes", func(t *testing.T) {
-		conv := Converter{
+		conv := interp.Converter{
 			VMType: types.TypeI32Array,
-			Marshal: func(_ *Interpreter, value any) (types.Value, error) {
+			Marshal: func(_ *interp.Interpreter, value any) (types.Value, error) {
 				return types.TypedArray[int32]{int32(value.(hostRef))}, nil
 			},
-			Unmarshal: func(_ *Interpreter, value types.Value, dst any) error {
+			Unmarshal: func(_ *interp.Interpreter, value types.Value, dst any) error {
 				*dst.(*hostRef) = hostRef(value.(types.TypedArray[int32])[0])
 				return nil
 			},
@@ -256,8 +287,8 @@ func TestNewHostObject(t *testing.T) {
 			)
 		}
 		code = append(code, instr.New(instr.DROP))
-		i := New(program.New(code), WithHeap(3), WithHeapLimit(3), WithConverter(reflect.TypeOf(hostRef(0)), conv))
-		host, err := NewHostObject(i, hostRefFields{Value: 4})
+		i := interp.New(program.New(code), interp.WithHeap(3), interp.WithHeapLimit(3), interp.WithConverter(reflect.TypeOf(hostRef(0)), conv))
+		host, err := interp.NewHostObject(i, hostRefFields{Value: 4})
 		require.NoError(t, err)
 		require.NoError(t, i.Push(host))
 		require.NoError(t, i.Run(context.Background()))
@@ -275,9 +306,9 @@ func TestNewHostObject(t *testing.T) {
 		}
 		code = append(code, instr.New(instr.DROP))
 		prog := program.New(code, program.WithTypes(types.TypeI32Array))
-		i = New(prog, WithHeap(3), WithHeapLimit(3), WithConverter(reflect.TypeOf(hostRef(0)), conv))
+		i = interp.New(prog, interp.WithHeap(3), interp.WithHeapLimit(3), interp.WithConverter(reflect.TypeOf(hostRef(0)), conv))
 		defer i.Close()
-		host, err = NewHostObject(i, hostRefFields{})
+		host, err = interp.NewHostObject(i, hostRefFields{})
 		require.NoError(t, err)
 		require.NoError(t, i.Push(host))
 		require.NoError(t, i.Run(context.Background()))
@@ -288,11 +319,11 @@ func TestNewHostObject(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.STRUCT_GET),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 		addr, err := i.Alloc(types.String("stored"))
 		require.NoError(t, err)
-		host, err := NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(addr)})
+		host, err := interp.NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(addr)})
 		require.NoError(t, err)
 		require.NoError(t, i.Push(host))
 
@@ -301,7 +332,7 @@ func TestNewHostObject(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.String("stored"), got)
 		_, err = i.Load(addr)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("transfers direct interface refs through threaded set", func(t *testing.T) {
@@ -311,15 +342,15 @@ func TestNewHostObject(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 1),
 			instr.New(instr.STRUCT_SET),
 		}, program.WithGlobals(types.TypeRef, types.TypeRef))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
-		child := &trackedValue{}
+		child := &hostTrackedValue{}
 		childAddr, err := i.Alloc(child)
 		require.NoError(t, err)
-		parent := &trackedValue{refs: []types.Ref{types.Ref(childAddr)}}
+		parent := &hostTrackedValue{refs: []types.Ref{types.Ref(childAddr)}}
 		parentAddr, err := i.Alloc(parent)
 		require.NoError(t, err)
-		host, err := NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(0)})
+		host, err := interp.NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(0)})
 		require.NoError(t, err)
 		hostAddr, err := i.Alloc(host)
 		require.NoError(t, err)
@@ -342,23 +373,23 @@ func TestNewHostObject(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, i.SetGlobal(0, types.BoxRef(null)))
 		_, err = i.Load(parentAddr)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		_, err = i.Load(childAddr)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		require.Equal(t, 1, parent.closed)
 		require.Equal(t, 1, child.closed)
 	})
 
 	t.Run("preserves direct interface refs on invalid replacement", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
-		resource := &trackedValue{}
+		resource := &hostTrackedValue{}
 		addr, err := i.Alloc(resource)
 		require.NoError(t, err)
-		host, err := NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(addr)})
+		host, err := interp.NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(addr)})
 		require.NoError(t, err)
 
-		require.PanicsWithValue(t, ErrSegmentationFault, func() {
+		require.PanicsWithValue(t, interp.ErrSegmentationFault, func() {
 			host.SetField(0, types.BoxRef(addr+1))
 		})
 		require.Equal(t, types.Ref(addr), host.Receiver.Elem().Field(0).Interface())
@@ -377,16 +408,16 @@ func TestNewHostObject(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.STRUCT_GET),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
-		host, err := NewHostObject(i, hostMethod{})
+		host, err := interp.NewHostObject(i, hostMethod{})
 		require.NoError(t, err)
 		require.NoError(t, i.Push(host))
 
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
-		fn := got.(*HostFunction)
+		fn := got.(*interp.HostFunction)
 		returns, err := fn.Fn(i, nil)
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(7)}, returns)
@@ -403,9 +434,9 @@ func TestNewHostObject(t *testing.T) {
 			)
 		}
 		code = append(code, instr.New(instr.DROP))
-		i := New(program.New(code), WithHeap(3), WithHeapLimit(3))
+		i := interp.New(program.New(code), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
-		host, err := NewHostObject(i, struct{ Text string }{Text: "value"})
+		host, err := interp.NewHostObject(i, struct{ Text string }{Text: "value"})
 		require.NoError(t, err)
 		require.NoError(t, i.Push(host))
 
@@ -425,9 +456,9 @@ func TestNewHostObject(t *testing.T) {
 		}
 		code = append(code, instr.New(instr.DROP))
 		prog := program.New(code, program.WithTypes(types.TypeI32Array))
-		i := New(prog, WithHeap(4), WithHeapLimit(4))
+		i := interp.New(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
-		host, err := NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(0)})
+		host, err := interp.NewHostObject(i, struct{ Value types.Value }{Value: types.Ref(0)})
 		require.NoError(t, err)
 		require.NoError(t, i.Push(host))
 
@@ -435,14 +466,14 @@ func TestNewHostObject(t *testing.T) {
 	})
 
 	t.Run("rolls back bound methods when the heap is full", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(2), WithHeapLimit(2))
+		i := interp.New(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
 		defer i.Close()
 
 		var err error
 		require.NotPanics(t, func() {
-			_, err = NewHostObject(i, hostFields{})
+			_, err = interp.NewHostObject(i, hostFields{})
 		})
-		require.ErrorIs(t, err, ErrHeapExhausted)
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
 		addr, err := i.Alloc(types.I32(1))
 		require.NoError(t, err)
 		require.NoError(t, i.Release(addr))
@@ -456,35 +487,35 @@ func TestNewHostObject(t *testing.T) {
 			}
 			code = append(code, instr.New(op))
 			prog := program.New(code, program.WithConstants(types.String("value")))
-			i := New(prog)
-			host, err := NewHostObject(i, struct{ Count int32 }{Count: 3})
+			i := interp.New(prog)
+			host, err := interp.NewHostObject(i, struct{ Count int32 }{Count: 3})
 			require.NoError(t, err, op)
 			host.Typ = types.NewStructType(types.NewStructField(types.TypeString))
 			require.NoError(t, i.Push(host), op)
 
-			require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault, op)
+			require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault, op)
 			require.Equal(t, int64(3), host.Receiver.Elem().Field(0).Int(), op)
 			require.NoError(t, i.Close(), op)
 		}
 	})
 
 	t.Run("rejects nil and unsupported receivers", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
-		_, err := NewHostObject(nil, hostFields{})
-		require.ErrorIs(t, err, ErrTypeMismatch)
-		_, err = NewHostObject(i, nil)
-		require.ErrorIs(t, err, ErrTypeMismatch)
-		_, err = NewHostObject(i, []int{1})
-		require.ErrorIs(t, err, ErrUnsupportedMarshalType)
-		require.False(t, errors.Is(err, ErrTypeMismatch))
+		_, err := interp.NewHostObject(nil, hostFields{})
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
+		_, err = interp.NewHostObject(i, nil)
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
+		_, err = interp.NewHostObject(i, []int{1})
+		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
+		require.False(t, errors.Is(err, interp.ErrTypeMismatch))
 	})
 
 	t.Run("rejects replaced public layout safely", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
-		host, err := NewHostObject(i, hostFields{Count: 1})
+		host, err := interp.NewHostObject(i, hostFields{Count: 1})
 		require.NoError(t, err)
 		host.Typ = types.NewStructType()
 		require.NotPanics(t, func() { host.Field(0) })
@@ -496,9 +527,9 @@ func TestNewHostObject(t *testing.T) {
 	})
 
 	t.Run("releases bound methods after public-field tampering", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
-		host, err := NewHostObject(i, hostFields{})
+		host, err := interp.NewHostObject(i, hostFields{})
 		require.NoError(t, err)
 		bump := host.Field(host.Typ.FieldIndex("Bump")).Ref()
 		context := host.Field(host.Typ.FieldIndex("Context")).Ref()
@@ -510,69 +541,69 @@ func TestNewHostObject(t *testing.T) {
 
 		require.NoError(t, i.Release(addr))
 		_, err = i.Load(bump)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		_, err = i.Load(context)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		_, err = i.Load(touch)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 }
 
 func TestHostFunction_Kind(t *testing.T) {
-	fn := NewHostFunction(&types.FunctionType{}, nil)
+	fn := interp.NewHostFunction(&types.FunctionType{}, nil)
 	require.Equal(t, types.KindRef, fn.Kind())
 }
 
 func TestHostFunction_Type(t *testing.T) {
 	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-	fn := NewHostFunction(typ, nil)
+	fn := interp.NewHostFunction(typ, nil)
 	require.Same(t, typ, fn.Type())
 }
 
 func TestHostFunction_String(t *testing.T) {
 	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-	fn := NewHostFunction(typ, nil)
+	fn := interp.NewHostFunction(typ, nil)
 	require.Equal(t, "func() i32\n<native>", fn.String())
 }
 
 func TestHostObject_Kind(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 	value, err := i.Marshal(hostFields{Count: 1})
 	require.NoError(t, err)
-	host := value.(*HostObject)
+	host := value.(*interp.HostObject)
 
 	require.Equal(t, types.KindRef, host.Kind())
 }
 
 func TestHostObject_Type(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 	value, err := i.Marshal(hostFields{Count: 1})
 	require.NoError(t, err)
-	host := value.(*HostObject)
+	host := value.(*interp.HostObject)
 
 	require.Same(t, host.Typ, host.Type())
 }
 
 func TestHostObject_String(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 	value, err := i.Marshal(hostFields{Count: 1})
 	require.NoError(t, err)
-	host := value.(*HostObject)
+	host := value.(*interp.HostObject)
 
-	require.Equal(t, "host<interp.hostFields>", host.String())
-	require.Equal(t, "host<>", (&HostObject{}).String())
+	require.Equal(t, "host<interp_test.hostFields>", host.String())
+	require.Equal(t, "host<>", (&interp.HostObject{}).String())
 }
 
 func TestHostObject_Refs(t *testing.T) {
 	t.Run("bound methods", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		value, err := i.Marshal(hostFields{Count: 1})
 		require.NoError(t, err)
-		host := value.(*HostObject)
+		host := value.(*interp.HostObject)
 		bump := host.Field(host.Typ.FieldIndex("Bump"))
 		context := host.Field(host.Typ.FieldIndex("Context"))
 		touch := host.Field(host.Typ.FieldIndex("Touch"))
@@ -585,11 +616,11 @@ func TestHostObject_Refs(t *testing.T) {
 			Visible int32
 			hidden  int32
 		}
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		value, err := i.Marshal(private{Visible: 1, hidden: 2})
 		require.NoError(t, err)
-		host, ok := value.(*HostObject)
+		host, ok := value.(*interp.HostObject)
 		require.True(t, ok)
 
 		refs := []types.Ref{9}
@@ -603,11 +634,11 @@ func TestHostObject_Refs(t *testing.T) {
 
 func TestHostObject_Field(t *testing.T) {
 	t.Run("data and method fields", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		value, err := i.Marshal(hostFields{Count: 1})
 		require.NoError(t, err)
-		host := value.(*HostObject)
+		host := value.(*interp.HostObject)
 
 		require.Equal(t, types.BoxI32(1), host.Field(host.Typ.FieldIndex("Count")))
 		method := host.Field(host.Typ.FieldIndex("Bump"))
@@ -617,7 +648,7 @@ func TestHostObject_Field(t *testing.T) {
 
 		loaded, err := i.Load(method.Ref())
 		require.NoError(t, err)
-		fn := loaded.(*HostFunction)
+		fn := loaded.(*interp.HostFunction)
 		returns, err := fn.Fn(i, []types.Boxed{types.BoxI32(4)})
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(5)}, returns)
@@ -625,7 +656,7 @@ func TestHostObject_Field(t *testing.T) {
 	})
 
 	t.Run("supported Go fields", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		value, err := i.Marshal(hostFields{
 			Bool: true, I8: -8, I16: -16, I32: -32, I: -64, I64: -128,
@@ -633,7 +664,7 @@ func TestHostObject_Field(t *testing.T) {
 			F32: 1.25, F64: 2.5, Text: "go", Value: types.I32(7),
 		})
 		require.NoError(t, err)
-		host := value.(*HostObject)
+		host := value.(*interp.HostObject)
 
 		require.Equal(t, types.BoxedTrue, host.Field(host.Typ.FieldIndex("Bool")))
 		require.Equal(t, types.BoxI32(-8), host.Field(host.Typ.FieldIndex("I8")))
@@ -656,12 +687,12 @@ func TestHostObject_Field(t *testing.T) {
 	})
 
 	t.Run("named scalar receiver", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		id := hostUserID(41)
 		value, err := i.Marshal(&id)
 		require.NoError(t, err)
-		host := value.(*HostObject)
+		host := value.(*interp.HostObject)
 
 		require.Equal(t, types.BoxI64(41), host.Field(host.Typ.FieldIndex("Value")))
 		require.NotEqual(t, -1, host.Typ.FieldIndex("Bump"))
@@ -670,11 +701,11 @@ func TestHostObject_Field(t *testing.T) {
 }
 
 func TestHostObject_SetField(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 	value, err := i.Marshal(hostFields{I32: 1, F64: 2, Value: types.I32(3)})
 	require.NoError(t, err)
-	host := value.(*HostObject)
+	host := value.(*interp.HostObject)
 
 	host.SetField(host.Typ.FieldIndex("Bool"), types.BoxedTrue)
 	host.SetField(host.Typ.FieldIndex("I32"), types.BoxI32(20))
@@ -683,7 +714,9 @@ func TestHostObject_SetField(t *testing.T) {
 	host.SetField(host.Typ.FieldIndex("U64"), types.BoxI64(25))
 	host.SetField(host.Typ.FieldIndex("F32"), types.BoxF32(3.5))
 	host.SetField(host.Typ.FieldIndex("F64"), types.BoxF64(4.5))
-	host.SetField(host.Typ.FieldIndex("Text"), i.box(types.String("vm")))
+	textAddr, err := i.Alloc(types.String("vm"))
+	require.NoError(t, err)
+	host.SetField(host.Typ.FieldIndex("Text"), types.BoxRef(textAddr))
 	host.SetField(host.Typ.FieldIndex("Value"), types.BoxI32(11))
 	method := host.Field(host.Typ.FieldIndex("Touch"))
 	host.SetField(host.Typ.FieldIndex("Touch"), types.BoxI32(99))
@@ -696,16 +729,21 @@ func TestHostObject_SetField(t *testing.T) {
 	require.Equal(t, types.BoxI64(25), host.Field(host.Typ.FieldIndex("U64")))
 	require.Equal(t, types.BoxF32(3.5), host.Field(host.Typ.FieldIndex("F32")))
 	require.Equal(t, types.BoxF64(4.5), host.Field(host.Typ.FieldIndex("F64")))
+	text := host.Field(host.Typ.FieldIndex("Text"))
+	textValue, err := i.Load(text.Ref())
+	require.NoError(t, err)
+	require.Equal(t, types.String("vm"), textValue)
+	require.NoError(t, i.Release(text.Ref()))
 	require.Equal(t, types.BoxI32(11), host.Field(host.Typ.FieldIndex("Value")))
 	require.Equal(t, method, host.Field(host.Typ.FieldIndex("Touch")))
 }
 
 func TestHostObject_Raw(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 	value, err := i.Marshal(hostFields{I: -1, I64: -2, U: 3, U64: 4, Uintpt: 5})
 	require.NoError(t, err)
-	host := value.(*HostObject)
+	host := value.(*interp.HostObject)
 
 	require.Equal(t, uint64(^uint(0)), host.Raw(host.Typ.FieldIndex("I")))
 	require.Equal(t, uint64(^uint64(1)), host.Raw(host.Typ.FieldIndex("I64")))
@@ -718,11 +756,11 @@ func TestHostObject_Raw(t *testing.T) {
 }
 
 func TestHostObject_SetRaw(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 	value, err := i.Marshal(hostFields{})
 	require.NoError(t, err)
-	host := value.(*HostObject)
+	host := value.(*interp.HostObject)
 
 	host.SetRaw(host.Typ.FieldIndex("I"), 88)
 	host.SetRaw(host.Typ.FieldIndex("I64"), 99)

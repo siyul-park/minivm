@@ -21,6 +21,21 @@ type upperCodec byte
 
 type contextKey byte
 
+type optionCustom int32
+
+func (v optionCustom) MarshalVM(*Interpreter) (types.Value, error) {
+	return types.I32(v), nil
+}
+
+func (v *optionCustom) UnmarshalVM(_ *Interpreter, value types.Value) error {
+	n, ok := value.(types.I32)
+	if !ok {
+		return ErrTypeMismatch
+	}
+	*v = optionCustom(n)
+	return nil
+}
+
 type trackedValue struct {
 	refs   []types.Ref
 	closed int
@@ -268,6 +283,14 @@ var runTests = []struct {
 			instr.New(instr.REF_GET),
 		}),
 		values: []types.Value{types.I32(77)},
+	},
+	{
+		name: "const.get closure.new dup i32.const ref.set rejects callable mutation",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.DUP),
+			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
+		}, program.WithConstants(types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild())),
+		err: ErrTypeMismatch,
 	},
 	{
 		name:    "i32.const ref.test returns i1",
@@ -1525,6 +1548,41 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		require.Empty(t, missing)
 	})
+
+	for _, tt := range []struct {
+		name        string
+		typ         types.Type
+		initial     types.Boxed
+		replacement types.Boxed
+		want        types.Value
+	}{
+		{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
+		{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
+		{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
+		{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
+		{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
+		{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
+	} {
+		t.Run("ref set and get round-trip "+tt.name, func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.GLOBAL_GET, 1),
+				instr.New(instr.REF_SET),
+				instr.New(instr.REF_GET),
+			}, program.WithGlobals(tt.typ, tt.typ))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			require.NoError(t, i.SetGlobal(0, tt.initial))
+			require.NoError(t, i.SetGlobal(1, tt.replacement))
+
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 
 	t.Run("keeps cold backedges on ordinary dispatch", func(t *testing.T) {
 		b := program.NewBuilder()
@@ -4267,20 +4325,20 @@ func TestWithConverter(t *testing.T) {
 				return types.I64(99), nil
 			},
 			Unmarshal: func(_ *Interpreter, _ types.Value, dst any) error {
-				*dst.(*marshalCustom) = 99
+				*dst.(*optionCustom) = 99
 				return nil
 			},
 		}
-		i := New(program.New(nil), WithConverter(reflect.TypeOf(marshalCustom(0)), conv))
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(optionCustom(0)), conv))
 		defer i.Close()
 
-		v, err := i.Marshal(marshalCustom(5))
+		v, err := i.Marshal(optionCustom(5))
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), v)
 
-		var dst marshalCustom
+		var dst optionCustom
 		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
-		require.Equal(t, marshalCustom(7), dst)
+		require.Equal(t, optionCustom(7), dst)
 	})
 }
 

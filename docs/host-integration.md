@@ -117,6 +117,8 @@ Ownership rules:
 - `Alloc` of an existing `types.Ref` or `KindRef` creates another ownership of the same address
 - `Load` reads without changing ownership
 - `Store` replaces the value at an address, releases refs owned by the old value, and finalizes its external resources
+- function, closure, and coroutine slots are immutable because runtime frames
+  borrow their code, captures, and suspension state
 - storing the same concrete pointer or the destination's own `types.Ref` /
   `KindRef` is a no-op
 - storing a different heap address returns `ErrTypeMismatch`; use

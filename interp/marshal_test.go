@@ -1,4 +1,4 @@
-package interp
+package interp_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	interp "github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -14,14 +15,27 @@ import (
 
 type marshalCustom int32
 
-func (v marshalCustom) MarshalVM(*Interpreter) (types.Value, error) {
+type marshalContextKey byte
+
+type marshalHostFields struct {
+	Count int32
+}
+
+func (*marshalHostFields) Context(ctx context.Context) int32 {
+	if ctx.Value(marshalContextKey(0)) == "value" {
+		return 7
+	}
+	return 0
+}
+
+func (v marshalCustom) MarshalVM(*interp.Interpreter) (types.Value, error) {
 	return types.I32(v), nil
 }
 
-func (v *marshalCustom) UnmarshalVM(_ *Interpreter, value types.Value) error {
+func (v *marshalCustom) UnmarshalVM(_ *interp.Interpreter, value types.Value) error {
 	n, ok := value.(types.I32)
 	if !ok {
-		return ErrTypeMismatch
+		return interp.ErrTypeMismatch
 	}
 	*v = marshalCustom(n)
 	return nil
@@ -29,7 +43,7 @@ func (v *marshalCustom) UnmarshalVM(_ *Interpreter, value types.Value) error {
 
 func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("scalar value", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		v, err := i.Marshal(int32(7))
@@ -39,7 +53,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 	t.Run("function receives active context", func(t *testing.T) {
 		var got context.Context
-		setup := New(program.New(nil))
+		setup := interp.New(program.New(nil))
 		fn, err := setup.Marshal(func(ctx context.Context) int32 {
 			got = ctx
 			return 7
@@ -48,9 +62,9 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.NoError(t, setup.Close())
 
 		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
-		ctx := context.WithValue(context.Background(), contextKey(0), "value")
+		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 		require.NoError(t, i.Run(ctx))
 		value, err := i.Pop()
 		require.NoError(t, err)
@@ -59,19 +73,19 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("host method receives active context", func(t *testing.T) {
-		setup := New(program.New(nil))
+		setup := interp.New(program.New(nil))
 		defer setup.Close()
-		value, err := setup.Marshal(hostFields{})
+		value, err := setup.Marshal(marshalHostFields{})
 		require.NoError(t, err)
-		host := value.(*HostObject)
+		host := value.(*interp.HostObject)
 		method := host.Field(host.Typ.FieldIndex("Context"))
 		fn, err := setup.Load(method.Ref())
 		require.NoError(t, err)
 
 		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
-		ctx := context.WithValue(context.Background(), contextKey(0), "value")
+		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 		require.NoError(t, i.Run(ctx))
 		got, err := i.Pop()
 		require.NoError(t, err)
@@ -79,7 +93,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
-		setup := New(program.New(nil))
+		setup := interp.New(program.New(nil))
 		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
 		require.NoError(t, err)
 		require.NoError(t, setup.Close())
@@ -88,7 +102,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		// value itself (not a copy) in each Interpreter's heap, so two
 		// Interpreters built from programs referencing the same fn share one
 		// *HostFunction and race on any call-scoped state it caches.
-		fn := v.(*HostFunction)
+		fn := v.(*interp.HostFunction)
 
 		prog1 := program.New(
 			[]instr.Instruction{
@@ -109,9 +123,9 @@ func TestInterpreter_Marshal(t *testing.T) {
 			program.WithConstants(fn),
 		)
 
-		i1 := New(prog1)
+		i1 := interp.New(prog1)
 		defer i1.Close()
-		i2 := New(prog2)
+		i2 := interp.New(prog2)
 		defer i2.Close()
 
 		var wg sync.WaitGroup
@@ -138,7 +152,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.Equal(t, types.I32(30), v2)
 	})
 	t.Run("named scalar and pointers", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		type count int32
@@ -154,7 +168,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("nested collections", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		src := struct {
 			Name   string
@@ -181,7 +195,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("custom value marshaler", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value, err := i.Marshal(marshalCustom(9))
@@ -190,7 +204,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("builtin converter", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		src := time.Unix(1, 2)
 
@@ -200,39 +214,39 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("host object", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
-		value, err := i.Marshal(hostFields{Count: 7})
+		value, err := i.Marshal(marshalHostFields{Count: 7})
 		require.NoError(t, err)
-		host, ok := value.(*HostObject)
+		host, ok := value.(*interp.HostObject)
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(7), host.Field(host.Typ.FieldIndex("Count")))
 	})
 
 	t.Run("cycle", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		node := &struct{ Next any }{}
 		node.Next = node
 
 		_, err := i.Marshal(node)
-		require.ErrorIs(t, err, ErrMarshalCycle)
+		require.ErrorIs(t, err, interp.ErrMarshalCycle)
 	})
 
 	t.Run("unsupported type", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Marshal(make(chan int))
-		require.ErrorIs(t, err, ErrUnsupportedMarshalType)
+		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
 	})
 
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
 	t.Run("scalar", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		var dst int32
@@ -241,7 +255,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
@@ -255,7 +269,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function with context", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
@@ -270,7 +284,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM function context identity", func(t *testing.T) {
 		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
+		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 			got = i.Context()
 			return nil
 		}))
@@ -284,7 +298,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 		var call func(context.Context) (int32, error)
 		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		ctx := context.WithValue(context.Background(), contextKey(0), "value")
+		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 		value, err := call(ctx)
 		require.NoError(t, err)
 		require.Equal(t, int32(7), value)
@@ -292,7 +306,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function canceled context", func(t *testing.T) {
-		i := New(program.New(nil), WithTick(1))
+		i := interp.New(program.New(nil), interp.WithTick(1))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
@@ -308,7 +322,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM function nil context uses background", func(t *testing.T) {
 		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
+		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 			got = i.Context()
 			return nil
 		}))
@@ -329,7 +343,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function non-first context", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.TypeI32, types.TypeRef}, Returns: []types.Type{types.TypeI32},
@@ -343,7 +357,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM closure with context", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
@@ -363,7 +377,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM function without context uses background", func(t *testing.T) {
 		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
+		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 			got = i.Context()
 			return nil
 		}))
@@ -384,7 +398,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("function ref", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
@@ -399,7 +413,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("runtime error", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN),
@@ -409,23 +423,23 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.NoError(t, i.Unmarshal(fn, &call))
 		got, err := call()
 		require.Zero(t, got)
-		require.ErrorIs(t, err, ErrDivideByZero)
+		require.ErrorIs(t, err, interp.ErrDivideByZero)
 
 		got, err = call()
 		require.Zero(t, got)
-		require.ErrorIs(t, err, ErrDivideByZero)
+		require.ErrorIs(t, err, interp.ErrDivideByZero)
 	})
 
 	t.Run("signature mismatch", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).MustBuild()
 
 		var call func() int64
-		require.ErrorIs(t, i.Unmarshal(fn, &call), ErrTypeMismatch)
+		require.ErrorIs(t, i.Unmarshal(fn, &call), interp.ErrTypeMismatch)
 	})
 	t.Run("custom value unmarshaler", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		var dst marshalCustom
 
@@ -434,7 +448,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("builtin converter", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		var dst time.Time
 
@@ -443,40 +457,40 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("host object receiver", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
-		value, err := i.Marshal(hostFields{Count: 7})
+		value, err := i.Marshal(marshalHostFields{Count: 7})
 		require.NoError(t, err)
-		var dst hostFields
+		var dst marshalHostFields
 
 		require.NoError(t, i.Unmarshal(value, &dst))
-		require.Equal(t, hostFields{Count: 7}, dst)
+		require.Equal(t, marshalHostFields{Count: 7}, dst)
 	})
 
 	t.Run("invalid target", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Unmarshal(types.I32(1), nil), ErrInvalidUnmarshalTarget)
-		require.ErrorIs(t, i.Unmarshal(types.I32(1), int32(0)), ErrInvalidUnmarshalTarget)
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), nil), interp.ErrInvalidUnmarshalTarget)
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), int32(0)), interp.ErrInvalidUnmarshalTarget)
 		var dst *int32
-		require.ErrorIs(t, i.Unmarshal(types.I32(1), dst), ErrInvalidUnmarshalTarget)
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), dst), interp.ErrInvalidUnmarshalTarget)
 	})
 
 	t.Run("overflow", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		var dst int8
 
-		require.ErrorIs(t, i.Unmarshal(types.I64(256), &dst), ErrValueOverflow)
+		require.ErrorIs(t, i.Unmarshal(types.I64(256), &dst), interp.ErrValueOverflow)
 	})
 
 	t.Run("type mismatch", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 		var dst int32
 
-		require.ErrorIs(t, i.Unmarshal(types.String("x"), &dst), ErrTypeMismatch)
+		require.ErrorIs(t, i.Unmarshal(types.String("x"), &dst), interp.ErrTypeMismatch)
 	})
 
 }

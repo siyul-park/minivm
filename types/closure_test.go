@@ -1,61 +1,62 @@
-package types
+package types_test
 
 import (
 	"testing"
 
+	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestClosure_Kind(t *testing.T) {
-	cl := NewClosure(nil, 1, nil)
-	require.Equal(t, KindRef, cl.Kind())
+	cl := types.NewClosure(nil, 1, nil)
+	require.Equal(t, types.KindRef, cl.Kind())
 }
 
 func TestClosure_Type(t *testing.T) {
-	typ := &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI32}}
-	cl := NewClosure(typ, 1, nil)
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}
+	cl := types.NewClosure(typ, 1, nil)
 	require.Equal(t, typ, cl.Type())
 
 	t.Run("shares function type, captures excluded from equality", func(t *testing.T) {
-		a := NewClosure(typ, 1, []Boxed{BoxI32(1)})
-		b := NewClosure(typ, 2, []Boxed{BoxI32(2), BoxRef(3)})
+		a := types.NewClosure(typ, 1, []types.Boxed{types.BoxI32(1)})
+		b := types.NewClosure(typ, 2, []types.Boxed{types.BoxI32(2), types.BoxRef(3)})
 		require.True(t, a.Type().Equals(b.Type()))
 		require.True(t, a.Type().Equals(typ))
 	})
 }
 
 func TestClosure_String(t *testing.T) {
-	cl := NewClosure(&FunctionType{Returns: []Type{TypeI32}}, 1, nil)
+	cl := types.NewClosure(&types.FunctionType{Returns: []types.Type{types.TypeI32}}, 1, nil)
 	require.Equal(t, "func() i32", cl.String())
 }
 
 func TestClosure_Refs(t *testing.T) {
 	t.Run("no upvalues reports the template", func(t *testing.T) {
-		cl := NewClosure(nil, 7, nil)
-		require.Equal(t, []Ref{Ref(5), Ref(7)}, cl.Refs([]Ref{5}))
+		cl := types.NewClosure(nil, 7, nil)
+		require.Equal(t, []types.Ref{types.Ref(5), types.Ref(7)}, cl.Refs([]types.Ref{5}))
 	})
 
 	t.Run("ref upvalues follow the template", func(t *testing.T) {
-		cl := NewClosure(nil, 7, []Boxed{BoxI32(1), BoxRef(9), BoxRef(4)})
-		require.Equal(t, []Ref{Ref(5), Ref(7), Ref(9), Ref(4)}, cl.Refs([]Ref{5}))
+		cl := types.NewClosure(nil, 7, []types.Boxed{types.BoxI32(1), types.BoxRef(9), types.BoxRef(4)})
+		require.Equal(t, []types.Ref{types.Ref(5), types.Ref(7), types.Ref(9), types.Ref(4)}, cl.Refs([]types.Ref{5}))
 	})
 
 	t.Run("primitive upvalues are skipped", func(t *testing.T) {
-		cl := NewClosure(nil, 7, []Boxed{BoxI32(1), BoxF64(2)})
-		require.Equal(t, []Ref{Ref(7)}, cl.Refs(nil))
+		cl := types.NewClosure(nil, 7, []types.Boxed{types.BoxI32(1), types.BoxF64(2)})
+		require.Equal(t, []types.Ref{types.Ref(7)}, cl.Refs(nil))
 	})
 }
 
 func TestNewClosure(t *testing.T) {
-	typ := &FunctionType{Returns: []Type{TypeI32}}
-	ups := []Boxed{BoxRef(2)}
-	cl := NewClosure(typ, 5, ups)
+	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
+	ups := []types.Boxed{types.BoxRef(2)}
+	cl := types.NewClosure(typ, 5, ups)
 	require.Equal(t, typ, cl.Typ)
-	require.Equal(t, Ref(5), cl.Fn)
+	require.Equal(t, types.Ref(5), cl.Fn)
 	require.Equal(t, ups, cl.Upvals)
 
 	t.Run("nil type defaults to empty", func(t *testing.T) {
-		cl := NewClosure(nil, 1, nil)
-		require.Equal(t, &FunctionType{}, cl.Typ)
+		cl := types.NewClosure(nil, 1, nil)
+		require.Equal(t, &types.FunctionType{}, cl.Typ)
 	})
 }

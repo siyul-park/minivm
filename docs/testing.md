@@ -24,15 +24,15 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Public contract | production-matched package test file | exported constructors, functions, methods, options, errors, and lifecycle behavior |
 | Runtime specification | `interp.TestInterpreter_Run` | one visible bytecode fixture per opcode behavior, including traps and ownership |
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
-| Internal invariant | nearest implementation test file | safety or deterministic mechanics unavailable through stable public behavior |
+| Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
 
-Unit tests use the production package name. External `_test` packages are
-limited to public examples and genuine importing-client conformance tests.
-`asm/assembler_test.go` and `asm/link_test.go` are such conformance tests:
-they consume `asm/arm64`, which itself imports `asm`, so using package `asm`
-would create an import cycle.
+Every test package uses the production package name plus `_test` and acts as an
+importing client. Tests do not access private symbols or representation.
+Internal invariants use public behavior, generated output, or executable
+artifacts; tests that cannot express an observable contract are removed rather
+than widening production APIs for test access.
 
 ### JIT Harness Migration
 

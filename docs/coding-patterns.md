@@ -538,9 +538,8 @@ a single recovery boundary. Other runtime failures MUST return errors.
 ### 12.1 Placement and Ownership
 
 - Unit tests live beside production code as `*_test.go`.
-- Unit-test packages MUST match the production package. The `_test` suffix is
-  reserved for public examples and genuine external conformance tests that
-  intentionally act as an importing client.
+- Every test package MUST use the production package name plus the `_test`
+  suffix and exercise the package as an importing client.
 - Each test file MUST match the production file owning the symbol.
 - Catch-all concept files and `test_helpers_test.go` MUST NOT be created.
 - Black-box, conformance, and external fixtures belong under `test/` or the
@@ -558,15 +557,7 @@ Tests are executable specifications. Public-contract tests MUST construct
 exported types through exported constructors, builders, or options and verify
 behavior through exported functions and methods or an observable boundary.
 
-A same-package white-box test MAY access private symbols only when it owns a
-safety invariant or deterministic internal mechanism that no stable public
-behavior can isolate. The test MUST live beside the owning production file,
-state the invariant rather than incidental representation, and have no
-equivalent public-contract case. Architecture, timing, or heuristic convenience
-alone is not sufficient. Production proxies solely for testing remain
-forbidden.
-
-Outside that exception, tests MUST NOT:
+Tests MUST NOT:
 
 - construct literals naming unexported fields;
 - read or write unexported state;
@@ -578,6 +569,10 @@ Outside that exception, tests MUST NOT:
 If behavior cannot be reached publicly, it is either a missing legitimate
 contract or unobservable implementation state. Improve the production API only
 for a real caller contract; otherwise delete the test and record the lost claim.
+Internal invariants MUST be tested through public observable behavior, generated
+output, executable artifacts, or another real package boundary. A `main`
+package MUST use a separate external test package and invoke its executable or
+generation boundary; being non-importable does not permit private access.
 
 A test-local implementation of an exported extension interface is a public API
 client and MAY be used when it does not depend on private state.

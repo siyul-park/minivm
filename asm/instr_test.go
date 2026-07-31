@@ -1,26 +1,24 @@
-package asm
+package asm_test
 
 import (
 	"testing"
 
+	asm "github.com/siyul-park/minivm/asm"
 	"github.com/stretchr/testify/require"
 )
 
 func TestInstruction_String(t *testing.T) {
-	reg := NewVReg(1, RegTypeInt, Width64)
+	reg := asm.NewVReg(1, asm.RegTypeInt, asm.Width64)
 
 	tests := []struct {
-		inst Instruction
+		inst asm.Instruction
 		str  string
 	}{
-		{Instruction{Op: 1}, "1"},
-		{Instruction{Op: 1, Dst: V(reg)}, "1 vr1"},
-		{Instruction{Op: 1, Src2: Imm(3)}, "1 #3"},
-		{Instruction{Op: 1, Dst: V(reg), Src1: Imm(2)}, "1 vr1, #2"},
-		{
-			Instruction{Op: 1, Dst: V(reg), Src1: Imm(2), Src2: Imm(3), Src3: Imm(4)},
-			"1 vr1, #2, #3, #4",
-		},
+		{asm.Instruction{Op: 1}, "1"},
+		{asm.Instruction{Op: 1, Dst: asm.V(reg)}, "1 vr1"},
+		{asm.Instruction{Op: 1, Src2: asm.Imm(3)}, "1 #3"},
+		{asm.Instruction{Op: 1, Dst: asm.V(reg), Src1: asm.Imm(2)}, "1 vr1, #2"},
+		{asm.Instruction{Op: 1, Dst: asm.V(reg), Src1: asm.Imm(2), Src2: asm.Imm(3), Src3: asm.Imm(4)}, "1 vr1, #2, #3, #4"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.str, func(t *testing.T) {

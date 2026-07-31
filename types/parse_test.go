@@ -1,40 +1,41 @@
-package types
+package types_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestParse(t *testing.T) {
 	tests := []struct {
 		input   string
-		want    Type
+		want    types.Type
 		wantErr bool
 	}{
-		{"i1", TypeI1, false},
-		{"i8", TypeI8, false},
-		{"i32", TypeI32, false},
-		{"i64", TypeI64, false},
-		{"f32", TypeF32, false},
-		{"f64", TypeF64, false},
-		{"ref", TypeRef, false},
-		{"string", TypeString, false},
-		{"[]i8", NewArrayType(TypeI8), false},
-		{"[]i32", NewArrayType(TypeI32), false},
-		{"[]f64", NewArrayType(TypeF64), false},
-		{"map[i32]string", NewMapType(TypeI32, TypeString), false},
-		{"map[string][]i32", NewMapType(TypeString, NewArrayType(TypeI32)), false},
-		{"map[[]i32]f64", NewMapType(NewArrayType(TypeI32), TypeF64), false},
-		{"iterator[i32]", NewIteratorType(TypeI32), false},
-		{"iterator[map[string]i32]", NewIteratorType(NewMapType(TypeString, TypeI32)), false},
-		{"func()", &FunctionType{}, false},
-		{"func(i32) i64", &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}, false},
-		{"func(i32, f64) i32", &FunctionType{Params: []Type{TypeI32, TypeF64}, Returns: []Type{TypeI32}}, false},
-		{"func(i32) (i32, i64)", &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI32, TypeI64}}, false},
-		{"struct {i32; f64}", NewStructType(NewStructField(TypeI32), NewStructField(TypeF64)), false},
+		{"i1", types.TypeI1, false},
+		{"i8", types.TypeI8, false},
+		{"i32", types.TypeI32, false},
+		{"i64", types.TypeI64, false},
+		{"f32", types.TypeF32, false},
+		{"f64", types.TypeF64, false},
+		{"ref", types.TypeRef, false},
+		{"string", types.TypeString, false},
+		{"[]i8", types.NewArrayType(types.TypeI8), false},
+		{"[]i32", types.NewArrayType(types.TypeI32), false},
+		{"[]f64", types.NewArrayType(types.TypeF64), false},
+		{"map[i32]string", types.NewMapType(types.TypeI32, types.TypeString), false},
+		{"map[string][]i32", types.NewMapType(types.TypeString, types.NewArrayType(types.TypeI32)), false},
+		{"map[[]i32]f64", types.NewMapType(types.NewArrayType(types.TypeI32), types.TypeF64), false},
+		{"iterator[i32]", types.NewIteratorType(types.TypeI32), false},
+		{"iterator[map[string]i32]", types.NewIteratorType(types.NewMapType(types.TypeString, types.TypeI32)), false},
+		{"func()", &types.FunctionType{}, false},
+		{"func(i32) i64", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}, false},
+		{"func(i32, f64) i32", &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeF64}, Returns: []types.Type{types.TypeI32}}, false},
+		{"func(i32) (i32, i64)", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32, types.TypeI64}}, false},
+		{"struct {i32; f64}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)), false},
 		{"map[]i32", nil, true},
 		{"map[i32]", nil, true},
 		{"iterator[]", nil, true},
@@ -44,7 +45,7 @@ func TestParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, err := Parse(tt.input)
+			got, err := types.Parse(tt.input)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -61,32 +62,26 @@ func TestParseFunction(t *testing.T) {
 	}{
 		{
 			// no locals
-			lines: strings.Split(
-				NewFunctionBuilder(&FunctionType{Returns: []Type{TypeI32}}).
-					Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
-					MustBuild().String(),
-				"\n",
+			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
+				MustBuild().String(), "\n",
 			),
 		},
 		{
 			// with locals
-			lines: strings.Split(
-				NewFunctionBuilder(&FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI32}}).
-					Locals(TypeI32, TypeI64).
-					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
-					MustBuild().String(),
-				"\n",
+			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+				Locals(types.TypeI32, types.TypeI64).
+				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				MustBuild().String(), "\n",
 			),
 		},
 		{
 			// with captures and locals
-			lines: strings.Split(
-				NewFunctionBuilder(&FunctionType{Returns: []Type{TypeI32}}).
-					Captures(TypeI32, TypeRef).
-					Locals(TypeI64).
-					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
-					MustBuild().String(),
-				"\n",
+			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Captures(types.TypeI32, types.TypeRef).
+				Locals(types.TypeI64).
+				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				MustBuild().String(), "\n",
 			),
 		},
 	}
@@ -98,7 +93,7 @@ func TestParseFunction(t *testing.T) {
 			lines = lines[:len(lines)-1]
 		}
 		t.Run(lines[0], func(t *testing.T) {
-			fn, err := ParseFunction(lines)
+			fn, err := types.ParseFunction(lines)
 			require.NoError(t, err)
 			require.NotNil(t, fn)
 			// Round-trip: String() must match input
@@ -117,7 +112,7 @@ func TestParseFunction(t *testing.T) {
 			"i32.const 42",
 			"return",
 		}
-		fn, err := ParseFunction(lines)
+		fn, err := types.ParseFunction(lines)
 		require.NoError(t, err)
 		require.NotNil(t, fn)
 		require.Equal(t, 0, len(fn.Locals))
@@ -132,7 +127,7 @@ func TestParseFunction(t *testing.T) {
 			"i32.const 42",
 			"return",
 		}
-		fn, err := ParseFunction(lines)
+		fn, err := types.ParseFunction(lines)
 		require.NoError(t, err)
 		require.NotNil(t, fn)
 		require.Equal(t, 2, len(fn.Locals))
@@ -148,11 +143,11 @@ func TestParseFunction(t *testing.T) {
 			"i32.const 42",
 			"return",
 		}
-		fn, err := ParseFunction(lines)
+		fn, err := types.ParseFunction(lines)
 		require.NoError(t, err)
 		require.NotNil(t, fn)
-		require.Equal(t, []Type{TypeI32, TypeRef}, fn.Captures)
-		require.Equal(t, []Type{TypeI64}, fn.Locals)
+		require.Equal(t, []types.Type{types.TypeI32, types.TypeRef}, fn.Captures)
+		require.Equal(t, []types.Type{types.TypeI64}, fn.Locals)
 		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
 	})
 }
