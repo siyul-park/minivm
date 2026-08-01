@@ -5,7 +5,6 @@ package interp
 import (
 	"math"
 	"math/bits"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
@@ -806,7 +805,7 @@ var (
 			}
 		},
 		instr.GLOBAL_GET: func(c *threader) func(i *Interpreter) {
-			i0 := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			i0 := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if i0 < len(c.globals) {
 				switch c.globals[i0].Repr() {
@@ -840,7 +839,7 @@ var (
 			}
 		},
 		instr.GLOBAL_SET: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx < len(c.globals) {
 				switch c.globals[idx].Repr() {
@@ -876,7 +875,7 @@ var (
 			}
 		},
 		instr.GLOBAL_TEE: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx < len(c.globals) {
 				switch c.globals[idx].Repr() {
@@ -1025,7 +1024,7 @@ var (
 			}
 		},
 		instr.CONST_GET: func(c *threader) func(i *Interpreter) {
-			i0 := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			i0 := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if i0 >= len(c.constants) {
 				return func(*Interpreter) {
@@ -1217,7 +1216,7 @@ var (
 			}
 		},
 		instr.REF_TEST: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -1244,7 +1243,7 @@ var (
 			}
 		},
 		instr.REF_CAST: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -3322,7 +3321,7 @@ var (
 			}
 		},
 		instr.ARRAY_NEW: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -3456,7 +3455,7 @@ var (
 			}
 		},
 		instr.ARRAY_NEW_DEFAULT: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -4308,7 +4307,7 @@ var (
 			}
 		},
 		instr.STRUCT_NEW: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -4344,7 +4343,7 @@ var (
 			}
 		},
 		instr.STRUCT_NEW_DEFAULT: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -4505,7 +4504,7 @@ var (
 			}
 		},
 		instr.MAP_NEW: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {
@@ -4644,7 +4643,7 @@ var (
 			}
 		},
 		instr.MAP_NEW_DEFAULT: func(c *threader) func(i *Interpreter) {
-			idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			idx := instr.ParseU16(c.code, c.ip+1)
 			c.ip += 3
 			if idx >= len(c.types) {
 				return func(i *Interpreter) {

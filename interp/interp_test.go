@@ -237,6 +237,20 @@ var runTests = []struct {
 		values:  []types.Value{types.I32(11)},
 	},
 	{
+		name: "raw little-endian const.get selects high-byte index",
+		program: func() *program.Program {
+			constants := make([]types.Value, 257)
+			for index := range constants {
+				constants[index] = types.I32(index)
+			}
+			return program.New(
+				[]instr.Instruction{{byte(instr.CONST_GET), 0x00, 0x01}},
+				program.WithConstants(constants...),
+			)
+		}(),
+		values: []types.Value{types.I32(256)},
+	},
+	{
 		name: "i32.const const.get closure.new call upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),

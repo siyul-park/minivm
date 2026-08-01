@@ -59,6 +59,9 @@ func TestGenerator(t *testing.T) {
 	file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
 	require.NoError(t, err)
 	require.Equal(t, "interp", file.Name.Name)
+	for _, imported := range file.Imports {
+		require.NotEqual(t, `"unsafe"`, imported.Path.Value)
+	}
 
 	forbidden := map[string]struct{}{
 		"arrayGetAt": {}, "branchIf": {}, "callHost": {}, "finish": {},

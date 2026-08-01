@@ -1,9 +1,9 @@
 package instr
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
-	"unsafe"
 )
 
 type Instruction []byte
@@ -46,11 +46,11 @@ func New(op Opcode, operands ...uint64) Instruction {
 			case 1:
 				code[offset] = byte(operands[idx])
 			case 2:
-				*(*uint16)(unsafe.Pointer(&code[offset])) = uint16(operands[idx])
+				binary.LittleEndian.PutUint16(code[offset:], uint16(operands[idx]))
 			case 4:
-				*(*uint32)(unsafe.Pointer(&code[offset])) = uint32(operands[idx])
+				binary.LittleEndian.PutUint32(code[offset:], uint32(operands[idx]))
 			case 8:
-				*(*uint64)(unsafe.Pointer(&code[offset])) = operands[idx]
+				binary.LittleEndian.PutUint64(code[offset:], operands[idx])
 			default:
 				return nil
 			}
@@ -83,11 +83,11 @@ func (i Instruction) SetOperand(index int, value uint64) {
 			case 1:
 				i[offset+(index-idx)] = byte(value)
 			case 2:
-				*(*uint16)(unsafe.Pointer(&i[offset+(index-idx)*2])) = uint16(value)
+				binary.LittleEndian.PutUint16(i[offset+(index-idx)*2:], uint16(value))
 			case 4:
-				*(*uint32)(unsafe.Pointer(&i[offset+(index-idx)*4])) = uint32(value)
+				binary.LittleEndian.PutUint32(i[offset+(index-idx)*4:], uint32(value))
 			case 8:
-				*(*uint64)(unsafe.Pointer(&i[offset+(index-idx)*8])) = value
+				binary.LittleEndian.PutUint64(i[offset+(index-idx)*8:], value)
 			}
 			return
 		}
@@ -164,11 +164,11 @@ func (i Instruction) Operands() []uint64 {
 			case 1:
 				operands = append(operands, uint64(i[offset]))
 			case 2:
-				operands = append(operands, uint64(*(*uint16)(unsafe.Pointer(&i[offset]))))
+				operands = append(operands, uint64(binary.LittleEndian.Uint16(i[offset:])))
 			case 4:
-				operands = append(operands, uint64(*(*uint32)(unsafe.Pointer(&i[offset]))))
+				operands = append(operands, uint64(binary.LittleEndian.Uint32(i[offset:])))
 			case 8:
-				operands = append(operands, *(*uint64)(unsafe.Pointer(&i[offset])))
+				operands = append(operands, binary.LittleEndian.Uint64(i[offset:]))
 			default:
 				return nil
 			}

@@ -22,6 +22,18 @@ func TestNew(t *testing.T) {
 		require.Equal(t, []uint64{2, 0, 1, 0}, instruction.Operands())
 		require.Equal(t, 8, instruction.Width())
 	})
+	t.Run("2-byte little endian", func(t *testing.T) {
+		instruction := instr.New(instr.BR, 0x0102)
+		require.Equal(t, []byte{byte(instr.BR), 0x02, 0x01}, []byte(instruction))
+	})
+	t.Run("4-byte little endian", func(t *testing.T) {
+		instruction := instr.New(instr.I32_CONST, 0x01020304)
+		require.Equal(t, []byte{byte(instr.I32_CONST), 0x04, 0x03, 0x02, 0x01}, []byte(instruction))
+	})
+	t.Run("8-byte little endian", func(t *testing.T) {
+		instruction := instr.New(instr.I64_CONST, 0x0102030405060708)
+		require.Equal(t, []byte{byte(instr.I64_CONST), 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}, []byte(instruction))
+	})
 }
 
 func TestInstruction_SetOperand(t *testing.T) {
@@ -54,6 +66,21 @@ func TestInstruction_SetOperand(t *testing.T) {
 		instruction := instr.New(instr.BR, 5)
 		instruction.SetOperand(1, 9)
 		require.Equal(t, []uint64{5}, instruction.Operands())
+	})
+	t.Run("2-byte little endian", func(t *testing.T) {
+		instruction := instr.New(instr.BR, 0)
+		instruction.SetOperand(0, 0x0102)
+		require.Equal(t, []byte{byte(instr.BR), 0x02, 0x01}, []byte(instruction))
+	})
+	t.Run("4-byte little endian", func(t *testing.T) {
+		instruction := instr.New(instr.I32_CONST, 0)
+		instruction.SetOperand(0, 0x01020304)
+		require.Equal(t, []byte{byte(instr.I32_CONST), 0x04, 0x03, 0x02, 0x01}, []byte(instruction))
+	})
+	t.Run("8-byte little endian", func(t *testing.T) {
+		instruction := instr.New(instr.I64_CONST, 0)
+		instruction.SetOperand(0, 0x0102030405060708)
+		require.Equal(t, []byte{byte(instr.I64_CONST), 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}, []byte(instruction))
 	})
 }
 
@@ -98,6 +125,18 @@ func TestInstruction_Operands(t *testing.T) {
 	t.Run("dynamic", func(t *testing.T) {
 		instruction := instr.New(instr.BR_TABLE, 2, 0, 1, 0)
 		require.Equal(t, []uint64{2, 0, 1, 0}, instruction.Operands())
+	})
+	t.Run("2-byte little endian", func(t *testing.T) {
+		instruction := instr.Instruction{byte(instr.BR), 0x02, 0x01}
+		require.Equal(t, []uint64{0x0102}, instruction.Operands())
+	})
+	t.Run("4-byte little endian", func(t *testing.T) {
+		instruction := instr.Instruction{byte(instr.I32_CONST), 0x04, 0x03, 0x02, 0x01}
+		require.Equal(t, []uint64{0x01020304}, instruction.Operands())
+	})
+	t.Run("8-byte little endian", func(t *testing.T) {
+		instruction := instr.Instruction{byte(instr.I64_CONST), 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}
+		require.Equal(t, []uint64{0x0102030405060708}, instruction.Operands())
 	})
 }
 
