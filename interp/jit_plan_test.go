@@ -182,13 +182,13 @@ func TestStaticPlan(t *testing.T) {
 		Code: instr.Marshal(instructions),
 	}
 	input := &compileInput{address: 1, function: fn}
-	plans, err := staticPlan(input)
+	planned, ok, err := staticPlan(input, anchor{addr: 1})
 	require.NoError(t, err)
-	require.Len(t, plans, 1)
-	require.True(t, plans[0].valid())
-	require.Equal(t, entryFunction, plans[0].kind)
-	require.Equal(t, terminateBranchIf, plans[0].blocks[0].term.kind)
-	require.Len(t, plans[0].blocks[0].term.edges, 2)
+	require.True(t, ok)
+	require.True(t, planned.valid())
+	require.Equal(t, entryFunction, planned.kind)
+	require.Equal(t, terminateBranchIf, planned.blocks[0].term.kind)
+	require.Len(t, planned.blocks[0].term.edges, 2)
 
 	t.Run("direct call facts", func(t *testing.T) {
 		callee := &types.Function{Typ: &types.FunctionType{}}
@@ -203,11 +203,11 @@ func TestStaticPlan(t *testing.T) {
 			heap:      []types.Value{nil, nil, callee},
 		}
 
-		plans, err := staticPlan(input)
+		planned, ok, err := staticPlan(input, anchor{addr: 1})
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.Equal(t, uint64(0), plans[0].blocks[0].steps[0].args[0])
-		require.Equal(t, 2, plans[0].blocks[0].steps[1].callee)
+		require.True(t, ok)
+		require.Equal(t, uint64(0), planned.blocks[0].steps[0].args[0])
+		require.Equal(t, 2, planned.blocks[0].steps[1].callee)
 	})
 
 	t.Run("struct get resolves the field kind", func(t *testing.T) {
@@ -221,10 +221,10 @@ func TestStaticPlan(t *testing.T) {
 				instr.New(instr.RETURN),
 			}),
 		}
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		planned, ok, err := staticPlan(&compileInput{address: 1, function: fn}, anchor{addr: 1})
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.Equal(t, types.KindF64, plans[0].blocks[0].steps[2].seen.Kind())
+		require.True(t, ok)
+		require.Equal(t, types.KindF64, planned.blocks[0].steps[2].seen.Kind())
 	})
 
 	t.Run("struct get with an unknown index rejects the plan", func(t *testing.T) {
@@ -238,9 +238,9 @@ func TestStaticPlan(t *testing.T) {
 				instr.New(instr.RETURN),
 			}),
 		}
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		_, ok, err := staticPlan(&compileInput{address: 1, function: fn}, anchor{addr: 1})
 		require.NoError(t, err)
-		require.Empty(t, plans)
+		require.False(t, ok)
 	})
 }
 
@@ -285,18 +285,18 @@ func TestTracePlan(t *testing.T) {
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
 
-		plans, err := tracePlan(input)
+		planned, ok, err := tracePlan(input, root.anchor)
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.True(t, plans[0].valid())
-		require.GreaterOrEqual(t, len(plans[0].blocks), 2)
-		entry := plans[0].blocks[plans[0].root]
+		require.True(t, ok)
+		require.True(t, planned.valid())
+		require.GreaterOrEqual(t, len(planned.blocks), 2)
+		entry := planned.blocks[planned.root]
 		require.Equal(t, terminateBranchIf, entry.term.kind)
 		require.Equal(t, uint64(0), entry.steps[0].args[0])
 		for _, op := range entry.steps {
 			require.NotEqual(t, instr.BR_IF, op.op)
 		}
-		require.Equal(t, continuation.anchor, plans[0].blocks[len(plans[0].blocks)-1].anchor)
+		require.Equal(t, continuation.anchor, planned.blocks[len(planned.blocks)-1].anchor)
 	})
 
 	t.Run("a leg cut at the loop header folds into the back-edge", func(t *testing.T) {
@@ -326,14 +326,14 @@ func TestTracePlan(t *testing.T) {
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
 
-		plans, err := tracePlan(input)
+		planned, ok, err := tracePlan(input, root.anchor)
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.True(t, plans[0].valid())
-		last := plans[0].blocks[len(plans[0].blocks)-1]
+		require.True(t, ok)
+		require.True(t, planned.valid())
+		last := planned.blocks[len(planned.blocks)-1]
 		require.Equal(t, anchor{addr: 1, ip: 20}, last.anchor)
 		require.Equal(t, terminateBranch, last.term.kind)
-		require.Equal(t, plans[0].root, last.term.edges[0].block)
+		require.Equal(t, planned.root, last.term.edges[0].block)
 	})
 
 	t.Run("an explicit back-edge branch before the cut leaves no spurious block", func(t *testing.T) {
@@ -364,15 +364,15 @@ func TestTracePlan(t *testing.T) {
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
 
-		plans, err := tracePlan(input)
+		planned, ok, err := tracePlan(input, root.anchor)
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.True(t, plans[0].valid())
-		require.Len(t, plans[0].blocks, 2)
-		last := plans[0].blocks[1]
+		require.True(t, ok)
+		require.True(t, planned.valid())
+		require.Len(t, planned.blocks, 2)
+		last := planned.blocks[1]
 		require.Equal(t, anchor{addr: 1, ip: 20}, last.anchor)
 		require.Equal(t, terminateBranch, last.term.kind)
-		require.Equal(t, plans[0].root, last.term.edges[0].block)
+		require.Equal(t, planned.root, last.term.edges[0].block)
 	})
 
 	t.Run("an inlined-frame branch before a matching cut stays a fallback", func(t *testing.T) {
@@ -403,13 +403,13 @@ func TestTracePlan(t *testing.T) {
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
 
-		plans, err := tracePlan(input)
+		planned, ok, err := tracePlan(input, root.anchor)
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.True(t, plans[0].valid())
-		require.Len(t, plans[0].blocks, 3)
-		branch := plans[0].blocks[1]
-		fallback := plans[0].blocks[2]
+		require.True(t, ok)
+		require.True(t, planned.valid())
+		require.Len(t, planned.blocks, 3)
+		branch := planned.blocks[1]
+		fallback := planned.blocks[2]
 		require.Equal(t, terminateBranch, branch.term.kind)
 		require.Equal(t, 2, branch.term.edges[0].block)
 		require.Equal(t, anchor{addr: 1, ip: 2}, fallback.anchor)
@@ -444,11 +444,11 @@ func TestTracePlan(t *testing.T) {
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
 
-		plans, err := tracePlan(input)
+		planned, ok, err := tracePlan(input, root.anchor)
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.True(t, plans[0].valid())
-		last := plans[0].blocks[len(plans[0].blocks)-1]
+		require.True(t, ok)
+		require.True(t, planned.valid())
+		last := planned.blocks[len(planned.blocks)-1]
 		require.Equal(t, terminateFallback, last.term.kind)
 		require.Equal(t, 50, last.term.ip)
 	})
@@ -477,12 +477,13 @@ func TestTracePlan(t *testing.T) {
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
 
-		plans, err := tracePlan(input)
+		planned, ok, err := tracePlan(input, root.anchor)
 		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.True(t, plans[0].valid())
-		require.Len(t, plans[0].blocks, 1)
+		require.True(t, ok)
+		require.True(t, planned.valid())
+		require.Len(t, planned.blocks, 1)
 	})
+
 }
 
 func TestLoopCarried(t *testing.T) {

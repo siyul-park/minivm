@@ -216,15 +216,15 @@ func (p plan) valid() bool {
 	return true
 }
 
-func staticPlan(input *compileInput) ([]plan, error) {
-	if input == nil || input.function == nil || len(input.function.Code) == 0 || input.installed {
-		return nil, nil
+func staticPlan(input *compileInput, root anchor) (plan, bool, error) {
+	if input == nil || input.function == nil || len(input.function.Code) == 0 || input.installed || root != (anchor{addr: input.address}) {
+		return plan{}, false, nil
 	}
 	if input.address == 0 {
 		for ip := 0; ip < len(input.function.Code); {
 			inst := instr.Instruction(input.function.Code[ip:])
 			if inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL {
-				return nil, nil
+				return plan{}, false, nil
 			}
 			ip += inst.Width()
 		}
@@ -232,12 +232,12 @@ func staticPlan(input *compileInput) ([]plan, error) {
 
 	blocks, err := analysis.Blocks(input.function)
 	if err != nil {
-		return nil, err
+		return plan{}, false, err
 	}
 	constants, heap := input.constants, input.heap
 	facts, ok := planStates(input.function, blocks, constants, input.globals, heap)
 	if !ok {
-		return nil, nil
+		return plan{}, false, nil
 	}
 
 	entryType := entryFunction
@@ -290,7 +290,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 				target.steps = append(target.steps, step)
 			}
 			if !applyStep(input.function, locals, constants, input.globals, heap, &flow, inst) {
-				return nil, nil
+				return plan{}, false, nil
 			}
 			ip = next
 		}
@@ -313,109 +313,104 @@ func staticPlan(input *compileInput) ([]plan, error) {
 	}
 	wire(&result, roots)
 	result.carried = loopCarried(input.function, result.blocks)
-	return []plan{result}, nil
+	return result, true, nil
 }
 
-func tracePlan(input *compileInput) ([]plan, error) {
-	if input == nil || input.tracer == nil || input.function == nil {
-		return nil, nil
+func tracePlan(input *compileInput, root anchor) (plan, bool, error) {
+	if input == nil || input.tracer == nil || input.function == nil || root.addr != input.address {
+		return plan{}, false, nil
 	}
-	var plans []plan
-	for _, ip := range input.tracer.anchors(input.address) {
-		a := anchor{addr: input.address, ip: ip}
-		tree := input.tracer.rootAt(a)
-		if tree == nil || tree.root == nil {
+	tree := input.tracer.rootAt(root)
+	if tree == nil || tree.root == nil {
+		return plan{}, false, nil
+	}
+	// A loop anchor accepts a looping root or a returned straight-line
+	// fragment: a body whose terminal boundary (bulk mutation, yield,
+	// throw) deopts before the back-edge still compiles as a per-entry
+	// prefix that re-enters at the header next iteration. Carried entry
+	// operands stay rejected either way.
+	switch tree.root.status {
+	case fallback, completed, partial:
+		if root.ip != 0 {
+			return plan{}, false, nil
+		}
+	case returned:
+		if root.ip != 0 && tree.root.carried {
+			return plan{}, false, nil
+		}
+	case loop:
+		if root.ip == 0 || tree.root.carried {
+			return plan{}, false, nil
+		}
+	case aborted:
+		return plan{}, false, nil
+	default:
+		return plan{}, false, nil
+	}
+	kind := entryFunction
+	if input.address == 0 {
+		kind = entryModule
+	}
+	if root.ip != 0 {
+		kind = entryLoop
+	}
+	planned := plan{anchor: root, kind: kind, root: -1}
+	ids := store(&planned, split(&planned, tree.root, input), false)
+	if len(ids) == 0 {
+		return plan{}, false, nil
+	}
+	planned.root = ids[0]
+	roots := map[anchor]int{tree.root.anchor: ids[0]}
+
+	type leg struct {
+		trace *trace
+		hits  int64
+	}
+	var legs []leg
+	for id, tr := range tree.branches {
+		if tr == nil {
 			continue
 		}
-		// A loop anchor accepts a looping root or a returned straight-line
-		// fragment: a body whose terminal boundary (bulk mutation, yield,
-		// throw) deopts before the back-edge still compiles as a per-entry
-		// prefix that re-enters at the header next iteration. Carried entry
-		// operands stay rejected either way.
-		switch tree.root.status {
-		case fallback, completed, partial:
-			if ip != 0 {
-				continue
-			}
-		case returned:
-			if ip != 0 && tree.root.carried {
-				continue
-			}
-		case loop:
-			if ip == 0 || tree.root.carried {
-				continue
-			}
-		case aborted:
+		// A loop-kind leg is a loop root of its own: anchored at this
+		// header it is the root trace itself (capture returns the existing
+		// root, and its edge already wires to the root block); anchored
+		// elsewhere it is a different loop, and splitting it here would
+		// inline that whole loop body instead of using its native entry.
+		switch tr.status {
+		case aborted, loop:
 			continue
+		case fallback, returned, completed, partial:
 		default:
 			continue
 		}
-		kind := entryFunction
-		if input.address == 0 {
-			kind = entryModule
+		hits := int64(0)
+		if id >= 0 && id < len(tree.hits) {
+			hits = tree.hits[id]
 		}
-		if ip != 0 {
-			kind = entryLoop
-		}
-		planned := plan{anchor: a, kind: kind, root: -1}
-		root := store(&planned, split(&planned, tree.root, input), false)
-		if len(root) == 0 {
-			continue
-		}
-		planned.root = root[0]
-		roots := map[anchor]int{tree.root.anchor: root[0]}
-
-		type leg struct {
-			trace *trace
-			hits  int64
-		}
-		var legs []leg
-		for id, tr := range tree.branches {
-			if tr == nil {
-				continue
-			}
-			// A loop-kind leg is a loop root of its own: anchored at this
-			// header it is the root trace itself (capture returns the existing
-			// root, and its edge already wires to the root block); anchored
-			// elsewhere it is a different loop, and splitting it here would
-			// inline that whole loop body instead of using its native entry.
-			switch tr.status {
-			case aborted, loop:
-				continue
-			case fallback, returned, completed, partial:
-			default:
-				continue
-			}
-			hits := int64(0)
-			if id >= 0 && id < len(tree.hits) {
-				hits = tree.hits[id]
-			}
-			legs = append(legs, leg{trace: tr, hits: hits})
-		}
-		sort.SliceStable(legs, func(i, j int) bool {
-			if legs[i].hits != legs[j].hits {
-				return legs[i].hits > legs[j].hits
-			}
-			if legs[i].trace.anchor.addr != legs[j].trace.anchor.addr {
-				return legs[i].trace.anchor.addr < legs[j].trace.anchor.addr
-			}
-			return legs[i].trace.anchor.ip < legs[j].trace.anchor.ip
-		})
-		for _, leg := range legs {
-			ids := store(&planned, split(&planned, leg.trace, input), false)
-			if len(ids) > 0 {
-				roots[leg.trace.anchor] = ids[0]
-			}
-		}
-		wire(&planned, roots)
-		planned.carried = loopCarried(input.function, planned.blocks)
-		if kind == entryLoop {
-			planned.hoist = hoistable(input.function, planned.blocks)
-		}
-		planned.noSpill = noSpill(planned.blocks)
-		plans = append(plans, planned)
+		legs = append(legs, leg{trace: tr, hits: hits})
 	}
-	return plans, nil
+	sort.SliceStable(legs, func(i, j int) bool {
+		if legs[i].hits != legs[j].hits {
+			return legs[i].hits > legs[j].hits
+		}
+		if legs[i].trace.anchor.addr != legs[j].trace.anchor.addr {
+			return legs[i].trace.anchor.addr < legs[j].trace.anchor.addr
+		}
+		return legs[i].trace.anchor.ip < legs[j].trace.anchor.ip
+	})
+	for _, leg := range legs {
+		ids := store(&planned, split(&planned, leg.trace, input), false)
+		if len(ids) > 0 {
+			roots[leg.trace.anchor] = ids[0]
+		}
+	}
+	wire(&planned, roots)
+	planned.carried = loopCarried(input.function, planned.blocks)
+	if kind == entryLoop {
+		planned.hoist = hoistable(input.function, planned.blocks)
+	}
+	planned.noSpill = noSpill(planned.blocks)
+	return planned, true, nil
 }
 
 // loopCarried returns the inline scalar locals that a call-free native loop

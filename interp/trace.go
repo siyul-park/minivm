@@ -3,7 +3,6 @@ package interp
 import (
 	"maps"
 	"slices"
-	"sort"
 	"sync"
 	"unsafe"
 
@@ -653,19 +652,6 @@ func (t *tracer) tree(a anchor) *tree {
 		t.trees[a] = tr
 	}
 	return tr
-}
-
-func (t *tracer) anchors(addr int) []int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	out := make([]int, 0, len(t.trees))
-	for anchor, tree := range t.trees {
-		if anchor.addr == addr && tree.root != nil {
-			out = append(out, anchor.ip)
-		}
-	}
-	sort.Ints(out)
-	return out
 }
 
 // rootAt returns the published tree anchored exactly at a, or nil when none is

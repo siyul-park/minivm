@@ -278,32 +278,30 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	}
 	frontends := [...]struct {
 		kind prof.Frontend
-		plan func(*compileInput) ([]plan, error)
+		plan func(*compileInput, anchor) (plan, bool, error)
 	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
 	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
 	for _, frontend := range frontends {
-		plans, err := frontend.plan(input)
+		planned, ok, err := frontend.plan(input, root)
 		if err != nil {
 			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 		}
 		result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
+		if !ok {
+			continue
+		}
+		if !planned.valid() {
+			result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
+			continue
+		}
 		mod := &module{entries: map[anchor]native{}}
-		for _, plan := range plans {
-			if plan.anchor != root {
-				continue
-			}
-			if !plan.valid() {
-				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
-				continue
-			}
-			reason, err := c.compile(input, plan, mod, frontend.kind)
-			if err != nil {
-				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
-			}
-			if reason != prof.CompileReasonNone {
-				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
-				continue
-			}
+		reason, err := c.compile(input, planned, mod, frontend.kind)
+		if err != nil {
+			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+		}
+		if reason != prof.CompileReasonNone {
+			result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
+			continue
 		}
 		if len(mod.entries) > 0 {
 			return compileResult{module: mod, anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}

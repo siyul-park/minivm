@@ -1030,9 +1030,9 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		_, ok, err := staticPlan(&compileInput{address: 1, function: fn}, anchor{addr: 1})
 		require.NoError(t, err)
-		require.NotEmpty(t, plans)
+		require.True(t, ok)
 	})
 
 	t.Run("branches and loops match threaded execution", func(t *testing.T) {
@@ -1115,9 +1115,9 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		_, ok, err := staticPlan(&compileInput{address: 1, function: fn}, anchor{addr: 1})
 		require.NoError(t, err)
-		require.NotEmpty(t, plans)
+		require.True(t, ok)
 	})
 }
 

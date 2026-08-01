@@ -98,7 +98,7 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 ## Compiler
 
-`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, root)` and receives an opaque `module`; it does not select or inspect a compilation strategy. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
+`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, root)` and receives an opaque `module`; it does not select or inspect a compilation strategy. Each frontend plans only the requested anchor, so later loop attempts neither rebuild nor re-emit unrelated entries. A trace plan still includes that root's learned continuation branches.
 
 The compiler builds one read-only `compileInput`, then runs two ordered frontends:
 

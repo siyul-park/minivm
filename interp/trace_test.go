@@ -472,22 +472,6 @@ func TestTracer_Capture(t *testing.T) {
 
 }
 
-func TestTracer_OrdersAnchors(t *testing.T) {
-	t.Run("returns anchors in instruction order", func(t *testing.T) {
-		tracer := newTracer()
-		const count = 64
-		for ip := count - 1; ip >= 0; ip-- {
-			tracer.trees[anchor{addr: 1, ip: ip}] = &tree{root: &trace{anchor: anchor{addr: 1, ip: ip}, status: completed}}
-		}
-
-		want := make([]int, count)
-		for ip := range count {
-			want[ip] = ip
-		}
-		require.Equal(t, want, tracer.anchors(1))
-	})
-}
-
 func TestTracer_Headers(t *testing.T) {
 	t.Run("concurrent calls return identical memoized headers", func(t *testing.T) {
 		b := program.NewBuilder()
