@@ -50,6 +50,7 @@ type Interpreter struct {
 
 	frames   []frame
 	fr       *frame
+	switched bool
 	stack    []types.Boxed
 	heap     []types.Value
 	base     int
@@ -755,10 +756,14 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 	f := i.fr
 	code := f.code
 	if i.threshold < 0 && i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
+		i.switched = false
 		for f.ip < len(code) {
 			code[f.ip](i)
-			f = i.fr
-			code = f.code
+			if i.switched {
+				i.switched = false
+				f = i.fr
+				code = f.code
+			}
 		}
 		return false, nil
 	}
@@ -1225,6 +1230,7 @@ func (i *Interpreter) popFrame() {
 	f.code = nil
 	i.fp--
 	i.fr = &i.frames[i.fp-1]
+	i.switched = true
 }
 
 func (i *Interpreter) complete() {
@@ -1445,6 +1451,7 @@ func (i *Interpreter) deopt() {
 	}
 	i.fp += depth - 1
 	i.fr = &i.frames[i.fp-1]
+	i.switched = true
 }
 
 // unpack reads frame record n from the native journal.
@@ -1599,6 +1606,7 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 	i.sp = base + 1
 	f.ip = h.Catch
 	i.fr = f
+	i.switched = true
 }
 
 // discard releases an unwound frame's activation: its function reference and any

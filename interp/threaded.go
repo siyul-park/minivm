@@ -197,6 +197,7 @@ var (
 					i.fr.ip += 1
 					i.fp++
 					i.fr = f
+					i.switched = true
 				case *types.Closure:
 					if i.fp == len(i.frames) {
 						panic(ErrFrameOverflow)
@@ -234,6 +235,7 @@ var (
 					i.fr.ip += 1
 					i.fp++
 					i.fr = f
+					i.switched = true
 				case *HostFunction:
 					{
 						fn := fn
@@ -331,6 +333,7 @@ var (
 						i.fr = &i.frames[i.fp-1]
 						i.stack[bp] = types.BoxRef(coAddr)
 						i.sp = bp + 1
+						i.switched = true
 						return
 					}
 					switch f.returns {
@@ -347,6 +350,7 @@ var (
 					f.code = nil
 					i.fp--
 					i.fr = &i.frames[i.fp-1]
+					i.switched = true
 				}
 			}
 		},
@@ -395,6 +399,7 @@ var (
 							i.fr.ip += 1
 							i.fp++
 							i.fr = f
+							i.switched = true
 							goto inlineTail2
 						}
 						f = i.fr
@@ -418,6 +423,7 @@ var (
 						f.returns = returns
 						f.release = true
 						i.sp = base + params + locals
+						i.switched = true
 					inlineTail2:
 					}
 				case *types.Closure:
@@ -461,6 +467,7 @@ var (
 							i.fr.ip += 1
 							i.fp++
 							i.fr = f
+							i.switched = true
 							goto inlineTail3
 						}
 						f = i.fr
@@ -484,6 +491,7 @@ var (
 						f.returns = returns
 						f.release = true
 						i.sp = base + params + locals
+						i.switched = true
 					inlineTail3:
 					}
 				case *HostFunction:
@@ -572,6 +580,7 @@ var (
 							i.fr = &i.frames[i.fp-1]
 							i.stack[bp] = types.BoxRef(coAddr)
 							i.sp = bp + 1
+							i.switched = true
 							return
 						}
 						switch f.returns {
@@ -588,6 +597,7 @@ var (
 						f.code = nil
 						i.fp--
 						i.fr = &i.frames[i.fp-1]
+						i.switched = true
 					}
 				default:
 					panic(ErrTypeMismatch)
@@ -629,6 +639,7 @@ var (
 					i.fr = &i.frames[i.fp-1]
 					i.stack[bp] = types.BoxRef(coAddr)
 					i.sp = bp + 1
+					i.switched = true
 				}
 			}
 		},
@@ -685,6 +696,7 @@ var (
 							i.fr.ip++
 							i.fp++
 							i.fr = f
+							i.switched = true
 						}
 					case types.Iterator:
 						{
@@ -39079,6 +39091,7 @@ var (
 							i.fr.ip += 4
 							i.fp++
 							i.fr = f
+							i.switched = true
 							return
 						}
 						f := i.fr
@@ -39101,6 +39114,7 @@ var (
 						f.returns = returns
 						f.release = false
 						i.sp = base + params + locals
+						i.switched = true
 					}
 				case *types.Closure:
 					tmpl, ok := c.heap[fn.Fn].(*types.Function)
@@ -39145,6 +39159,7 @@ var (
 							i.fr.ip += 4
 							i.fp++
 							i.fr = f
+							i.switched = true
 							return
 						}
 						f := i.fr
@@ -39167,6 +39182,7 @@ var (
 						f.returns = returns
 						f.release = false
 						i.sp = base + params + locals
+						i.switched = true
 					}
 				case *HostFunction:
 					params := len(fn.Typ.Params)
@@ -39240,6 +39256,7 @@ var (
 								i.fr = &i.frames[i.fp-1]
 								i.stack[bp] = types.BoxRef(coAddr)
 								i.sp = bp + 1
+								i.switched = true
 								return
 							}
 							switch f.returns {
@@ -39256,6 +39273,7 @@ var (
 							f.code = nil
 							i.fp--
 							i.fr = &i.frames[i.fp-1]
+							i.switched = true
 						}
 					}
 				default:
@@ -39351,6 +39369,7 @@ var (
 						i.fr.ip += 4
 						i.fp++
 						i.fr = f
+						i.switched = true
 					}
 				case *types.Closure:
 					tmpl, ok := c.heap[fn.Fn].(*types.Function)
@@ -39394,6 +39413,7 @@ var (
 						i.fr.ip += 4
 						i.fp++
 						i.fr = f
+						i.switched = true
 					}
 				case *HostFunction:
 					params := len(fn.Typ.Params)

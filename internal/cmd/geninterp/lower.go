@@ -1220,6 +1220,7 @@ func frame(callee target, targetSlots int, releaseTarget bool, advance int, coro
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 		jen.Id("i").Dot("fp").Op("++"),
 		jen.Id("i").Dot("fr").Op("=").Id("f"),
+		jen.Id("i").Dot("switched").Op("=").True(),
 	)
 	return body
 }
@@ -1258,6 +1259,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 				jen.Id("i").Dot("fp").Op("++"),
 				jen.Id("i").Dot("fr").Op("=").Id("f"),
+				jen.Id("i").Dot("switched").Op("=").True(),
 				jen.Goto().Id(label),
 			),
 			jen.Id("f").Op("=").Id("i").Dot("fr"),
@@ -1275,6 +1277,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 			jen.Id("f").Dot("returns").Op("=").Id("returns"),
 			jen.Id("f").Dot("release").Op("=").Add(jen.Lit(releaseTarget)),
 			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
+			jen.Id("i").Dot("switched").Op("=").True(),
 			jen.Id(label).Op(":").Add(jen.Null()),
 		}
 		return body
@@ -1301,6 +1304,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 			jen.Id("i").Dot("fp").Op("++"),
 			jen.Id("i").Dot("fr").Op("=").Id("f"),
+			jen.Id("i").Dot("switched").Op("=").True(),
 			jen.Return(),
 		),
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
@@ -1317,6 +1321,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 		jen.Id("f").Dot("returns").Op("=").Id("returns"),
 		jen.Id("f").Dot("release").Op("=").False(),
 		jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
+		jen.Id("i").Dot("switched").Op("=").True(),
 	)
 	return body
 }
@@ -1465,6 +1470,7 @@ func retire() []jen.Code {
 			jen.Id("i").Dot("fr").Op("=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Lit(1)),
 			jen.Id("i").Dot("stack").Index(jen.Id("bp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Id("coAddr")),
 			jen.Id("i").Dot("sp").Op("=").Id("bp").Op("+").Lit(1),
+			jen.Id("i").Dot("switched").Op("=").True(),
 			jen.Return(),
 		),
 		jen.Switch(jen.Id("f").Dot("returns")).Block(
@@ -1480,6 +1486,7 @@ func retire() []jen.Code {
 		jen.Id("f").Dot("code").Op("=").Nil(),
 		jen.Id("i").Dot("fp").Op("--"),
 		jen.Id("i").Dot("fr").Op("=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Lit(1)),
+		jen.Id("i").Dot("switched").Op("=").True(),
 	}
 }
 
@@ -3787,7 +3794,8 @@ func resume() jen.Code {
 				jen.List(jen.Id("co").Dot("release")).Op("=").List(jen.Id("false")),
 				jen.Id("i").Dot("fr").Dot("ip").Op("++"),
 				jen.Id("i").Dot("fp").Op("++"),
-				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Id("f")))),
+				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Id("f")),
+				jen.List(jen.Id("i").Dot("switched")).Op("=").List(jen.Id("true")))),
 				jen.Case(jen.Id("types").Dot("Iterator")).Block(jen.Block(jen.List(jen.Id("iter")).Op(":=").List(jen.Id("co")),
 					jen.List(jen.Id("in")).Op(":=").List(jen.Id("in")),
 					jen.If(jen.Id("iter").Dot("Done").Call()).Block(jen.Id("panic").Call(jen.Id("ErrCoroutineDone"))),
@@ -4084,5 +4092,6 @@ func yield() jen.Code {
 				jen.Id("i").Dot("fp").Op("--"),
 				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Op("&").Add(jen.Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Add(jen.Lit(1))))),
 				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("bp"))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("coAddr"))),
-				jen.List(jen.Id("i").Dot("sp")).Op("=").List(jen.Id("bp").Op("+").Add(jen.Lit(1)))))))
+				jen.List(jen.Id("i").Dot("sp")).Op("=").List(jen.Id("bp").Op("+").Add(jen.Lit(1))),
+				jen.List(jen.Id("i").Dot("switched")).Op("=").List(jen.Id("true"))))))
 }

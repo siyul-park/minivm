@@ -1831,6 +1831,39 @@ func TestInterpreter_Run(t *testing.T) {
 		{name: "standalone", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
 		{name: "fused", opts: []func(*option){WithThreshold(-1)}},
 	}
+	for _, mode := range modes {
+		t.Run("return_call changes same frame target before nested call/"+mode.name, func(t *testing.T) {
+			b := program.NewBuilder()
+			leaf := types.NewFunctionBuilder(nil).Returns(types.TypeI32).
+				Emit(instr.New(instr.I32_CONST, 40), instr.New(instr.RETURN)).
+				MustBuild()
+			leafIndex := b.Const(leaf)
+			target := types.NewFunctionBuilder(nil).Returns(types.TypeI32).
+				Emit(
+					instr.New(instr.CONST_GET, uint64(leafIndex)),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+				).
+				MustBuild()
+			targetIndex := b.Const(target)
+			source := types.NewFunctionBuilder(nil).Returns(types.TypeI32).
+				Emit(instr.New(instr.CONST_GET, uint64(targetIndex)), instr.New(instr.RETURN_CALL)).
+				MustBuild()
+			b.ConstGet(source).Emit(instr.CALL)
+			prog, err := b.Build()
+			require.NoError(t, err)
+
+			i := New(prog, append(mode.opts, WithFrame(3))...)
+			t.Cleanup(func() { require.NoError(t, i.Close()) })
+
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), got)
+		})
+	}
 	for _, tt := range runTests {
 		for _, mode := range modes {
 			t.Run(tt.name+"/"+mode.name, func(t *testing.T) {
