@@ -60,6 +60,7 @@ func declare(file *jen.File) {
 		jen.Id("heap").Index().Qual("github.com/siyul-park/minivm/types", "Value"),
 		jen.Id("coros").Index().Bool(),
 		jen.Id("locals").Index().Qual("github.com/siyul-park/minivm/types", "Kind"),
+		jen.Id("localTypes").Index().Qual("github.com/siyul-park/minivm/types", "Type"),
 		jen.Id("globals").Index().Qual("github.com/siyul-park/minivm/types", "Kind"),
 		jen.Id("captures").Index().Qual("github.com/siyul-park/minivm/types", "Kind"),
 		jen.Id("code").Index().Byte(),
@@ -165,10 +166,12 @@ func compile(file *jen.File) {
 	file.Func().Params(jen.Id("c").Op("*").Id("threader")).Id("Compile").Params(
 		jen.Id("code").Index().Byte(),
 		jen.Id("locals").Index().Qual("github.com/siyul-park/minivm/types", "Kind"),
+		jen.Id("localTypes").Index().Qual("github.com/siyul-park/minivm/types", "Type"),
 		jen.Id("captures").Index().Qual("github.com/siyul-park/minivm/types", "Kind"),
 	).Index().Func().Params(jen.Op("*").Id("Interpreter")).Block(
 		jen.Id("c").Dot("code").Op("=").Id("code"),
 		jen.Id("c").Dot("locals").Op("=").Id("locals"),
+		jen.Id("c").Dot("localTypes").Op("=").Id("localTypes"),
 		jen.Id("c").Dot("captures").Op("=").Id("captures"),
 		jen.Id("c").Dot("ip").Op("=").Lit(0),
 		jen.Id("compiled").Op(":=").Make(jen.Index().Func().Params(jen.Op("*").Id("Interpreter")), jen.Len(jen.Id("code"))),

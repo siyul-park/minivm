@@ -466,9 +466,11 @@ func (t *tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 			continue
 		}
 		var locals []types.Kind
+		var declared []types.Type
 		var captures []types.Kind
 		if fn, ok := i.function(addr); ok {
 			locals = fn.Slots()
+			declared = fn.Declared()
 			captures = types.Kinds(fn.Captures)
 		}
 		tc := &threader{
@@ -478,7 +480,7 @@ func (t *tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 			globals:   globals,
 			exact:     true,
 		}
-		t.exact[addr] = tc.Compile(code, locals, captures)
+		t.exact[addr] = tc.Compile(code, locals, declared, captures)
 	}
 	return t.exact
 }

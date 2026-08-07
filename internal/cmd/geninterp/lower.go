@@ -328,6 +328,11 @@ func (l loader) read(result *value, current step) error {
 		}
 		result.compile = append(result.compile, guard...)
 	}
+	if current.op == instr.LOCAL_GET && current.typ != nil {
+		if err := l.arrayGuard(result, current); err != nil {
+			return err
+		}
+	}
 	switch current.op {
 	case instr.LOCAL_GET:
 		if l.standalone {
@@ -429,6 +434,32 @@ func (l loader) constantGuard(result *value, current step) error {
 		result.object = jen.Id(ref)
 		result.typ = current.typ
 	}
+	return nil
+}
+
+// arrayGuard proves, once at threading time, that the local slot l.index
+// addresses is declared as the concrete typed-array element kind current.typ
+// names. A miss rejects the fusion attempt so the local's runtime value keeps
+// its own type check in the standalone ARRAY_GET handler; it never assumes
+// the declared type from a narrower Kind, because ArrayType.Kind is KindRef
+// for every element kind alike.
+func (l loader) arrayGuard(result *value, current step) error {
+	kind, ok := arrayKind(current.typ)
+	if !ok {
+		return fmt.Errorf("unsupported array element type %s", current.typ)
+	}
+	name, ok := arrayKindName(kind)
+	if !ok {
+		return fmt.Errorf("unsupported array element kind %s", kind)
+	}
+	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
+	declared := fmt.Sprintf("d%d", l.slot)
+	okName := fmt.Sprintf("dok%d", l.slot)
+	result.compile = append(result.compile,
+		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot("localTypes").Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "ArrayType")),
+		jen.If(jen.Op("!").Id(okName).Op("||").Id(declared).Dot("ElemKind").Op("!=").Add(expected)).Block(reject(l.label)),
+	)
+	result.typ = current.typ
 	return nil
 }
 
@@ -886,6 +917,34 @@ func index(state *state, current step) (value, error) {
 		body = append(body, index.body...)
 		body = append(body,
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.object).Assert(typeName(container.typ)),
+			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("at").Op(":=").Int().Call(index.raw),
+			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
+			jen.Id("result").Op(":=").Add(boxArray(current.kind, jen.Id("array"), jen.Id("at"))),
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id("result"),
+			jen.Id("i").Dot("sp").Op("++"),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+		)
+		compile = append(compile,
+			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
+			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+		)
+		state.stack = nil
+		return value{op: current.op, head: container.head, compile: compile}, nil
+	}
+	if len(state.stack) == 2 && current.op == instr.ARRAY_GET && state.stack[0].op == instr.LOCAL_GET && state.stack[0].typ != nil {
+		container := state.stack[0]
+		index := state.stack[1]
+		compile := append([]jen.Code(nil), container.compile...)
+		compile = append(compile, index.compile...)
+		body := []jen.Code{overflow()}
+		body = append(body, container.check...)
+		body = append(body, container.body...)
+		body = append(body, index.check...)
+		body = append(body, index.body...)
+		body = append(body,
+			jen.If(jen.Add(container.boxed).Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.Id("at").Op(":=").Int().Call(index.raw),
 			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
@@ -2075,6 +2134,20 @@ func kindName(kind instr.Kind) (string, bool) {
 		return "Ref", true
 	default:
 		return "", false
+	}
+}
+
+// arrayKindName names the types.Kind constant for kind, keeping i1 and i8
+// narrow instead of kindName's reduced Repr, because ArrayType.ElemKind
+// stores the array's real element width.
+func arrayKindName(kind instr.Kind) (string, bool) {
+	switch kind {
+	case instr.KindI1:
+		return "I1", true
+	case instr.KindI8:
+		return "I8", true
+	default:
+		return kindName(kind)
 	}
 }
 

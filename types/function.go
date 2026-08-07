@@ -173,22 +173,24 @@ func (f *Function) Type() Type {
 // consumer that computes through a slot reduces it with Kind.Repr at the point
 // of use. Returns nil when the function has neither.
 func (f *Function) Slots() []Kind {
-	if f.Typ == nil {
-		return Kinds(f.Locals)
-	}
-	if len(f.Typ.Params) == 0 {
-		return Kinds(f.Locals)
+	return Kinds(f.Declared())
+}
+
+// Declared returns the declared Type of each stack slot addressable by
+// LOCAL_* opcodes, in the same params-then-locals order as Slots. Callers
+// that need more than a slot's reduced Kind, such as proving a local is a
+// concrete typed array, index this by the same slot number. Returns nil when
+// the function has neither.
+func (f *Function) Declared() []Type {
+	if f.Typ == nil || len(f.Typ.Params) == 0 {
+		return f.Locals
 	}
 	if len(f.Locals) == 0 {
-		return Kinds(f.Typ.Params)
+		return f.Typ.Params
 	}
-	out := make([]Kind, 0, len(f.Typ.Params)+len(f.Locals))
-	for _, t := range f.Typ.Params {
-		out = append(out, t.Kind())
-	}
-	for _, t := range f.Locals {
-		out = append(out, t.Kind())
-	}
+	out := make([]Type, 0, len(f.Typ.Params)+len(f.Locals))
+	out = append(out, f.Typ.Params...)
+	out = append(out, f.Locals...)
 	return out
 }
 

@@ -341,7 +341,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.backedges[0] = nativeBackend && i.eager
 	c := i.threader(i.backedges[0])
-	i.code[0] = c.Compile(prog.Code, i.module.Slots(), types.Kinds(i.module.Captures))
+	i.code[0] = c.Compile(prog.Code, i.module.Slots(), i.module.Declared(), types.Kinds(i.module.Captures))
 
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
@@ -1403,7 +1403,7 @@ func (i *Interpreter) enableBackedges(addr int) {
 	}
 	c := i.threader(true)
 	installed := i.code[addr]
-	compiled := c.Compile(fn.Code, fn.Slots(), types.Kinds(fn.Captures))
+	compiled := c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures))
 	// Rethreading replaces only interpreted handlers. Installed native entries
 	// stay live while their saved fallbacks advance to the exact-backedge table.
 	for root := range i.exits {
@@ -1871,7 +1871,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	}
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
-	i.code[addr] = c.Compile(fn.Code, fn.Slots(), types.Kinds(fn.Captures))
+	i.code[addr] = c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures))
 	if dynamic {
 		i.dynamic[addr] = true
 	}

@@ -531,6 +531,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/function.go` | `TestFunctionType_Equals` | ✅ |
 | `types/function.go` | `TestFunctionType_Kind` | ✅ |
 | `types/function.go` | `TestFunctionType_String` | ✅ |
+| `types/function.go` | `TestFunction_Declared` | ✅ |
 | `types/function.go` | `TestFunction_Kind` | ✅ |
 | `types/function.go` | `TestFunction_Slots` | ✅ |
 | `types/function.go` | `TestFunction_String` | ✅ |

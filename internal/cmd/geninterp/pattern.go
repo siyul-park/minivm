@@ -122,19 +122,28 @@ func scalars() []pattern {
 			}
 		}
 	}
-	typedArrays := []pattern{
+	// Every typed-array container, whether a compile-time constant or a local
+	// whose declared type is a concrete element kind, pairs with every scalar
+	// index producer to feed array.get.
+	containers := []pattern{
 		constant[types.TypedArray[bool]](),
 		constant[types.TypedArray[int8]](),
 		constant[types.TypedArray[int32]](),
 		constant[types.TypedArray[int64]](),
 		constant[types.TypedArray[float32]](),
 		constant[types.TypedArray[float64]](),
+		typedLocal[types.TypedArray[bool]](),
+		typedLocal[types.TypedArray[int8]](),
+		typedLocal[types.TypedArray[int32]](),
+		typedLocal[types.TypedArray[int64]](),
+		typedLocal[types.TypedArray[float32]](),
+		typedLocal[types.TypedArray[float64]](),
 	}
-	for _, array := range typedArrays {
-		for _, index := range producers[types.I32](instr.I32_CONST) {
-			patterns = append(patterns, seq(array, index, op(instr.ARRAY_GET)))
-		}
+	indexed := make([]pattern, 0, len(producers[types.I32](instr.I32_CONST)))
+	for _, index := range producers[types.I32](instr.I32_CONST) {
+		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
 	}
+	patterns = append(patterns, cross(containers, indexed...)...)
 	patterns = append(patterns, cross(
 		[]pattern{op(instr.I32_CONST), constant[types.I32]()},
 		op(instr.ARRAY_GET),
@@ -181,6 +190,13 @@ func op(code instr.Opcode) pattern {
 
 func constant[T types.Value]() pattern {
 	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T]()}}
+}
+
+// typedLocal matches a LOCAL_GET whose declared slot type is the concrete
+// array type T, letting a fused consumer prove the container's element kind
+// at threading time instead of re-deriving it from the runtime heap value.
+func typedLocal[T types.Value]() pattern {
+	return pattern{{op: instr.LOCAL_GET, typ: reflect.TypeFor[T]()}}
 }
 
 func except[T types.Value]() pattern {

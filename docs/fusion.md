@@ -28,7 +28,7 @@ Every valid opcode has exactly one `lowerers` entry and one semantic emitter. Th
 
 The generator validates the concrete patterns returned by `catalog` in `internal/cmd/geninterp/pattern.go`.
 
-Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, constant aggregate indexes, direct non-trapping arithmetic stores to typed locals, and typed-array constants indexed by scalar producers. Trapping numeric operations materialize completed sources before evaluating the trap so stack ownership and instruction offsets match exact execution.
+Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, constant aggregate indexes, direct non-trapping arithmetic stores to typed locals, and typed-array constants or typed-array locals indexed by scalar producers. A typed-array local container is proven at threading time from the local's declared type (`*types.ArrayType.ElemKind`), not from its current runtime value, so the pattern is scoped to `array.get`; `array.set`, `global.get`, and `upval.get` containers remain unfused. Trapping numeric operations materialize completed sources before evaluating the trap so stack ownership and instruction offsets match exact execution.
 
 ## Threaded Compilation
 
