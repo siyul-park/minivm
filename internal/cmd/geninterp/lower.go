@@ -1029,7 +1029,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 	hostCore = append(hostCore, invoke(1, 1, tail)...)
 	host := []jen.Code{jen.Block(hostCore...)}
 	if tail {
-		host = append(host, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire()...))
+		host = append(host, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire(nil)...))
 	}
 	body := append(prefix, jen.Switch(jen.Id("fn").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
 		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")).Block(function...),
@@ -1365,7 +1365,7 @@ func invoke(targetSlots, advance int, tail bool) []jen.Code {
 		if targetSlots == 1 {
 			body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 		} else {
-			body = append(body, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire()...))
+			body = append(body, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire(nil)...))
 		}
 	} else {
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
@@ -1435,7 +1435,16 @@ func release(args, returns jen.Code) jen.Code {
 	)
 }
 
-func retire() []jen.Code {
+// retire emits a frame teardown. guard, when non-nil, is a condition the
+// caller computed while threading: the slot release only runs when it holds.
+func retire(guard jen.Code) []jen.Code {
+	sweep := jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
+		jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("f").Dot("returns"),
+	)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value")))
+	var discard jen.Code = sweep
+	if guard != nil {
+		discard = jen.If(guard).Block(sweep)
+	}
 	return []jen.Code{
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
 		jen.If(jen.Id("i").Dot("sp").Op("<").Id("f").Dot("returns")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -1445,10 +1454,13 @@ func retire() []jen.Code {
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.If(jen.Id("f").Dot("returns").Op(">").Lit(0)).Block(
 				jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
-					jen.Id("i").Dot("sp").Op("-").Id("f").Dot("returns").Op(":").Id("i").Dot("sp").Op("-").Lit(1),
+					jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Lit(1),
 				)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value"))),
 				jen.Id("co").Dot("value").Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
 			).Else().Block(
+				jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
+					jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp"),
+				)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value"))),
 				jen.Id("i").Dot("retain").Call(jen.Lit(0)),
 				jen.Id("co").Dot("value").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxedNull"),
 			),
@@ -1468,6 +1480,11 @@ func retire() []jen.Code {
 			jen.Id("i").Dot("sp").Op("=").Id("bp").Op("+").Lit(1),
 			jen.Return(),
 		),
+		jen.Comment("A frame owns its params, locals, and any operands left below the"),
+		jen.Comment("returned values; only the returns pass to the caller, so everything"),
+		jen.Comment("under them is released here. land does the same when an exception"),
+		jen.Comment("unwinds the frame, and the cycle collector needs counts to be exact."),
+		discard,
 		jen.Switch(jen.Id("f").Dot("returns")).Block(
 			jen.Case(jen.Lit(0)).Block(),
 			jen.Case(jen.Lit(1)).Block(jen.Id("i").Dot("stack").Index(jen.Id("f").Dot("bp")).Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1))),
@@ -3817,10 +3834,26 @@ func returnOp() jen.Code {
 		Params(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter"))).
 		Block(
 			jen.Id("c").Dot("ip").Op("++"),
+			jen.Comment("A frame whose every slot is a plain scalar can only be holding"),
+			jen.Comment("scalars when its operand stack is balanced, so the release sweep"),
+			jen.Comment("is skipped for it. The kinds that can carry a ref are the same ones"),
+			jen.Comment("LOCAL_GET retains for."),
+			jen.Id("slots").Op(":=").Len(jen.Id("c").Dot("locals")),
+			jen.Id("owned").Op(":=").False(),
+			jen.For(jen.List(jen.Id("_"), jen.Id("kind")).Op(":=").Range().Id("c").Dot("locals")).Block(
+				jen.Switch(jen.Id("kind").Dot("Repr").Call()).Block(
+					jen.Case(
+						jen.Qual("github.com/siyul-park/minivm/types", "KindI32"),
+						jen.Qual("github.com/siyul-park/minivm/types", "KindF32"),
+						jen.Qual("github.com/siyul-park/minivm/types", "KindF64"),
+					).Block(),
+					jen.Default().Block(jen.Id("owned").Op("=").True()),
+				),
+			),
 			jen.Return(
 				jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
 					jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(jen.Panic(jen.Id("ErrFrameUnderflow"))),
-					jen.Block(retire()...),
+					jen.Block(retire(jen.Id("owned").Op("||").Id("i").Dot("sp").Op("!=").Id("f").Dot("bp").Op("+").Id("slots").Op("+").Id("f").Dot("returns"))...),
 				),
 			),
 		)

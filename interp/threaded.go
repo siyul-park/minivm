@@ -292,6 +292,19 @@ var (
 		},
 		instr.RETURN: func(c *threader) func(i *Interpreter) {
 			c.ip++
+			// A frame whose every slot is a plain scalar can only be holding
+			// scalars when its operand stack is balanced, so the release sweep
+			// is skipped for it. The kinds that can carry a ref are the same ones
+			// LOCAL_GET retains for.
+			slots := len(c.locals)
+			owned := false
+			for _, kind := range c.locals {
+				switch kind.Repr() {
+				case types.KindI32, types.KindF32, types.KindF64:
+				default:
+					owned = true
+				}
+			}
 			return func(i *Interpreter) {
 				if i.fp == 1 {
 					panic(ErrFrameUnderflow)
@@ -308,11 +321,14 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						if f.returns > 0 {
-							for _, value := range i.stack[i.sp-f.returns : i.sp-1] {
+							for _, value := range i.stack[f.bp : i.sp-1] {
 								i.releaseBox(value)
 							}
 							co.value = i.stack[i.sp-1]
 						} else {
+							for _, value := range i.stack[f.bp:i.sp] {
+								i.releaseBox(value)
+							}
 							i.retain(0)
 							co.value = types.BoxedNull
 						}
@@ -333,6 +349,15 @@ var (
 						i.stack[bp] = types.BoxRef(coAddr)
 						i.sp = bp + 1
 						return
+					}
+					// A frame owns its params, locals, and any operands left below the
+					// returned values; only the returns pass to the caller, so everything
+					// under them is released here. land does the same when an exception
+					// unwinds the frame, and the cycle collector needs counts to be exact.
+					if owned || i.sp != f.bp+slots+f.returns {
+						for _, value := range i.stack[f.bp : i.sp-f.returns] {
+							i.releaseBox(value)
+						}
 					}
 					switch f.returns {
 					case 0:
@@ -549,11 +574,14 @@ var (
 								panic(ErrTypeMismatch)
 							}
 							if f.returns > 0 {
-								for _, value := range i.stack[i.sp-f.returns : i.sp-1] {
+								for _, value := range i.stack[f.bp : i.sp-1] {
 									i.releaseBox(value)
 								}
 								co.value = i.stack[i.sp-1]
 							} else {
+								for _, value := range i.stack[f.bp:i.sp] {
+									i.releaseBox(value)
+								}
 								i.retain(0)
 								co.value = types.BoxedNull
 							}
@@ -574,6 +602,13 @@ var (
 							i.stack[bp] = types.BoxRef(coAddr)
 							i.sp = bp + 1
 							return
+						}
+						// A frame owns its params, locals, and any operands left below the
+						// returned values; only the returns pass to the caller, so everything
+						// under them is released here. land does the same when an exception
+						// unwinds the frame, and the cycle collector needs counts to be exact.
+						for _, value := range i.stack[f.bp : i.sp-f.returns] {
+							i.releaseBox(value)
 						}
 						switch f.returns {
 						case 0:
@@ -39217,11 +39252,14 @@ var (
 									panic(ErrTypeMismatch)
 								}
 								if f.returns > 0 {
-									for _, value := range i.stack[i.sp-f.returns : i.sp-1] {
+									for _, value := range i.stack[f.bp : i.sp-1] {
 										i.releaseBox(value)
 									}
 									co.value = i.stack[i.sp-1]
 								} else {
+									for _, value := range i.stack[f.bp:i.sp] {
+										i.releaseBox(value)
+									}
 									i.retain(0)
 									co.value = types.BoxedNull
 								}
@@ -39242,6 +39280,13 @@ var (
 								i.stack[bp] = types.BoxRef(coAddr)
 								i.sp = bp + 1
 								return
+							}
+							// A frame owns its params, locals, and any operands left below the
+							// returned values; only the returns pass to the caller, so everything
+							// under them is released here. land does the same when an exception
+							// unwinds the frame, and the cycle collector needs counts to be exact.
+							for _, value := range i.stack[f.bp : i.sp-f.returns] {
+								i.releaseBox(value)
 							}
 							switch f.returns {
 							case 0:

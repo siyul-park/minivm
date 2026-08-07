@@ -308,6 +308,9 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.work = nil
 	out.refbuf = nil
 	out.interned = map[string]types.Ref{}
+	// Capture never serves a host ownership query, and every allocating opcode
+	// is unrecordable, so the clone only needs a writable index of its own.
+	out.owners = map[types.Value]int{}
 	for idx := 0; idx < out.fp; idx++ {
 		addr := out.frames[idx].addr
 		if addr >= 0 && addr < len(out.code) {

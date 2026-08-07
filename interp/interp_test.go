@@ -1549,6 +1549,38 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Empty(t, missing)
 	})
 
+	t.Run("releases frame slots on return", func(t *testing.T) {
+		// The callee returns a scalar, so the reference the caller passed in is
+		// discarded with the frame instead of handed back. A teardown that keeps
+		// it leaks one slot per call and exhausts a bounded heap.
+		callee := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeRef},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).MustBuild()
+
+		b := program.NewBuilder()
+		fn := b.Const(callee)
+		loop := b.Label()
+		done := b.Label()
+		b.Locals(types.TypeI32)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4*heapRunway).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.REF_NEW)
+		b.Emit(instr.CONST_GET, uint64(fn)).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		i := New(prog, WithHeapLimit(heapRunway))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+	})
+
 	for _, tt := range []struct {
 		name        string
 		typ         types.Type
@@ -3844,6 +3876,37 @@ func TestInterpreter_Alloc(t *testing.T) {
 		require.NoError(t, err)
 		require.Same(t, value, loaded)
 		require.Equal(t, 0, value.closed)
+	})
+
+	t.Run("rejects pointer read back out of the heap", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(&trackedValue{})
+		require.NoError(t, err)
+		for range 4 * heapRunway {
+			_, err := i.Alloc(&trackedValue{})
+			require.NoError(t, err)
+		}
+
+		loaded, err := i.Load(addr)
+		require.NoError(t, err)
+		_, err = i.Alloc(loaded)
+		require.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("accepts pointer whose slot was released", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		reused, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.NotEqual(t, 0, reused)
 	})
 }
 
