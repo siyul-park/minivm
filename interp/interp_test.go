@@ -1226,6 +1226,16 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const array.new_default through f64.const array.fill i32.const array.get returns f64",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.DUP),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_GET),
+		}, program.WithTypes(types.TypeF64Array)),
+		values: []types.Value{types.F64(1.5)},
+	},
+	{
 		name: "i32.const array.new_default through i32.const array.copy i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),

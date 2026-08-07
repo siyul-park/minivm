@@ -246,7 +246,7 @@ var types = map[Opcode]Type{
 	ARRAY_LEN:    {Mnemonic: "array.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
 	ARRAY_GET:    {Mnemonic: "array.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
 	ARRAY_SET:    {Mnemonic: "array.set", Pop: []Kind{KindAny, KindI32, KindRef}},
-	ARRAY_FILL:   {Mnemonic: "array.fill", Pop: []Kind{KindAny, KindI32, KindI32, KindRef}},
+	ARRAY_FILL:   {Mnemonic: "array.fill", Pop: []Kind{KindI32, KindAny, KindI32, KindRef}},
 	ARRAY_COPY:   {Mnemonic: "array.copy", Pop: []Kind{KindI32, KindI32, KindRef, KindI32, KindRef}},
 	ARRAY_APPEND: {Mnemonic: "array.append"},
 	ARRAY_DELETE: {Mnemonic: "array.delete", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
