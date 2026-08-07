@@ -128,6 +128,14 @@ Aggregate metrics remain available for existing consumers:
 | `vm_jit_emits_total` | emitted trace objects |
 | `vm_jit_errors_total` | compile or link errors |
 | `vm_jit_bytes_total` | generated code bytes |
+| `vm_gc_cycles_total` | collections run |
+| `vm_gc_slots_total` | heap slots a collection walked, summed over cycles |
+
+Every collection pass walks the whole heap, so `vm_gc_slots_total` is the
+collector's total work; divided by the allocations a run performs it is the
+price paced allocation pays per object. A rising `vm_gc_cycles_total` on a
+program with a steady live set means garbage that reference counting is not
+reclaiming.
 
 Detailed lifecycle metrics retain bounded typed dimensions until `Metrics()`
 converts them to ordered string labels:

@@ -55,6 +55,7 @@ type Interpreter struct {
 	base     int
 	target   int
 	interned map[string]types.Ref
+	owners   map[types.Value]int
 	free     []int
 	rc       []int
 	trial    []int
@@ -261,6 +262,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		stack:       make([]types.Boxed, opt.stack),
 		heap:        make([]types.Value, 0, opt.heap),
 		interned:    make(map[string]types.Ref),
+		owners:      make(map[types.Value]int),
 		free:        make([]int, 0, opt.heap),
 		rc:          make([]int, 0, opt.heap),
 		tick:        opt.tick,
@@ -506,7 +508,9 @@ func (i *Interpreter) Load(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
 	}
-	return i.heap[addr], nil
+	val := i.heap[addr]
+	i.own(addr, val)
+	return val, nil
 }
 
 // Store replaces the value at addr. Concrete values transfer unique slot
@@ -548,6 +552,7 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 		return ErrTypeMismatch
 	}
 	i.heap[addr] = val
+	i.own(addr, val)
 	i.dispose(addr, old)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
@@ -583,6 +588,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 		return int(i.intern(string(s))), nil
 	}
 	addr = i.alloc(val)
+	i.own(addr, val)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
 	}
@@ -594,7 +600,9 @@ func (i *Interpreter) Retain(addr int) (types.Value, error) {
 		return nil, ErrSegmentationFault
 	}
 	i.retain(addr)
-	return i.heap[addr], nil
+	val := i.heap[addr]
+	i.own(addr, val)
+	return val, nil
 }
 
 func (i *Interpreter) Release(addr int) error {
@@ -613,7 +621,11 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	if i.owner(val) >= 0 {
 		return ErrTypeMismatch
 	}
-	i.stack[i.sp] = i.box(val)
+	boxed := i.box(val)
+	if boxed.Kind() == types.KindRef {
+		i.own(boxed.Ref(), val)
+	}
+	i.stack[i.sp] = boxed
 	i.sp++
 	return nil
 }
@@ -623,7 +635,12 @@ func (i *Interpreter) Pop() (types.Value, error) {
 		return nil, ErrStackUnderflow
 	}
 	i.sp--
-	return i.unbox(i.stack[i.sp]), nil
+	boxed := i.stack[i.sp]
+	val := i.unbox(boxed)
+	if boxed.Kind() == types.KindRef {
+		i.own(boxed.Ref(), val)
+	}
+	return val, nil
 }
 
 // PopBoxed consumes the top-of-stack value and returns its raw NaN-boxed word
@@ -1948,21 +1965,63 @@ func (i *Interpreter) releaseBox(v types.Boxed) {
 	}
 }
 
+// owner returns the slot that already holds val, or -1 when val is unowned.
+// Only a pointer value can be aliased into two slots; every other kind is
+// copied into its slot, so unowned is the answer for them by construction.
+//
+// owners only hints at the answer. The heap is the authority, so a hint left
+// behind by a freed or overwritten slot is discarded here instead of being
+// tracked on the interpreter's allocation path.
 func (i *Interpreter) owner(val types.Value) int {
-	pointer := reflect.ValueOf(val)
-	if !pointer.IsValid() || pointer.Kind() != reflect.Pointer {
+	if !aliasable(val) {
 		return -1
 	}
-	for addr, current := range i.heap {
-		if !i.alive(addr) {
-			continue
-		}
-		owner := reflect.ValueOf(current)
-		if owner.IsValid() && owner.Type() == pointer.Type() && owner.Pointer() == pointer.Pointer() {
-			return addr
+	addr, ok := i.owners[val]
+	if !ok || !i.holds(addr, val) {
+		return -1
+	}
+	return addr
+}
+
+// own hints that addr holds val. Only the host boundary records hints: the VM
+// never hands a value it allocated back to itself, so a pointer the host can
+// present has always crossed Alloc, Store, Push, Load, Retain, or Pop first.
+func (i *Interpreter) own(addr int, val types.Value) {
+	if !aliasable(val) {
+		return
+	}
+	// A hint survives only while its slot still holds it, so at most one per
+	// occupied slot is live. Twice that many entries means half are stale, and
+	// pruning then costs one pass per as many insertions as it discards.
+	if len(i.owners) >= max(2*(len(i.heap)-len(i.free)), heapRunway) {
+		i.prune()
+	}
+	i.owners[val] = addr
+}
+
+// prune drops every hint the heap no longer backs, keeping the index
+// proportional to the values the host actually holds without charging hint
+// removal to release and sweep.
+func (i *Interpreter) prune() {
+	for val, addr := range i.owners {
+		if !i.holds(addr, val) {
+			delete(i.owners, val)
 		}
 	}
-	return -1
+}
+
+// holds reports whether addr still stores val. The heap decides ownership, so
+// every hint is confirmed against it before it is trusted or kept.
+func (i *Interpreter) holds(addr int, val types.Value) bool {
+	return i.alive(addr) && i.heap[addr] == val
+}
+
+// aliasable reports whether val is a pointer, the only shape two slots can
+// share. A pointer is stored directly in the interface word and is comparable,
+// so the interface itself keys the index.
+func aliasable(val types.Value) bool {
+	typ := reflect.TypeOf(val)
+	return typ != nil && typ.Kind() == reflect.Pointer
 }
 
 func (i *Interpreter) alive(addr int) bool {
@@ -1977,7 +2036,12 @@ func (i *Interpreter) retains(addr int, n int) {
 	i.rc[addr] += n
 }
 
+// gc collects one cycle. Every pass walks the whole heap, so the recorded slot
+// count is what the collection cost; the two metrics together report collector
+// pressure without a build-time switch.
 func (i *Interpreter) gc() {
+	i.samples.AddMetric("vm_gc_cycles_total", 1)
+	i.samples.AddMetric("vm_gc_slots_total", float64(len(i.heap)))
 	i.scan()
 	i.mark()
 	i.sweep()

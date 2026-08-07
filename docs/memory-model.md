@@ -61,6 +61,13 @@ Reference counting is handled by threaded handlers and host APIs.
 | map replace/delete/clear | release map-owned refs |
 | `CLOSURE_NEW` | transfer popped function and upvalues into closure |
 | suspend closure coroutine | transfer callable, stack image, and yielded value; trace upvalues through callable |
+| `RETURN` | release every frame slot below the returned values |
+
+A frame owns its params, its locals, and any operands still stacked beneath the
+values it returns. Only the returns pass to the caller, so `RETURN` releases the
+rest before collapsing the frame, exactly as an exception unwind does. Leaving
+them unreleased inflates counts that no owner backs, and trial deletion reads an
+inflated count as ownership outside the heap, so such a leak is unreclaimable.
 
 `retain(addr)` increments `rc[addr]`.
 

@@ -125,7 +125,9 @@ Ownership rules:
   `Alloc(existingRef)` to create another ownership of one object
 - concrete pointer values passed to `Alloc`, `Store`, or `Push` transfer unique
   ownership and must not already be owned by the interpreter; use an existing
-  ref when sharing one object
+  ref when sharing one object. The interpreter answers this from an index of the
+  pointers that have crossed `Alloc`, `Store`, `Push`, `Load`, `Retain`, or
+  `Pop`, so the check costs one lookup no matter how large the heap is
 - `Retain` creates another host-owned reference
 - `Release` drops a host-owned reference
 - every owned reference from `Alloc` or `Retain` must eventually be transferred or released

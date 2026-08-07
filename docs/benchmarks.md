@@ -46,7 +46,7 @@ go test -tags=compare -run='^$' -bench='.' -benchmem -benchtime=300ms -count=3 .
 # Issue #164 A/B: alternate this command between commit 10d6adf and the
 # current checkout five times, then take each side's median.
 go test -run='^$' \
-  -bench='^(BenchmarkControl_IterativeFib|BenchmarkControl_Sieve|BenchmarkCall_RecursiveFib|BenchmarkCall_IndirectRecursiveFib|BenchmarkCall_ClosureCounter|BenchmarkMemory_TypedArraySum|BenchmarkMemory_AllocationGraph|BenchmarkNumeric_BranchTree)$' \
+  -bench='^(BenchmarkControl_IterativeFib|BenchmarkControl_Sieve|BenchmarkCall_RecursiveFib|BenchmarkCall_IndirectRecursiveFib|BenchmarkCall_ClosureCounter|BenchmarkMemory_TypedArraySum|BenchmarkMemory_AllocationGraph|BenchmarkMemory_PermutationFlips|BenchmarkMemory_StructTreeWalk|BenchmarkNumeric_BranchTree)$' \
   -benchmem -benchtime=300ms -count=1 .
 
 # Public interpreter and pool API costs
@@ -83,6 +83,25 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
 - Threshold-zero `jit` is not a warmed-JIT guarantee. It matches `default` on Sieve and BranchTree, but is slower on IterativeFib, TypedArraySum, and recursive Fibonacci because it can compile before representative traces are learned.
 - Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **4.816 us**; adaptive and eager modes add profiling cost without native coverage.
 - Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **53.56 us** in `default`, versus **478 us** threaded and **43.3 us** in wazero. Eager `jit` stays at **584 us**, consistent with the threshold-zero note above.
+
+- Host-boundary ownership checking is no longer proportional to the heap
+  (issues #169, #170). `Alloc`, `Store`, and `Push` used to scan every live slot
+  with reflection to reject an already-owned pointer, so an embedder that
+  allocates per operation ran quadratically. The check is now one index lookup.
+- `RETURN` releases the frame slots it discards, which reference counting
+  previously leaked. On `linux/amd64` (4 cores, Go 1.26.2, min of eight
+  300 ms samples) the sweep costs `RecursiveFib(20)/threaded`
+  **604 -> 672 ns/op**; skipping it for frames whose every slot is a plain
+  scalar recovers most of that at **625 ns/op**. Frames with `ref`- or
+  `i64`-shaped slots pay the sweep, which is the price of counts exact enough
+  for trial deletion to collect at all.
+- `PermutationFlips` and `StructTreeWalk` cover recursion with per-call boxed
+  array allocation and in-place `ARRAY_GET`/`ARRAY_SET`, and recursive
+  `STRUCT_NEW_DEFAULT`/`STRUCT_SET` construction with `REF_CAST` traversal.
+  They are workload coverage for the shapes those issues reported; neither
+  reproduces the regressions on its own, because the host-boundary scan needs
+  an embedder and a per-call leak does not compound inside one benchmark
+  operation.
 
 These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, host-call conventions, and compilation strategies.
 
