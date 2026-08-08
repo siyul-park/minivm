@@ -1272,6 +1272,26 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
+		// array.new_default's type index names a ref-element array type, so
+		// it allocates the generic *types.Array boxed-element representation
+		// (never TypedArray[int32]), while the local it is stored into is
+		// declared types.TypeI32Array. array.get's fused LOCAL_GET path
+		// proves only the local's declared element kind at threading time,
+		// so it must fall back from its specialized TypedArray[int32]
+		// assertion to the *types.Array representation actually on the heap
+		// instead of trapping.
+		name: "array.new_default of a ref-element array type local.set local.get i32.const array.get fuses declared i32 array local, returns element",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+			program.WithLocals(types.TypeI32Array),
+		),
+		values: []types.Value{types.Null},
+	},
+	{
 		name: "i32.const f64.const struct.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
@@ -1304,6 +1324,103 @@ var runTests = []struct {
 			instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
 		values: []types.Value{types.I32(99)},
+	},
+	{
+		name: "struct.new local.set local.get i32.const struct.get fuses declared struct local, returns i32",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+		},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+		),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		name: "struct.new local.set local.get i32.const struct.get fuses declared struct local, returns f64",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+		},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+		),
+		values: []types.Value{types.F64(2.5)},
+	},
+	{
+		name: "struct.new local.set local.get const.get struct.get fuses declared struct local with a constant field index, returns f64",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.STRUCT_GET),
+		},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+			program.WithConstants(types.I32(1)),
+		),
+		values: []types.Value{types.F64(2.5)},
+	},
+	{
+		name: "const.get struct.new local.set local.get i32.const struct.get fuses declared struct local, returns and retains ref field",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+		},
+			program.WithConstants(types.String("hi")),
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeString))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeString))),
+		),
+		values: []types.Value{types.String("hi")},
+	},
+	{
+		name: "i32.const local.set local.get i32.const struct.get on a scalar stored into a declared struct local traps type mismatch",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32)))),
+		err: ErrTypeMismatch,
+	},
+	{
+		name: "local.get i32.const struct.get on an uninitialized declared struct local traps type mismatch",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32)))),
+		err: ErrTypeMismatch,
+	},
+	{
+		name: "ref.null local.set local.get i32.const struct.get on a null declared struct local traps type mismatch",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.REF_NULL), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32)))),
+		err: ErrTypeMismatch,
+	},
+	{
+		name: "struct.new local.set local.get i32.const struct.get on a smaller runtime struct traps segmentation fault",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+		},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
+		),
+		err: ErrSegmentationFault,
+	},
+	{
+		name: "struct.new local.set local.get i32.const struct.get with a field index past the declared struct rejects fusion, still traps segmentation fault",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 5), instr.New(instr.STRUCT_GET),
+		},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32))),
+		),
+		err: ErrSegmentationFault,
 	},
 	{
 		name: "i32.const i32.const through i32.const map.new i32.const map.get returns i32",
@@ -1589,6 +1706,29 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
+	})
+
+	t.Run("STRUCT_GET fused on a declared struct local traps type mismatch when the runtime field's kind diverges from the declared field's kind", func(t *testing.T) {
+		// The local's declared type only proves what the fused handler
+		// specializes for at threading time; storing a different-shaped
+		// struct (same field count, mismatched field kind) at the same
+		// index must still trap instead of reinterpreting the raw bits
+		// under the specialized (wrong) kind. Standalone execution has no
+		// specialization to diverge from, so this is exercised only under
+		// fusion.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.STRUCT_NEW, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+		},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32))),
+		)
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrTypeMismatch)
 	})
 
 	for _, tt := range []struct {
@@ -7679,4 +7819,120 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 	}
 	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 	require.NoError(b, vm.Release(addr))
+}
+
+func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
+	prog := structSumTree(12, 500)
+	vm := New(prog, WithThreshold(-1)) // threaded + fused, no JIT
+	b.Cleanup(func() { require.NoError(b, vm.Close()) })
+	ctx := context.Background()
+
+	require.NoError(b, vm.Run(ctx))
+	want, err := vm.PopBoxed()
+	require.NoError(b, err)
+	vm.Reset()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		require.NoError(b, vm.Run(ctx))
+		got, err := vm.PopBoxed()
+		require.NoError(b, err)
+		require.Equal(b, want, got)
+		vm.Reset()
+	}
+}
+
+// structSumTree builds a small binary-tree kernel shaped like
+// benchmarks/memory_test.go's structTreeWalk, except sumFn's tree parameter
+// is declared as the concrete node struct type instead of types.TypeRef, so
+// every struct.get on it is a LOCAL_GET whose declared type is a concrete
+// *types.StructType -- the shape interp/threaded.go's generated STRUCT_GET
+// local-container fusion specializes.
+func structSumTree(depth, repeats int32) *program.Program {
+	nodeType := types.NewStructType(
+		types.NewStructField(types.TypeI32, types.FieldWithName("value")),
+		types.NewStructField(types.TypeRef, types.FieldWithName("left")),
+		types.NewStructField(types.TypeRef, types.FieldWithName("right")),
+	)
+
+	// build locals: 0=d (param), 1=n
+	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+		Params(types.TypeI32).
+		Locals(types.TypeRef)
+	buildDone := buildBuilder.Label()
+	buildFn := buildBuilder.
+		Emit(
+			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+		).
+		BrIf(buildDone).
+		Emit(
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 2),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.STRUCT_SET),
+		).
+		Bind(buildDone).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)).
+		MustBuild()
+
+	// sum params: 0=t, declared as the concrete node struct type.
+	sumBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Params(nodeType)
+	nullCase := sumBuilder.Label()
+	sumFn := sumBuilder.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
+		BrIf(nullCase).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).
+		Bind(nullCase).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	// Top level: build the tree once, then call sum(tree) repeats times in a
+	// loop, accumulating a checksum. This isolates sum's struct.get cost
+	// from build's allocation cost, which would otherwise dominate a single
+	// build+sum call and hide any per-access improvement.
+	b := program.NewBuilder()
+	buildIdx := b.Const(buildFn)
+	sumIdx := b.Const(sumFn)
+	b.Type(nodeType)
+	b.Locals(types.TypeRef, types.TypeI32, types.TypeI32) // 0=tree, 1=counter, 2=checksum
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.I32_CONST, uint64(uint32(depth))).
+		Emit(instr.CONST_GET, uint64(buildIdx)).Emit(instr.CALL).
+		Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(sumIdx)).Emit(instr.CALL).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
 }

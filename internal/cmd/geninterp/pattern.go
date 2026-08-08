@@ -144,11 +144,19 @@ func scalars() []pattern {
 		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
 	}
 	patterns = append(patterns, cross(containers, indexed...)...)
-	patterns = append(patterns, cross(
-		[]pattern{op(instr.I32_CONST), constant[types.I32]()},
-		op(instr.ARRAY_GET),
-		op(instr.STRUCT_GET),
-	)...)
+	// array.get and struct.get both accept a compile-time constant field
+	// index alone, leaving whatever container instruction precedes them
+	// unfused.
+	fieldIndex := []pattern{op(instr.I32_CONST), constant[types.I32]()}
+	patterns = append(patterns, cross(fieldIndex, op(instr.ARRAY_GET), op(instr.STRUCT_GET))...)
+	// A struct.get container may also be a LOCAL_GET whose declared type is
+	// a concrete struct, letting the fused consumer resolve the accessed
+	// field's Kind from the declared type at threading time.
+	structFields := make([]pattern, 0, len(fieldIndex))
+	for _, index := range fieldIndex {
+		structFields = append(structFields, seq(index, op(instr.STRUCT_GET)))
+	}
+	patterns = append(patterns, cross([]pattern{structLocal()}, structFields...)...)
 	return append(patterns,
 		seq(op(instr.I32_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
@@ -197,6 +205,14 @@ func constant[T types.Value]() pattern {
 // at threading time instead of re-deriving it from the runtime heap value.
 func typedLocal[T types.Value]() pattern {
 	return pattern{{op: instr.LOCAL_GET, typ: reflect.TypeFor[T]()}}
+}
+
+// structLocal matches a LOCAL_GET whose declared slot type is a struct.
+// Unlike typedLocal, one Go type covers every struct shape, so the fused
+// struct.get consumer resolves the specific declared *types.StructType (and
+// each accessed field's Kind) at threading time instead of selecting it here.
+func structLocal() pattern {
+	return pattern{{op: instr.LOCAL_GET, typ: reflect.TypeFor[types.Struct]()}}
 }
 
 func except[T types.Value]() pattern {

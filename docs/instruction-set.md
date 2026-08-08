@@ -325,6 +325,8 @@ Examples:
 - typed-array locals (declared, concrete element type) plus scalar index
   producers feeding `array.get`
 - constant indexes feeding `array.get` or `struct.get`
+- struct locals (declared, concrete `*types.StructType`) plus a constant
+  field index feeding `struct.get`
 - constant ref cell plus `ref.get`
 - structured-error creation followed by a raise
 
@@ -336,7 +338,13 @@ stack, so it keeps a check per push. Typed-array constant and typed-array
 local loads validate the current heap value's concrete array type and bounds
 on every execution; a typed-array local container is read fresh from its
 stack slot and borrowed (no retain/release) because `array.get` fully
-consumes it within the fused sequence.
+consumes it within the fused sequence. A struct local container is read and
+borrowed the same way; because a struct field's Kind depends on the runtime
+`StructType`, not a Go type the generator can name, threading picks one
+specialized handler per Kind from the local's *declared* type, while every
+execution still validates the ref kind, the heap value's concrete type, the
+field index against the *runtime* struct's field count, and the runtime
+field's actual Kind before boxing it.
 
 ## Maintenance Notes
 
