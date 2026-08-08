@@ -1001,27 +1001,27 @@ func index(state *state, current step) (value, error) {
 			}
 		}
 		// arrayGuard only proves the container's declared element kind, never
-		// the runtime value's concrete representation: a local, global, or
-		// upvalue slot proven to declare element kind T can still hold the
-		// generic *types.Array boxed representation at runtime (e.g.
-		// ARRAY_NEW_DEFAULT's ref-element path stores through a
-		// differently-declared alias), so a miss on the specialized
-		// TypedArray[T] assertion falls back to the same *types.Array arm the
-		// unfused ARRAY_GET handler runs, instead of trapping a case the
-		// unfused handler accepts.
+		// the runtime value's concrete representation: LOCAL_SET, GLOBAL_SET,
+		// and a closure's captured upvalue all assign into a declared slot
+		// without re-checking the assigned value's concrete representation
+		// against it (e.g. ARRAY_NEW_DEFAULT's ref-element path stores
+		// through a differently-declared alias, or a store from a source
+		// whose static type verification could not pin down leaves a
+		// concrete TypedArray[U] with U != T in the slot), so a miss on the
+		// specialized TypedArray[T] assertion falls back to
+		// (*Interpreter).arrayElem, the same generic reader the unfused
+		// handler calls unconditionally — every other TypedArray[_]
+		// representation and the generic *types.Array alike — instead of
+		// trapping a case the unfused handler accepts. This arm still
+		// returns on its own success path, so no variable is live across it
+		// and the fallback below.
 		body = append(body, jen.If(
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.Id("ok"),
 		).Block(append([]jen.Code{
 			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
 		}, tail(boxArray(current.kind, jen.Id("array"), jen.Id("at")))...)...))
-		body = append(body, jen.If(
-			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Array")),
-			jen.Id("ok"),
-		).Block(append(append([]jen.Code{
-			jen.Var().Id("result").Qual("github.com/siyul-park/minivm/types", "Boxed"),
-		}, arrayGetElem(jen.Id("at"))...), tail(jen.Id("result"))...)...))
-		body = append(body, jen.Panic(jen.Id("ErrTypeMismatch")))
+		body = append(body, tail(jen.Id("i").Dot("arrayElem").Call(container.raw, jen.Id("at")))...)
 		compile = append(compile,
 			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
 			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
@@ -1113,20 +1113,15 @@ func structIndex(state *state, current step) (value, error) {
 		// never the runtime value's concrete representation: the same local,
 		// global, or upvalue slot the unfused STRUCT_GET handler would read
 		// off a *HostObject can reach a fused STRUCT_GET too, so a miss on
-		// the specialized *types.Struct assertion falls back to the same
-		// *HostObject arm the unfused handler runs, instead of trapping a
-		// case it accepts.
+		// the specialized *types.Struct assertion falls back to
+		// (*Interpreter).structField, the same generic reader the unfused
+		// handler calls unconditionally, instead of trapping a case it
+		// accepts.
 		body = append(body, jen.If(
 			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Struct")),
 			jen.Id("ok"),
 		).Block(structBody...))
-		body = append(body, jen.If(
-			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Id("HostObject")),
-			jen.Id("ok"),
-		).Block(append(append([]jen.Code{
-			jen.Var().Id("result").Qual("github.com/siyul-park/minivm/types", "Boxed"),
-		}, structGetHostObject(jen.Id("at"))...), tail(jen.Id("result"))...)...))
-		body = append(body, jen.Panic(jen.Id("ErrTypeMismatch")))
+		body = append(body, tail(jen.Id("i").Dot("structField").Call(container.raw, jen.Id("at")))...)
 		cases = append(cases, jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)).Block(
 			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
 			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
@@ -1725,79 +1720,28 @@ func retire(guard jen.Code) []jen.Code {
 	}
 }
 
-// lookup emits ARRAY_GET and STRUCT_GET from a resolved index expression.
+// lookup emits ARRAY_GET and STRUCT_GET from a resolved index expression,
+// delegating the per-representation read to (*Interpreter).arrayElem or
+// (*Interpreter).structField so this generated handler and every fused
+// fallback that reaches the same generic case share one runtime copy of the
+// dispatch instead of duplicating it in generated code.
 func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
-	body := []jen.Code{
+	method := "arrayElem"
+	if op != instr.ARRAY_GET {
+		method = "structField"
+	}
+	return []jen.Code{
 		jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.Id("ref").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
 		jen.If(jen.Id("ref").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		jen.Id("addr").Op(":=").Id("ref").Dot("Ref").Call(),
-		jen.Var().Id("result").Qual("github.com/siyul-park/minivm/types", "Boxed"),
-	}
-	if op == instr.ARRAY_GET {
-		body = append(body, jen.Switch(jen.Id("array").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Bool())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Int8())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI8").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Int32())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Int64())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Id("i").Dot("boxI64").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Float32())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Float64())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Array")).Block(
-				arrayGetElem(index)...,
-			),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		))
-	} else {
-		field := func() jen.Code { return jen.Id("value").Dot("Typ").Dot("Fields").Index(index) }
-		data := func() jen.Code { return jen.Id("value").Dot("Data").Index(index) }
-		body = append(body, jen.Switch(jen.Id("value").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
-			jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Struct")).Block(
-				jen.If(jen.Add(index).Op("<").Lit(0).Op("||").Add(index).Op(">=").Len(jen.Id("value").Dot("Typ").Dot("Fields"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-				jen.Switch(jen.Add(field()).Dot("Kind")).Block(
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI32")).Block(jen.Id("result").Op("=").Add(structFieldBox(instr.KindI32, data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI8")).Block(jen.Id("result").Op("=").Add(structFieldBox(instr.KindI8, data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI1")).Block(jen.Id("result").Op("=").Add(structFieldBox(instr.KindI1, data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(jen.Id("result").Op("=").Add(structFieldBox(instr.KindI64, data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindF32")).Block(jen.Id("result").Op("=").Add(structFieldBox(instr.KindF32, data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindF64")).Block(jen.Id("result").Op("=").Add(structFieldBox(instr.KindF64, data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-						jen.Id("result").Op("=").Add(structFieldBox(instr.KindRef, data())),
-						jen.Id("i").Dot("retainBox").Call(jen.Id("result")),
-					),
-					jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-				),
-			),
-			jen.Case(jen.Op("*").Id("HostObject")).Block(
-				structGetHostObject(index)...,
-			),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		))
-	}
-	return append(body,
+		jen.Id("result").Op(":=").Id("i").Dot(method).Call(jen.Id("addr"), index),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("--"),
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id("result"),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
-	)
+	}
 }
 
 func bounds(offset, size, length jen.Code) jen.Code {
@@ -2325,48 +2269,6 @@ func fieldKindName(kind instr.Kind) (string, bool) {
 		return "I8", true
 	default:
 		return kindName(kind)
-	}
-}
-
-// arrayGetElem returns the runtime body that reads array.Elems[index] once
-// array is known to be bound to a *types.Array, assigning through the
-// enclosing var result types.Boxed. It matches the unfused ARRAY_GET
-// handler's *types.Array arm exactly: bounds check against len(array.Elems),
-// then retain the read element, since array elements are always owned refs.
-// Both the unfused handler (lookup) and every fused ARRAY_GET path that can
-// reach a boxed-element array at runtime share this single copy so their
-// bounds checks and retain rules cannot drift apart.
-func arrayGetElem(index jen.Code) []jen.Code {
-	return []jen.Code{
-		bounds(index, jen.Lit(1), jen.Len(jen.Id("array").Dot("Elems"))),
-		jen.Id("result").Op("=").Id("array").Dot("Elems").Index(index),
-		jen.Id("i").Dot("retainBox").Call(jen.Id("result")),
-	}
-}
-
-// structGetHostObject returns the runtime body that reads field index off a
-// *HostObject once value is known to be bound to one, assigning through the
-// enclosing var result types.Boxed. It matches the unfused STRUCT_GET
-// handler's *HostObject arm exactly: dispatch on the field's runtime Kind,
-// box scalar fields directly, and retain a ref field only when value.read
-// reports it is not already owned. Both the unfused handler (lookup) and
-// every fused STRUCT_GET path that can reach a *HostObject at runtime share
-// this single copy so their per-Kind boxing and ownership rules cannot drift
-// apart.
-func structGetHostObject(index jen.Code) []jen.Code {
-	return []jen.Code{
-		jen.List(jen.Id("kind"), jen.Id("ok")).Op(":=").Id("value").Dot("kind").Call(index),
-		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-		jen.Switch(jen.Id("kind")).Block(
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI32"), jen.Qual("github.com/siyul-park/minivm/types", "KindI8"), jen.Qual("github.com/siyul-park/minivm/types", "KindI1"), jen.Qual("github.com/siyul-park/minivm/types", "KindF32"), jen.Qual("github.com/siyul-park/minivm/types", "KindF64")).Block(jen.List(jen.Id("result"), jen.Id("_"), jen.Id("_")).Op("=").Id("value").Dot("read").Call(index)),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(jen.Id("result").Op("=").Id("i").Dot("boxI64").Call(jen.Int64().Call(jen.Id("value").Dot("Raw").Call(index)))),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-				jen.List(jen.Id("boxed"), jen.Id("owned"), jen.Id("_")).Op(":=").Id("value").Dot("read").Call(index),
-				jen.Id("result").Op("=").Id("boxed"),
-				jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
-			),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		),
 	}
 }
 

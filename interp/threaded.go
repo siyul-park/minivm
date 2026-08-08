@@ -3650,47 +3650,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				addr := ref.Ref()
-				var result types.Boxed
-				switch array := i.heap[addr].(type) {
-				case types.TypedArray[bool]:
-					if index < 0 || index+1 > len(array) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = types.BoxI1(array[index])
-				case types.TypedArray[int8]:
-					if index < 0 || index+1 > len(array) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = types.BoxI8(array[index])
-				case types.TypedArray[int32]:
-					if index < 0 || index+1 > len(array) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = types.BoxI32(array[index])
-				case types.TypedArray[int64]:
-					if index < 0 || index+1 > len(array) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = i.boxI64(array[index])
-				case types.TypedArray[float32]:
-					if index < 0 || index+1 > len(array) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = types.BoxF32(array[index])
-				case types.TypedArray[float64]:
-					if index < 0 || index+1 > len(array) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = types.BoxF64(array[index])
-				case *types.Array:
-					if index < 0 || index+1 > len(array.Elems) {
-						panic(ErrIndexOutOfRange)
-					}
-					result = array.Elems[index]
-					i.retainBox(result)
-				default:
-					panic(ErrTypeMismatch)
-				}
+				result := i.arrayElem(addr, index)
 				i.release(addr)
 				i.sp--
 				i.stack[i.sp] = result
@@ -4421,53 +4381,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				addr := ref.Ref()
-				var result types.Boxed
-				switch value := i.heap[addr].(type) {
-				case *types.Struct:
-					if index < 0 || index >= len(value.Typ.Fields) {
-						panic(ErrSegmentationFault)
-					}
-					switch value.Typ.Fields[index].Kind {
-					case types.KindI32:
-						result = types.BoxI32(int32(uint32(value.Data[index])))
-					case types.KindI8:
-						result = types.BoxI8(int8(uint32(value.Data[index])))
-					case types.KindI1:
-						result = types.BoxI1(value.Data[index] != 0)
-					case types.KindI64:
-						result = i.boxI64(int64(value.Data[index]))
-					case types.KindF32:
-						result = types.BoxF32(math.Float32frombits(uint32(value.Data[index])))
-					case types.KindF64:
-						result = types.BoxF64(math.Float64frombits(value.Data[index]))
-					case types.KindRef:
-						result = types.Boxed(value.Data[index])
-						i.retainBox(result)
-					default:
-						panic(ErrTypeMismatch)
-					}
-				case *HostObject:
-					kind, ok := value.kind(index)
-					if !ok {
-						panic(ErrSegmentationFault)
-					}
-					switch kind {
-					case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-						result, _, _ = value.read(index)
-					case types.KindI64:
-						result = i.boxI64(int64(value.Raw(index)))
-					case types.KindRef:
-						boxed, owned, _ := value.read(index)
-						result = boxed
-						if !owned {
-							i.retainBox(result)
-						}
-					default:
-						panic(ErrTypeMismatch)
-					}
-				default:
-					panic(ErrTypeMismatch)
-				}
+				result := i.structField(addr, index)
 				i.release(addr)
 				i.sp--
 				i.stack[i.sp] = result
@@ -21730,32 +21644,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				case types.KindI8:
 					c.ip += 3
@@ -21784,32 +21676,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				case types.KindI32:
 					c.ip += 3
@@ -21838,32 +21708,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				case types.KindI64:
 					c.ip += 3
@@ -21892,32 +21740,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				case types.KindF32:
 					c.ip += 3
@@ -21946,32 +21772,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				case types.KindF64:
 					c.ip += 3
@@ -22000,32 +21804,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				case types.KindRef:
 					c.ip += 3
@@ -22055,32 +21837,10 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 7
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 7
+						return
 					}
 				default:
 					goto l481
@@ -22132,32 +21892,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				case types.KindI8:
 					c.ip += 3
@@ -22186,32 +21924,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				case types.KindI32:
 					c.ip += 3
@@ -22240,32 +21956,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				case types.KindI64:
 					c.ip += 3
@@ -22294,32 +21988,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				case types.KindF32:
 					c.ip += 3
@@ -22348,32 +22020,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				case types.KindF64:
 					c.ip += 3
@@ -22402,32 +22052,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				case types.KindRef:
 					c.ip += 3
@@ -22457,32 +22085,10 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 9
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 9
+						return
 					}
 				default:
 					goto l482
@@ -22533,19 +22139,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l483:
@@ -22594,19 +22191,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l484:
@@ -22650,19 +22238,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l485:
@@ -22710,19 +22289,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l486:
@@ -22762,19 +22332,10 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 9
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 9
+					return
 				}
 			}
 		l487:
@@ -22822,19 +22383,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l488:
@@ -22883,19 +22435,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l489:
@@ -22939,19 +22482,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l490:
@@ -22999,19 +22533,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l491:
@@ -23051,19 +22576,10 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 9
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 9
+					return
 				}
 			}
 		l492:
@@ -23111,19 +22627,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l493:
@@ -23172,19 +22679,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l494:
@@ -23228,19 +22726,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l495:
@@ -23288,19 +22777,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l496:
@@ -23340,19 +22820,10 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 9
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 9
+					return
 				}
 			}
 		l497:
@@ -23400,19 +22871,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l498:
@@ -23461,19 +22923,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l499:
@@ -23517,19 +22970,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l500:
@@ -23577,19 +23021,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l501:
@@ -23629,19 +23064,10 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 9
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 9
+					return
 				}
 			}
 		l502:
@@ -23689,19 +23115,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l503:
@@ -23750,19 +23167,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l504:
@@ -23806,19 +23214,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l505:
@@ -23866,19 +23265,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l506:
@@ -23918,19 +23308,10 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 9
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 9
+					return
 				}
 			}
 		l507:
@@ -23978,19 +23359,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l508:
@@ -24039,19 +23411,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l509:
@@ -24095,19 +23458,10 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 7
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 7
+					return
 				}
 			}
 		l510:
@@ -24155,19 +23509,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l511:
@@ -24207,19 +23552,10 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 9
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 9
+					return
 				}
 			}
 		l512:
@@ -37369,32 +36705,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindI8:
 					c.ip += 2
@@ -37424,32 +36738,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindI32:
 					c.ip += 2
@@ -37479,32 +36771,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindI64:
 					c.ip += 2
@@ -37534,32 +36804,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindF32:
 					c.ip += 2
@@ -37589,32 +36837,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindF64:
 					c.ip += 2
@@ -37644,32 +36870,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindRef:
 					c.ip += 2
@@ -37700,32 +36904,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				default:
 					goto l325
@@ -37778,32 +36960,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindI8:
 					c.ip += 2
@@ -37833,32 +36993,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindI32:
 					c.ip += 2
@@ -37888,32 +37026,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindI64:
 					c.ip += 2
@@ -37943,32 +37059,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindF32:
 					c.ip += 2
@@ -37998,32 +37092,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindF64:
 					c.ip += 2
@@ -38053,32 +37125,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindRef:
 					c.ip += 2
@@ -38109,32 +37159,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				default:
 					goto l326
@@ -38186,19 +37214,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l327:
@@ -38248,19 +37267,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l328:
@@ -38305,19 +37315,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l329:
@@ -38366,19 +37367,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l330:
@@ -38419,19 +37411,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l331:
@@ -38480,19 +37463,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l332:
@@ -38542,19 +37516,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l333:
@@ -38599,19 +37564,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l334:
@@ -38660,19 +37616,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l335:
@@ -38713,19 +37660,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l336:
@@ -38774,19 +37712,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l337:
@@ -38836,19 +37765,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l338:
@@ -38893,19 +37813,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l339:
@@ -38954,19 +37865,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l340:
@@ -39007,19 +37909,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l341:
@@ -39068,19 +37961,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l342:
@@ -39130,19 +38014,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l343:
@@ -39187,19 +38062,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l344:
@@ -39248,19 +38114,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l345:
@@ -39301,19 +38158,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l346:
@@ -39362,19 +38210,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l347:
@@ -39424,19 +38263,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l348:
@@ -39481,19 +38311,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l349:
@@ -39542,19 +38363,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l350:
@@ -39595,19 +38407,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l351:
@@ -39656,19 +38459,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l352:
@@ -39718,19 +38512,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l353:
@@ -39775,19 +38560,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l354:
@@ -39836,19 +38612,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l355:
@@ -39889,19 +38656,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l356:
@@ -45318,47 +44076,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					var result types.Boxed
-					switch array := i.heap[addr].(type) {
-					case types.TypedArray[bool]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxI1(array[int(v0)])
-					case types.TypedArray[int8]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxI8(array[int(v0)])
-					case types.TypedArray[int32]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxI32(array[int(v0)])
-					case types.TypedArray[int64]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = i.boxI64(array[int(v0)])
-					case types.TypedArray[float32]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxF32(array[int(v0)])
-					case types.TypedArray[float64]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxF64(array[int(v0)])
-					case *types.Array:
-						if int(v0) < 0 || int(v0)+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[int(v0)]
-						i.retainBox(result)
-					default:
-						panic(ErrTypeMismatch)
-					}
+					result := i.arrayElem(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result
@@ -45386,53 +44104,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					var result types.Boxed
-					switch value := i.heap[addr].(type) {
-					case *types.Struct:
-						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
-							panic(ErrSegmentationFault)
-						}
-						switch value.Typ.Fields[int(v0)].Kind {
-						case types.KindI32:
-							result = types.BoxI32(int32(uint32(value.Data[int(v0)])))
-						case types.KindI8:
-							result = types.BoxI8(int8(uint32(value.Data[int(v0)])))
-						case types.KindI1:
-							result = types.BoxI1(value.Data[int(v0)] != 0)
-						case types.KindI64:
-							result = i.boxI64(int64(value.Data[int(v0)]))
-						case types.KindF32:
-							result = types.BoxF32(math.Float32frombits(uint32(value.Data[int(v0)])))
-						case types.KindF64:
-							result = types.BoxF64(math.Float64frombits(value.Data[int(v0)]))
-						case types.KindRef:
-							result = types.Boxed(value.Data[int(v0)])
-							i.retainBox(result)
-						default:
-							panic(ErrTypeMismatch)
-						}
-					case *HostObject:
-						kind, ok := value.kind(int(v0))
-						if !ok {
-							panic(ErrSegmentationFault)
-						}
-						switch kind {
-						case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-							result, _, _ = value.read(int(v0))
-						case types.KindI64:
-							result = i.boxI64(int64(value.Raw(int(v0))))
-						case types.KindRef:
-							boxed, owned, _ := value.read(int(v0))
-							result = boxed
-							if !owned {
-								i.retainBox(result)
-							}
-						default:
-							panic(ErrTypeMismatch)
-						}
-					default:
-						panic(ErrTypeMismatch)
-					}
+					result := i.structField(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result
@@ -62781,32 +61453,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindI8:
 					c.ip += 2
@@ -62835,32 +61485,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindI32:
 					c.ip += 2
@@ -62889,32 +61517,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindI64:
 					c.ip += 2
@@ -62943,32 +61549,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindF32:
 					c.ip += 2
@@ -62997,32 +61581,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindF64:
 					c.ip += 2
@@ -63051,32 +61613,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				case types.KindRef:
 					c.ip += 2
@@ -63106,32 +61646,10 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 6
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 6
+						return
 					}
 				default:
 					goto l481
@@ -63183,32 +61701,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindI8:
 					c.ip += 2
@@ -63237,32 +61733,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindI32:
 					c.ip += 2
@@ -63291,32 +61765,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindI64:
 					c.ip += 2
@@ -63345,32 +61797,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindF32:
 					c.ip += 2
@@ -63399,32 +61829,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindF64:
 					c.ip += 2
@@ -63453,32 +61861,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				case types.KindRef:
 					c.ip += 2
@@ -63508,32 +61894,10 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						if value, ok := i.heap[v0].(*HostObject); ok {
-							var result types.Boxed
-							kind, ok := value.kind(at)
-							if !ok {
-								panic(ErrSegmentationFault)
-							}
-							switch kind {
-							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-								result, _, _ = value.read(at)
-							case types.KindI64:
-								result = i.boxI64(int64(value.Raw(at)))
-							case types.KindRef:
-								boxed, owned, _ := value.read(at)
-								result = boxed
-								if !owned {
-									i.retainBox(result)
-								}
-							default:
-								panic(ErrTypeMismatch)
-							}
-							i.stack[i.sp] = result
-							i.sp++
-							i.fr.ip += 8
-							return
-						}
-						panic(ErrTypeMismatch)
+						i.stack[i.sp] = i.structField(v0, at)
+						i.sp++
+						i.fr.ip += 8
+						return
 					}
 				default:
 					goto l482
@@ -63584,19 +61948,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l483:
@@ -63645,19 +62000,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l484:
@@ -63701,19 +62047,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l485:
@@ -63761,19 +62098,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l486:
@@ -63813,19 +62141,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l487:
@@ -63873,19 +62192,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l488:
@@ -63934,19 +62244,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l489:
@@ -63990,19 +62291,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l490:
@@ -64050,19 +62342,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l491:
@@ -64102,19 +62385,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l492:
@@ -64162,19 +62436,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l493:
@@ -64223,19 +62488,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l494:
@@ -64279,19 +62535,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l495:
@@ -64339,19 +62586,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l496:
@@ -64391,19 +62629,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l497:
@@ -64451,19 +62680,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l498:
@@ -64512,19 +62732,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l499:
@@ -64568,19 +62779,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l500:
@@ -64628,19 +62830,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l501:
@@ -64680,19 +62873,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l502:
@@ -64740,19 +62924,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l503:
@@ -64801,19 +62976,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l504:
@@ -64857,19 +63023,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l505:
@@ -64917,19 +63074,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l506:
@@ -64969,19 +63117,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l507:
@@ -65029,19 +63168,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l508:
@@ -65090,19 +63220,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l509:
@@ -65146,19 +63267,10 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 6
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 6
+					return
 				}
 			}
 		l510:
@@ -65206,19 +63318,10 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 5
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 5
+					return
 				}
 			}
 		l511:
@@ -65258,19 +63361,10 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					if array, ok := i.heap[v0].(*types.Array); ok {
-						var result types.Boxed
-						if at < 0 || at+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[at]
-						i.retainBox(result)
-						i.stack[i.sp] = result
-						i.sp++
-						i.fr.ip += 8
-						return
-					}
-					panic(ErrTypeMismatch)
+					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.sp++
+					i.fr.ip += 8
+					return
 				}
 			}
 		l512:
@@ -67669,47 +65763,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					var result types.Boxed
-					switch array := i.heap[addr].(type) {
-					case types.TypedArray[bool]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxI1(array[int(v0)])
-					case types.TypedArray[int8]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxI8(array[int(v0)])
-					case types.TypedArray[int32]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxI32(array[int(v0)])
-					case types.TypedArray[int64]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = i.boxI64(array[int(v0)])
-					case types.TypedArray[float32]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxF32(array[int(v0)])
-					case types.TypedArray[float64]:
-						if int(v0) < 0 || int(v0)+1 > len(array) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = types.BoxF64(array[int(v0)])
-					case *types.Array:
-						if int(v0) < 0 || int(v0)+1 > len(array.Elems) {
-							panic(ErrIndexOutOfRange)
-						}
-						result = array.Elems[int(v0)]
-						i.retainBox(result)
-					default:
-						panic(ErrTypeMismatch)
-					}
+					result := i.arrayElem(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result
@@ -67733,53 +65787,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					var result types.Boxed
-					switch value := i.heap[addr].(type) {
-					case *types.Struct:
-						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
-							panic(ErrSegmentationFault)
-						}
-						switch value.Typ.Fields[int(v0)].Kind {
-						case types.KindI32:
-							result = types.BoxI32(int32(uint32(value.Data[int(v0)])))
-						case types.KindI8:
-							result = types.BoxI8(int8(uint32(value.Data[int(v0)])))
-						case types.KindI1:
-							result = types.BoxI1(value.Data[int(v0)] != 0)
-						case types.KindI64:
-							result = i.boxI64(int64(value.Data[int(v0)]))
-						case types.KindF32:
-							result = types.BoxF32(math.Float32frombits(uint32(value.Data[int(v0)])))
-						case types.KindF64:
-							result = types.BoxF64(math.Float64frombits(value.Data[int(v0)]))
-						case types.KindRef:
-							result = types.Boxed(value.Data[int(v0)])
-							i.retainBox(result)
-						default:
-							panic(ErrTypeMismatch)
-						}
-					case *HostObject:
-						kind, ok := value.kind(int(v0))
-						if !ok {
-							panic(ErrSegmentationFault)
-						}
-						switch kind {
-						case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-							result, _, _ = value.read(int(v0))
-						case types.KindI64:
-							result = i.boxI64(int64(value.Raw(int(v0))))
-						case types.KindRef:
-							boxed, owned, _ := value.read(int(v0))
-							result = boxed
-							if !owned {
-								i.retainBox(result)
-							}
-						default:
-							panic(ErrTypeMismatch)
-						}
-					default:
-						panic(ErrTypeMismatch)
-					}
+					result := i.structField(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result

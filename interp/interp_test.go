@@ -1292,6 +1292,25 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
+		// LOCAL_SET does not recheck the declared type of the slot it writes
+		// into, so a local declared as a concrete i32-element array can still
+		// hold a different concrete element kind (here f32) at runtime.
+		// array.get's fused LOCAL_GET path proves only the local's declared
+		// element kind at threading time, so a miss on its specialized
+		// TypedArray[int32] assertion must fall back through every other
+		// concrete TypedArray[_] representation, not just *types.Array,
+		// instead of trapping a case the unfused handler accepts.
+		name: "const.get of a mismatched-element typed array local.set local.get i32.const array.get on a declared i32 array local returns the actual f32 element",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithConstants(types.TypedArray[float32]{1.5}),
+			program.WithLocals(types.TypeI32Array),
+		),
+		values: []types.Value{types.F32(1.5)},
+	},
+	{
 		name: "i32.const f64.const struct.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
@@ -1466,6 +1485,26 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
+		// The generated GLOBAL_SET handler does not recheck the declared type
+		// of the slot it writes into, so a global declared as a concrete
+		// i32-element array can still hold a different concrete element kind
+		// (here f32) at runtime. array.get's fused GLOBAL_GET path proves
+		// only the global's declared element kind at threading time, so a
+		// miss on its specialized TypedArray[int32] assertion must fall back
+		// through every other concrete TypedArray[_] representation, not
+		// just *types.Array, instead of trapping a case the unfused handler
+		// accepts.
+		name: "const.get of a mismatched-element typed array global.set global.get i32.const array.get on a declared i32 array global returns the actual f32 element",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithConstants(types.TypedArray[float32]{1.5}),
+			program.WithGlobals(types.TypeI32Array),
+		),
+		values: []types.Value{types.F32(1.5)},
+	},
+	{
 		name: "i32.const global.set global.get i32.const array.get on a scalar stored into a declared array global traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
@@ -1531,6 +1570,33 @@ var runTests = []struct {
 				MustBuild()),
 		),
 		values: []types.Value{types.Null},
+	},
+	{
+		// CLOSURE_NEW does not recheck a captured value's type against the
+		// callee's declared Captures, so an upvalue declared as a concrete
+		// i32-element array can still hold a different concrete element kind
+		// (here f32) at runtime. array.get's fused UPVAL_GET path proves only
+		// the upvalue's declared element kind at threading time, so a miss on
+		// its specialized TypedArray[int32] assertion must fall back through
+		// every other concrete TypedArray[_] representation, not just
+		// *types.Array, instead of trapping a case the unfused handler
+		// accepts.
+		name: "const.get of a mismatched-element typed array const.get closure.new call on a declared i32 array upvalue returns the actual f32 element",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.CALL),
+		},
+			program.WithConstants(
+				types.TypedArray[float32]{1.5},
+				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF32}}).
+					Captures(types.TypeI32Array).
+					Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+					MustBuild(),
+			),
+		),
+		values: []types.Value{types.F32(1.5)},
 	},
 	{
 		name: "i32.const const.get closure.new call on a scalar captured into a declared array upvalue traps type mismatch",

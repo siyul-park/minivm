@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"sync/atomic"
 	"unsafe"
@@ -1755,6 +1756,125 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 	}
 	addr := i.alloc(types.I64(val))
 	return types.BoxRef(addr)
+}
+
+// arrayElem reads the element at index at off the array bound to heap
+// address addr, covering every TypedArray[_] representation and the generic
+// *types.Array alike. It is the generic counterpart to the specialized reads
+// array.get fusion emits when a slot's declared element kind matches the
+// runtime representation: a fused handler falls back to arrayElem exactly
+// when that specialization misses, and the unfused ARRAY_GET handler calls
+// it unconditionally. A *types.Array element is always an owned ref and is
+// retained here; a TypedArray[_] element is a scalar copy and needs none.
+// arrayElem does not release addr itself — callers that only borrowed the
+// container ref (a fused read) must leave it alone, and callers that popped
+// an owned ref (the unfused handler) must release it themselves.
+func (i *Interpreter) arrayElem(addr, at int) types.Boxed {
+	switch array := i.heap[addr].(type) {
+	case types.TypedArray[bool]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		return types.BoxI1(array[at])
+	case types.TypedArray[int8]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		return types.BoxI8(array[at])
+	case types.TypedArray[int32]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		return types.BoxI32(array[at])
+	case types.TypedArray[int64]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		return i.boxI64(array[at])
+	case types.TypedArray[float32]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		return types.BoxF32(array[at])
+	case types.TypedArray[float64]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		return types.BoxF64(array[at])
+	case *types.Array:
+		if at < 0 || at >= len(array.Elems) {
+			panic(ErrIndexOutOfRange)
+		}
+		result := array.Elems[at]
+		i.retainBox(result)
+		return result
+	default:
+		panic(ErrTypeMismatch)
+	}
+}
+
+// structField reads the field at index at off the struct or host object
+// bound to heap address addr, covering *types.Struct and *HostObject alike.
+// It is the generic counterpart to the specialized reads struct.get fusion
+// emits for a declared *types.StructType slot: a fused handler falls back
+// to structField exactly when the runtime value turns out to be a
+// *HostObject instead, and the unfused STRUCT_GET handler calls it
+// unconditionally for either representation. A *types.Struct KindRef field
+// and a *HostObject KindRef field are both retained, except a *HostObject
+// field already reported as owned by read, which must not be retained
+// again. structField does not release addr itself, for the same reason
+// arrayElem does not.
+func (i *Interpreter) structField(addr, at int) types.Boxed {
+	switch value := i.heap[addr].(type) {
+	case *types.Struct:
+		if at < 0 || at >= len(value.Typ.Fields) {
+			panic(ErrSegmentationFault)
+		}
+		kind := value.Typ.Fields[at].Kind
+		data := value.Data[at]
+		switch kind {
+		case types.KindI1:
+			return types.BoxI1(data != 0)
+		case types.KindI8:
+			return types.BoxI8(int8(uint32(data)))
+		case types.KindI32:
+			return types.BoxI32(int32(uint32(data)))
+		case types.KindI64:
+			return i.boxI64(int64(data))
+		case types.KindF32:
+			return types.BoxF32(math.Float32frombits(uint32(data)))
+		case types.KindF64:
+			return types.BoxF64(math.Float64frombits(data))
+		case types.KindRef:
+			result := types.Boxed(data)
+			i.retainBox(result)
+			return result
+		default:
+			panic(ErrTypeMismatch)
+		}
+	case *HostObject:
+		kind, ok := value.kind(at)
+		if !ok {
+			panic(ErrSegmentationFault)
+		}
+		switch kind {
+		case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+			result, _, _ := value.read(at)
+			return result
+		case types.KindI64:
+			return i.boxI64(int64(value.Raw(at)))
+		case types.KindRef:
+			result, owned, _ := value.read(at)
+			if !owned {
+				i.retainBox(result)
+			}
+			return result
+		default:
+			panic(ErrTypeMismatch)
+		}
+	default:
+		panic(ErrTypeMismatch)
+	}
 }
 
 // intern returns a heap ref for s. Interpreters are single-threaded; callers
