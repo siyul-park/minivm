@@ -36,6 +36,21 @@ concurrent benchmark processes did not compete for CPU time. The comparison
 numbers use `-benchtime=300ms`; a short-warmup adaptive mode can read slightly
 slower there than in a focused single-kernel run.
 
+The ported minipy kernels and the CPython comparison were measured on
+August 7, 2026 from five samples on a different host:
+
+- Intel Xeon @ 2.80GHz, 4 cores
+- `linux/amd64`
+- Go 1.26.2
+- CPython 3.13.12
+
+**These two hosts are not comparable and their numbers are never mixed.**
+AMD64 has no JIT backend — `interp/jit_stub.go` disables compiler construction
+off ARM64 — so on that host `default` and `jit` are threaded execution plus
+profiling overhead, and `threaded` is the only mode whose ratio against another
+interpreter means anything. Every darwin/arm64 table below remains the
+authority for native and adaptive behavior.
+
 ## Reproduction
 
 ```bash
@@ -102,6 +117,27 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
   reproduces the regressions on its own, because the host-boundary scan needs
   an embedder and a per-call leak does not compound inside one benchmark
   operation.
+
+- Ten kernels ported from `siyul-park/minipy`'s benchmark corpus add the
+  module's first f64, i64, and string coverage; every kernel before them was
+  integer-only. See `benchmarks/README.md` for the source mapping, the fixture
+  sizes, and the two translation deviations. They are measured against CPython
+  on `linux/amd64`; see [CPython Comparison](#cpython-comparison).
+- Fusing `array.get` on typed-array locals cuts `NBody(100)` **-29.0%**,
+  `Sieve(256)` **-13.0%**, and `SpectralNorm(24)` **-9.3%** in threaded mode,
+  with `B/op` and `allocs/op` identical on both sides. Profiling `NBody`
+  put four handlers plus dispatch at about 77% of runtime: the container
+  `LOCAL_GET` retained a ref that `ARRAY_GET` released one dispatch later, and
+  `ARRAY_GET` switched over every element kind on every access. The catalog
+  already fused this shape for a compile-time constant container; the container
+  may now also be a local whose declared type is a concrete typed array, and it
+  is borrowed rather than retained. `array.set`, `global.get`, and `upval.get`
+  containers remain unfused (issues #173, #174).
+- Porting the corpus surfaced one verification defect: `array.fill` declared
+  its operand kinds in the wrong order in `instr/type.go`, assigning `KindAny`
+  to the size operand and `KindI32` to the fill value. Since both are `i32` for
+  an i32 array the error was invisible, but every `f64`, `i64`, `f32`, `i8`,
+  and `i1` array failed `program.Verify` even though the runtime handled them.
 
 These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, host-call conventions, and compilation strategies.
 
@@ -215,6 +251,59 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | BranchTree(96) | Yaegi | 10,769 | 1,832 | 308 |
 
 Wazero has no equivalent canonical fixture for `ClosureCounter(128)` or `AllocationGraph(128)`, so those rows are `N/A`.
+
+### CPython Comparison
+
+Ten kernels ported from `siyul-park/minipy`'s benchmark corpus answer a
+narrower question than the table above: how minivm's threaded interpreter
+compares with CPython's, on the same algorithm. minipy compiles Python to
+minivm bytecode, so its own published ratios conflate its code generation with
+minivm's execution cost; hand-written kernels isolate the second.
+
+**Measured on `linux/amd64`, not the darwin/arm64 host above.** That host has
+no JIT backend, so `threaded` is the mode reported here — CPython is a pure
+interpreter, and comparing it against an adaptive mode that may or may not have
+compiled would not answer the question. Median of five samples at
+`-benchtime=300ms`; `B/op` and `allocs/op` are minivm's.
+
+| Workload | minivm/threaded ns/op | CPython 3.13 ns/op | ratio | B/op | allocs/op |
+|---|---:|---:|---:|---:|---:|
+| SpectralNorm(24) | 463,373 | 819,218 | **0.57** | 648 | 6 |
+| Mandelbrot(16x16) | 270,899 | 414,391 | **0.65** | 0 | 0 |
+| MatMul(16) | 354,315 | 464,071 | **0.76** | 6,216 | 6 |
+| SortStress(128) | 626,727 | 713,681 | **0.88** | 5,136 | 512 |
+| NBody(100) | 588,776 | 573,398 | 1.03 | 504 | 14 |
+| Fannkuch(6) | 934,544 | 760,761 | 1.23 | 34,608 | 1,442 |
+| NQueens(7) | 550,201 | 407,940 | 1.35 | 120 | 6 |
+| BinaryTrees(4,6) | 2,627,955 | 1,941,612 | 1.35 | 556,192 | 8,888 |
+| StringBuild(512) | 1,703,922 | 684,396 | 2.49 | 1,724,160 | 5,118 |
+
+Ratios below 1.00 mean minivm is faster. Reading them:
+
+- **Scalar and float work beats CPython.** Spectral norm, Mandelbrot, and
+  matrix multiply run 0.57-0.76x, and sort stress 0.88x on an identical
+  hand-written insertion sort.
+- **Allocation and string work does not.** Binary trees is 1.35x with 8,888
+  allocations per operation, and string build 2.49x with 1.7 MB per operation —
+  the widest gap in the corpus. Issues #172 and #175 track those.
+- **NBody moved from 1.61x to 1.03x** when `array.get` fusion on typed-array
+  locals landed. NQueens did not move, because its kernel declares its array
+  parameters as `types.TypeRef` and so never reaches the fused path
+  (issue #176); the fusion's dependence on a declared concrete type is
+  issue #174.
+
+CPython runs as a subprocess, since it is not a Go library. The driver spawns
+`python3.13` once, runs the workload `b.N` times inside a `time.perf_counter()`
+window, and reports that elapsed time, so the interpreter's own startup is
+excluded rather than amortized. It verifies the checksum before timing, runs
+with `PYTHONHASHSEED=0`, and the row is skipped when `python3.13` is absent.
+
+```bash
+cd benchmarks
+go test -tags=compare -run='^$' \
+  -bench='^(BenchmarkNumeric_(NBody|SpectralNorm|Mandelbrot|MatMul)|BenchmarkCall_(NQueens|Fannkuch)|BenchmarkMemory_(BinaryTrees|SortStress|StringBuild))$' \
+  -benchmem -benchtime=300ms -count=5 ./...
+```
 
 ## Public API Costs
 
