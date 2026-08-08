@@ -122,7 +122,11 @@ func scalars() []pattern {
 			}
 		}
 	}
-	typedArrays := []pattern{
+	// Every typed-array container, whether a compile-time constant or a
+	// LOCAL_GET/GLOBAL_GET/UPVAL_GET whose declared type is a concrete
+	// element kind, pairs with every scalar index producer to feed
+	// array.get.
+	containers := []pattern{
 		constant[types.TypedArray[bool]](),
 		constant[types.TypedArray[int8]](),
 		constant[types.TypedArray[int32]](),
@@ -130,16 +134,39 @@ func scalars() []pattern {
 		constant[types.TypedArray[float32]](),
 		constant[types.TypedArray[float64]](),
 	}
-	for _, array := range typedArrays {
-		for _, index := range producers[types.I32](instr.I32_CONST) {
-			patterns = append(patterns, seq(array, index, op(instr.ARRAY_GET)))
-		}
+	for _, source := range containerSources {
+		containers = append(containers,
+			typedContainer[types.TypedArray[bool]](source),
+			typedContainer[types.TypedArray[int8]](source),
+			typedContainer[types.TypedArray[int32]](source),
+			typedContainer[types.TypedArray[int64]](source),
+			typedContainer[types.TypedArray[float32]](source),
+			typedContainer[types.TypedArray[float64]](source),
+		)
 	}
-	patterns = append(patterns, cross(
-		[]pattern{op(instr.I32_CONST), constant[types.I32]()},
-		op(instr.ARRAY_GET),
-		op(instr.STRUCT_GET),
-	)...)
+	indexed := make([]pattern, 0, len(producers[types.I32](instr.I32_CONST)))
+	for _, index := range producers[types.I32](instr.I32_CONST) {
+		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
+	}
+	patterns = append(patterns, cross(containers, indexed...)...)
+	// array.get and struct.get both accept a compile-time constant field
+	// index alone, leaving whatever container instruction precedes them
+	// unfused.
+	fieldIndex := []pattern{op(instr.I32_CONST), constant[types.I32]()}
+	patterns = append(patterns, cross(fieldIndex, op(instr.ARRAY_GET), op(instr.STRUCT_GET))...)
+	// A struct.get container may also be a LOCAL_GET, GLOBAL_GET, or
+	// UPVAL_GET whose declared type is a concrete struct, letting the fused
+	// consumer resolve the accessed field's Kind from the declared type at
+	// threading time.
+	structFields := make([]pattern, 0, len(fieldIndex))
+	for _, index := range fieldIndex {
+		structFields = append(structFields, seq(index, op(instr.STRUCT_GET)))
+	}
+	structContainers := make([]pattern, 0, len(containerSources))
+	for _, source := range containerSources {
+		structContainers = append(structContainers, structContainer(source))
+	}
+	patterns = append(patterns, cross(structContainers, structFields...)...)
 	return append(patterns,
 		seq(op(instr.I32_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
@@ -181,6 +208,28 @@ func op(code instr.Opcode) pattern {
 
 func constant[T types.Value]() pattern {
 	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T]()}}
+}
+
+// containerSources lists the slot-read opcodes whose declared type can prove
+// an array.get/struct.get container's shape at threading time: a local slot,
+// a module global, or a closure's captured upvalue.
+var containerSources = []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET}
+
+// typedContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET) whose
+// declared slot type is the concrete array type T, letting a fused consumer
+// prove the container's element kind at threading time instead of
+// re-deriving it from the runtime heap value.
+func typedContainer[T types.Value](source instr.Opcode) pattern {
+	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
+}
+
+// structContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET)
+// whose declared slot type is a struct. Unlike typedContainer, one Go type
+// covers every struct shape, so the fused struct.get consumer resolves the
+// specific declared *types.StructType (and each accessed field's Kind) at
+// threading time instead of selecting it here.
+func structContainer(source instr.Opcode) pattern {
+	return pattern{{op: source, typ: reflect.TypeFor[types.Struct]()}}
 }
 
 func except[T types.Value]() pattern {

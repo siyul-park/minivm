@@ -137,7 +137,7 @@ benchmark-compare:
 	for scenario in \
 		BenchmarkControl_IterativeFib \
 		BenchmarkControl_Sieve \
-		BenchmarkCall_RecursiveFib \
+		BenchmarkCall_RecursiveFib/20 \
 		BenchmarkCall_IndirectRecursiveFib \
 		BenchmarkCall_ClosureCounter \
 		BenchmarkMemory_TypedArraySum \
@@ -150,11 +150,26 @@ benchmark-compare:
 	for scenario in \
 		BenchmarkControl_IterativeFib \
 		BenchmarkControl_Sieve \
-		BenchmarkCall_RecursiveFib \
+		BenchmarkCall_RecursiveFib/20 \
 		BenchmarkCall_IndirectRecursiveFib \
 		BenchmarkMemory_TypedArraySum \
 		BenchmarkNumeric_BranchTree; do \
 		printf '%s\n' "$$comparisons" | grep -q "^$$scenario/wazero-" || { printf 'missing comparison %s/wazero\n' "$$scenario"; exit 1; }; \
+	done; \
+	for scenario in \
+		BenchmarkCall_RecursiveFib/20 \
+		BenchmarkCall_NQueens \
+		BenchmarkCall_Fannkuch \
+		BenchmarkNumeric_NBody \
+		BenchmarkNumeric_SpectralNorm \
+		BenchmarkNumeric_Mandelbrot \
+		BenchmarkNumeric_MatMul \
+		BenchmarkMemory_BinaryTrees \
+		BenchmarkMemory_SortStress \
+		BenchmarkMemory_StringBuild; do \
+		for runtime in native cpython; do \
+			printf '%s\n' "$$comparisons" | grep -q "^$$scenario/$$runtime-" || { printf 'missing comparison %s/%s\n' "$$scenario" "$$runtime"; exit 1; }; \
+		done; \
 	done
 
 lint: fmt vet

@@ -3,9 +3,14 @@
 package benchmarks_test
 
 import (
+	"bytes"
 	"context"
 	stdbinary "encoding/binary"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -55,18 +60,29 @@ func benchmarkNative(b *testing.B, run func() int32, want int32) {
 
 func benchmarkScriptRuntimes(b *testing.B, scripts benchmarkScripts, values []int32, want int32) {
 	b.Helper()
-	b.Run("tengo", func(b *testing.B) {
-		benchmarkTengo(b, scripts.tengo, values, want)
-	})
-	b.Run("gopher_lua", func(b *testing.B) {
-		benchmarkGopherLua(b, scripts.gopherLua, values, want)
-	})
-	b.Run("goja", func(b *testing.B) {
-		benchmarkGoja(b, scripts.goja, values, want)
-	})
+	if scripts.tengo != "" {
+		b.Run("tengo", func(b *testing.B) {
+			benchmarkTengo(b, scripts.tengo, values, want)
+		})
+	}
+	if scripts.gopherLua != "" {
+		b.Run("gopher_lua", func(b *testing.B) {
+			benchmarkGopherLua(b, scripts.gopherLua, values, want)
+		})
+	}
+	if scripts.goja != "" {
+		b.Run("goja", func(b *testing.B) {
+			benchmarkGoja(b, scripts.goja, values, want)
+		})
+	}
 	if scripts.gpython != "" {
 		b.Run("gpython", func(b *testing.B) {
 			benchmarkGpython(b, scripts.gpython, want)
+		})
+	}
+	if scripts.cpython != "" {
+		b.Run("cpython", func(b *testing.B) {
+			benchmarkCPython(b, scripts.cpython, want)
 		})
 	}
 	if scripts.yaegi != "" {
@@ -214,6 +230,57 @@ func benchmarkGpython(b *testing.B, source string, want int32) {
 	b.StopTimer()
 	require.NoError(b, err)
 	require.Equal(b, want, int32(result.(py.Int)))
+}
+
+// cpythonDriver appends to a `def run() -> int` source. It reads the wanted
+// result and the iteration count from argv rather than string-formatting them
+// into the source, so a kernel's own `%` operators never collide with driver
+// interpolation. It checks correctness once, then times iterations calls to
+// run() with CPython's own perf_counter and prints the elapsed nanoseconds.
+const cpythonDriver = `
+import sys
+import time
+
+want = int(sys.argv[1])
+iterations = int(sys.argv[2])
+
+result = run()
+if result != want:
+    sys.exit("run() returned {} want {}".format(result, want))
+
+start = time.perf_counter()
+for _ in range(iterations):
+    run()
+elapsed = time.perf_counter() - start
+
+print(int(elapsed * 1e9))
+`
+
+func benchmarkCPython(b *testing.B, source string, want int32) {
+	b.Helper()
+	python, err := exec.LookPath("python3.13")
+	if err != nil {
+		b.Skipf("python3.13 not found: %v", err)
+	}
+
+	path := filepath.Join(b.TempDir(), "compare.py")
+	script := strings.TrimSpace(source) + "\n" + cpythonDriver
+	require.NoError(b, os.WriteFile(path, []byte(script), 0o600))
+
+	cmd := exec.Command(python, path, strconv.Itoa(int(want)), strconv.Itoa(b.N))
+	cmd.Env = append(os.Environ(), "PYTHONHASHSEED=0")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	b.ResetTimer()
+	err = cmd.Run()
+	b.StopTimer()
+	require.NoError(b, err, "cpython stderr: %s", stderr.String())
+
+	elapsed, err := strconv.ParseInt(strings.TrimSpace(stdout.String()), 10, 64)
+	require.NoError(b, err, "cpython stdout %q stderr: %s", stdout.String(), stderr.String())
+	b.ReportMetric(float64(elapsed)/float64(b.N), "ns/op")
 }
 
 func benchmarkYaegi(b *testing.B, source string, want int32) {

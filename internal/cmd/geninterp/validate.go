@@ -69,7 +69,7 @@ func validate(patterns []pattern) error {
 				if current.typ == nil {
 					return fmt.Errorf("%s has invalid guard", typ.Mnemonic)
 				}
-				if current.op != instr.CONST_GET {
+				if current.op != instr.CONST_GET && current.op != instr.LOCAL_GET && current.op != instr.GLOBAL_GET && current.op != instr.UPVAL_GET {
 					return fmt.Errorf("%s cannot resolve a type guard", typ.Mnemonic)
 				}
 			}

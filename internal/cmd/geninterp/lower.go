@@ -24,6 +24,7 @@ type value struct {
 	boxed    jen.Code
 	object   jen.Code
 	typ      reflect.Type
+	declared jen.Code // compile-time *types.StructType proven for a struct container (local, global, or upvalue)
 	resident bool
 	handler  jen.Code
 }
@@ -328,6 +329,19 @@ func (l loader) read(result *value, current step) error {
 		}
 		result.compile = append(result.compile, guard...)
 	}
+	// l.read is called only for LOCAL_GET, GLOBAL_GET, and UPVAL_GET (see
+	// load's switch), so current.typ != nil alone identifies a container
+	// guard; typedContainer/structContainer are the only pattern builders
+	// that set it for these three opcodes.
+	if current.typ != nil {
+		if current.typ == reflect.TypeFor[types.Struct]() {
+			if err := l.structGuard(result, current); err != nil {
+				return err
+			}
+		} else if err := l.arrayGuard(result, current); err != nil {
+			return err
+		}
+	}
 	switch current.op {
 	case instr.LOCAL_GET:
 		if l.standalone {
@@ -429,6 +443,58 @@ func (l loader) constantGuard(result *value, current step) error {
 		result.object = jen.Id(ref)
 		result.typ = current.typ
 	}
+	return nil
+}
+
+// arrayGuard proves, once at threading time, that the local, global, or
+// upvalue slot l.index addresses is declared as the concrete typed-array
+// element kind current.typ names. A miss rejects the fusion attempt so the
+// container's runtime value keeps its own type check in the standalone
+// ARRAY_GET handler; it never assumes the declared type from a narrower
+// Kind, because ArrayType.Kind is KindRef for every element kind alike.
+func (l loader) arrayGuard(result *value, current step) error {
+	kind, ok := arrayKind(current.typ)
+	if !ok {
+		return fmt.Errorf("unsupported array element type %s", current.typ)
+	}
+	name, ok := fieldKindName(kind)
+	if !ok {
+		return fmt.Errorf("unsupported array element kind %s", kind)
+	}
+	field, ok := declaredTypesField(current.op)
+	if !ok {
+		return fmt.Errorf("unsupported array container opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
+	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
+	declared := fmt.Sprintf("d%d", l.slot)
+	okName := fmt.Sprintf("dok%d", l.slot)
+	result.compile = append(result.compile,
+		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot(field).Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "ArrayType")),
+		jen.If(jen.Op("!").Id(okName).Op("||").Id(declared).Dot("ElemKind").Op("!=").Add(expected)).Block(reject(l.label)),
+	)
+	result.typ = current.typ
+	return nil
+}
+
+// structGuard proves, once at threading time, that the local, global, or
+// upvalue slot l.index addresses is declared as a concrete *types.StructType,
+// and records that declared type so a fused STRUCT_GET consumer can resolve
+// each accessed field's static Kind without re-deriving it from the runtime
+// heap value. A miss rejects the fusion attempt so the container's runtime
+// value keeps its own type check in the standalone STRUCT_GET handler; it
+// never assumes the runtime struct shares the declared type's field shape.
+func (l loader) structGuard(result *value, current step) error {
+	field, ok := declaredTypesField(current.op)
+	if !ok {
+		return fmt.Errorf("unsupported struct container opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
+	declared := fmt.Sprintf("d%d", l.slot)
+	okName := fmt.Sprintf("dok%d", l.slot)
+	result.compile = append(result.compile,
+		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot(field).Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "StructType")),
+		jen.If(jen.Op("!").Id(okName)).Block(reject(l.label)),
+	)
+	result.declared = jen.Id(declared)
 	return nil
 }
 
@@ -599,6 +665,14 @@ func resolve(pattern pattern) ([]step, error) {
 		steps[0].kind = instr.KindRef
 		steps[1].kind = instr.KindI32
 		steps[2].kind = kind
+		return steps, nil
+	}
+	if consumer == instr.STRUCT_GET && consumerAt == 2 {
+		// The field's Kind depends on the runtime *types.StructType a struct
+		// container declares, not on a Go type the pattern can name, so it is
+		// resolved during composition instead of here.
+		steps[0].kind = instr.KindRef
+		steps[1].kind = instr.KindI32
 		return steps, nil
 	}
 
@@ -901,6 +975,63 @@ func index(state *state, current step) (value, error) {
 		state.stack = nil
 		return value{op: current.op, head: container.head, compile: compile}, nil
 	}
+	if len(state.stack) == 2 && current.op == instr.ARRAY_GET && isContainerSource(state.stack[0].op) && state.stack[0].typ != nil {
+		container := state.stack[0]
+		index := state.stack[1]
+		compile := append([]jen.Code(nil), container.compile...)
+		compile = append(compile, index.compile...)
+		body := []jen.Code{overflow()}
+		body = append(body, container.check...)
+		body = append(body, container.body...)
+		body = append(body, index.check...)
+		body = append(body, index.body...)
+		body = append(body,
+			jen.If(jen.Add(container.boxed).Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("at").Op(":=").Int().Call(index.raw),
+		)
+		// Each arm below pushes its own result and returns immediately: no
+		// variable is live across the two heap-type assertions, so the
+		// success path stays straight-line with no join point.
+		tail := func(result jen.Code) []jen.Code {
+			return []jen.Code{
+				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result),
+				jen.Id("i").Dot("sp").Op("++"),
+				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+				jen.Return(),
+			}
+		}
+		// arrayGuard only proves the container's declared element kind, never
+		// the runtime value's concrete representation: LOCAL_SET, GLOBAL_SET,
+		// and a closure's captured upvalue all assign into a declared slot
+		// without re-checking the assigned value's concrete representation
+		// against it (e.g. ARRAY_NEW_DEFAULT's ref-element path stores
+		// through a differently-declared alias, or a store from a source
+		// whose static type verification could not pin down leaves a
+		// concrete TypedArray[U] with U != T in the slot), so a miss on the
+		// specialized TypedArray[T] assertion falls back to
+		// (*Interpreter).arrayElem, the same generic reader the unfused
+		// handler calls unconditionally — every other TypedArray[_]
+		// representation and the generic *types.Array alike — instead of
+		// trapping a case the unfused handler accepts. This arm still
+		// returns on its own success path, so no variable is live across it
+		// and the fallback below.
+		body = append(body, jen.If(
+			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
+			jen.Id("ok"),
+		).Block(append([]jen.Code{
+			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
+		}, tail(boxArray(current.kind, jen.Id("array"), jen.Id("at")))...)...))
+		body = append(body, tail(jen.Id("i").Dot("arrayElem").Call(container.raw, jen.Id("at")))...)
+		compile = append(compile,
+			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
+			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+		)
+		state.stack = nil
+		return value{op: current.op, head: container.head, compile: compile}, nil
+	}
+	if len(state.stack) == 2 && current.op == instr.STRUCT_GET && isContainerSource(state.stack[0].op) && state.stack[0].declared != nil {
+		return structIndex(state, current)
+	}
 	if len(state.stack) != 1 {
 		return value{}, fmt.Errorf("%s needs one constant index", instr.TypeOf(current.op).Mnemonic)
 	}
@@ -915,6 +1046,94 @@ func index(state *state, current step) (value, error) {
 	)
 	state.stack = nil
 	return value{op: current.op, head: index.head, compile: compile}, nil
+}
+
+// structIndex fuses STRUCT_GET onto a LOCAL_GET, GLOBAL_GET, or UPVAL_GET
+// container whose declared type is a concrete *types.StructType, with the
+// field index a compile-time constant. A struct field's Kind depends on
+// which StructType the container declares, not on any Go type the catalog
+// can name ahead of time, so the switch over Kind runs once here at
+// threading time instead of once per execution: it selects one specialized
+// runtime closure per Kind, and that closure boxes the field directly with
+// no switch of its own. Every runtime guard the standalone STRUCT_GET
+// handler performs — ref kind, heap value type, field bounds, and the
+// runtime field's actual Kind — still runs on every execution in the same
+// order, because the declared type only proves what to specialize for, never
+// what the runtime value actually holds; a mismatch on any guard, or a field
+// index outside the declared type's own fields, rejects the fusion or traps
+// exactly as the unfused sequence would.
+func structIndex(state *state, current step) (value, error) {
+	container := state.stack[0]
+	idx := state.stack[1]
+	compile := append([]jen.Code(nil), container.compile...)
+	compile = append(compile, idx.compile...)
+	compile = append(compile, idx.check...)
+	compile = append(compile, idx.body...)
+	compile = append(compile,
+		jen.Id("at").Op(":=").Int().Call(idx.raw),
+		jen.If(
+			jen.Id("at").Op("<").Lit(0).Op("||").Id("at").Op(">=").Len(jen.Add(container.declared).Dot("Fields")),
+		).Block(reject(state.label)),
+	)
+
+	kinds := []instr.Kind{instr.KindI1, instr.KindI8, instr.KindI32, instr.KindI64, instr.KindF32, instr.KindF64, instr.KindRef}
+	cases := make([]jen.Code, 0, len(kinds)+1)
+	for _, kind := range kinds {
+		name, ok := fieldKindName(kind)
+		if !ok {
+			return value{}, fmt.Errorf("unsupported struct field kind %s", kind)
+		}
+		body := []jen.Code{overflow()}
+		body = append(body, container.check...)
+		body = append(body, container.body...)
+		body = append(body,
+			jen.If(jen.Add(container.boxed).Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		)
+		// Each arm below pushes its own result and returns immediately: no
+		// variable is live across the two heap-type assertions, so the
+		// success path stays straight-line with no join point.
+		tail := func(result jen.Code) []jen.Code {
+			return []jen.Code{
+				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result),
+				jen.Id("i").Dot("sp").Op("++"),
+				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+				jen.Return(),
+			}
+		}
+		structBody := []jen.Code{
+			jen.If(jen.Id("at").Op(">=").Len(jen.Id("value").Dot("Typ").Dot("Fields"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			jen.If(jen.Id("value").Dot("Typ").Dot("Fields").Index(jen.Id("at")).Dot("Kind").Op("!=").Qual("github.com/siyul-park/minivm/types", "Kind"+name)).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("result").Op(":=").Add(structFieldBox(kind, jen.Id("value").Dot("Data").Index(jen.Id("at")))),
+		}
+		if kind == instr.KindRef {
+			structBody = append(structBody, jen.Id("i").Dot("retainBox").Call(jen.Id("result")))
+		}
+		structBody = append(structBody, tail(jen.Id("result"))...)
+		// The declared *types.StructType only proves what to specialize for,
+		// never the runtime value's concrete representation: the same local,
+		// global, or upvalue slot the unfused STRUCT_GET handler would read
+		// off a *HostObject can reach a fused STRUCT_GET too, so a miss on
+		// the specialized *types.Struct assertion falls back to
+		// (*Interpreter).structField, the same generic reader the unfused
+		// handler calls unconditionally, instead of trapping a case it
+		// accepts.
+		body = append(body, jen.If(
+			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Struct")),
+			jen.Id("ok"),
+		).Block(structBody...))
+		body = append(body, tail(jen.Id("i").Dot("structField").Call(container.raw, jen.Id("at")))...)
+		cases = append(cases, jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)).Block(
+			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
+			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+		))
+	}
+	cases = append(cases, jen.Default().Block(reject(state.label)))
+
+	compile = append(compile,
+		jen.Switch(jen.Add(container.declared).Dot("Fields").Index(jen.Id("at")).Dot("Kind")).Block(cases...),
+	)
+	state.stack = nil
+	return value{op: current.op, head: container.head, compile: compile}, nil
 }
 
 func call(state *state, current step) (value, error) {
@@ -1501,92 +1720,28 @@ func retire(guard jen.Code) []jen.Code {
 	}
 }
 
-// lookup emits ARRAY_GET and STRUCT_GET from a resolved index expression.
+// lookup emits ARRAY_GET and STRUCT_GET from a resolved index expression,
+// delegating the per-representation read to (*Interpreter).arrayElem or
+// (*Interpreter).structField so this generated handler and every fused
+// fallback that reaches the same generic case share one runtime copy of the
+// dispatch instead of duplicating it in generated code.
 func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
-	body := []jen.Code{
+	method := "arrayElem"
+	if op != instr.ARRAY_GET {
+		method = "structField"
+	}
+	return []jen.Code{
 		jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.Id("ref").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
 		jen.If(jen.Id("ref").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		jen.Id("addr").Op(":=").Id("ref").Dot("Ref").Call(),
-		jen.Var().Id("result").Qual("github.com/siyul-park/minivm/types", "Boxed"),
-	}
-	if op == instr.ARRAY_GET {
-		body = append(body, jen.Switch(jen.Id("array").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Bool())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Int8())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI8").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Int32())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Int64())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Id("i").Dot("boxI64").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Float32())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "TypedArray").Types(jen.Float64())).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array"))),
-				jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Id("array").Index(index)),
-			),
-			jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Array")).Block(
-				bounds(index, jen.Lit(1), jen.Len(jen.Id("array").Dot("Elems"))),
-				jen.Id("result").Op("=").Id("array").Dot("Elems").Index(index),
-				jen.Id("i").Dot("retainBox").Call(jen.Id("result")),
-			),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		))
-	} else {
-		field := func() jen.Code { return jen.Id("value").Dot("Typ").Dot("Fields").Index(index) }
-		data := func() jen.Code { return jen.Id("value").Dot("Data").Index(index) }
-		body = append(body, jen.Switch(jen.Id("value").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
-			jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Struct")).Block(
-				jen.If(jen.Add(index).Op("<").Lit(0).Op("||").Add(index).Op(">=").Len(jen.Id("value").Dot("Typ").Dot("Fields"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-				jen.Switch(jen.Add(field()).Dot("Kind")).Block(
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI32")).Block(jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Int32().Call(jen.Uint32().Call(data())))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI8")).Block(jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI8").Call(jen.Int8().Call(jen.Uint32().Call(data())))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI1")).Block(jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(jen.Add(data()).Op("!=").Lit(0))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(jen.Id("result").Op("=").Id("i").Dot("boxI64").Call(jen.Int64().Call(data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindF32")).Block(jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Qual("math", "Float32frombits").Call(jen.Uint32().Call(data())))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindF64")).Block(jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Qual("math", "Float64frombits").Call(data()))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-						jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "Boxed").Call(data()),
-						jen.Id("i").Dot("retainBox").Call(jen.Id("result")),
-					),
-					jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-				),
-			),
-			jen.Case(jen.Op("*").Id("HostObject")).Block(
-				jen.List(jen.Id("kind"), jen.Id("ok")).Op(":=").Id("value").Dot("kind").Call(index),
-				jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-				jen.Switch(jen.Id("kind")).Block(
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI32"), jen.Qual("github.com/siyul-park/minivm/types", "KindI8"), jen.Qual("github.com/siyul-park/minivm/types", "KindI1"), jen.Qual("github.com/siyul-park/minivm/types", "KindF32"), jen.Qual("github.com/siyul-park/minivm/types", "KindF64")).Block(jen.List(jen.Id("result"), jen.Id("_"), jen.Id("_")).Op("=").Id("value").Dot("read").Call(index)),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(jen.Id("result").Op("=").Id("i").Dot("boxI64").Call(jen.Int64().Call(jen.Id("value").Dot("Raw").Call(index)))),
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-						jen.List(jen.Id("boxed"), jen.Id("owned"), jen.Id("_")).Op(":=").Id("value").Dot("read").Call(index),
-						jen.Id("result").Op("=").Id("boxed"),
-						jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
-					),
-					jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-				),
-			),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		))
-	}
-	return append(body,
+		jen.Id("result").Op(":=").Id("i").Dot(method).Call(jen.Id("addr"), index),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("--"),
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id("result"),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
-	)
+	}
 }
 
 func bounds(offset, size, length jen.Code) jen.Code {
@@ -2010,6 +2165,31 @@ func slotInfo(op instr.Opcode) (field, method string, ok bool) {
 	}
 }
 
+// isContainerSource reports whether op is a slot-read opcode (LOCAL_GET,
+// GLOBAL_GET, UPVAL_GET) that array.get/struct.get container fusion can
+// prove a declared element or field type from.
+func isContainerSource(op instr.Opcode) bool {
+	_, _, ok := slotInfo(op)
+	return ok
+}
+
+// declaredTypesField names the threader field holding op's declared
+// types.Type per slot, indexed the same way slotInfo's Kind-only field is:
+// LOCAL_GET by localTypes, GLOBAL_GET by globalTypes, UPVAL_GET by
+// captureTypes.
+func declaredTypesField(op instr.Opcode) (string, bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "localTypes", true
+	case instr.GLOBAL_GET:
+		return "globalTypes", true
+	case instr.UPVAL_GET:
+		return "captureTypes", true
+	default:
+		return "", false
+	}
+}
+
 func overflow() jen.Code {
 	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 }
@@ -2075,6 +2255,44 @@ func kindName(kind instr.Kind) (string, bool) {
 		return "Ref", true
 	default:
 		return "", false
+	}
+}
+
+// fieldKindName names the types.Kind constant for kind, keeping i1 and i8
+// narrow instead of kindName's reduced Repr, because ArrayType.ElemKind and
+// StructField.Kind both store the element or field's real width.
+func fieldKindName(kind instr.Kind) (string, bool) {
+	switch kind {
+	case instr.KindI1:
+		return "I1", true
+	case instr.KindI8:
+		return "I8", true
+	default:
+		return kindName(kind)
+	}
+}
+
+// structFieldBox returns the boxed expression for a struct field's raw
+// 64-bit data slot once kind is known, mirroring (*types.Struct).Field's
+// per-kind decoding without its runtime switch over the field's Kind.
+func structFieldBox(kind instr.Kind, data jen.Code) jen.Code {
+	switch kind {
+	case instr.KindI1:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(jen.Add(data).Op("!=").Lit(0))
+	case instr.KindI8:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxI8").Call(jen.Int8().Call(jen.Uint32().Call(data)))
+	case instr.KindI32:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Int32().Call(jen.Uint32().Call(data)))
+	case instr.KindI64:
+		return jen.Id("i").Dot("boxI64").Call(jen.Int64().Call(data))
+	case instr.KindF32:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Qual("math", "Float32frombits").Call(jen.Uint32().Call(data)))
+	case instr.KindF64:
+		return jen.Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Qual("math", "Float64frombits").Call(data))
+	case instr.KindRef:
+		return jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(data)
+	default:
+		panic(fmt.Sprintf("unsupported struct field kind %s", kind))
 	}
 }
 

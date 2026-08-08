@@ -466,19 +466,24 @@ func (t *tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 			continue
 		}
 		var locals []types.Kind
+		var declared []types.Type
 		var captures []types.Kind
+		var captureTypes []types.Type
 		if fn, ok := i.function(addr); ok {
 			locals = fn.Slots()
+			declared = fn.Declared()
 			captures = types.Kinds(fn.Captures)
+			captureTypes = fn.Captures
 		}
 		tc := &threader{
-			types:     i.types,
-			constants: i.constants,
-			heap:      i.heap,
-			globals:   globals,
-			exact:     true,
+			types:       i.types,
+			constants:   i.constants,
+			heap:        i.heap,
+			globals:     globals,
+			globalTypes: i.globalTypes,
+			exact:       true,
 		}
-		t.exact[addr] = tc.Compile(code, locals, captures)
+		t.exact[addr] = tc.Compile(code, locals, declared, captures, captureTypes)
 	}
 	return t.exact
 }

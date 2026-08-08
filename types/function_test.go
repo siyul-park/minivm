@@ -167,6 +167,23 @@ func TestFunction_Slots(t *testing.T) {
 	}
 }
 
+func TestFunction_Declared(t *testing.T) {
+	tests := []struct {
+		fn   *types.Function
+		want []types.Type
+	}{
+		{fn: types.NewFunction(nil, nil, nil)},
+		{fn: types.NewFunction(nil, []types.Type{types.TypeI32, types.TypeRef}, nil), want: []types.Type{types.TypeI32, types.TypeRef}},
+		{fn: types.NewFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}}, nil, nil), want: []types.Type{types.TypeI64}},
+		{fn: types.NewFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}}, []types.Type{types.TypeF32}, nil), want: []types.Type{types.TypeI64, types.TypeF32}},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("params=%v,locals=%v", tt.fn.Typ.Params, tt.fn.Locals), func(t *testing.T) {
+			require.Equal(t, tt.want, tt.fn.Declared())
+		})
+	}
+}
+
 func TestFunctionType_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, (&types.FunctionType{}).Kind())
 }

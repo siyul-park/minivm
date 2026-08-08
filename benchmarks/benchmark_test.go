@@ -26,6 +26,7 @@ type benchmarkScripts struct {
 	gopherLua string
 	goja      string
 	gpython   string
+	cpython   string
 	yaegi     string
 }
 
