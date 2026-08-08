@@ -322,11 +322,11 @@ Examples:
 - typed locals plus primitive constants feeding binary operations
 - non-trapping primitive binary results stored directly into typed locals
 - typed-array constants plus scalar index producers feeding `array.get`
-- typed-array locals (declared, concrete element type) plus scalar index
-  producers feeding `array.get`
+- typed-array `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` containers (declared,
+  concrete element type) plus scalar index producers feeding `array.get`
 - constant indexes feeding `array.get` or `struct.get`
-- struct locals (declared, concrete `*types.StructType`) plus a constant
-  field index feeding `struct.get`
+- struct `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` containers (declared, concrete
+  `*types.StructType`) plus a constant field index feeding `struct.get`
 - constant ref cell plus `ref.get`
 - structured-error creation followed by a raise
 
@@ -335,16 +335,20 @@ handler checks stack room once for its own net push rather than once per
 folded source. Bounds, segmentation, and underflow checks stay per source.
 Trapping arithmetic (`div`/`rem`/`mod`) still materializes its operands on the
 stack, so it keeps a check per push. Typed-array constant and typed-array
-local loads validate the current heap value's concrete array type and bounds
-on every execution; a typed-array local container is read fresh from its
-stack slot and borrowed (no retain/release) because `array.get` fully
-consumes it within the fused sequence. A struct local container is read and
-borrowed the same way; because a struct field's Kind depends on the runtime
-`StructType`, not a Go type the generator can name, threading picks one
-specialized handler per Kind from the local's *declared* type, while every
-execution still validates the ref kind, the heap value's concrete type, the
-field index against the *runtime* struct's field count, and the runtime
-field's actual Kind before boxing it.
+container loads validate the current heap value's concrete array type and
+bounds on every execution; a typed-array local, global, or upvalue container
+is read fresh from its slot and borrowed (no retain/release) because
+`array.get` fully consumes it within the fused sequence. A struct container
+(local, global, or upvalue) is read and borrowed the same way; because a
+struct field's Kind depends on the runtime `StructType`, not a Go type the
+generator can name, threading picks one specialized handler per Kind from the
+container's *declared* type, while every execution still validates the ref
+kind, the heap value's concrete type, the field index against the *runtime*
+struct's field count, and the runtime field's actual Kind before boxing it.
+On a specialized-type miss (the heap value is the generic `*types.Array` or
+`*HostObject` representation instead), both fusions fall back to the same
+unfused arm the standalone `array.get`/`struct.get` handler runs, instead of
+trapping a case the unfused handler accepts.
 
 ## Maintenance Notes
 

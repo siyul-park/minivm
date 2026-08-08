@@ -122,9 +122,10 @@ func scalars() []pattern {
 			}
 		}
 	}
-	// Every typed-array container, whether a compile-time constant or a local
-	// whose declared type is a concrete element kind, pairs with every scalar
-	// index producer to feed array.get.
+	// Every typed-array container, whether a compile-time constant or a
+	// LOCAL_GET/GLOBAL_GET/UPVAL_GET whose declared type is a concrete
+	// element kind, pairs with every scalar index producer to feed
+	// array.get.
 	containers := []pattern{
 		constant[types.TypedArray[bool]](),
 		constant[types.TypedArray[int8]](),
@@ -132,12 +133,16 @@ func scalars() []pattern {
 		constant[types.TypedArray[int64]](),
 		constant[types.TypedArray[float32]](),
 		constant[types.TypedArray[float64]](),
-		typedLocal[types.TypedArray[bool]](),
-		typedLocal[types.TypedArray[int8]](),
-		typedLocal[types.TypedArray[int32]](),
-		typedLocal[types.TypedArray[int64]](),
-		typedLocal[types.TypedArray[float32]](),
-		typedLocal[types.TypedArray[float64]](),
+	}
+	for _, source := range containerSources {
+		containers = append(containers,
+			typedContainer[types.TypedArray[bool]](source),
+			typedContainer[types.TypedArray[int8]](source),
+			typedContainer[types.TypedArray[int32]](source),
+			typedContainer[types.TypedArray[int64]](source),
+			typedContainer[types.TypedArray[float32]](source),
+			typedContainer[types.TypedArray[float64]](source),
+		)
 	}
 	indexed := make([]pattern, 0, len(producers[types.I32](instr.I32_CONST)))
 	for _, index := range producers[types.I32](instr.I32_CONST) {
@@ -149,14 +154,19 @@ func scalars() []pattern {
 	// unfused.
 	fieldIndex := []pattern{op(instr.I32_CONST), constant[types.I32]()}
 	patterns = append(patterns, cross(fieldIndex, op(instr.ARRAY_GET), op(instr.STRUCT_GET))...)
-	// A struct.get container may also be a LOCAL_GET whose declared type is
-	// a concrete struct, letting the fused consumer resolve the accessed
-	// field's Kind from the declared type at threading time.
+	// A struct.get container may also be a LOCAL_GET, GLOBAL_GET, or
+	// UPVAL_GET whose declared type is a concrete struct, letting the fused
+	// consumer resolve the accessed field's Kind from the declared type at
+	// threading time.
 	structFields := make([]pattern, 0, len(fieldIndex))
 	for _, index := range fieldIndex {
 		structFields = append(structFields, seq(index, op(instr.STRUCT_GET)))
 	}
-	patterns = append(patterns, cross([]pattern{structLocal()}, structFields...)...)
+	structContainers := make([]pattern, 0, len(containerSources))
+	for _, source := range containerSources {
+		structContainers = append(structContainers, structContainer(source))
+	}
+	patterns = append(patterns, cross(structContainers, structFields...)...)
 	return append(patterns,
 		seq(op(instr.I32_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
@@ -200,19 +210,26 @@ func constant[T types.Value]() pattern {
 	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T]()}}
 }
 
-// typedLocal matches a LOCAL_GET whose declared slot type is the concrete
-// array type T, letting a fused consumer prove the container's element kind
-// at threading time instead of re-deriving it from the runtime heap value.
-func typedLocal[T types.Value]() pattern {
-	return pattern{{op: instr.LOCAL_GET, typ: reflect.TypeFor[T]()}}
+// containerSources lists the slot-read opcodes whose declared type can prove
+// an array.get/struct.get container's shape at threading time: a local slot,
+// a module global, or a closure's captured upvalue.
+var containerSources = []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET}
+
+// typedContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET) whose
+// declared slot type is the concrete array type T, letting a fused consumer
+// prove the container's element kind at threading time instead of
+// re-deriving it from the runtime heap value.
+func typedContainer[T types.Value](source instr.Opcode) pattern {
+	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
 }
 
-// structLocal matches a LOCAL_GET whose declared slot type is a struct.
-// Unlike typedLocal, one Go type covers every struct shape, so the fused
-// struct.get consumer resolves the specific declared *types.StructType (and
-// each accessed field's Kind) at threading time instead of selecting it here.
-func structLocal() pattern {
-	return pattern{{op: instr.LOCAL_GET, typ: reflect.TypeFor[types.Struct]()}}
+// structContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET)
+// whose declared slot type is a struct. Unlike typedContainer, one Go type
+// covers every struct shape, so the fused struct.get consumer resolves the
+// specific declared *types.StructType (and each accessed field's Kind) at
+// threading time instead of selecting it here.
+func structContainer(source instr.Opcode) pattern {
+	return pattern{{op: source, typ: reflect.TypeFor[types.Struct]()}}
 }
 
 func except[T types.Value]() pattern {

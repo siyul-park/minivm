@@ -24,7 +24,7 @@ type value struct {
 	boxed    jen.Code
 	object   jen.Code
 	typ      reflect.Type
-	declared jen.Code // compile-time *types.StructType proven for a struct-local container
+	declared jen.Code // compile-time *types.StructType proven for a struct container (local, global, or upvalue)
 	resident bool
 	handler  jen.Code
 }
@@ -329,7 +329,11 @@ func (l loader) read(result *value, current step) error {
 		}
 		result.compile = append(result.compile, guard...)
 	}
-	if current.op == instr.LOCAL_GET && current.typ != nil {
+	// l.read is called only for LOCAL_GET, GLOBAL_GET, and UPVAL_GET (see
+	// load's switch), so current.typ != nil alone identifies a container
+	// guard; typedContainer/structContainer are the only pattern builders
+	// that set it for these three opcodes.
+	if current.typ != nil {
 		if current.typ == reflect.TypeFor[types.Struct]() {
 			if err := l.structGuard(result, current); err != nil {
 				return err
@@ -442,12 +446,12 @@ func (l loader) constantGuard(result *value, current step) error {
 	return nil
 }
 
-// arrayGuard proves, once at threading time, that the local slot l.index
-// addresses is declared as the concrete typed-array element kind current.typ
-// names. A miss rejects the fusion attempt so the local's runtime value keeps
-// its own type check in the standalone ARRAY_GET handler; it never assumes
-// the declared type from a narrower Kind, because ArrayType.Kind is KindRef
-// for every element kind alike.
+// arrayGuard proves, once at threading time, that the local, global, or
+// upvalue slot l.index addresses is declared as the concrete typed-array
+// element kind current.typ names. A miss rejects the fusion attempt so the
+// container's runtime value keeps its own type check in the standalone
+// ARRAY_GET handler; it never assumes the declared type from a narrower
+// Kind, because ArrayType.Kind is KindRef for every element kind alike.
 func (l loader) arrayGuard(result *value, current step) error {
 	kind, ok := arrayKind(current.typ)
 	if !ok {
@@ -457,29 +461,37 @@ func (l loader) arrayGuard(result *value, current step) error {
 	if !ok {
 		return fmt.Errorf("unsupported array element kind %s", kind)
 	}
+	field, ok := declaredTypesField(current.op)
+	if !ok {
+		return fmt.Errorf("unsupported array container opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
 	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
 	declared := fmt.Sprintf("d%d", l.slot)
 	okName := fmt.Sprintf("dok%d", l.slot)
 	result.compile = append(result.compile,
-		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot("localTypes").Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "ArrayType")),
+		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot(field).Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "ArrayType")),
 		jen.If(jen.Op("!").Id(okName).Op("||").Id(declared).Dot("ElemKind").Op("!=").Add(expected)).Block(reject(l.label)),
 	)
 	result.typ = current.typ
 	return nil
 }
 
-// structGuard proves, once at threading time, that the local slot l.index
-// addresses is declared as a concrete *types.StructType, and records that
-// declared type so a fused STRUCT_GET consumer can resolve each accessed
-// field's static Kind without re-deriving it from the runtime heap value. A
-// miss rejects the fusion attempt so the local's runtime value keeps its own
-// type check in the standalone STRUCT_GET handler; it never assumes the
-// runtime struct shares the declared type's field shape.
+// structGuard proves, once at threading time, that the local, global, or
+// upvalue slot l.index addresses is declared as a concrete *types.StructType,
+// and records that declared type so a fused STRUCT_GET consumer can resolve
+// each accessed field's static Kind without re-deriving it from the runtime
+// heap value. A miss rejects the fusion attempt so the container's runtime
+// value keeps its own type check in the standalone STRUCT_GET handler; it
+// never assumes the runtime struct shares the declared type's field shape.
 func (l loader) structGuard(result *value, current step) error {
+	field, ok := declaredTypesField(current.op)
+	if !ok {
+		return fmt.Errorf("unsupported struct container opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
 	declared := fmt.Sprintf("d%d", l.slot)
 	okName := fmt.Sprintf("dok%d", l.slot)
 	result.compile = append(result.compile,
-		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot("localTypes").Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "StructType")),
+		jen.List(jen.Id(declared), jen.Id(okName)).Op(":=").Id("c").Dot(field).Index(jen.Id(l.index)).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "StructType")),
 		jen.If(jen.Op("!").Id(okName)).Block(reject(l.label)),
 	)
 	result.declared = jen.Id(declared)
@@ -657,7 +669,7 @@ func resolve(pattern pattern) ([]step, error) {
 	}
 	if consumer == instr.STRUCT_GET && consumerAt == 2 {
 		// The field's Kind depends on the runtime *types.StructType a struct
-		// local declares, not on a Go type the pattern can name, so it is
+		// container declares, not on a Go type the pattern can name, so it is
 		// resolved during composition instead of here.
 		steps[0].kind = instr.KindRef
 		steps[1].kind = instr.KindI32
@@ -963,7 +975,7 @@ func index(state *state, current step) (value, error) {
 		state.stack = nil
 		return value{op: current.op, head: container.head, compile: compile}, nil
 	}
-	if len(state.stack) == 2 && current.op == instr.ARRAY_GET && state.stack[0].op == instr.LOCAL_GET && state.stack[0].typ != nil {
+	if len(state.stack) == 2 && current.op == instr.ARRAY_GET && isContainerSource(state.stack[0].op) && state.stack[0].typ != nil {
 		container := state.stack[0]
 		index := state.stack[1]
 		compile := append([]jen.Code(nil), container.compile...)
@@ -988,14 +1000,15 @@ func index(state *state, current step) (value, error) {
 				jen.Return(),
 			}
 		}
-		// arrayGuard only proves the local's declared element kind, never the
-		// runtime value's concrete representation: a local proven to declare
-		// element kind T can still hold the generic *types.Array boxed
-		// representation at runtime (e.g. ARRAY_NEW_DEFAULT's ref-element
-		// path stores through a differently-declared alias), so a miss on
-		// the specialized TypedArray[T] assertion falls back to the same
-		// *types.Array arm the unfused ARRAY_GET handler runs, instead of
-		// trapping a case the unfused handler accepts.
+		// arrayGuard only proves the container's declared element kind, never
+		// the runtime value's concrete representation: a local, global, or
+		// upvalue slot proven to declare element kind T can still hold the
+		// generic *types.Array boxed representation at runtime (e.g.
+		// ARRAY_NEW_DEFAULT's ref-element path stores through a
+		// differently-declared alias), so a miss on the specialized
+		// TypedArray[T] assertion falls back to the same *types.Array arm the
+		// unfused ARRAY_GET handler runs, instead of trapping a case the
+		// unfused handler accepts.
 		body = append(body, jen.If(
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.Id("ok"),
@@ -1016,7 +1029,7 @@ func index(state *state, current step) (value, error) {
 		state.stack = nil
 		return value{op: current.op, head: container.head, compile: compile}, nil
 	}
-	if len(state.stack) == 2 && current.op == instr.STRUCT_GET && state.stack[0].op == instr.LOCAL_GET && state.stack[0].declared != nil {
+	if len(state.stack) == 2 && current.op == instr.STRUCT_GET && isContainerSource(state.stack[0].op) && state.stack[0].declared != nil {
 		return structIndex(state, current)
 	}
 	if len(state.stack) != 1 {
@@ -1035,19 +1048,20 @@ func index(state *state, current step) (value, error) {
 	return value{op: current.op, head: index.head, compile: compile}, nil
 }
 
-// structIndex fuses STRUCT_GET onto a LOCAL_GET container whose declared type
-// is a concrete *types.StructType, with the field index a compile-time
-// constant. A struct field's Kind depends on which StructType the local
-// declares, not on any Go type the catalog can name ahead of time, so the
-// switch over Kind runs once here at threading time instead of once per
-// execution: it selects one specialized runtime closure per Kind, and that
-// closure boxes the field directly with no switch of its own. Every runtime
-// guard the standalone STRUCT_GET handler performs — ref kind, heap value
-// type, field bounds, and the runtime field's actual Kind — still runs on
-// every execution in the same order, because the declared type only proves
-// what to specialize for, never what the runtime value actually holds; a
-// mismatch on any guard, or a field index outside the declared type's own
-// fields, rejects the fusion or traps exactly as the unfused sequence would.
+// structIndex fuses STRUCT_GET onto a LOCAL_GET, GLOBAL_GET, or UPVAL_GET
+// container whose declared type is a concrete *types.StructType, with the
+// field index a compile-time constant. A struct field's Kind depends on
+// which StructType the container declares, not on any Go type the catalog
+// can name ahead of time, so the switch over Kind runs once here at
+// threading time instead of once per execution: it selects one specialized
+// runtime closure per Kind, and that closure boxes the field directly with
+// no switch of its own. Every runtime guard the standalone STRUCT_GET
+// handler performs — ref kind, heap value type, field bounds, and the
+// runtime field's actual Kind — still runs on every execution in the same
+// order, because the declared type only proves what to specialize for, never
+// what the runtime value actually holds; a mismatch on any guard, or a field
+// index outside the declared type's own fields, rejects the fusion or traps
+// exactly as the unfused sequence would.
 func structIndex(state *state, current step) (value, error) {
 	container := state.stack[0]
 	idx := state.stack[1]
@@ -1096,11 +1110,12 @@ func structIndex(state *state, current step) (value, error) {
 		}
 		structBody = append(structBody, tail(jen.Id("result"))...)
 		// The declared *types.StructType only proves what to specialize for,
-		// never the runtime value's concrete representation: the same local
-		// slot the unfused STRUCT_GET handler would read off a *HostObject
-		// can reach a fused STRUCT_GET too, so a miss on the specialized
-		// *types.Struct assertion falls back to the same *HostObject arm the
-		// unfused handler runs, instead of trapping a case it accepts.
+		// never the runtime value's concrete representation: the same local,
+		// global, or upvalue slot the unfused STRUCT_GET handler would read
+		// off a *HostObject can reach a fused STRUCT_GET too, so a miss on
+		// the specialized *types.Struct assertion falls back to the same
+		// *HostObject arm the unfused handler runs, instead of trapping a
+		// case it accepts.
 		body = append(body, jen.If(
 			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Struct")),
 			jen.Id("ok"),
@@ -2203,6 +2218,31 @@ func slotInfo(op instr.Opcode) (field, method string, ok bool) {
 		return "captures", "upval", true
 	default:
 		return "", "", false
+	}
+}
+
+// isContainerSource reports whether op is a slot-read opcode (LOCAL_GET,
+// GLOBAL_GET, UPVAL_GET) that array.get/struct.get container fusion can
+// prove a declared element or field type from.
+func isContainerSource(op instr.Opcode) bool {
+	_, _, ok := slotInfo(op)
+	return ok
+}
+
+// declaredTypesField names the threader field holding op's declared
+// types.Type per slot, indexed the same way slotInfo's Kind-only field is:
+// LOCAL_GET by localTypes, GLOBAL_GET by globalTypes, UPVAL_GET by
+// captureTypes.
+func declaredTypesField(op instr.Opcode) (string, bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "localTypes", true
+	case instr.GLOBAL_GET:
+		return "globalTypes", true
+	case instr.UPVAL_GET:
+		return "captureTypes", true
+	default:
+		return "", false
 	}
 }
 

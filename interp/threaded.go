@@ -12,18 +12,20 @@ import (
 )
 
 type threader struct {
-	types      []types.Type
-	constants  []types.Boxed
-	heap       []types.Value
-	coros      []bool
-	locals     []types.Kind
-	localTypes []types.Type
-	globals    []types.Kind
-	captures   []types.Kind
-	code       []byte
-	ip         int
-	exact      bool
-	backedge   func(*Interpreter, *frame) error
+	types        []types.Type
+	constants    []types.Boxed
+	heap         []types.Value
+	coros        []bool
+	locals       []types.Kind
+	localTypes   []types.Type
+	globals      []types.Kind
+	globalTypes  []types.Type
+	captures     []types.Kind
+	captureTypes []types.Type
+	code         []byte
+	ip           int
+	exact        bool
+	backedge     func(*Interpreter, *frame) error
 }
 
 var (
@@ -21679,13 +21681,2555 @@ var (
 				}
 			}
 		l480:
-			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_S) {
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.STRUCT_GET) {
 				goto l481
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l481
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.StructType)
+				if !dok0 {
+					goto l481
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l481
+				}
+				v1 := r1.I32()
+				at := int(v1)
+				if at < 0 || at >= len(d0.Fields) {
+					goto l481
+				}
+				switch d0.Fields[at].Kind {
+				case types.KindI1:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI1 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI1(value.Data[at] != 0)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI8:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI8 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI8(int8(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI32:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI32(int32(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI64:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI64 {
+								panic(ErrTypeMismatch)
+							}
+							result := i.boxI64(int64(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF32:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF32(math.Float32frombits(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF64:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF64 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF64(math.Float64frombits(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindRef:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindRef {
+								panic(ErrTypeMismatch)
+							}
+							result := types.Boxed(value.Data[at])
+							i.retainBox(result)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 7
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				default:
+					goto l481
+				}
+			}
+		l481:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.STRUCT_GET) {
+				goto l482
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l482
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.StructType)
+				if !dok0 {
+					goto l482
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				at := int(v1)
+				if at < 0 || at >= len(d0.Fields) {
+					goto l482
+				}
+				switch d0.Fields[at].Kind {
+				case types.KindI1:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI1 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI1(value.Data[at] != 0)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI8:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI8 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI8(int8(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI32:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI32(int32(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI64:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI64 {
+								panic(ErrTypeMismatch)
+							}
+							result := i.boxI64(int64(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF32:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF32(math.Float32frombits(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF64:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF64 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF64(math.Float64frombits(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindRef:
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindRef {
+								panic(ErrTypeMismatch)
+							}
+							result := types.Boxed(value.Data[at])
+							i.retainBox(result)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 9
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				default:
+					goto l482
+				}
+			}
+		l482:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l483
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l483
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l483
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l483
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l483:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l484
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l484
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l484
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l484
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l484:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l485
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l485
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l485
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l485
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l485:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l486
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l486
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l486
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l486
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l486:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l487
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l487
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l487
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l487:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l488
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l488
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l488
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l488
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l488:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l489
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l489
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l489
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l489
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l489:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l490
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l490
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l490
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l490
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l490:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l491
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l491
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l491
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l491
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l491:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l492
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l492
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l492
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l492:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l493
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l493
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l493
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l493
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l493:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l494
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l494
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l494
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l494
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l494:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l495
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l495
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l495
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l495
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l495:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l496
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l496
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l496
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l496
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l496:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l497
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l497
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l497
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l497:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l498
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l498
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l498
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l498
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l498:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l499
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l499
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l499
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l499
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l499:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l500
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l500
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l500
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l500
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l500:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l501
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l501
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l501
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l501
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l501:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l502
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l502
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l502
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l502:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l503
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l503
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l503
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l503
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l503:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l504
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l504
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l504
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l504
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l504:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l505
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l505
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l505
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l505
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l505:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l506
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l506
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l506
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l506
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l506:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l507
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l507
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l507
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l507:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l508
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l508
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l508
+				}
+				i1, ok1 := c.global(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l508
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l508:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.LOCAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l509
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l509
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l509
+				}
+				i1, ok1 := c.local(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l509
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l509:
+			if !(start+7 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.CONST_GET && instr.Opcode(c.code[start+6]) == instr.ARRAY_GET) {
+				goto l510
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l510
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l510
+				}
+				r1, ok1 := c.constant(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l510
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 7
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l510:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.UPVAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l511
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l511
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l511
+				}
+				i1, ok1 := c.upval(start+3+1, types.KindI32)
+				if !ok1 {
+					goto l511
+				}
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l511:
+			if !(start+9 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_CONST && instr.Opcode(c.code[start+8]) == instr.ARRAY_GET) {
+				goto l512
+			}
+			{
+				i0, ok0 := c.global(start+1, types.KindRef)
+				if !ok0 {
+					goto l512
+				}
+				d0, dok0 := c.globalTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l512
+				}
+				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
+				c.ip += 3
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.globals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 9
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l512:
+			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_S) {
+				goto l513
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l481
+					goto l513
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21702,14 +24246,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l481:
+		l513:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_U) {
-				goto l482
+				goto l514
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l482
+					goto l514
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21726,14 +24270,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l482:
+		l514:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LE_S) {
-				goto l483
+				goto l515
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l483
+					goto l515
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21750,14 +24294,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l483:
+		l515:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LE_U) {
-				goto l484
+				goto l516
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l484
+					goto l516
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21774,14 +24318,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l484:
+		l516:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GE_S) {
-				goto l485
+				goto l517
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l485
+					goto l517
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21798,14 +24342,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l485:
+		l517:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GE_U) {
-				goto l486
+				goto l518
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l486
+					goto l518
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21822,14 +24366,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l486:
+		l518:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_ADD) {
-				goto l487
+				goto l519
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l487
+					goto l519
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21846,14 +24390,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l487:
+		l519:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_SUB) {
-				goto l488
+				goto l520
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l488
+					goto l520
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21870,14 +24414,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l488:
+		l520:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MUL) {
-				goto l489
+				goto l521
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l489
+					goto l521
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21894,14 +24438,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l489:
+		l521:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_DIV) {
-				goto l490
+				goto l522
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l490
+					goto l522
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21929,14 +24473,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l490:
+		l522:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_REM) {
-				goto l491
+				goto l523
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l491
+					goto l523
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -21964,14 +24508,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l491:
+		l523:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MOD) {
-				goto l492
+				goto l524
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l492
+					goto l524
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22005,14 +24549,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l492:
+		l524:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MIN) {
-				goto l493
+				goto l525
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l493
+					goto l525
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22029,14 +24573,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l493:
+		l525:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MAX) {
-				goto l494
+				goto l526
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l494
+					goto l526
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22053,14 +24597,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l494:
+		l526:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_COPYSIGN) {
-				goto l495
+				goto l527
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l495
+					goto l527
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22077,14 +24621,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l495:
+		l527:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_EQ) {
-				goto l496
+				goto l528
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l496
+					goto l528
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22101,14 +24645,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l496:
+		l528:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_NE) {
-				goto l497
+				goto l529
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l497
+					goto l529
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22125,14 +24669,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l497:
+		l529:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_LT) {
-				goto l498
+				goto l530
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l498
+					goto l530
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22149,14 +24693,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l498:
+		l530:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_GT) {
-				goto l499
+				goto l531
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l499
+					goto l531
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22173,14 +24717,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l499:
+		l531:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_LE) {
-				goto l500
+				goto l532
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l500
+					goto l532
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22197,14 +24741,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l500:
+		l532:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_GE) {
-				goto l501
+				goto l533
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF32)
 				if !ok0 {
-					goto l501
+					goto l533
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22221,14 +24765,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l501:
+		l533:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_ADD) {
-				goto l502
+				goto l534
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l502
+					goto l534
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22245,14 +24789,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l502:
+		l534:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_SUB) {
-				goto l503
+				goto l535
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l503
+					goto l535
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22269,14 +24813,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l503:
+		l535:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MUL) {
-				goto l504
+				goto l536
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l504
+					goto l536
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22293,14 +24837,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l504:
+		l536:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_DIV) {
-				goto l505
+				goto l537
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l505
+					goto l537
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22328,14 +24872,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l505:
+		l537:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_REM) {
-				goto l506
+				goto l538
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l506
+					goto l538
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22363,14 +24907,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l506:
+		l538:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MOD) {
-				goto l507
+				goto l539
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l507
+					goto l539
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22404,14 +24948,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l507:
+		l539:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MIN) {
-				goto l508
+				goto l540
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l508
+					goto l540
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22428,14 +24972,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l508:
+		l540:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MAX) {
-				goto l509
+				goto l541
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l509
+					goto l541
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22452,14 +24996,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l509:
+		l541:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_COPYSIGN) {
-				goto l510
+				goto l542
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l510
+					goto l542
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22476,14 +25020,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l510:
+		l542:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_EQ) {
-				goto l511
+				goto l543
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l511
+					goto l543
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22500,14 +25044,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l511:
+		l543:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_NE) {
-				goto l512
+				goto l544
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l512
+					goto l544
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22524,14 +25068,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l512:
+		l544:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_LT) {
-				goto l513
+				goto l545
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l513
+					goto l545
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22548,14 +25092,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l513:
+		l545:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_GT) {
-				goto l514
+				goto l546
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l514
+					goto l546
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22572,14 +25116,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l514:
+		l546:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_LE) {
-				goto l515
+				goto l547
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l515
+					goto l547
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22596,14 +25140,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l515:
+		l547:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_GE) {
-				goto l516
+				goto l548
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindF64)
 				if !ok0 {
-					goto l516
+					goto l548
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22620,14 +25164,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l516:
+		l548:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.DROP) {
-				goto l517
+				goto l549
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindRef)
 				if !ok0 {
-					goto l517
+					goto l549
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22637,14 +25181,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l517:
+		l549:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.REF_IS_NULL) {
-				goto l518
+				goto l550
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindRef)
 				if !ok0 {
-					goto l518
+					goto l550
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22660,14 +25204,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l518:
+		l550:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ADD) {
-				goto l519
+				goto l551
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l519
+					goto l551
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22684,14 +25228,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l519:
+		l551:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SUB) {
-				goto l520
+				goto l552
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l520
+					goto l552
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22708,14 +25252,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l520:
+		l552:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_MUL) {
-				goto l521
+				goto l553
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l521
+					goto l553
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22732,14 +25276,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l521:
+		l553:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_DIV_S) {
-				goto l522
+				goto l554
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l522
+					goto l554
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22767,14 +25311,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l522:
+		l554:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_DIV_U) {
-				goto l523
+				goto l555
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l523
+					goto l555
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22802,14 +25346,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l523:
+		l555:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_REM_S) {
-				goto l524
+				goto l556
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l524
+					goto l556
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22837,14 +25381,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l524:
+		l556:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_REM_U) {
-				goto l525
+				goto l557
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l525
+					goto l557
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22872,14 +25416,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l525:
+		l557:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHL) {
-				goto l526
+				goto l558
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l526
+					goto l558
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22896,14 +25440,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l526:
+		l558:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHR_S) {
-				goto l527
+				goto l559
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l527
+					goto l559
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22920,14 +25464,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l527:
+		l559:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHR_U) {
-				goto l528
+				goto l560
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l528
+					goto l560
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22944,14 +25488,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l528:
+		l560:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_XOR) {
-				goto l529
+				goto l561
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l529
+					goto l561
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22967,14 +25511,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l529:
+		l561:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_AND) {
-				goto l530
+				goto l562
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l530
+					goto l562
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -22990,14 +25534,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l530:
+		l562:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_OR) {
-				goto l531
+				goto l563
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l531
+					goto l563
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23013,14 +25557,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l531:
+		l563:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ROTL) {
-				goto l532
+				goto l564
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l532
+					goto l564
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23037,14 +25581,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l532:
+		l564:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ROTR) {
-				goto l533
+				goto l565
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l533
+					goto l565
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23061,14 +25605,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l533:
+		l565:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_EQ) {
-				goto l534
+				goto l566
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l534
+					goto l566
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23085,14 +25629,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l534:
+		l566:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_NE) {
-				goto l535
+				goto l567
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l535
+					goto l567
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23109,14 +25653,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l535:
+		l567:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LT_S) {
-				goto l536
+				goto l568
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l536
+					goto l568
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23133,14 +25677,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l536:
+		l568:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LT_U) {
-				goto l537
+				goto l569
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l537
+					goto l569
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23157,14 +25701,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l537:
+		l569:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GT_S) {
-				goto l538
+				goto l570
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l538
+					goto l570
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23181,14 +25725,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l538:
+		l570:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GT_U) {
-				goto l539
+				goto l571
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l539
+					goto l571
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23205,14 +25749,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l539:
+		l571:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LE_S) {
-				goto l540
+				goto l572
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l540
+					goto l572
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23229,14 +25773,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l540:
+		l572:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LE_U) {
-				goto l541
+				goto l573
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l541
+					goto l573
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23253,14 +25797,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l541:
+		l573:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GE_S) {
-				goto l542
+				goto l574
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l542
+					goto l574
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23277,14 +25821,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l542:
+		l574:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GE_U) {
-				goto l543
+				goto l575
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI32)
 				if !ok0 {
-					goto l543
+					goto l575
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23301,14 +25845,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l543:
+		l575:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ADD) {
-				goto l544
+				goto l576
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l544
+					goto l576
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23325,14 +25869,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l544:
+		l576:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SUB) {
-				goto l545
+				goto l577
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l545
+					goto l577
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23349,14 +25893,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l545:
+		l577:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_MUL) {
-				goto l546
+				goto l578
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l546
+					goto l578
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23373,14 +25917,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l546:
+		l578:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_DIV_S) {
-				goto l547
+				goto l579
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l547
+					goto l579
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23409,14 +25953,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l547:
+		l579:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_DIV_U) {
-				goto l548
+				goto l580
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l548
+					goto l580
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23445,14 +25989,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l548:
+		l580:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_REM_S) {
-				goto l549
+				goto l581
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l549
+					goto l581
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23481,14 +26025,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l549:
+		l581:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_REM_U) {
-				goto l550
+				goto l582
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l550
+					goto l582
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23517,14 +26061,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l550:
+		l582:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHL) {
-				goto l551
+				goto l583
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l551
+					goto l583
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23541,14 +26085,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l551:
+		l583:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHR_S) {
-				goto l552
+				goto l584
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l552
+					goto l584
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23565,14 +26109,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l552:
+		l584:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHR_U) {
-				goto l553
+				goto l585
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l553
+					goto l585
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23589,14 +26133,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l553:
+		l585:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_XOR) {
-				goto l554
+				goto l586
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l554
+					goto l586
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23613,14 +26157,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l554:
+		l586:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_AND) {
-				goto l555
+				goto l587
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l555
+					goto l587
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23637,14 +26181,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l555:
+		l587:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_OR) {
-				goto l556
+				goto l588
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l556
+					goto l588
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23661,14 +26205,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l556:
+		l588:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ROTL) {
-				goto l557
+				goto l589
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l557
+					goto l589
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23685,14 +26229,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l557:
+		l589:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ROTR) {
-				goto l558
+				goto l590
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l558
+					goto l590
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23709,14 +26253,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l558:
+		l590:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_EQ) {
-				goto l559
+				goto l591
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l559
+					goto l591
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23733,14 +26277,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l559:
+		l591:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_NE) {
-				goto l560
+				goto l592
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l560
+					goto l592
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23757,14 +26301,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l560:
+		l592:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LT_S) {
-				goto l561
+				goto l593
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l561
+					goto l593
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23781,14 +26325,14 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l561:
+		l593:
 			if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LT_U) {
-				goto l562
+				goto l594
 			}
 			{
 				i0, ok0 := c.global(start+1, types.KindI64)
 				if !ok0 {
-					goto l562
+					goto l594
 				}
 				c.ip += 3
 				return func(i *Interpreter) {
@@ -23805,7 +26349,7 @@ var (
 					i.fr.ip += 4
 				}
 			}
-		l562:
+		l594:
 			return nil
 		},
 		instr.LOCAL_GET: func(c *threader) func(*Interpreter) {
@@ -60188,13 +62732,2555 @@ var (
 				}
 			}
 		l480:
-			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_S) {
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.STRUCT_GET) {
 				goto l481
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l481
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.StructType)
+				if !dok0 {
+					goto l481
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l481
+				}
+				v1 := r1.I32()
+				at := int(v1)
+				if at < 0 || at >= len(d0.Fields) {
+					goto l481
+				}
+				switch d0.Fields[at].Kind {
+				case types.KindI1:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI1 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI1(value.Data[at] != 0)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI8:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI8 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI8(int8(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI32:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI32(int32(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI64:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI64 {
+								panic(ErrTypeMismatch)
+							}
+							result := i.boxI64(int64(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF32:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF32(math.Float32frombits(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF64:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF64 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF64(math.Float64frombits(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindRef:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindRef {
+								panic(ErrTypeMismatch)
+							}
+							result := types.Boxed(value.Data[at])
+							i.retainBox(result)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 6
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				default:
+					goto l481
+				}
+			}
+		l481:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.STRUCT_GET) {
+				goto l482
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l482
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.StructType)
+				if !dok0 {
+					goto l482
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				at := int(v1)
+				if at < 0 || at >= len(d0.Fields) {
+					goto l482
+				}
+				switch d0.Fields[at].Kind {
+				case types.KindI1:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI1 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI1(value.Data[at] != 0)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI8:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI8 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI8(int8(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI32:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxI32(int32(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindI64:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindI64 {
+								panic(ErrTypeMismatch)
+							}
+							result := i.boxI64(int64(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF32:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF32 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF32(math.Float32frombits(uint32(value.Data[at])))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindF64:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindF64 {
+								panic(ErrTypeMismatch)
+							}
+							result := types.BoxF64(math.Float64frombits(value.Data[at]))
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				case types.KindRef:
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.Ref()
+						if r0.Kind() != types.KindRef {
+							panic(ErrTypeMismatch)
+						}
+						if value, ok := i.heap[v0].(*types.Struct); ok {
+							if at >= len(value.Typ.Fields) {
+								panic(ErrSegmentationFault)
+							}
+							if value.Typ.Fields[at].Kind != types.KindRef {
+								panic(ErrTypeMismatch)
+							}
+							result := types.Boxed(value.Data[at])
+							i.retainBox(result)
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						if value, ok := i.heap[v0].(*HostObject); ok {
+							var result types.Boxed
+							kind, ok := value.kind(at)
+							if !ok {
+								panic(ErrSegmentationFault)
+							}
+							switch kind {
+							case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+								result, _, _ = value.read(at)
+							case types.KindI64:
+								result = i.boxI64(int64(value.Raw(at)))
+							case types.KindRef:
+								boxed, owned, _ := value.read(at)
+								result = boxed
+								if !owned {
+									i.retainBox(result)
+								}
+							default:
+								panic(ErrTypeMismatch)
+							}
+							i.stack[i.sp] = result
+							i.sp++
+							i.fr.ip += 8
+							return
+						}
+						panic(ErrTypeMismatch)
+					}
+				default:
+					goto l482
+				}
+			}
+		l482:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l483
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l483
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l483
+				}
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l483
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l483:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l484
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l484
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l484
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l484
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l484:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l485
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l485
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l485
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l485
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l485:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.UPVAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l486
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l486
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l486
+				}
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l486
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l486:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.ARRAY_GET) {
+				goto l487
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l487
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI1 {
+					goto l487
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[bool]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI1(array[at])
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l487:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l488
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l488
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l488
+				}
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l488
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l488:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l489
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l489
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l489
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l489
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l489:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l490
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l490
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l490
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l490
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l490:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.UPVAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l491
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l491
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l491
+				}
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l491
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l491:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.ARRAY_GET) {
+				goto l492
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l492
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF32 {
+					goto l492
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF32(array[at])
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l492:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l493
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l493
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l493
+				}
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l493
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l493:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l494
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l494
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l494
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l494
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l494:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l495
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l495
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l495
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l495
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l495:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.UPVAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l496
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l496
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l496
+				}
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l496
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l496:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.ARRAY_GET) {
+				goto l497
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l497
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindF64 {
+					goto l497
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[float64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxF64(array[at])
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l497:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l498
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l498
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l498
+				}
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l498
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l498:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l499
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l499
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l499
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l499
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l499:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l500
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l500
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l500
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l500
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l500:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.UPVAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l501
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l501
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l501
+				}
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l501
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l501:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.ARRAY_GET) {
+				goto l502
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l502
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI32 {
+					goto l502
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int32]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI32(array[at])
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l502:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l503
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l503
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l503
+				}
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l503
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l503:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l504
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l504
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l504
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l504
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l504:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l505
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l505
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l505
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l505
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l505:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.UPVAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l506
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l506
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l506
+				}
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l506
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l506:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.ARRAY_GET) {
+				goto l507
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l507
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI64 {
+					goto l507
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int64]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = i.boxI64(array[at])
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l507:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l508
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l508
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l508
+				}
+				i1, ok1 := c.global(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l508
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.globals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l508:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.LOCAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l509
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l509
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l509
+				}
+				i1, ok1 := c.local(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l509
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i.fr.bp+i1 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i3 := i.fr.bp + i1
+					r1 := i.stack[i3]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l509:
+			if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.CONST_GET && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
+				goto l510
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l510
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l510
+				}
+				r1, ok1 := c.constant(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l510
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 6
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l510:
+			if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.UPVAL_GET && instr.Opcode(c.code[start+4]) == instr.ARRAY_GET) {
+				goto l511
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l511
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l511
+				}
+				i1, ok1 := c.upval(start+2+1, types.KindI32)
+				if !ok1 {
+					goto l511
+				}
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if i1 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r1 := i.fr.upvals[i1]
+					v1 := r1.I32()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 5
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l511:
+			if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_CONST && instr.Opcode(c.code[start+7]) == instr.ARRAY_GET) {
+				goto l512
+			}
+			{
+				i0, ok0 := c.upval(start+1, types.KindRef)
+				if !ok0 {
+					goto l512
+				}
+				d0, dok0 := c.captureTypes[i0].(*types.ArrayType)
+				if !dok0 || d0.ElemKind != types.KindI8 {
+					goto l512
+				}
+				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
+				c.ip += 2
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if i0 >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.fr.upvals[i0]
+					v0 := r0.Ref()
+					if r0.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					at := int(v1)
+					if array, ok := i.heap[v0].(types.TypedArray[int8]); ok {
+						if at < 0 || at+1 > len(array) {
+							panic(ErrIndexOutOfRange)
+						}
+						i.stack[i.sp] = types.BoxI8(array[at])
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					if array, ok := i.heap[v0].(*types.Array); ok {
+						var result types.Boxed
+						if at < 0 || at+1 > len(array.Elems) {
+							panic(ErrIndexOutOfRange)
+						}
+						result = array.Elems[at]
+						i.retainBox(result)
+						i.stack[i.sp] = result
+						i.sp++
+						i.fr.ip += 8
+						return
+					}
+					panic(ErrTypeMismatch)
+				}
+			}
+		l512:
+			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_S) {
+				goto l513
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l481
+					goto l513
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60211,14 +65297,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l481:
+		l513:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GT_U) {
-				goto l482
+				goto l514
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l482
+					goto l514
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60235,14 +65321,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l482:
+		l514:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LE_S) {
-				goto l483
+				goto l515
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l483
+					goto l515
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60259,14 +65345,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l483:
+		l515:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LE_U) {
-				goto l484
+				goto l516
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l484
+					goto l516
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60283,14 +65369,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l484:
+		l516:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GE_S) {
-				goto l485
+				goto l517
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l485
+					goto l517
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60307,14 +65393,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l485:
+		l517:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_GE_U) {
-				goto l486
+				goto l518
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l486
+					goto l518
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60331,14 +65417,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l486:
+		l518:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_ADD) {
-				goto l487
+				goto l519
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l487
+					goto l519
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60355,14 +65441,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l487:
+		l519:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_SUB) {
-				goto l488
+				goto l520
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l488
+					goto l520
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60379,14 +65465,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l488:
+		l520:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MUL) {
-				goto l489
+				goto l521
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l489
+					goto l521
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60403,14 +65489,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l489:
+		l521:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_DIV) {
-				goto l490
+				goto l522
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l490
+					goto l522
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60438,14 +65524,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l490:
+		l522:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_REM) {
-				goto l491
+				goto l523
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l491
+					goto l523
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60473,14 +65559,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l491:
+		l523:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MOD) {
-				goto l492
+				goto l524
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l492
+					goto l524
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60514,14 +65600,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l492:
+		l524:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MIN) {
-				goto l493
+				goto l525
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l493
+					goto l525
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60538,14 +65624,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l493:
+		l525:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_MAX) {
-				goto l494
+				goto l526
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l494
+					goto l526
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60562,14 +65648,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l494:
+		l526:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_COPYSIGN) {
-				goto l495
+				goto l527
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l495
+					goto l527
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60586,14 +65672,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l495:
+		l527:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_EQ) {
-				goto l496
+				goto l528
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l496
+					goto l528
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60610,14 +65696,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l496:
+		l528:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_NE) {
-				goto l497
+				goto l529
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l497
+					goto l529
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60634,14 +65720,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l497:
+		l529:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_LT) {
-				goto l498
+				goto l530
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l498
+					goto l530
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60658,14 +65744,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l498:
+		l530:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_GT) {
-				goto l499
+				goto l531
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l499
+					goto l531
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60682,14 +65768,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l499:
+		l531:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_LE) {
-				goto l500
+				goto l532
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l500
+					goto l532
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60706,14 +65792,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l500:
+		l532:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_GE) {
-				goto l501
+				goto l533
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF32)
 				if !ok0 {
-					goto l501
+					goto l533
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60730,14 +65816,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l501:
+		l533:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_ADD) {
-				goto l502
+				goto l534
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l502
+					goto l534
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60754,14 +65840,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l502:
+		l534:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_SUB) {
-				goto l503
+				goto l535
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l503
+					goto l535
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60778,14 +65864,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l503:
+		l535:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MUL) {
-				goto l504
+				goto l536
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l504
+					goto l536
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60802,14 +65888,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l504:
+		l536:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_DIV) {
-				goto l505
+				goto l537
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l505
+					goto l537
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60837,14 +65923,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l505:
+		l537:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_REM) {
-				goto l506
+				goto l538
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l506
+					goto l538
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60872,14 +65958,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l506:
+		l538:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MOD) {
-				goto l507
+				goto l539
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l507
+					goto l539
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60913,14 +65999,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l507:
+		l539:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MIN) {
-				goto l508
+				goto l540
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l508
+					goto l540
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60937,14 +66023,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l508:
+		l540:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_MAX) {
-				goto l509
+				goto l541
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l509
+					goto l541
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60961,14 +66047,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l509:
+		l541:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_COPYSIGN) {
-				goto l510
+				goto l542
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l510
+					goto l542
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -60985,14 +66071,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l510:
+		l542:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_EQ) {
-				goto l511
+				goto l543
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l511
+					goto l543
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61009,14 +66095,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l511:
+		l543:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_NE) {
-				goto l512
+				goto l544
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l512
+					goto l544
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61033,14 +66119,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l512:
+		l544:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_LT) {
-				goto l513
+				goto l545
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l513
+					goto l545
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61057,14 +66143,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l513:
+		l545:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_GT) {
-				goto l514
+				goto l546
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l514
+					goto l546
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61081,14 +66167,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l514:
+		l546:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_LE) {
-				goto l515
+				goto l547
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l515
+					goto l547
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61105,14 +66191,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l515:
+		l547:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F64_GE) {
-				goto l516
+				goto l548
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindF64)
 				if !ok0 {
-					goto l516
+					goto l548
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61129,14 +66215,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l516:
+		l548:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.DROP) {
-				goto l517
+				goto l549
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindRef)
 				if !ok0 {
-					goto l517
+					goto l549
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61146,14 +66232,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l517:
+		l549:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.REF_IS_NULL) {
-				goto l518
+				goto l550
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindRef)
 				if !ok0 {
-					goto l518
+					goto l550
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61169,14 +66255,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l518:
+		l550:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_ADD) {
-				goto l519
+				goto l551
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l519
+					goto l551
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61193,14 +66279,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l519:
+		l551:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SUB) {
-				goto l520
+				goto l552
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l520
+					goto l552
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61217,14 +66303,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l520:
+		l552:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_MUL) {
-				goto l521
+				goto l553
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l521
+					goto l553
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61241,14 +66327,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l521:
+		l553:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_DIV_S) {
-				goto l522
+				goto l554
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l522
+					goto l554
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61276,14 +66362,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l522:
+		l554:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_DIV_U) {
-				goto l523
+				goto l555
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l523
+					goto l555
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61311,14 +66397,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l523:
+		l555:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_REM_S) {
-				goto l524
+				goto l556
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l524
+					goto l556
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61346,14 +66432,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l524:
+		l556:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_REM_U) {
-				goto l525
+				goto l557
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l525
+					goto l557
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61381,14 +66467,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l525:
+		l557:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SHL) {
-				goto l526
+				goto l558
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l526
+					goto l558
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61405,14 +66491,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l526:
+		l558:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SHR_S) {
-				goto l527
+				goto l559
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l527
+					goto l559
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61429,14 +66515,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l527:
+		l559:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_SHR_U) {
-				goto l528
+				goto l560
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l528
+					goto l560
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61453,14 +66539,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l528:
+		l560:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_XOR) {
-				goto l529
+				goto l561
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l529
+					goto l561
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61476,14 +66562,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l529:
+		l561:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_AND) {
-				goto l530
+				goto l562
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l530
+					goto l562
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61499,14 +66585,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l530:
+		l562:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_OR) {
-				goto l531
+				goto l563
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l531
+					goto l563
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61522,14 +66608,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l531:
+		l563:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_ROTL) {
-				goto l532
+				goto l564
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l532
+					goto l564
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61546,14 +66632,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l532:
+		l564:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_ROTR) {
-				goto l533
+				goto l565
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l533
+					goto l565
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61570,14 +66656,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l533:
+		l565:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_EQ) {
-				goto l534
+				goto l566
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l534
+					goto l566
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61594,14 +66680,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l534:
+		l566:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_NE) {
-				goto l535
+				goto l567
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l535
+					goto l567
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61618,14 +66704,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l535:
+		l567:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LT_S) {
-				goto l536
+				goto l568
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l536
+					goto l568
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61642,14 +66728,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l536:
+		l568:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LT_U) {
-				goto l537
+				goto l569
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l537
+					goto l569
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61666,14 +66752,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l537:
+		l569:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GT_S) {
-				goto l538
+				goto l570
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l538
+					goto l570
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61690,14 +66776,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l538:
+		l570:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GT_U) {
-				goto l539
+				goto l571
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l539
+					goto l571
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61714,14 +66800,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l539:
+		l571:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LE_S) {
-				goto l540
+				goto l572
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l540
+					goto l572
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61738,14 +66824,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l540:
+		l572:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_LE_U) {
-				goto l541
+				goto l573
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l541
+					goto l573
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61762,14 +66848,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l541:
+		l573:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GE_S) {
-				goto l542
+				goto l574
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l542
+					goto l574
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61786,14 +66872,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l542:
+		l574:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I32_GE_U) {
-				goto l543
+				goto l575
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI32)
 				if !ok0 {
-					goto l543
+					goto l575
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61810,14 +66896,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l543:
+		l575:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_ADD) {
-				goto l544
+				goto l576
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l544
+					goto l576
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61834,14 +66920,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l544:
+		l576:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SUB) {
-				goto l545
+				goto l577
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l545
+					goto l577
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61858,14 +66944,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l545:
+		l577:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_MUL) {
-				goto l546
+				goto l578
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l546
+					goto l578
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61882,14 +66968,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l546:
+		l578:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_DIV_S) {
-				goto l547
+				goto l579
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l547
+					goto l579
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61918,14 +67004,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l547:
+		l579:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_DIV_U) {
-				goto l548
+				goto l580
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l548
+					goto l580
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61954,14 +67040,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l548:
+		l580:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_REM_S) {
-				goto l549
+				goto l581
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l549
+					goto l581
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -61990,14 +67076,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l549:
+		l581:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_REM_U) {
-				goto l550
+				goto l582
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l550
+					goto l582
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62026,14 +67112,14 @@ var (
 					i.fr.ip++
 				}
 			}
-		l550:
+		l582:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SHL) {
-				goto l551
+				goto l583
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l551
+					goto l583
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62050,14 +67136,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l551:
+		l583:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SHR_S) {
-				goto l552
+				goto l584
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l552
+					goto l584
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62074,14 +67160,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l552:
+		l584:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_SHR_U) {
-				goto l553
+				goto l585
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l553
+					goto l585
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62098,14 +67184,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l553:
+		l585:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_XOR) {
-				goto l554
+				goto l586
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l554
+					goto l586
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62122,14 +67208,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l554:
+		l586:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_AND) {
-				goto l555
+				goto l587
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l555
+					goto l587
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62146,14 +67232,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l555:
+		l587:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_OR) {
-				goto l556
+				goto l588
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l556
+					goto l588
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62170,14 +67256,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l556:
+		l588:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_ROTL) {
-				goto l557
+				goto l589
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l557
+					goto l589
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62194,14 +67280,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l557:
+		l589:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_ROTR) {
-				goto l558
+				goto l590
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l558
+					goto l590
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62218,14 +67304,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l558:
+		l590:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_EQ) {
-				goto l559
+				goto l591
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l559
+					goto l591
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62242,14 +67328,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l559:
+		l591:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_NE) {
-				goto l560
+				goto l592
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l560
+					goto l592
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62266,14 +67352,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l560:
+		l592:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LT_S) {
-				goto l561
+				goto l593
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l561
+					goto l593
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62290,14 +67376,14 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l561:
+		l593:
 			if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.I64_LT_U) {
-				goto l562
+				goto l594
 			}
 			{
 				i0, ok0 := c.upval(start+1, types.KindI64)
 				if !ok0 {
-					goto l562
+					goto l594
 				}
 				c.ip += 2
 				return func(i *Interpreter) {
@@ -62314,7 +67400,7 @@ var (
 					i.fr.ip += 3
 				}
 			}
-		l562:
+		l594:
 			return nil
 		},
 		instr.REF_NULL: func(c *threader) func(*Interpreter) {
@@ -66426,11 +71512,12 @@ func init() {
 	}
 }
 
-func (c *threader) Compile(code []byte, locals []types.Kind, localTypes []types.Type, captures []types.Kind) []func(*Interpreter) {
+func (c *threader) Compile(code []byte, locals []types.Kind, localTypes []types.Type, captures []types.Kind, captureTypes []types.Type) []func(*Interpreter) {
 	c.code = code
 	c.locals = locals
 	c.localTypes = localTypes
 	c.captures = captures
+	c.captureTypes = captureTypes
 	c.ip = 0
 	compiled := make([]func(*Interpreter), len(code))
 	for c.ip < len(code) {
