@@ -1813,18 +1813,8 @@ func (i *Interpreter) arrayElem(addr, at int) types.Boxed {
 	}
 }
 
-// setArrayElem writes the element at index at into the array bound to heap
-// address addr, covering every TypedArray[_] representation and the generic
-// *types.Array alike. It is the generic counterpart to the specialized stores
-// array.set fusion emits when a slot's declared element kind matches the
-// runtime representation: a fused handler falls back to setArrayElem exactly
-// when that specialization misses, and the unfused ARRAY_SET handler calls
-// it unconditionally. A *types.Array element is always an owned ref and is
-// released here after replacement; a TypedArray[_] element is a scalar copy
-// and needs none. setArrayElem does not release addr itself — callers that
-// only borrowed the container ref (a fused store) must leave it alone, and
-// callers that popped an owned ref (the unfused handler) must release it
-// themselves.
+// setArrayElem writes val to the array at addr and index.
+// Reference elements transfer ownership to the array.
 func (i *Interpreter) setArrayElem(addr, at int, val types.Boxed) {
 	switch array := i.heap[addr].(type) {
 	case types.TypedArray[bool]:

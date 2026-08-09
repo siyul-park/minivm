@@ -123,10 +123,7 @@ func scalars() []pattern {
 			}
 		}
 	}
-	// Typed-array containers pair with scalar index producers for array.get.
-	// array.set is restricted to constant containers because mutation lowering
-	// needs the same compile-time heap shape guard as its native fast path.
-	containers := []pattern{
+	constantArrays := []pattern{
 		constant[types.TypedArray[bool]](),
 		constant[types.TypedArray[int8]](),
 		constant[types.TypedArray[int32]](),
@@ -134,6 +131,7 @@ func scalars() []pattern {
 		constant[types.TypedArray[float32]](),
 		constant[types.TypedArray[float64]](),
 	}
+	containers := append([]pattern{}, constantArrays...)
 	for _, source := range containerSources {
 		containers = append(containers,
 			typedContainer[types.TypedArray[bool]](source),
@@ -149,24 +147,11 @@ func scalars() []pattern {
 		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
 	}
 	patterns = append(patterns, cross(containers, indexed...)...)
-	stored := make([]pattern, 0, 6*len(producers[types.I32](instr.I32_CONST))*4)
-	for _, container := range containers[:6] {
+	stored := make([]pattern, 0, len(constantArrays)*len(producers[types.I32](instr.I32_CONST))*4)
+	for _, container := range constantArrays {
 		kind, _ := arrayKind(container[0].typ)
 		for _, index := range producers[types.I32](instr.I32_CONST) {
-			var values []pattern
-			switch kind.Repr() {
-			case instr.KindI1, instr.KindI8, instr.KindI32:
-				values = producers[types.I32](instr.I32_CONST)
-			case instr.KindI64:
-				values = producers[types.I64](instr.I64_CONST)
-			case instr.KindF32:
-				values = producers[types.F32](instr.F32_CONST)
-			case instr.KindF64:
-				values = producers[types.F64](instr.F64_CONST)
-			default:
-				panic(fmt.Sprintf("unsupported array element kind %s", kind))
-			}
-			for _, val := range values {
+			for _, val := range arrayValueProducers(kind) {
 				stored = append(stored, seq(container, index, val, op(instr.ARRAY_SET)))
 			}
 		}
@@ -195,6 +180,21 @@ func scalars() []pattern {
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I32_CONST), op(instr.BR_IF)),
 	)
+}
+
+func arrayValueProducers(kind instr.Kind) []pattern {
+	switch kind.Repr() {
+	case instr.KindI1, instr.KindI8, instr.KindI32:
+		return producers[types.I32](instr.I32_CONST)
+	case instr.KindI64:
+		return producers[types.I64](instr.I64_CONST)
+	case instr.KindF32:
+		return producers[types.F32](instr.F32_CONST)
+	case instr.KindF64:
+		return producers[types.F64](instr.F64_CONST)
+	default:
+		panic(fmt.Sprintf("unsupported array element kind %s", kind))
+	}
 }
 
 func producers[T types.Value](immediate instr.Opcode) []pattern {
