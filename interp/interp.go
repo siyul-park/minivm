@@ -1758,18 +1758,18 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 	return types.BoxRef(addr)
 }
 
-// arrayElem reads the element at index at off the array bound to heap
+// arrayGet reads the element at index at off the array bound to heap
 // address addr, covering every TypedArray[_] representation and the generic
 // *types.Array alike. It is the generic counterpart to the specialized reads
 // array.get fusion emits when a slot's declared element kind matches the
-// runtime representation: a fused handler falls back to arrayElem exactly
+// runtime representation: a fused handler falls back to arrayGet exactly
 // when that specialization misses, and the unfused ARRAY_GET handler calls
 // it unconditionally. A *types.Array element is always an owned ref and is
 // retained here; a TypedArray[_] element is a scalar copy and needs none.
-// arrayElem does not release addr itself — callers that only borrowed the
+// arrayGet does not release addr itself — callers that only borrowed the
 // container ref (a fused read) must leave it alone, and callers that popped
 // an owned ref (the unfused handler) must release it themselves.
-func (i *Interpreter) arrayElem(addr, at int) types.Boxed {
+func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 	switch array := i.heap[addr].(type) {
 	case types.TypedArray[bool]:
 		if at < 0 || at >= len(array) {
@@ -1813,9 +1813,9 @@ func (i *Interpreter) arrayElem(addr, at int) types.Boxed {
 	}
 }
 
-// setArrayElem writes val to the array at addr and index.
+// arraySet writes val to the array at addr and index.
 // Reference elements transfer ownership to the array.
-func (i *Interpreter) setArrayElem(addr, at int, val types.Boxed) {
+func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 	switch array := i.heap[addr].(type) {
 	case types.TypedArray[bool]:
 		if at < 0 || at >= len(array) {
@@ -1869,7 +1869,7 @@ func (i *Interpreter) setArrayElem(addr, at int, val types.Boxed) {
 // and a *HostObject KindRef field are both retained, except a *HostObject
 // field already reported as owned by read, which must not be retained
 // again. structField does not release addr itself, for the same reason
-// arrayElem does not.
+// arrayGet does not.
 func (i *Interpreter) structField(addr, at int) types.Boxed {
 	switch value := i.heap[addr].(type) {
 	case *types.Struct:

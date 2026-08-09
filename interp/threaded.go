@@ -3650,7 +3650,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				addr := ref.Ref()
-				result := i.arrayElem(addr, index)
+				result := i.arrayGet(addr, index)
 				i.release(addr)
 				i.sp--
 				i.stack[i.sp] = result
@@ -3670,7 +3670,7 @@ var (
 				if ref.Kind() != types.KindRef {
 					panic(ErrTypeMismatch)
 				}
-				i.setArrayElem(ref.Ref(), idx, val)
+				i.arraySet(ref.Ref(), idx, val)
 				i.release(ref.Ref())
 				i.sp -= 3
 				i.fr.ip++
@@ -22063,7 +22063,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22115,7 +22115,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22162,7 +22162,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22213,7 +22213,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22256,7 +22256,7 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 9
 					return
@@ -22307,7 +22307,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22359,7 +22359,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22406,7 +22406,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22457,7 +22457,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22500,7 +22500,7 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 9
 					return
@@ -22551,7 +22551,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22603,7 +22603,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22650,7 +22650,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22701,7 +22701,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22744,7 +22744,7 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 9
 					return
@@ -22795,7 +22795,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22847,7 +22847,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22894,7 +22894,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -22945,7 +22945,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -22988,7 +22988,7 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 9
 					return
@@ -23039,7 +23039,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -23091,7 +23091,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -23138,7 +23138,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -23189,7 +23189,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -23232,7 +23232,7 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 9
 					return
@@ -23283,7 +23283,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -23335,7 +23335,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -23382,7 +23382,7 @@ var (
 						i.fr.ip += 7
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 7
 					return
@@ -23433,7 +23433,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -23476,7 +23476,7 @@ var (
 						i.fr.ip += 9
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 9
 					return
@@ -37138,7 +37138,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37191,7 +37191,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37239,7 +37239,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37291,7 +37291,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37335,7 +37335,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -37387,7 +37387,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37440,7 +37440,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37488,7 +37488,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37540,7 +37540,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37584,7 +37584,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -37636,7 +37636,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37689,7 +37689,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37737,7 +37737,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37789,7 +37789,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37833,7 +37833,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -37885,7 +37885,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -37938,7 +37938,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -37986,7 +37986,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -38038,7 +38038,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -38082,7 +38082,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -38134,7 +38134,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -38187,7 +38187,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -38235,7 +38235,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -38287,7 +38287,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -38331,7 +38331,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -38383,7 +38383,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -38436,7 +38436,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -38484,7 +38484,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -38536,7 +38536,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -38580,7 +38580,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -51440,7 +51440,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					result := i.arrayElem(addr, int(v0))
+					result := i.arrayGet(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result
@@ -69312,7 +69312,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -69364,7 +69364,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -69411,7 +69411,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -69462,7 +69462,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -69505,7 +69505,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -69556,7 +69556,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -69608,7 +69608,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -69655,7 +69655,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -69706,7 +69706,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -69749,7 +69749,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -69800,7 +69800,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -69852,7 +69852,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -69899,7 +69899,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -69950,7 +69950,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -69993,7 +69993,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -70044,7 +70044,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -70096,7 +70096,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -70143,7 +70143,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -70194,7 +70194,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -70237,7 +70237,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -70288,7 +70288,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -70340,7 +70340,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -70387,7 +70387,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -70438,7 +70438,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -70481,7 +70481,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -70532,7 +70532,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -70584,7 +70584,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -70631,7 +70631,7 @@ var (
 						i.fr.ip += 6
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 6
 					return
@@ -70682,7 +70682,7 @@ var (
 						i.fr.ip += 5
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 5
 					return
@@ -70725,7 +70725,7 @@ var (
 						i.fr.ip += 8
 						return
 					}
-					i.stack[i.sp] = i.arrayElem(v0, at)
+					i.stack[i.sp] = i.arrayGet(v0, at)
 					i.sp++
 					i.fr.ip += 8
 					return
@@ -73127,7 +73127,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					result := i.arrayElem(addr, int(v0))
+					result := i.arrayGet(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result

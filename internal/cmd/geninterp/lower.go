@@ -1020,7 +1020,7 @@ func index(state *state, current step) (value, error) {
 		// whose static type verification could not pin down leaves a
 		// concrete TypedArray[U] with U != T in the slot), so a miss on the
 		// specialized TypedArray[T] assertion falls back to
-		// (*Interpreter).arrayElem, the same generic reader the unfused
+		// (*Interpreter).arrayGet, the same generic reader the unfused
 		// handler calls unconditionally — every other TypedArray[_]
 		// representation and the generic *types.Array alike — instead of
 		// trapping a case the unfused handler accepts. This arm still
@@ -1032,7 +1032,7 @@ func index(state *state, current step) (value, error) {
 		).Block(append([]jen.Code{
 			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
 		}, tail(boxArray(current.kind, jen.Id("array"), jen.Id("at")))...)...))
-		body = append(body, tail(jen.Id("i").Dot("arrayElem").Call(container.raw, jen.Id("at")))...)
+		body = append(body, tail(jen.Id("i").Dot("arrayGet").Call(container.raw, jen.Id("at")))...)
 		compile = append(compile,
 			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
 			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
@@ -1732,12 +1732,12 @@ func retire(guard jen.Code) []jen.Code {
 }
 
 // lookup emits ARRAY_GET and STRUCT_GET from a resolved index expression,
-// delegating the per-representation read to (*Interpreter).arrayElem or
+// delegating the per-representation read to (*Interpreter).arrayGet or
 // (*Interpreter).structField so this generated handler and every fused
 // fallback that reaches the same generic case share one runtime copy of the
 // dispatch instead of duplicating it in generated code.
 func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
-	method := "arrayElem"
+	method := "arrayGet"
 	if op != instr.ARRAY_GET {
 		method = "structField"
 	}
@@ -2842,7 +2842,7 @@ func arraySet() jen.Code {
 			jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(2))).Dot("I32").Call())),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(3)))),
 			jen.If(jen.Id("ref").Dot("Kind").Call().Op("!=").Add(jen.Id("types").Dot("KindRef"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
-			jen.Id("i").Dot("setArrayElem").Call(jen.Id("ref").Dot("Ref").Call(), jen.Id("idx"), jen.Id("val")),
+			jen.Id("i").Dot("arraySet").Call(jen.Id("ref").Dot("Ref").Call(), jen.Id("idx"), jen.Id("val")),
 			jen.Id("i").Dot("release").Call(jen.Id("ref").Dot("Ref").Call()),
 			jen.Id("i").Dot("sp").Op("-=").Lit(3),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"),
