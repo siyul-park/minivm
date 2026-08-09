@@ -199,6 +199,7 @@ Rules:
 
 - never free it
 - never put it in `free`
+- releasing `BoxedNull` is a no-op
 - `BoxedNull` is `BoxRef(0)`
 
 ### Only refs use RC
@@ -207,13 +208,25 @@ Primitive boxed values do not participate in reference counting. Only `KindRef` 
 
 ### RC must be exact and symmetric
 
-Every ownership edge contributes exactly one count. Every retained ref must be
-released exactly once. Missing counts can collect a value too early; excess
-counts can turn unreachable garbage into a false external root.
+Every ownership edge contributes exactly one count. Every retained non-null ref must be
+released exactly once. `BoxedNull` is the permanent null sentinel and carries no
+heap ownership, so releasing it must not decrement or reclaim heap index 0. Missing
+counts can collect a value too early; excess counts can turn unreachable garbage
+into a false external root.
 
 ### Heap indices are stable
 
 Do not keep addresses into the heap slice across any operation that may allocate. Keep integer heap indexes instead.
+
+### Tail-call frame replacement
+
+`RETURN_CALL` replaces the retiring activation. Forwarded arguments are a separate
+ownership set: the replacement activation owns them before the retiring frame releases
+its slots. The retiring slot sweep excludes those forwarded arguments.
+
+Register caching does not define ownership. A ref local remains owned until frame
+retirement even when it has no cached native register; the JIT materializes its boxed
+value from the VM stack when necessary.
 
 ### Ref ownership must be explicit
 

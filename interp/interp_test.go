@@ -6895,7 +6895,7 @@ func TestWithThreshold(t *testing.T) {
 		for _, hit := range tree.hits {
 			hits += hit
 		}
-		require.Equal(t, int64(0), hits)
+		require.Greater(t, hits, int64(0))
 	})
 
 	t.Run("deopts after i64 array get with stack shape intact", func(t *testing.T) {
@@ -7027,7 +7027,7 @@ func TestWithThreshold(t *testing.T) {
 		for _, hit := range tree.hits {
 			hits += hit
 		}
-		require.Equal(t, int64(0), hits)
+		require.Greater(t, hits, int64(0))
 	})
 
 	t.Run("jits learned callee branch through caller tail", func(t *testing.T) {

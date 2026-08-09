@@ -140,12 +140,13 @@ Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple go
 - Heap indices are stable and must not move.
 - Values that contain refs must implement `types.Traceable`.
 - Large `i64` values may spill to the heap while preserving bytecode semantics.
+- Heap index 0 is a permanent null sentinel and is never reclaimed.
 
 See `memory-model.md` and `value-representation.md` for the detailed rules.
 
 ### Frames
 
-A frame separates the function/template address from the callable reference.
+A frame separates the function/template address from the callable reference. `RETURN_CALL` replaces an activation only after the replacement owns forwarded arguments and the retiring activation has released all of its owned ref slots. JIT frame ownership is independent of register caching; uncached ref locals are still released from their VM stack slots.
 
 | Field | Meaning |
 |---|---|

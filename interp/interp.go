@@ -2127,7 +2127,7 @@ func (i *Interpreter) retainBox(v types.Boxed) {
 }
 
 func (i *Interpreter) releaseBox(v types.Boxed) {
-	if v.Kind() == types.KindRef {
+	if v.Kind() == types.KindRef && v.Ref() != 0 {
 		i.release(v.Ref())
 	}
 }

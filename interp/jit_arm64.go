@@ -158,8 +158,9 @@ func (l arm64Lowerer) emitExits(ctx *lowering) bool {
 				}
 				ctx.assembler.Emit(arm64.ANDI(refAddr, reg, maskI32))
 				if rcBase.Width() == asm.WidthUndefined {
-					rcBase = l.rcBase(ctx)
+					rcBase = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 				}
+				ctx.assembler.Emit(arm64.LDR(rcBase, ctx.pin(scratchCtrl), int16(journalRC*8)))
 				if rc.Width() == asm.WidthUndefined {
 					rc = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 				}
@@ -4031,7 +4032,11 @@ func (l arm64Lowerer) unlessEqual(ctx *lowering, a, b asm.VReg, body func()) {
 
 func (l arm64Lowerer) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int) {
 	l.refOnly(ctx, v, func(addr asm.VReg) {
+		a := ctx.assembler
+		done := a.Label()
+		a.Emit(arm64.CMPI(addr, 0), arm64.BCondLabel(arm64.OpBEQ, done))
 		l.releaseRef(ctx, addr, pre, ip)
+		a.Bind(done)
 	})
 }
 
