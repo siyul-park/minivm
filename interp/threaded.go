@@ -435,7 +435,7 @@ var (
 							if value.Kind() != types.KindRef {
 								continue
 							}
-							i.release(value.Ref())
+							i.releaseBox(value)
 						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
 						if f.release {
@@ -507,7 +507,7 @@ var (
 							if value.Kind() != types.KindRef {
 								continue
 							}
-							i.release(value.Ref())
+							i.releaseBox(value)
 						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
 						if f.release {
@@ -50391,7 +50391,7 @@ var (
 							if value.Kind() != types.KindRef {
 								continue
 							}
-							i.release(value.Ref())
+							i.releaseBox(value)
 						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
 						if f.release {
@@ -50463,7 +50463,7 @@ var (
 							if value.Kind() != types.KindRef {
 								continue
 							}
-							i.release(value.Ref())
+							i.releaseBox(value)
 						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
 						if f.release {

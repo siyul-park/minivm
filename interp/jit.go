@@ -75,10 +75,7 @@ type lowering struct {
 	kind       entryKind
 	leaf       bool
 	nativeLoop bool
-
-	reuseLocals bool
-	spare       asm.VReg
-	carried     []carriedLocal
+	carried    []carriedLocal
 
 	// hoist caches one loop-invariant container's slice header, derived by a
 	// per-entry prologue (see arm64Lowerer.hoist). The registers are pure

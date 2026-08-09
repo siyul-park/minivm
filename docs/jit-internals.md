@@ -228,7 +228,7 @@ Linear spill state is unsafe across a loop back-edge, and mutation blocks can co
 - `asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
 - `noSpill` scans every step in the completed plan, including learned continuations, and forbids spilling whenever `ARRAY_SET` or `STRUCT_SET` is present.
 
-When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. Continuable primitive array stores therefore lower through an explicit state barrier and reuse dead registers rather than depending on spill slots.
+When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. `ARRAY_SET` and `STRUCT_SET` use the common fresh-register heap path rather than a store-specific register-recycling path.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
@@ -306,7 +306,7 @@ A call may lower to native `BL` when the observed target is a JIT-eligible `*typ
 
 Unsupported targets fall back, including host calls, allocation, maps, unsupported functions, unsupported closures, and heap mutations outside the selected guarded fast paths.
 
-Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a function entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path, and `RETURN_CALL` remains threaded.
+Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a function entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path; supported `RETURN_CALL` paths use native tail-loop or tail-morph lowering.
 
 Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, enters the callee trace, and restores caller state on return.
 
@@ -314,7 +314,7 @@ On deoptimization, native frames append enough journal records for Go to rebuild
 
 `RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack. `RETURN_CALL` tail-loop and tail-morph paths replace the current activation only after the replacement owns forwarded arguments and the retiring activation has released every owned ref local.
 
-Native frame teardown mirrors threaded ownership: `stitch` and `ret` first preserve returned refs that still point into the retiring frame, then `releaseFrameRefs` drops each owned ref local through the normal refcount guard before the frame is removed. Frame cleanup preflights all ref locals before emitting the release sequence; a zero-or-one refcount deoptimizes instead of freeing an object natively.
+Native frame teardown mirrors threaded ownership: `stitch` and `ret` first preserve returned refs that still point into the retiring frame, then `releaseFrame` drops each owned ref local through the normal refcount guard before the frame is removed. Frame cleanup preflights all ref locals before emitting the release sequence; a zero-or-one refcount deoptimizes instead of freeing an object natively.
 
 Top-level module code has no synthetic `RETURN`. Falling off the end closes the module trace and writes live operands back to the VM stack.
 

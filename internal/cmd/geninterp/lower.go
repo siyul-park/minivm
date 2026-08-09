@@ -1498,7 +1498,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 				jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1),
 			)).Block(
 				jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Continue()),
-				jen.Id("i").Dot("release").Call(jen.Id("value").Dot("Ref").Call()),
+				jen.Id("i").Dot("releaseBox").Call(jen.Id("value")),
 			),
 			jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
 			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
@@ -1547,7 +1547,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 			jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("params"),
 		)).Block(
 			jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Continue()),
-			jen.Id("i").Dot("release").Call(jen.Id("value").Dot("Ref").Call()),
+			jen.Id("i").Dot("releaseBox").Call(jen.Id("value")),
 		),
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp"))),
 		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
