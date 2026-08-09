@@ -2682,6 +2682,34 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 	return true
 }
 
+// releaseFrameRefs drops the ownership held by an activation's VM local slots.
+// The threaded return path releases every slot below the return values before
+// shrinking the frame. Native inlined frames must do the same; otherwise a ref
+// parameter/local survives every stitch and diverges from the threaded refcount.
+func (l arm64Lowerer) releaseFrameRefs(ctx *lowering, f *activation) bool {
+	for idx, kind := range f.kinds {
+		if kind != types.KindRef {
+			continue
+		}
+		v := f.locals[idx]
+		if v.reg.Width() == asm.WidthUndefined {
+			continue
+		}
+		ref, ok := l.box(ctx, v)
+		if !ok {
+			return false
+		}
+		addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.ANDI(addr, ref, maskI32))
+		base := l.rcBase(ctx)
+		rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
+		ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
+		ctx.assembler.Emit(arm64.STRR(rc, base, addr))
+	}
+	return true
+}
+
 // stitch retires an inlined frame at its RETURN: the top return values
 // land where the interpreter would put them — on the caller's operand stack.
 func (l arm64Lowerer) stitch(ctx *lowering) bool {
@@ -2690,9 +2718,8 @@ func (l arm64Lowerer) stitch(ctx *lowering) bool {
 		return false
 	}
 	rets := append([]value(nil), ctx.values[len(ctx.values)-f.returns:]...)
-	// The frame that produced these values is retiring: a return backed by
-	// one of its own locals, or by its closure's upvals, would otherwise keep
-	// pointing at storage this stitch is about to stop tracking.
+	// A return backed by one of the callee's locals must acquire an independent
+	// retain before that local is released with the rest of the retiring frame.
 	for i := range rets {
 		v := &rets[i]
 		if v.kind != types.KindRef {
@@ -2703,6 +2730,9 @@ func (l arm64Lowerer) stitch(ctx *lowering) bool {
 				return false
 			}
 		}
+	}
+	if !l.releaseFrameRefs(ctx, f) {
+		return false
 	}
 	ctx.values = ctx.values[:f.opBase]
 	ctx.frames = ctx.frames[:len(ctx.frames)-1]
@@ -2717,13 +2747,24 @@ func (l arm64Lowerer) ret(ctx *lowering) bool {
 		return false
 	}
 	a := ctx.assembler
+	// A native entry frame owns every ref local/parameter until RETURN. Retain
+	// deferred return values first so a value returned from one of those locals
+	// survives the local-slot cleanup below.
+	for idx := 0; idx < ctx.returns; idx++ {
+		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx]); !ok {
+			return false
+		}
+	}
+	f := ctx.frame()
+	if !l.releaseFrameRefs(ctx, f) {
+		return false
+	}
 	vStack := ctx.pin(scratchStack)
 	addr := l.base(ctx, vStack)
 	for idx := 0; idx < ctx.returns; idx++ {
-		// The entry frame is about to end, so a deferred return value must own
-		// its retain here: the Go wrapper reads these VM stack slots as
-		// ordinary owned values with no notion of a slot-backed deferral.
-		boxed, ok := l.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx])
+		// The entry frame is ending; the owned return is written into the
+		// caller-visible result slot after the frame's local refs are released.
+		boxed, ok := l.box(ctx, ctx.values[len(ctx.values)-ctx.returns+idx])
 		if !ok {
 			return false
 		}
