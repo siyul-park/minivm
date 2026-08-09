@@ -964,16 +964,15 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 		return false
 	}
 	vp := &ctx.values[len(ctx.values)-1]
-	if vp.kind != kind || !vp.raw {
-		if vp.kind != types.KindRef || kind != types.KindRef {
+	if kind == types.KindRef {
+		if vp.kind != types.KindRef {
 			return false
 		}
+	} else if vp.kind != kind || !vp.raw {
+		return false
 	}
 	var boxed asm.VReg
-	deferred := false
-	if kind == types.KindRef {
-		deferred = vp.backing != backingStack
-	}
+	deferred := kind == types.KindRef && vp.backing != backingStack
 	boxed, ok = l.box(ctx, *vp)
 	if !ok {
 		return false
@@ -983,23 +982,19 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		if kind == types.KindRef {
-			if pop && deferred {
-				l.releaseBox(ctx, old, pre, op.ip)
-			} else {
-				l.releaseBoxExcept(ctx, old, boxed, pre, op.ip)
-			}
+		if pop && deferred {
+			l.releaseBox(ctx, old, pre, op.ip)
+		} else {
+			l.releaseBoxExcept(ctx, old, boxed, pre, op.ip)
 		}
-		if kind == types.KindRef {
-			if _, ok := l.own(ctx, vp); !ok {
-				return false
-			}
-			if !l.detach(ctx, backingGlobal, idx) {
-				return false
-			}
-			if !pop {
-				l.retainBoxExcept(ctx, old, boxed)
-			}
+		if _, ok := l.own(ctx, vp); !ok {
+			return false
+		}
+		if !l.detach(ctx, backingGlobal, idx) {
+			return false
+		}
+		if !pop {
+			l.retainBoxExcept(ctx, old, boxed)
 		}
 	}
 	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
@@ -3001,18 +2996,16 @@ func (l arm64Lowerer) upvalSet(ctx *lowering, op step) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		if kind == types.KindRef && deferred {
+		if deferred {
 			l.releaseBox(ctx, old, pre, op.ip)
-		} else if kind == types.KindRef {
+		} else {
 			l.releaseBoxExcept(ctx, old, boxed, pre, op.ip)
 		}
-		if kind == types.KindRef {
-			if _, ok := l.own(ctx, vp); !ok {
-				return false
-			}
-			if !l.detach(ctx, backingUpval, idx) {
-				return false
-			}
+		if _, ok := l.own(ctx, vp); !ok {
+			return false
+		}
+		if !l.detach(ctx, backingUpval, idx) {
+			return false
 		}
 	}
 	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
