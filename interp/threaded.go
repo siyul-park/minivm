@@ -431,6 +431,12 @@ var (
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
+						for _, value := range i.stack[f.bp : i.sp-params-1] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							i.release(value.Ref())
+						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
 						if f.release {
 							i.release(f.ref)
@@ -496,6 +502,12 @@ var (
 						base = f.bp
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
+						}
+						for _, value := range i.stack[f.bp : i.sp-params-1] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							i.release(value.Ref())
 						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
 						if f.release {
@@ -50375,6 +50387,12 @@ var (
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
+						for _, value := range i.stack[f.bp : i.sp-params] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							i.release(value.Ref())
+						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
 						if f.release {
 							i.release(f.ref)
@@ -50440,6 +50458,12 @@ var (
 						base := f.bp
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
+						}
+						for _, value := range i.stack[f.bp : i.sp-params] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							i.release(value.Ref())
 						}
 						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
 						if f.release {
