@@ -667,7 +667,7 @@ func resolve(pattern pattern) ([]step, error) {
 		steps[2].kind = kind
 		return steps, nil
 	}
-	if consumer == instr.ARRAY_SET && consumerAt == 3 {
+	if consumer == instr.ARRAY_SET && consumerAt == 3 && steps[0].op == instr.CONST_GET {
 		kind, ok := arrayKind(steps[0].typ)
 		if !ok {
 			return nil, fmt.Errorf("array.set cannot resolve element kind")
@@ -2795,84 +2795,42 @@ func element(state *state, current step) (value, error) {
 	if state.standalone {
 		return value{op: current.op, head: current.op, handler: arraySet()}, nil
 	}
-	if current.op != instr.ARRAY_SET || len(state.stack) != 3 {
+	if len(state.stack) != 3 {
+		return value{}, fmt.Errorf("array.set needs three pending values")
+	}
+
+	container, index, val := state.stack[0], state.stack[1], state.stack[2]
+	kind, ok := arrayKind(container.typ)
+	if !ok || container.object == nil {
 		return value{}, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(current.op).Mnemonic)
 	}
 
-	container := state.stack[0]
-	index := state.stack[1]
-	val := state.stack[2]
-	kind, ok := arrayKind(container.typ)
-	if !ok {
-		return value{}, fmt.Errorf("array.set cannot resolve element kind")
-	}
-	compile := append([]jen.Code(nil), container.compile...)
-	compile = append(compile, index.compile...)
-	compile = append(compile, val.compile...)
+	compile := append(append(append([]jen.Code(nil), container.compile...), index.compile...), val.compile...)
 	body := []jen.Code{overflow()}
-
-	if container.object != nil {
-		body = append(body, index.check...)
-		body = append(body, index.body...)
-		body = append(body, val.check...)
-		body = append(body, val.body...)
-		raw := val.raw
-		if raw == nil {
-			raw = val.boxed
-		}
-		body = append(body,
-			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.object).Assert(typeName(container.typ)),
-			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-			jen.Id("at").Op(":=").Int().Call(index.raw),
-			bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
-			storeArray(kind, jen.Id("array"), jen.Id("at"), raw),
-			jen.Id("i").Dot("sp").Op("-=").Lit(3),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
-			jen.Return(),
-		)
-		compile = append(compile,
-			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
-			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-		)
-		state.stack = nil
-		return value{op: current.op, head: container.head, compile: compile}, nil
+	body = append(body, index.check...)
+	body = append(body, index.body...)
+	body = append(body, val.check...)
+	body = append(body, val.body...)
+	raw := val.raw
+	if raw == nil {
+		raw = val.boxed
 	}
-
-	if isContainerSource(container.op) && container.typ != nil {
-		body = append(body, val.check...)
-		body = append(body, val.body...)
-		body = append(body, container.check...)
-		body = append(body, container.body...)
-		body = append(body, index.check...)
-		body = append(body, index.body...)
-		raw := val.raw
-		if raw == nil {
-			raw = val.boxed
-		}
-		body = append(body,
-			jen.If(jen.Add(container.boxed).Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-			jen.Id("at").Op(":=").Int().Call(index.raw),
-			jen.If(jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)), jen.Id("ok")).Block(
-				bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
-				storeArray(kind, jen.Id("array"), jen.Id("at"), raw),
-				jen.Id("i").Dot("sp").Op("-=").Lit(3),
-				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
-				jen.Return(),
-			),
-			jen.Id("i").Dot("retainBox").Call(val.boxed),
-			jen.Id("i").Dot("setArrayElem").Call(container.raw, jen.Id("at"), val.boxed),
-			jen.Id("i").Dot("sp").Op("-=").Lit(3),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
-		)
-		compile = append(compile,
-			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
-			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-		)
-		state.stack = nil
-		return value{op: current.op, head: container.head, compile: compile}, nil
-	}
-
-	return value{}, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(current.op).Mnemonic)
+	body = append(body,
+		jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.object).Assert(typeName(container.typ)),
+		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		jen.Id("at").Op(":=").Int().Call(index.raw),
+		bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
+		storeArray(kind, jen.Id("array"), jen.Id("at"), raw),
+		jen.Id("i").Dot("sp").Op("-=").Lit(3),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+		jen.Return(),
+	)
+	compile = append(compile,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+	)
+	state.stack = nil
+	return value{op: current.op, head: container.head, compile: compile}, nil
 }
 
 func arraySet() jen.Code {

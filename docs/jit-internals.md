@@ -460,7 +460,7 @@ Ref reads retain the loaded element or payload. A container consumer releases it
 
 Heap-promoted `i64` values fall back before boxing.
 
-A primitive typed-array `ARRAY_SET` or a scalar-field `STRUCT_SET` may continue through native execution when it occurs in the anchor frame before any inlined call. Lowering first materializes one resumable pre-op snapshot, clears the local register cache, and lets the guards (shape, bounds, and release for arrays, plus the per-field kind guard for structs) share that snapshot. Guard failure resumes at the original opcode; success performs the scalar store and continues to later operations or the loop back-edge.
+A primitive typed-array `ARRAY_SET` may continue through native execution only for a compile-time constant container. A scalar-field `STRUCT_SET` may continue in the anchor frame before any inlined call. Lowering materializes the smallest resumable state needed by each mutation; guard failure resumes at the original opcode, while success performs the scalar store and continues to later operations or the loop back-edge.
 
 Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` remain terminal mutations. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. Their hot path may perform the store and resume threaded execution at the next instruction, while recursive release or any failed guard remains interpreter-owned.
 
