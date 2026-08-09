@@ -3315,6 +3315,10 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false
 	}
+	container := ctx.values[len(ctx.values)-3]
+	if container.backing != backingConst {
+		return l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op))
+	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	var want uintptr
 	var base int16
@@ -3355,7 +3359,6 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			return false
 		}
 	}
-	container := ctx.values[len(ctx.values)-3]
 	owned := container.backing == backingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]

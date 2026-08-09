@@ -452,7 +452,7 @@ A committing (loop back-edge) flush rejects any live deferred ref: owning it wou
 
 ARM64 supports selected heap fast paths.
 
-Native full-trace reads include observed shapes for scalar `REF_GET`, selected `ARRAY_LEN`, selected `ARRAY_GET`, selected `STRUCT_GET`, `ERROR_GET`, `CORO_DONE`, and `CORO_VALUE`.
+Native full-trace reads include observed shapes for scalar `REF_GET`, selected `ARRAY_LEN`, selected `ARRAY_GET`, selected `STRUCT_GET`, `ERROR_GET`, `CORO_DONE`, and `CORO_VALUE`. `ARRAY_SET` is native only for compile-time constant typed-array containers; other containers deopt to the threaded handler.
 
 Heap reads guard ref address, heap itab, array element kind, struct type pointer, struct field kind, index bounds, and release safety when needed.
 

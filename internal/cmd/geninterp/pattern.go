@@ -151,7 +151,7 @@ func scalars() []pattern {
 	}
 	patterns = append(patterns, cross(containers, indexed...)...)
 	stored := make([]pattern, 0, len(containers)*len(producers[types.I32](instr.I32_CONST))*4)
-	for _, container := range containers {
+	for _, container := range containers[:6] {
 		kind, _ := arrayKind(container[0].typ)
 		for _, index := range producers[types.I32](instr.I32_CONST) {
 			for _, val := range valueProducers(kind) {
