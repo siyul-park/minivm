@@ -312,9 +312,9 @@ Native calls are frame-aware. The lowering checks frame budget, increments nativ
 
 On deoptimization, native frames append enough journal records for Go to rebuild the VM call chain.
 
-`RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack. `RETURN_CALL` tail-loop and tail-morph paths replace the current activation only after the replacement owns forwarded arguments and the retiring activation has released every owned ref local.
+`RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack. `RETURN_CALL` tail-loop and tail-morph paths first preflight the retiring activation, then own forwarded arguments and release the retiring frame.
 
-Native frame teardown mirrors threaded ownership: `stitch` and `ret` first preserve returned refs that still point into the retiring frame, then `releaseFrame` drops each owned ref local through the normal refcount guard before the frame is removed. Frame cleanup preflights all ref locals before emitting the release sequence; a zero-or-one refcount deoptimizes instead of freeing an object natively.
+Native frame teardown mirrors threaded ownership: `stitch` and `ret` first guard the retiring refs, then preserve returned refs that still point into the frame, and finally `releaseFrame` drops the owned refs before the frame is removed. The guard counts duplicate addresses together; native teardown deoptimizes when any address cannot cover all pending releases, so native code never decrements an object to zero without the interpreter's reclaim path.
 
 Top-level module code has no synthetic `RETURN`. Falling off the end closes the module trace and writes live operands back to the VM stack.
 

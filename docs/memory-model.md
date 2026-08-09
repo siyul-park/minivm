@@ -220,9 +220,10 @@ Do not keep addresses into the heap slice across any operation that may allocate
 
 ### Tail-call frame replacement
 
-`RETURN_CALL` replaces the retiring activation. Forwarded arguments are a separate
-ownership set: the replacement activation owns them before the retiring frame releases
-its slots. The retiring slot sweep excludes those forwarded arguments.
+`RETURN_CALL` replaces the retiring activation. The retiring frame is first checked for
+a safe native release; only then does the replacement activation own forwarded arguments
+and the retiring frame release its slots. The retiring slot sweep excludes those
+forwarded arguments.
 
 Register caching does not define ownership. A ref local remains owned until frame
 retirement even when it has no cached native register; the JIT materializes its boxed
