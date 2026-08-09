@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"sort"
@@ -122,11 +123,7 @@ func scalars() []pattern {
 			}
 		}
 	}
-	// Every typed-array container, whether a compile-time constant or a
-	// LOCAL_GET/GLOBAL_GET/UPVAL_GET whose declared type is a concrete
-	// element kind, pairs with every scalar index producer to feed
-	// array.get.
-	containers := []pattern{
+	arrayConstants := []pattern{
 		constant[types.TypedArray[bool]](),
 		constant[types.TypedArray[int8]](),
 		constant[types.TypedArray[int32]](),
@@ -134,8 +131,9 @@ func scalars() []pattern {
 		constant[types.TypedArray[float32]](),
 		constant[types.TypedArray[float64]](),
 	}
-	for _, source := range containerSources {
-		containers = append(containers,
+	arrayContainers := append([]pattern{}, arrayConstants...)
+	for _, source := range slotSources {
+		arrayContainers = append(arrayContainers,
 			typedContainer[types.TypedArray[bool]](source),
 			typedContainer[types.TypedArray[int8]](source),
 			typedContainer[types.TypedArray[int32]](source),
@@ -148,7 +146,17 @@ func scalars() []pattern {
 	for _, index := range producers[types.I32](instr.I32_CONST) {
 		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
 	}
-	patterns = append(patterns, cross(containers, indexed...)...)
+	patterns = append(patterns, cross(arrayContainers, indexed...)...)
+	setPatterns := make([]pattern, 0, len(arrayConstants)*len(producers[types.I32](instr.I32_CONST))*4)
+	for _, container := range arrayConstants {
+		kind, _ := arrayKind(container[0].typ)
+		for _, index := range producers[types.I32](instr.I32_CONST) {
+			for _, val := range arrayProducers(kind) {
+				setPatterns = append(setPatterns, seq(container, index, val, op(instr.ARRAY_SET)))
+			}
+		}
+	}
+	patterns = append(patterns, setPatterns...)
 	// array.get and struct.get both accept a compile-time constant field
 	// index alone, leaving whatever container instruction precedes them
 	// unfused.
@@ -162,8 +170,8 @@ func scalars() []pattern {
 	for _, index := range fieldIndex {
 		structFields = append(structFields, seq(index, op(instr.STRUCT_GET)))
 	}
-	structContainers := make([]pattern, 0, len(containerSources))
-	for _, source := range containerSources {
+	structContainers := make([]pattern, 0, len(slotSources))
+	for _, source := range slotSources {
 		structContainers = append(structContainers, structContainer(source))
 	}
 	patterns = append(patterns, cross(structContainers, structFields...)...)
@@ -172,6 +180,21 @@ func scalars() []pattern {
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I32_CONST), op(instr.BR_IF)),
 	)
+}
+
+func arrayProducers(kind instr.Kind) []pattern {
+	switch kind.Repr() {
+	case instr.KindI1, instr.KindI8, instr.KindI32:
+		return producers[types.I32](instr.I32_CONST)
+	case instr.KindI64:
+		return producers[types.I64](instr.I64_CONST)
+	case instr.KindF32:
+		return producers[types.F32](instr.F32_CONST)
+	case instr.KindF64:
+		return producers[types.F64](instr.F64_CONST)
+	default:
+		panic(fmt.Sprintf("unsupported array element kind %s", kind))
+	}
 }
 
 func producers[T types.Value](immediate instr.Opcode) []pattern {
@@ -210,10 +233,10 @@ func constant[T types.Value]() pattern {
 	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T]()}}
 }
 
-// containerSources lists the slot-read opcodes whose declared type can prove
+// slotSources lists the slot-read opcodes whose declared type can prove
 // an array.get/struct.get container's shape at threading time: a local slot,
 // a module global, or a closure's captured upvalue.
-var containerSources = []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET}
+var slotSources = []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET}
 
 // typedContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET) whose
 // declared slot type is the concrete array type T, letting a fused consumer

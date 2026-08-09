@@ -232,7 +232,7 @@ func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
 		return l.table(ctx, block, tail)
 	case terminateReturn:
 		if len(ctx.frames) > 1 {
-			if !l.stitch(ctx) {
+			if !l.stitch(ctx, block.term.ip) {
 				return false
 			}
 			if len(tail) > 0 {
@@ -241,9 +241,9 @@ func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
 			if ctx.kind == entryModule {
 				return l.complete(ctx)
 			}
-			return l.ret(ctx)
+			return l.ret(ctx, block.term.ip)
 		}
-		return l.ret(ctx)
+		return l.ret(ctx, block.term.ip)
 	case terminateComplete:
 		return l.complete(ctx)
 	case terminateFallback:
@@ -752,10 +752,10 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 			ok = l.tailMorph(ctx, op)
 		case instr.RETURN:
 			if len(ctx.frames) > 1 {
-				ok = l.stitch(ctx)
+				ok = l.stitch(ctx, op.ip)
 				break
 			}
-			if !l.ret(ctx) {
+			if !l.ret(ctx, op.ip) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
@@ -2684,15 +2684,14 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 
 // stitch retires an inlined frame at its RETURN: the top return values
 // land where the interpreter would put them — on the caller's operand stack.
-func (l arm64Lowerer) stitch(ctx *lowering) bool {
+func (l arm64Lowerer) stitch(ctx *lowering, ip int) bool {
 	f := ctx.frame()
 	if ctx.count() < f.returns {
 		return false
 	}
 	rets := append([]value(nil), ctx.values[len(ctx.values)-f.returns:]...)
-	// The frame that produced these values is retiring: a return backed by
-	// one of its own locals, or by its closure's upvals, would otherwise keep
-	// pointing at storage this stitch is about to stop tracking.
+	// A return backed by one of the callee's locals must acquire an independent
+	// retain before that local is released with the rest of the retiring frame.
 	for i := range rets {
 		v := &rets[i]
 		if v.kind != types.KindRef {
@@ -2704,6 +2703,9 @@ func (l arm64Lowerer) stitch(ctx *lowering) bool {
 			}
 		}
 	}
+	if !l.releaseFrameRefs(ctx, f, ip) {
+		return false
+	}
 	ctx.values = ctx.values[:f.opBase]
 	ctx.frames = ctx.frames[:len(ctx.frames)-1]
 	ctx.values = append(ctx.values, rets...)
@@ -2712,18 +2714,29 @@ func (l arm64Lowerer) stitch(ctx *lowering) bool {
 
 // ret closes the entry frame: boxed returns land at the frame base for
 // the Go wrapper and in the ABI return registers for native callers.
-func (l arm64Lowerer) ret(ctx *lowering) bool {
+func (l arm64Lowerer) ret(ctx *lowering, ip int) bool {
 	if ctx.count() < ctx.returns {
 		return false
 	}
 	a := ctx.assembler
+	// A native entry frame owns every ref local/parameter until RETURN. Retain
+	// deferred return values first so a value returned from one of those locals
+	// survives the local-slot cleanup below.
+	for idx := 0; idx < ctx.returns; idx++ {
+		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx]); !ok {
+			return false
+		}
+	}
+	f := ctx.frame()
+	if !l.releaseFrameRefs(ctx, f, ip) {
+		return false
+	}
 	vStack := ctx.pin(scratchStack)
 	addr := l.base(ctx, vStack)
 	for idx := 0; idx < ctx.returns; idx++ {
-		// The entry frame is about to end, so a deferred return value must own
-		// its retain here: the Go wrapper reads these VM stack slots as
-		// ordinary owned values with no notion of a slot-backed deferral.
-		boxed, ok := l.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx])
+		// The entry frame is ending; the owned return is written into the
+		// caller-visible result slot after the frame's local refs are released.
+		boxed, ok := l.box(ctx, ctx.values[len(ctx.values)-ctx.returns+idx])
 		if !ok {
 			return false
 		}
@@ -2736,6 +2749,38 @@ func (l arm64Lowerer) ret(ctx *lowering) bool {
 	a.Emit(
 		arm64.RET(),
 	)
+	return true
+}
+
+// releaseFrameRefs drops the ownership held by an activation's VM local slots.
+func (l arm64Lowerer) releaseFrameRefs(ctx *lowering, f *activation, ip int) bool {
+	refs := make([]asm.VReg, 0, len(f.kinds))
+	for idx, kind := range f.kinds {
+		if kind != types.KindRef || f.locals[idx].reg.Width() == asm.WidthUndefined {
+			continue
+		}
+		ref, ok := l.box(ctx, f.locals[idx])
+		if !ok {
+			return false
+		}
+		refs = append(refs, ref)
+	}
+	if len(refs) == 0 {
+		return true
+	}
+	pre := append([]value(nil), ctx.values...)
+	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
+	if !ok {
+		return false
+	}
+	base := l.rcBase(ctx)
+	for _, ref := range refs {
+		addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.ANDI(addr, ref, maskI32))
+		rc := l.guardRC(ctx, addr, base, fail)
+		ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
+		ctx.assembler.Emit(arm64.STRR(rc, base, addr))
+	}
 	return true
 }
 
@@ -3274,6 +3319,10 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false
 	}
+	container := ctx.values[len(ctx.values)-3]
+	if container.backing != backingConst {
+		return l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op))
+	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	var want uintptr
 	var base int16
@@ -3295,9 +3344,6 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	case types.KindF64:
 		want = heapArrayF64
 		scale = 3
-	case types.KindRef:
-		want = heapArrayRef
-		base = int16(arrayElems)
 	default:
 		return false
 	}
@@ -3314,7 +3360,6 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			return false
 		}
 	}
-	container := ctx.values[len(ctx.values)-3]
 	owned := container.backing == backingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]

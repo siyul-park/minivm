@@ -314,6 +314,8 @@ On deoptimization, native frames append enough journal records for Go to rebuild
 
 `RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack.
 
+Native frame teardown mirrors threaded ownership: `stitch` and `ret` first preserve returned refs that still point into the retiring frame, then `releaseFrameRefs` drops each owned ref local through the normal refcount guard before the frame is removed. Frame cleanup preflights all ref locals before emitting the release sequence; a zero-or-one refcount deoptimizes instead of freeing an object natively.
+
 Top-level module code has no synthetic `RETURN`. Falling off the end closes the module trace and writes live operands back to the VM stack.
 
 ## Branches
@@ -452,7 +454,7 @@ A committing (loop back-edge) flush rejects any live deferred ref: owning it wou
 
 ARM64 supports selected heap fast paths.
 
-Native full-trace reads include observed shapes for scalar `REF_GET`, selected `ARRAY_LEN`, selected `ARRAY_GET`, selected `STRUCT_GET`, `ERROR_GET`, `CORO_DONE`, and `CORO_VALUE`.
+Native full-trace reads include observed shapes for scalar `REF_GET`, selected `ARRAY_LEN`, selected `ARRAY_GET`, selected `STRUCT_GET`, `ERROR_GET`, `CORO_DONE`, and `CORO_VALUE`. `ARRAY_SET` is native only for compile-time constant typed-array containers; other containers deopt to the threaded handler.
 
 Heap reads guard ref address, heap itab, array element kind, struct type pointer, struct field kind, index bounds, and release safety when needed.
 
@@ -460,7 +462,7 @@ Ref reads retain the loaded element or payload. A container consumer releases it
 
 Heap-promoted `i64` values fall back before boxing.
 
-A primitive typed-array `ARRAY_SET` or a scalar-field `STRUCT_SET` may continue through native execution when it occurs in the anchor frame before any inlined call. Lowering first materializes one resumable pre-op snapshot, clears the local register cache, and lets the guards (shape, bounds, and release for arrays, plus the per-field kind guard for structs) share that snapshot. Guard failure resumes at the original opcode; success performs the scalar store and continues to later operations or the loop back-edge.
+A primitive typed-array `ARRAY_SET` may continue through native execution only for a compile-time constant container. A scalar-field `STRUCT_SET` may continue in the anchor frame before any inlined call. Lowering materializes the smallest resumable state needed by each mutation; guard failure resumes at the original opcode, while success performs the scalar store and continues to later operations or the loop back-edge.
 
 Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` remain terminal mutations. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. Their hot path may perform the store and resume threaded execution at the next instruction, while recursive release or any failed guard remains interpreter-owned.
 
