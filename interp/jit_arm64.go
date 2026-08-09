@@ -656,28 +656,28 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 		case instr.ARRAY_LEN:
 			ok = l.arrayLen(ctx, op)
 		case instr.ARRAY_SET:
-			terminal := op.terminal || ctx.count() > 0 && ctx.values[len(ctx.values)-1].kind == types.KindRef
-			if !l.arraySet(ctx, op) {
+			var terminal bool
+			ok, terminal = l.arraySet(ctx, op)
+			if !ok {
 				return false, false
 			}
 			if terminal {
 				return true, idx == len(ops)-1
 			}
-			ok = true
 		case instr.STRUCT_GET:
 			if !l.structGet(ctx, op) {
 				return false, false
 			}
 			ok = true
 		case instr.STRUCT_SET:
-			terminal := op.terminal || ctx.count() > 0 && ctx.values[len(ctx.values)-1].kind == types.KindRef
-			if !l.structSet(ctx, op) {
+			var terminal bool
+			ok, terminal = l.structSet(ctx, op)
+			if !ok {
 				return false, false
 			}
 			if terminal {
 				return true, idx == len(ops)-1
 			}
-			ok = true
 		case instr.ERROR_GET:
 			ok = l.errorGet(ctx, op)
 		case instr.CORO_DONE:
@@ -3322,9 +3322,9 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	return true
 }
 
-func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
+func (l arm64Lowerer) arraySet(ctx *lowering, op step) (bool, bool) {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
-		return false
+		return false, false
 	}
 	container := ctx.values[len(ctx.values)-3]
 	kind := ctx.values[len(ctx.values)-1].kind
@@ -3348,15 +3348,18 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	case types.KindF64:
 		want = heapArrayF64
 		scale = 3
+	case types.KindRef:
+		want = heapArrayRef
+		base = int16(arrayElems)
 	default:
-		return false
+		return false, false
 	}
 	if op.shape.itab != 0 && op.shape.itab != want {
-		return false
+		return false, false
 	}
 	if kind == types.KindRef {
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
-			return false
+			return false, false
 		}
 	}
 	owned := container.backing == backingStack
@@ -3368,7 +3371,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		container.backing == backingLocal && container.slot == ctx.hoist.slot && want == ctx.hoist.want {
 		bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
 		if !ok {
-			return false
+			return false, false
 		}
 		l.guardIndex(ctx, idx, ctx.hoist.n, bounds)
 		switch kind {
@@ -3385,23 +3388,23 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			a.Emit(arm64.STRR(val.reg, ctx.hoist.dataPtr, idx))
 		}
 		ctx.values = ctx.values[:len(ctx.values)-3]
-		return true
+		return true, op.terminal
 	}
 	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	ref, ok := l.box(ctx, container)
 	if !ok {
-		return false
+		return false, false
 	}
 	addr, itab, data := l.guardHeap(ctx, ref, fail)
 	l.guardItab(ctx, itab, want, fail)
@@ -3438,9 +3441,9 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
 	if kind == types.KindRef || op.terminal {
-		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op)), true
 	}
-	return true
+	return true, kind == types.KindRef || op.terminal
 }
 
 func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
@@ -3532,22 +3535,22 @@ func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 }
 
-func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
+func (l arm64Lowerer) structSet(ctx *lowering, op step) (bool, bool) {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
-		return false
+		return false, false
 	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	switch kind {
 	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
 	default:
-		return false
+		return false, false
 	}
 	if op.shape.itab != 0 && op.shape.itab != heapStruct {
-		return false
+		return false, false
 	}
 	if kind == types.KindRef {
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
-			return false
+			return false, false
 		}
 	}
 	container := ctx.values[len(ctx.values)-3]
@@ -3557,24 +3560,24 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
 	ref, ok := l.box(ctx, container)
 	if !ok {
-		return false
+		return false, false
 	}
 	a := ctx.assembler
 	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	kindFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
 	if !ok {
-		return false
+		return false, false
 	}
 	addr, itab, data := l.guardHeap(ctx, ref, fail)
 	l.guardItab(ctx, itab, heapStruct, fail)
@@ -3622,9 +3625,9 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
 	if kind == types.KindRef || op.terminal {
-		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op)), true
 	}
-	return true
+	return true, kind == types.KindRef || op.terminal
 }
 
 func (l arm64Lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
