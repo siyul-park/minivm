@@ -314,6 +314,8 @@ On deoptimization, native frames append enough journal records for Go to rebuild
 
 `RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack.
 
+Native frame teardown mirrors threaded ownership: `stitch` and `ret` first preserve returned refs that still point into the retiring frame, then `releaseFrameRefs` drops each owned ref local through the normal refcount guard before the frame is removed. Frame cleanup preflights all ref locals before emitting the release sequence; a zero-or-one refcount deoptimizes instead of freeing an object natively.
+
 Top-level module code has no synthetic `RETURN`. Falling off the end closes the module trace and writes live operands back to the VM stack.
 
 ## Branches
