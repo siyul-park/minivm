@@ -40,6 +40,11 @@ The VM core uses only the Go standard library. The CLI and tests use small exter
 | Linux / x86-64 | ✅ | ✅ | — |
 
 On non-ARM64 platforms, only the threaded interpreter and optimizer are active.
+ARM64 mutation lowering uses the same guarded fresh-register store path for
+primitive and ref `ARRAY_SET`/`STRUCT_SET` operations. Primitive stores can
+continue tracing; ref `ARRAY_SET` and ref-field `STRUCT_SET` report a terminal
+status. When the no-spill register budget is exceeded, native compilation
+falls back to threaded execution.
 
 JIT stubs compile cleanly but do not emit native code. `asm/amd64` is currently a placeholder: it preserves the generic `asm.Arch` shape, but its encoder and ABI return `asm.ErrNotImplemented`.
 

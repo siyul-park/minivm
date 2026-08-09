@@ -6769,7 +6769,7 @@ func TestWithThreshold(t *testing.T) {
 			Returns(types.TypeI32)
 		// Store the same host-pushed local into index 0 twice in a row: the
 		// second ARRAY_SET observes old==val (both reads of LOCAL_GET 1 name
-		// the same ref), exercising releaseBoxUnlessEqual's aliased-store path
+		// the same ref), exercising releaseBoxExcept's aliased-store path
 		// natively within a single call. Read the slot back through ARRAY_GET
 		// and STRING_LEN (rather than inspecting the interpreter's heap table
 		// directly) so the check only relies on legitimate VM operations —
@@ -6895,7 +6895,7 @@ func TestWithThreshold(t *testing.T) {
 		for _, hit := range tree.hits {
 			hits += hit
 		}
-		require.Equal(t, int64(0), hits)
+		require.Greater(t, hits, int64(0))
 	})
 
 	t.Run("deopts after i64 array get with stack shape intact", func(t *testing.T) {
@@ -7027,7 +7027,7 @@ func TestWithThreshold(t *testing.T) {
 		for _, hit := range tree.hits {
 			hits += hit
 		}
-		require.Equal(t, int64(0), hits)
+		require.Greater(t, hits, int64(0))
 	})
 
 	t.Run("jits learned callee branch through caller tail", func(t *testing.T) {

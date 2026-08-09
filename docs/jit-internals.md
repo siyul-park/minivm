@@ -228,7 +228,7 @@ Linear spill state is unsafe across a loop back-edge, and mutation blocks can co
 - `asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
 - `noSpill` scans every step in the completed plan, including learned continuations, and forbids spilling whenever `ARRAY_SET` or `STRUCT_SET` is present.
 
-When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. Continuable primitive array stores therefore lower through an explicit state barrier and reuse dead registers rather than depending on spill slots.
+When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. `ARRAY_SET` and `STRUCT_SET` use the common fresh-register heap path rather than a store-specific register-recycling path.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
@@ -306,15 +306,15 @@ A call may lower to native `BL` when the observed target is a JIT-eligible `*typ
 
 Unsupported targets fall back, including host calls, allocation, maps, unsupported functions, unsupported closures, and heap mutations outside the selected guarded fast paths.
 
-Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a function entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path, and `RETURN_CALL` remains threaded.
+Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a function entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path; supported `RETURN_CALL` paths use native tail-loop or tail-morph lowering.
 
 Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, enters the callee trace, and restores caller state on return.
 
 On deoptimization, native frames append enough journal records for Go to rebuild the VM call chain.
 
-`RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack.
+`RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack. `RETURN_CALL` tail-loop and tail-morph paths first preflight the retiring activation, then own forwarded arguments and release the retiring frame.
 
-Native frame teardown mirrors threaded ownership: `stitch` and `ret` first preserve returned refs that still point into the retiring frame, then `releaseFrameRefs` drops each owned ref local through the normal refcount guard before the frame is removed. Frame cleanup preflights all ref locals before emitting the release sequence; a zero-or-one refcount deoptimizes instead of freeing an object natively.
+Native frame teardown mirrors threaded ownership: `stitch` and `ret` first guard the retiring refs, then preserve returned refs that still point into the frame, and finally `releaseFrame` drops the owned refs before the frame is removed. The guard counts duplicate addresses together; native teardown deoptimizes when any address cannot cover all pending releases, so native code never decrements an object to zero without the interpreter's reclaim path.
 
 Top-level module code has no synthetic `RETURN`. Falling off the end closes the module trace and writes live operands back to the VM stack.
 
@@ -454,7 +454,7 @@ A committing (loop back-edge) flush rejects any live deferred ref: owning it wou
 
 ARM64 supports selected heap fast paths.
 
-Native full-trace reads include observed shapes for scalar `REF_GET`, selected `ARRAY_LEN`, selected `ARRAY_GET`, selected `STRUCT_GET`, `ERROR_GET`, `CORO_DONE`, and `CORO_VALUE`. `ARRAY_SET` is native only for compile-time constant typed-array containers; other containers deopt to the threaded handler.
+Native full-trace reads include observed shapes for scalar `REF_GET`, selected `ARRAY_LEN`, selected `ARRAY_GET`, selected `STRUCT_GET`, `ERROR_GET`, `CORO_DONE`, and `CORO_VALUE`. `ARRAY_SET` and `STRUCT_SET` use the guarded fresh-register heap path for both primitive and ref stores; the former compile-time-constant-container restriction is removed.
 
 Heap reads guard ref address, heap itab, array element kind, struct type pointer, struct field kind, index bounds, and release safety when needed.
 
@@ -462,11 +462,11 @@ Ref reads retain the loaded element or payload. A container consumer releases it
 
 Heap-promoted `i64` values fall back before boxing.
 
-A primitive typed-array `ARRAY_SET` may continue through native execution only for a compile-time constant container. A scalar-field `STRUCT_SET` may continue in the anchor frame before any inlined call. Lowering materializes the smallest resumable state needed by each mutation; guard failure resumes at the original opcode, while success performs the scalar store and continues to later operations or the loop back-edge.
+Primitive typed-array `ARRAY_SET` and scalar-field `STRUCT_SET` may continue through native execution when their guarded heap path fits the no-spill register budget. Guard failure resumes at the original opcode; success performs the store and continues to later operations or the loop back-edge.
 
-Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` remain terminal mutations. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. Their hot path may perform the store and resume threaded execution at the next instruction, while recursive release or any failed guard remains interpreter-owned.
+Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` are terminal mutations. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. A replaced `BoxedNull` field/element has no heap ownership and is not released.
 
-Mutation plans are always no-spill. Leaf traces reuse pinned and dead registers for stack homes, heap cells, refcounts, and boxing scratch so primitive mutation loops fit the physical register bank. A mutation after inlined calls retains the terminal boundary; register exhaustion still rejects compilation cleanly instead of spilling across a back-edge (regression test: `interp.TestARM64_ArraySetAfterNestedCalls`).
+Mutation plans are always no-spill. Stores use the common fresh-register heap path; if the physical register budget is exhausted, `asm.Build` rejects native compilation with `CompileReasonRegisterPressure` and threaded execution remains installed. Native compilation must never spill a store path across a back-edge.
 
 Allocation and complex ref-bearing mutations stay threaded or terminate the native trace.
 
