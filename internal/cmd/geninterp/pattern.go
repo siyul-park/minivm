@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"sort"
@@ -125,7 +126,7 @@ func scalars() []pattern {
 	// Every typed-array container, whether a compile-time constant or a
 	// LOCAL_GET/GLOBAL_GET/UPVAL_GET whose declared type is a concrete
 	// element kind, pairs with every scalar index producer to feed
-	// array.get.
+	// array.get and array.set.
 	containers := []pattern{
 		constant[types.TypedArray[bool]](),
 		constant[types.TypedArray[int8]](),
@@ -149,6 +150,16 @@ func scalars() []pattern {
 		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
 	}
 	patterns = append(patterns, cross(containers, indexed...)...)
+	stored := make([]pattern, 0, len(containers)*len(producers[types.I32](instr.I32_CONST))*4)
+	for _, container := range containers {
+		kind, _ := arrayKind(container[0].typ)
+		for _, index := range producers[types.I32](instr.I32_CONST) {
+			for _, val := range valueProducers(kind) {
+				stored = append(stored, seq(container, index, val, op(instr.ARRAY_SET)))
+			}
+		}
+	}
+	patterns = append(patterns, stored...)
 	// array.get and struct.get both accept a compile-time constant field
 	// index alone, leaving whatever container instruction precedes them
 	// unfused.
@@ -172,6 +183,21 @@ func scalars() []pattern {
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I32_CONST), op(instr.BR_IF)),
 	)
+}
+
+func valueProducers(kind instr.Kind) []pattern {
+	switch kind.Repr() {
+	case instr.KindI1, instr.KindI8, instr.KindI32:
+		return producers[types.I32](instr.I32_CONST)
+	case instr.KindI64:
+		return producers[types.I64](instr.I64_CONST)
+	case instr.KindF32:
+		return producers[types.F32](instr.F32_CONST)
+	case instr.KindF64:
+		return producers[types.F64](instr.F64_CONST)
+	default:
+		panic(fmt.Sprintf("unsupported array element kind %s", kind))
+	}
 }
 
 func producers[T types.Value](immediate instr.Opcode) []pattern {

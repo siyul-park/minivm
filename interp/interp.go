@@ -1813,6 +1813,62 @@ func (i *Interpreter) arrayElem(addr, at int) types.Boxed {
 	}
 }
 
+// setArrayElem writes the element at index at into the array bound to heap
+// address addr, covering every TypedArray[_] representation and the generic
+// *types.Array alike. It is the generic counterpart to the specialized stores
+// array.set fusion emits when a slot's declared element kind matches the
+// runtime representation: a fused handler falls back to setArrayElem exactly
+// when that specialization misses, and the unfused ARRAY_SET handler calls
+// it unconditionally. A *types.Array element is always an owned ref and is
+// released here after replacement; a TypedArray[_] element is a scalar copy
+// and needs none. setArrayElem does not release addr itself — callers that
+// only borrowed the container ref (a fused store) must leave it alone, and
+// callers that popped an owned ref (the unfused handler) must release it
+// themselves.
+func (i *Interpreter) setArrayElem(addr, at int, val types.Boxed) {
+	switch array := i.heap[addr].(type) {
+	case types.TypedArray[bool]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		array[at] = val.Bool()
+	case types.TypedArray[int8]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		array[at] = int8(val.I32())
+	case types.TypedArray[int32]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		array[at] = val.I32()
+	case types.TypedArray[int64]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		array[at] = i.unboxI64(val)
+	case types.TypedArray[float32]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		array[at] = val.F32()
+	case types.TypedArray[float64]:
+		if at < 0 || at >= len(array) {
+			panic(ErrIndexOutOfRange)
+		}
+		array[at] = val.F64()
+	case *types.Array:
+		if at < 0 || at >= len(array.Elems) {
+			panic(ErrIndexOutOfRange)
+		}
+		elem := array.Elems[at]
+		array.Elems[at] = val
+		i.releaseBox(elem)
+	default:
+		panic(ErrTypeMismatch)
+	}
+}
+
 // structField reads the field at index at off the struct or host object
 // bound to heap address addr, covering *types.Struct and *HostObject alike.
 // It is the generic counterpart to the specialized reads struct.get fusion
