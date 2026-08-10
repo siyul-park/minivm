@@ -192,6 +192,21 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		}
 		st.terminal = terminalMutation
 		if op == instr.CALL && t.callsAnchor(&clone, a) {
+			// A loop trace cannot skip a recursive call and keep tracing the
+			// continuation: skipCall supplies zero return values and does not
+			// reproduce the callee's heap mutations. Cutting at the call lets the
+			// real threaded call run, then captures the post-call continuation as
+			// a separate trace with the actual frame and heap state. Function-entry
+			// traces retain native selfCall lowering, where the call itself is part
+			// of the native execution contract.
+			if a.ip != 0 {
+				tr.ops = append(tr.ops, record{
+					step:   step{fn: clone.fr.addr, depth: clone.fp - startFP},
+					target: clone.fr.ip,
+					cut:    true,
+				})
+				return t.publish(a, tree, tr, partial, prof.CaptureReasonNone)
+			}
 			t.skipCall(&clone, a.addr)
 			st.callee = a.addr
 			tr.ops = append(tr.ops, st)
