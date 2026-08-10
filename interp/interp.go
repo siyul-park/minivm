@@ -17,6 +17,8 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+const pooledHeaderLimit = 1024
+
 type Interpreter struct {
 	ctx         context.Context
 	done        <-chan struct{}
@@ -692,23 +694,31 @@ func (i *Interpreter) Close() error {
 
 func (i *Interpreter) Reset() {
 	dynamic := len(i.heap) - i.base
-	if dynamic < len(i.arrays) {
-		clear(i.arrays[dynamic:])
-		i.arrays = i.arrays[:dynamic]
+	poolLimit := pooledHeaderLimit
+	if dynamic < poolLimit {
+		poolLimit = dynamic
+	}
+	if poolLimit < len(i.arrays) {
+		clear(i.arrays[poolLimit:])
+		i.arrays = i.arrays[:poolLimit]
+	}
+	if poolLimit < len(i.structs) {
+		clear(i.structs[poolLimit:])
+		i.structs = i.structs[:poolLimit]
 	}
 	for addr := i.base; addr < len(i.heap); addr++ {
 		value := i.heap[addr]
 		if i.rc[addr] > 0 {
 			i.finalize(addr, value)
 		}
-		if s, ok := value.(*types.Struct); ok && len(s.Typ.Fields) <= 4 {
+		if s, ok := value.(*types.Struct); ok && len(s.Typ.Fields) <= 4 && len(i.structs) < poolLimit {
 			*s = types.Struct{}
 			i.structs = append(i.structs, s)
 		}
 		if i.rc[addr] <= 0 {
 			continue
 		}
-		if array, ok := value.(*types.Array); ok && len(i.arrays) < dynamic {
+		if array, ok := value.(*types.Array); ok && len(i.arrays) < poolLimit {
 			*array = types.Array{}
 			i.arrays = append(i.arrays, array)
 		}
