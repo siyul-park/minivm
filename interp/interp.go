@@ -49,22 +49,21 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames      []frame
-	fr          *frame
-	stack       []types.Boxed
-	heap        []types.Value
-	base        int
-	target      int
-	interned    map[string]types.Ref
-	owners      map[types.Value]int
-	free        []int
-	rc          []int
-	trial       []int
-	work        []int
-	releaseWork []int
-	refbuf      []types.Ref
-	arrays      []*types.Array
-	structs     []*types.Struct
+	frames   []frame
+	fr       *frame
+	stack    []types.Boxed
+	heap     []types.Value
+	base     int
+	target   int
+	interned map[string]types.Ref
+	owners   map[types.Value]int
+	free     []int
+	rc       []int
+	trial    []int
+	work     []int
+	refbuf   []types.Ref
+	arrays   []*types.Array
+	structs  []*types.Struct
 
 	fp  int
 	sp  int
@@ -2283,13 +2282,13 @@ func (i *Interpreter) scan() {
 // mark traces from every positive external count. A negative trial value marks
 // a survivor; zero remains an unreachable cycle candidate.
 func (i *Interpreter) mark() {
-	i.work = i.work[:0]
+	var work []int
 	push := func(addr int) {
 		if addr <= 0 || addr >= len(i.rc) || i.rc[addr] <= 0 || i.trial[addr] < 0 {
 			return
 		}
 		i.trial[addr] = -i.trial[addr] - 1
-		i.work = append(i.work, addr)
+		work = append(work, addr)
 	}
 
 	for addr := 1; addr < len(i.rc); addr++ {
@@ -2297,9 +2296,9 @@ func (i *Interpreter) mark() {
 			push(addr)
 		}
 	}
-	for len(i.work) > 0 {
-		addr := i.work[len(i.work)-1]
-		i.work = i.work[:len(i.work)-1]
+	for len(work) > 0 {
+		addr := work[len(work)-1]
+		work = work[:len(work)-1]
 		for _, ref := range i.refs(i.heap[addr]) {
 			push(int(ref))
 		}
@@ -2349,17 +2348,17 @@ func (i *Interpreter) release(addr int) {
 		return
 	}
 
-	i.releaseWork = i.releaseWork[:0]
-	i.releaseWork = append(i.releaseWork, addr)
-	for len(i.releaseWork) > 0 {
-		addr := i.releaseWork[len(i.releaseWork)-1]
-		i.releaseWork = i.releaseWork[:len(i.releaseWork)-1]
+	i.work = i.work[:0]
+	i.work = append(i.work, addr)
+	for len(i.work) > 0 {
+		addr := i.work[len(i.work)-1]
+		i.work = i.work[:len(i.work)-1]
 
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
 			v := i.heap[addr]
 			for _, r := range i.refs(v) {
-				i.releaseWork = append(i.releaseWork, int(r))
+				i.work = append(i.work, int(r))
 			}
 			i.reclaim(addr, v)
 		}
