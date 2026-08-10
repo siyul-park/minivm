@@ -49,23 +49,22 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames         []frame
-	fr             *frame
-	stack          []types.Boxed
-	heap           []types.Value
-	base           int
-	target         int
-	interned       map[string]types.Ref
-	owners         map[types.Value]int
-	free           []int
-	rc             []int
-	trial          []int
-	work           []int
-	releaseWork    []int
-	refbuf         []types.Ref
-	arrays         []*types.Array
-	structs        []*types.Struct
-	structsPending []*types.Struct
+	frames      []frame
+	fr          *frame
+	stack       []types.Boxed
+	heap        []types.Value
+	base        int
+	target      int
+	interned    map[string]types.Ref
+	owners      map[types.Value]int
+	free        []int
+	rc          []int
+	trial       []int
+	work        []int
+	releaseWork []int
+	refbuf      []types.Ref
+	arrays      []*types.Array
+	structs     []*types.Struct
 
 	fp  int
 	sp  int
@@ -680,7 +679,6 @@ func (i *Interpreter) Close() error {
 	i.Reset()
 	i.arrays = nil
 	i.structs = nil
-	i.structsPending = nil
 	var err error
 	if i.compiler != nil {
 		err = errors.Join(err, i.compiler.Close())
@@ -694,11 +692,6 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
-	for _, s := range i.structsPending {
-		*s = types.Struct{}
-		i.structs = append(i.structs, s)
-	}
-	i.structsPending = i.structsPending[:0]
 	dynamic := len(i.heap) - i.base
 	if dynamic < len(i.arrays) {
 		clear(i.arrays[dynamic:])
@@ -2389,7 +2382,7 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.finalize(addr, v)
 	if s, ok := v.(*types.Struct); ok && len(s.Typ.Fields) <= 4 {
-		i.structsPending = append(i.structsPending, s)
+		i.structs = append(i.structs, s)
 	}
 	i.heap[addr] = nil
 	i.free = append(i.free, addr)
