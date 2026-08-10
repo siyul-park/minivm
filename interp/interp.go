@@ -17,8 +17,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-const pooledHeaderLimit = 1024
-
 type Interpreter struct {
 	ctx         context.Context
 	done        <-chan struct{}
@@ -66,6 +64,9 @@ type Interpreter struct {
 	refbuf   []types.Ref
 	arrays   []*types.Array
 	structs  []*types.Struct
+
+	arrayLive, arrayPeak   int
+	structLive, structPeak int
 
 	fp  int
 	sp  int
@@ -693,36 +694,59 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
-	dynamic := len(i.heap) - i.base
-	poolLimit := pooledHeaderLimit
-	if dynamic < poolLimit {
-		poolLimit = dynamic
-	}
-	if poolLimit < len(i.arrays) {
-		clear(i.arrays[poolLimit:])
-		i.arrays = i.arrays[:poolLimit]
-	}
-	if poolLimit < len(i.structs) {
-		clear(i.structs[poolLimit:])
-		i.structs = i.structs[:poolLimit]
-	}
+	// Keep the recent peak, but let a smaller heap shrink an old high-water mark.
+	structs := 0
+	arrays := 0
 	for addr := i.base; addr < len(i.heap); addr++ {
-		value := i.heap[addr]
-		if i.rc[addr] > 0 {
-			i.finalize(addr, value)
-		}
-		if s, ok := value.(*types.Struct); ok && len(s.Typ.Fields) <= 4 && len(i.structs) < poolLimit {
-			*s = types.Struct{}
-			i.structs = append(i.structs, s)
-		}
 		if i.rc[addr] <= 0 {
 			continue
 		}
-		if array, ok := value.(*types.Array); ok && len(i.arrays) < poolLimit {
-			*array = types.Array{}
-			i.arrays = append(i.arrays, array)
+		switch value := i.heap[addr].(type) {
+		case *types.Struct:
+			if len(value.Typ.Fields) <= 4 {
+				structs++
+			}
+		case *types.Array:
+			arrays++
 		}
 	}
+	i.structPeak = max(i.structPeak, structs)
+	i.arrayPeak = max(i.arrayPeak, arrays)
+	dynamic := len(i.heap) - i.base
+	keepStructs := max(i.structPeak, min(dynamic, len(i.structs)))
+	keepArrays := max(i.arrayPeak, min(dynamic, len(i.arrays)))
+	if keepStructs < len(i.structs) {
+		clear(i.structs[keepStructs:])
+		i.structs = i.structs[:keepStructs]
+	}
+	if keepArrays < len(i.arrays) {
+		clear(i.arrays[keepArrays:])
+		i.arrays = i.arrays[:keepArrays]
+	}
+	for addr := i.base; addr < len(i.heap); addr++ {
+		value := i.heap[addr]
+		if i.rc[addr] <= 0 {
+			continue
+		}
+		i.finalize(addr, value)
+		switch value := value.(type) {
+		case *types.Struct:
+			if len(value.Typ.Fields) <= 4 && len(i.structs) < keepStructs {
+				*value = types.Struct{}
+				i.structs = append(i.structs, value)
+			}
+		case *types.Array:
+			if len(i.arrays) < keepArrays {
+				clear(value.Elems)
+				*value = types.Array{}
+				i.arrays = append(i.arrays, value)
+			}
+		}
+	}
+	i.structLive = 0
+	i.structPeak = 0
+	i.arrayLive = 0
+	i.arrayPeak = 0
 	for i.fp > 1 {
 		i.fp--
 		i.frames[i.fp] = frame{}
@@ -1969,6 +1993,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		i.gc()
 	}
 	if addr, ok := i.reuse(val); ok {
+		i.track(val)
 		return addr
 	}
 
@@ -1977,6 +2002,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 	if !collected && (full || limited) {
 		i.gc()
 		if addr, ok := i.reuse(val); ok {
+			i.track(val)
 			return addr
 		}
 	}
@@ -2000,7 +2026,21 @@ func (i *Interpreter) alloc(val types.Value) int {
 
 	i.heap = append(i.heap, val)
 	i.rc = append(i.rc, 1)
+	i.track(val)
 	return len(i.heap) - 1
+}
+
+func (i *Interpreter) track(v types.Value) {
+	switch v := v.(type) {
+	case *types.Struct:
+		if len(v.Typ.Fields) <= 4 {
+			i.structLive++
+			i.structPeak = max(i.structPeak, i.structLive)
+		}
+	case *types.Array:
+		i.arrayLive++
+		i.arrayPeak = max(i.arrayPeak, i.arrayLive)
+	}
 }
 
 // newStruct reuses small struct objects retained by Reset. The pool is only
@@ -2392,8 +2432,14 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 // address to the free list. The caller has already settled its referents.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.finalize(addr, v)
-	if s, ok := v.(*types.Struct); ok && len(s.Typ.Fields) <= 4 {
-		i.structs = append(i.structs, s)
+	switch v := v.(type) {
+	case *types.Struct:
+		if len(v.Typ.Fields) <= 4 {
+			i.structLive--
+			i.structs = append(i.structs, v)
+		}
+	case *types.Array:
+		i.arrayLive--
 	}
 	i.heap[addr] = nil
 	i.free = append(i.free, addr)
