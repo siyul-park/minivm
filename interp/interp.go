@@ -698,6 +698,9 @@ func (i *Interpreter) Reset() {
 	}
 	for addr := i.base; addr < len(i.heap); addr++ {
 		value := i.heap[addr]
+		if i.rc[addr] > 0 {
+			i.finalize(addr, value)
+		}
 		if s, ok := value.(*types.Struct); ok && len(s.Typ.Fields) <= 4 {
 			*s = types.Struct{}
 			i.structs = append(i.structs, s)
@@ -709,7 +712,6 @@ func (i *Interpreter) Reset() {
 			*array = types.Array{}
 			i.arrays = append(i.arrays, array)
 		}
-		i.finalize(addr, value)
 	}
 	for i.fp > 1 {
 		i.fp--
