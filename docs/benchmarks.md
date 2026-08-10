@@ -35,7 +35,7 @@ Lower `ns/op`, `B/op`, and `allocs/op` are better. Result extraction, reset, fix
 ## Reproduction
 
 ```bash
-# Full external comparison used by the complete matrix
+# Focused external comparison for the current matrix
 cd benchmarks
 go test -tags=compare -run='^$' -bench='^(BenchmarkNumeric_(NBody|SpectralNorm|Mandelbrot|MatMul)|BenchmarkCall_(NQueens|Fannkuch)|BenchmarkMemory_(BinaryTrees|SortStress|StringBuild))$' -benchmem -benchtime=300ms -count=3 ./...
 
@@ -155,7 +155,7 @@ The current kernel sweep was re-measured on the same host with `-benchtime=100ms
 
 ### CPython Comparison
 
-Ten kernels ported from `siyul-park/minipy`'s benchmark corpus answer a
+Nine kernels ported from `siyul-park/minipy`'s benchmark corpus answer a
 narrower question than the table above: how minivm's threaded interpreter
 compares with CPython's, on the same algorithm. minipy compiles Python to
 minivm bytecode, so its own published ratios conflate its code generation with
