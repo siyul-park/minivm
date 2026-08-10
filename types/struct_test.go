@@ -32,6 +32,16 @@ func TestNewStruct(t *testing.T) {
 		s := types.NewStruct(typ)
 		require.Len(t, s.Data, 5)
 	})
+
+	t.Run("reset clears small storage", func(t *testing.T) {
+		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32))
+		s := types.NewStruct(typ, types.BoxI32(1), types.BoxI32(2))
+		s.Reset(typ)
+		require.Same(t, typ, s.Typ)
+		require.Equal(t, types.BoxI32(0), s.Field(0))
+		require.Equal(t, types.BoxI32(0), s.Field(1))
+		require.Len(t, s.Data, 2)
+	})
 }
 
 func TestStruct_FieldByName(t *testing.T) {

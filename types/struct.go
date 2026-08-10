@@ -25,18 +25,24 @@ var _ Traceable = (*Struct)(nil)
 var _ Type = (*StructType)(nil)
 
 func NewStruct(typ *StructType, fields ...Boxed) *Struct {
-	s := &Struct{
-		Typ: typ,
-	}
-	if len(typ.Fields) <= len(s.inline) {
-		s.Data = s.inline[:len(typ.Fields)]
-	} else {
-		s.Data = make([]uint64, len(typ.Fields))
-	}
+	s := &Struct{}
+	s.Reset(typ)
 	for i, field := range fields {
 		s.SetField(i, field)
 	}
 	return s
+}
+
+// Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
+// keep their data inline, so reinitialization does not allocate.
+func (s *Struct) Reset(typ *StructType) {
+	s.Typ = typ
+	if len(typ.Fields) <= len(s.inline) {
+		s.Data = s.inline[:len(typ.Fields)]
+		clear(s.Data)
+		return
+	}
+	s.Data = make([]uint64, len(typ.Fields))
 }
 
 func NewStructType(fields ...StructField) *StructType {

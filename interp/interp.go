@@ -49,20 +49,23 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames   []frame
-	fr       *frame
-	stack    []types.Boxed
-	heap     []types.Value
-	base     int
-	target   int
-	interned map[string]types.Ref
-	owners   map[types.Value]int
-	free     []int
-	rc       []int
-	trial    []int
-	work     []int
-	refbuf   []types.Ref
-	arrays   []*types.Array
+	frames         []frame
+	fr             *frame
+	stack          []types.Boxed
+	heap           []types.Value
+	base           int
+	target         int
+	interned       map[string]types.Ref
+	owners         map[types.Value]int
+	free           []int
+	rc             []int
+	trial          []int
+	work           []int
+	releaseWork    []int
+	refbuf         []types.Ref
+	arrays         []*types.Array
+	structs        []*types.Struct
+	structsPending []*types.Struct
 
 	fp  int
 	sp  int
@@ -676,6 +679,8 @@ func (i *Interpreter) Close() error {
 	i.flush()
 	i.Reset()
 	i.arrays = nil
+	i.structs = nil
+	i.structsPending = nil
 	var err error
 	if i.compiler != nil {
 		err = errors.Join(err, i.compiler.Close())
@@ -689,16 +694,25 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
+	for _, s := range i.structsPending {
+		*s = types.Struct{}
+		i.structs = append(i.structs, s)
+	}
+	i.structsPending = i.structsPending[:0]
 	dynamic := len(i.heap) - i.base
 	if dynamic < len(i.arrays) {
 		clear(i.arrays[dynamic:])
 		i.arrays = i.arrays[:dynamic]
 	}
 	for addr := i.base; addr < len(i.heap); addr++ {
+		value := i.heap[addr]
+		if s, ok := value.(*types.Struct); ok && len(s.Typ.Fields) <= 4 {
+			*s = types.Struct{}
+			i.structs = append(i.structs, s)
+		}
 		if i.rc[addr] <= 0 {
 			continue
 		}
-		value := i.heap[addr]
 		if array, ok := value.(*types.Array); ok && len(i.arrays) < dynamic {
 			*array = types.Array{}
 			i.arrays = append(i.arrays, array)
@@ -1985,6 +1999,20 @@ func (i *Interpreter) alloc(val types.Value) int {
 	return len(i.heap) - 1
 }
 
+// newStruct reuses small struct objects retained by Reset. The pool is only
+// for interpreter-owned heap values; larger structs keep their normal path.
+func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
+	if len(typ.Fields) <= 4 && len(i.structs) > 0 {
+		last := len(i.structs) - 1
+		s := i.structs[last]
+		i.structs[last] = nil
+		i.structs = i.structs[:last]
+		s.Reset(typ)
+		return s
+	}
+	return types.NewStruct(typ)
+}
+
 // newArray reuses only headers invalidated by Reset. Element storage remains
 // fresh so construction keeps its zeroing and memory-retention behavior.
 func (i *Interpreter) newArray(typ *types.ArrayType, elems []types.Boxed) *types.Array {
@@ -2328,16 +2356,17 @@ func (i *Interpreter) release(addr int) {
 		return
 	}
 
-	stack := []int{addr}
-	for len(stack) > 0 {
-		addr := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
+	i.releaseWork = i.releaseWork[:0]
+	i.releaseWork = append(i.releaseWork, addr)
+	for len(i.releaseWork) > 0 {
+		addr := i.releaseWork[len(i.releaseWork)-1]
+		i.releaseWork = i.releaseWork[:len(i.releaseWork)-1]
 
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
 			v := i.heap[addr]
 			for _, r := range i.refs(v) {
-				stack = append(stack, int(r))
+				i.releaseWork = append(i.releaseWork, int(r))
 			}
 			i.reclaim(addr, v)
 		}
@@ -2359,6 +2388,9 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 // address to the free list. The caller has already settled its referents.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.finalize(addr, v)
+	if s, ok := v.(*types.Struct); ok && len(s.Typ.Fields) <= 4 {
+		i.structsPending = append(i.structsPending, s)
+	}
 	i.heap[addr] = nil
 	i.free = append(i.free, addr)
 }
