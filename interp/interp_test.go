@@ -4608,13 +4608,13 @@ func TestInterpreter_Reset(t *testing.T) {
 			require.NoError(t, err)
 		}
 		i.Reset()
-		require.Len(t, i.arrays, 3)
+		require.Len(t, i.arrays.values, 3)
 
 		_, err := i.Alloc(types.String("value"))
 		require.NoError(t, err)
 		i.Reset()
-		require.Len(t, i.arrays, 1)
-		for _, array := range i.arrays[:cap(i.arrays)][1:] {
+		require.Len(t, i.arrays.values, 1)
+		for _, array := range i.arrays.values[:cap(i.arrays.values)][1:] {
 			require.Nil(t, array)
 		}
 	})
