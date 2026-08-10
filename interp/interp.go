@@ -2362,9 +2362,9 @@ func (i *Interpreter) release(addr int) {
 		return
 	}
 
-	i.work = i.work[:0]
+	base := len(i.work)
 	i.work = append(i.work, addr)
-	for len(i.work) > 0 {
+	for len(i.work) > base {
 		addr := i.work[len(i.work)-1]
 		i.work = i.work[:len(i.work)-1]
 

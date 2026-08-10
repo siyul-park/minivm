@@ -1,5 +1,7 @@
 package interp
 
+import "slices"
+
 type pool[T any] struct {
 	values []T
 	live   int
@@ -38,6 +40,7 @@ func (p *pool[T]) trim(dynamic int) int {
 		clear(p.values[keep:])
 		p.values = p.values[:keep]
 	}
+	p.values = slices.Clip(p.values)
 	return keep
 }
 

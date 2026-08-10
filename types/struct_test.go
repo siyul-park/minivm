@@ -21,26 +21,39 @@ func TestNewStruct(t *testing.T) {
 		require.Equal(t, types.BoxRef(2), s.Field(1))
 	})
 
-	t.Run("small storage", func(t *testing.T) {
-		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32))
-		s := types.NewStruct(typ)
-		require.Len(t, s.Data, 2)
-	})
+}
 
-	t.Run("large storage", func(t *testing.T) {
-		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32))
-		s := types.NewStruct(typ)
-		require.Len(t, s.Data, 5)
-	})
-
-	t.Run("reset clears small storage", func(t *testing.T) {
+func TestStruct_Reset(t *testing.T) {
+	t.Run("small", func(t *testing.T) {
 		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32))
 		s := types.NewStruct(typ, types.BoxI32(1), types.BoxI32(2))
+
 		s.Reset(typ)
 		require.Same(t, typ, s.Typ)
 		require.Equal(t, types.BoxI32(0), s.Field(0))
 		require.Equal(t, types.BoxI32(0), s.Field(1))
-		require.Len(t, s.Data, 2)
+	})
+
+	t.Run("large", func(t *testing.T) {
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32),
+			types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32),
+			types.NewStructField(types.TypeI32),
+		)
+		s := types.NewStruct(typ, types.BoxI32(1), types.BoxI32(2), types.BoxI32(3), types.BoxI32(4), types.BoxI32(5))
+
+		s.Reset(typ)
+		for i := range typ.Fields {
+			require.Equal(t, types.BoxI32(0), s.Field(i))
+		}
+	})
+
+	t.Run("reference", func(t *testing.T) {
+		typ := types.NewStructType(types.NewStructField(types.TypeRef))
+		s := types.NewStruct(typ, types.BoxRef(42))
+
+		s.Reset(typ)
+		require.Zero(t, s.Raw(0))
 	})
 }
 
