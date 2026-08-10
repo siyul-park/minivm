@@ -4260,7 +4260,7 @@ var (
 				if i.sp < size {
 					panic(ErrStackUnderflow)
 				}
-				s := types.NewStruct(typ)
+				s := i.newStruct(typ)
 				for j, f := range typ.Fields {
 					val := i.stack[i.sp-size+j]
 					switch f.Kind {
@@ -4295,7 +4295,7 @@ var (
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
 				}
-				s := types.NewStruct(typ)
+				s := i.newStruct(typ)
 				i.stack[i.sp] = types.BoxRef(i.alloc(s))
 				i.sp++
 				i.fr.ip += 3

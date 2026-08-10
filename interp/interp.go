@@ -62,7 +62,8 @@ type Interpreter struct {
 	trial    []int
 	work     []int
 	refbuf   []types.Ref
-	arrays   []*types.Array
+	arrays   pool[*types.Array]
+	structs  pool[*types.Struct]
 
 	fp  int
 	sp  int
@@ -675,7 +676,8 @@ func (i *Interpreter) Len() int {
 func (i *Interpreter) Close() error {
 	i.flush()
 	i.Reset()
-	i.arrays = nil
+	i.arrays.clear()
+	i.structs.clear()
 	var err error
 	if i.compiler != nil {
 		err = errors.Join(err, i.compiler.Close())
@@ -689,22 +691,32 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
+	// Keep the recent peak, but let a smaller heap shrink an old high-water mark.
 	dynamic := len(i.heap) - i.base
-	if dynamic < len(i.arrays) {
-		clear(i.arrays[dynamic:])
-		i.arrays = i.arrays[:dynamic]
-	}
+	keepStructs := i.structs.trim(dynamic)
+	keepArrays := i.arrays.trim(dynamic)
 	for addr := i.base; addr < len(i.heap); addr++ {
+		value := i.heap[addr]
 		if i.rc[addr] <= 0 {
 			continue
 		}
-		value := i.heap[addr]
-		if array, ok := value.(*types.Array); ok && len(i.arrays) < dynamic {
-			*array = types.Array{}
-			i.arrays = append(i.arrays, array)
-		}
 		i.finalize(addr, value)
+		switch value := value.(type) {
+		case *types.Struct:
+			if len(value.Typ.Fields) <= 4 && len(i.structs.values) < keepStructs {
+				*value = types.Struct{}
+				i.structs.put(value)
+			}
+		case *types.Array:
+			if len(i.arrays.values) < keepArrays {
+				clear(value.Elems)
+				*value = types.Array{}
+				i.arrays.put(value)
+			}
+		}
 	}
+	i.structs.reset()
+	i.arrays.reset()
 	for i.fp > 1 {
 		i.fp--
 		i.frames[i.fp] = frame{}
@@ -1951,6 +1963,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		i.gc()
 	}
 	if addr, ok := i.reuse(val); ok {
+		i.track(val)
 		return addr
 	}
 
@@ -1959,6 +1972,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 	if !collected && (full || limited) {
 		i.gc()
 		if addr, ok := i.reuse(val); ok {
+			i.track(val)
 			return addr
 		}
 	}
@@ -1982,21 +1996,41 @@ func (i *Interpreter) alloc(val types.Value) int {
 
 	i.heap = append(i.heap, val)
 	i.rc = append(i.rc, 1)
+	i.track(val)
 	return len(i.heap) - 1
+}
+
+func (i *Interpreter) track(v types.Value) {
+	switch v := v.(type) {
+	case *types.Struct:
+		if len(v.Typ.Fields) <= 4 {
+			i.structs.add()
+		}
+	case *types.Array:
+		i.arrays.add()
+	}
+}
+
+// newStruct reuses small struct objects retained by Reset. The pool is only
+// for interpreter-owned heap values; larger structs keep their normal path.
+func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
+	if len(typ.Fields) <= 4 {
+		if s, ok := i.structs.get(); ok {
+			s.Reset(typ)
+			return s
+		}
+	}
+	return types.NewStruct(typ)
 }
 
 // newArray reuses only headers invalidated by Reset. Element storage remains
 // fresh so construction keeps its zeroing and memory-retention behavior.
 func (i *Interpreter) newArray(typ *types.ArrayType, elems []types.Boxed) *types.Array {
-	if len(i.arrays) == 0 {
-		return &types.Array{Typ: typ, Elems: elems}
+	if array, ok := i.arrays.get(); ok {
+		*array = types.Array{Typ: typ, Elems: elems}
+		return array
 	}
-	last := len(i.arrays) - 1
-	array := i.arrays[last]
-	i.arrays[last] = nil
-	i.arrays = i.arrays[:last]
-	*array = types.Array{Typ: typ, Elems: elems}
-	return array
+	return &types.Array{Typ: typ, Elems: elems}
 }
 
 func (i *Interpreter) reuse(val types.Value) (int, bool) {
@@ -2262,13 +2296,13 @@ func (i *Interpreter) scan() {
 // mark traces from every positive external count. A negative trial value marks
 // a survivor; zero remains an unreachable cycle candidate.
 func (i *Interpreter) mark() {
-	i.work = i.work[:0]
+	var work []int
 	push := func(addr int) {
 		if addr <= 0 || addr >= len(i.rc) || i.rc[addr] <= 0 || i.trial[addr] < 0 {
 			return
 		}
 		i.trial[addr] = -i.trial[addr] - 1
-		i.work = append(i.work, addr)
+		work = append(work, addr)
 	}
 
 	for addr := 1; addr < len(i.rc); addr++ {
@@ -2276,9 +2310,9 @@ func (i *Interpreter) mark() {
 			push(addr)
 		}
 	}
-	for len(i.work) > 0 {
-		addr := i.work[len(i.work)-1]
-		i.work = i.work[:len(i.work)-1]
+	for len(work) > 0 {
+		addr := work[len(work)-1]
+		work = work[:len(work)-1]
 		for _, ref := range i.refs(i.heap[addr]) {
 			push(int(ref))
 		}
@@ -2328,16 +2362,17 @@ func (i *Interpreter) release(addr int) {
 		return
 	}
 
-	stack := []int{addr}
-	for len(stack) > 0 {
-		addr := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
+	base := len(i.work)
+	i.work = append(i.work, addr)
+	for len(i.work) > base {
+		addr := i.work[len(i.work)-1]
+		i.work = i.work[:len(i.work)-1]
 
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
 			v := i.heap[addr]
 			for _, r := range i.refs(v) {
-				stack = append(stack, int(r))
+				i.work = append(i.work, int(r))
 			}
 			i.reclaim(addr, v)
 		}
@@ -2359,6 +2394,15 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 // address to the free list. The caller has already settled its referents.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.finalize(addr, v)
+	switch v := v.(type) {
+	case *types.Struct:
+		if len(v.Typ.Fields) <= 4 {
+			i.structs.remove()
+			i.structs.put(v)
+		}
+	case *types.Array:
+		i.arrays.remove()
+	}
 	i.heap[addr] = nil
 	i.free = append(i.free, addr)
 }

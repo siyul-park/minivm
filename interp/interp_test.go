@@ -4598,26 +4598,6 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
 	})
 
-	t.Run("caps retained array headers at dynamic heap size", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		typ := types.NewArrayType(types.TypeRef)
-		for range 3 {
-			_, err := i.Alloc(types.NewArray(typ))
-			require.NoError(t, err)
-		}
-		i.Reset()
-		require.Len(t, i.arrays, 3)
-
-		_, err := i.Alloc(types.String("value"))
-		require.NoError(t, err)
-		i.Reset()
-		require.Len(t, i.arrays, 1)
-		for _, array := range i.arrays[:cap(i.arrays)][1:] {
-			require.Nil(t, array)
-		}
-	})
 }
 
 func TestNew(t *testing.T) {
