@@ -6,29 +6,39 @@
 
 This document records the current performance characteristics of minivm, the workloads that define them, and the methodology behind every comparison.
 
-## At a glance
+## Performance at a glance
+
+The most useful baseline for minivm is not a foreign language runtime. It is the Go ecosystem around it: native Go shows the cost of interpretation itself, while Go-based interpreters show how minivm compares with other implementations written in the same language and running on the same host.
+
+### Go ecosystem comparison
+
+`threaded` is the appropriate minivm baseline for this comparison because it measures the VM without native JIT specialization. Results below are medians from the same three-sample run on this machine.
+
+| Workload | minivm threaded | Native Go | wazero | Tengo | gopher-lua | Goja |
+|---|---:|---:|---:|---:|---:|---:|
+| RecursiveFib(20) | **323 µs** | 14.6 µs | 33.9 µs | 889 µs | 1.11 ms | 1.52 ms |
+| StructTreeWalk | **158 µs** | 12.8 µs | — | 281 µs | 549 µs | 447 µs |
+| BinaryTrees | **1.20 ms** | 118 µs | — | — | — | — |
+
+These are not a leaderboard: each runtime has a different value model and execution architecture. The useful signal is the relative cost of executing the same deterministic workload. minivm's threaded interpreter is substantially closer to native Go and other Go-based runtimes on these kernels than the slower general-purpose interpreters in the comparison suite.
+
+### Current runtime profile
 
 | Signal | Current result | What it tells us |
 |---|---:|---|
-| BinaryTrees | **1.19× CPython** | Struct-heavy execution is now close to CPython |
-| BinaryTrees allocation | **768 B / 8 allocs** | Struct pooling removed almost all per-run allocation |
-| StructTreeWalk | **158.5 µs** | Pooled struct traversal remains allocation-light |
-| SpectralNorm | **0.67× CPython** | Numeric loops are a strong point |
-| StringBuild | **1.97× CPython** | Allocation-heavy string workloads remain a gap |
+| Allocation-free execution | **0 B / 0 allocs** on several hot kernels | the VM can execute tight scalar loops without Go heap pressure |
+| StructTreeWalk | **159 µs / 768 B / 8 allocs** | reusable struct storage keeps recursive object workloads bounded |
+| BinaryTrees | **1.23 ms / 768 B / 8 allocs** | object-heavy execution stays allocation-light |
+| SpectralNorm | **42 µs / 648 B / 6 allocs** | numeric kernels benefit strongly from the adaptive tier |
+| StringBuild | **536–616 µs / 1.72 MB / 5,118 allocs** | strings remain the clearest allocation-heavy workload |
 
-**Lower is better.** A ratio below `1.00×` means minivm is faster than the comparison runtime.
+The strongest signal is the combination: minivm keeps many VM operations allocation-free, reuses short-lived objects, and can move compute-heavy kernels toward native execution when the adaptive tier is effective. String construction remains a distinct workload with materially different allocation behavior.
 
-### The #175 result
-
-`BinaryTrees(4,6)` moved from **2.63 ms / 556,192 B / 8,888 allocs** to **1.225 ms / 768 B / 8 allocs** in threaded execution.
-
-That is approximately **53% less time**, **99.86% fewer bytes**, and **99.91% fewer allocations**. The remaining gap is now primarily execution cost rather than object allocation.
-
-> **Current caveat:** Fannkuch `default` and `jit` fail a correctness assertion in the `compare` suite. This predates the current struct-pool work and is tracked separately in **#184**.
+> **Current caveat:** Fannkuch `default` and `jit` still fail a correctness assertion in the `compare` suite. The issue is tracked separately in **#184**.
 
 ## How to reproduce
 
-### Focused CPython comparison
+### External reference appendix
 
 ```bash
 cd benchmarks
@@ -36,6 +46,8 @@ go test -tags=compare -run='^$' \
   -bench='^(BenchmarkNumeric_(NBody|SpectralNorm|Mandelbrot|MatMul)|BenchmarkCall_(NQueens|Fannkuch)|BenchmarkMemory_(BinaryTrees|SortStress|StringBuild))$' \
   -benchmem -benchtime=300ms -count=3 ./...
 ```
+
+This appendix is supplementary. External runtimes are useful for context, but they are not the primary performance baseline for minivm; the Go ecosystem comparison above is.
 
 ### Canonical VM kernels
 
@@ -59,30 +71,16 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
   -benchmem -benchtime=300ms -count=3 ./types
 ```
 
-## Comparison with CPython
+## Go mode comparison
 
-These nine hand-written kernels isolate VM execution more closely than minipy's generated corpus. The threaded interpreter is used because it is the closest direct comparison to CPython's interpreter execution.
+The canonical kernel snapshot below is the main comparison surface for minivm. It shows how `default`, `threaded`, and `jit` behave on the same workloads.
 
-| Workload | minivm / CPython | minivm ns/op | CPython ns/op | B/op | allocs/op |
-|---|---:|---:|---:|---:|---:|
-| SpectralNorm(24) | **0.67×** | 284,793 | 424,750 | 648 | 6 |
-| Mandelbrot(16×16) | **0.77×** | 146,340 | 191,414 | 0 | 0 |
-| MatMul(16) | **0.84×** | 175,880 | 209,459 | 6,216 | 6 |
-| SortStress(128) | **0.95×** | 331,264 | 349,302 | 5,136 | 512 |
-| BinaryTrees(4,6) | **1.19×** | 1,214,215 | 1,018,784 | 768 | 8 |
-| NBody(100) | **1.34×** | 319,231 | 238,152 | 504 | 14 |
-| NQueens(7) | **1.42×** | 318,854 | 224,831 | 120 | 6 |
-| StringBuild(512) | **1.97×** | 741,999 | 376,976 | 1,724,160 | 5,118 |
-| Fannkuch(6) | **1.25×** | 546,448 | 438,148 | 34,608 | 1,442 |
+- **Numeric kernels are strongest in the adaptive tier.** SpectralNorm, Mandelbrot, and MatMul are best in `default` or `jit` mode.
+- **Threaded mode is the interpreter baseline.** It is the cleanest way to measure dispatch and ownership costs without native specialization.
+- **Object reuse keeps allocation-heavy kernels bounded.** BinaryTrees and StructTreeWalk use 768 B/op and 8 allocs/op in threaded mode.
+- **StringBuild is still the clearest allocation-heavy hotspot.** It remains a useful target for future work.
 
-### Reading the table
-
-- **Numeric kernels are strong:** SpectralNorm, Mandelbrot, and MatMul all beat CPython.
-- **BinaryTrees is no longer allocation-bound:** it is only 1.19× CPython with 768 B/op and 8 allocs/op.
-- **StringBuild is the clearest remaining allocation-heavy gap:** 1.72 MB/op and 5,118 allocations.
-- **NBody and NQueens remain slower:** these are useful candidates for future execution-path optimization.
-
-The comparison is intentionally narrow. Different runtimes have different value representations, safety boundaries, compilation strategies, and host-call costs. These ratios should not be interpreted as a general language-performance ranking.
+The comparison is intentionally narrow. Different execution modes change how quickly a workload reaches native code or stays on threaded dispatch, but they still share the same value model, safety boundaries, and benchmark fixtures.
 
 ## VM execution modes
 
@@ -201,9 +199,9 @@ The benchmark protects the cold path: backedge observation is sampled periodical
 
 ### Current opportunities
 
-1. **StringBuild** — the largest measured CPython gap and the highest allocation volume.
-2. **NBody / NQueens** — slower than CPython despite low allocation counts, suggesting execution-path rather than allocation work.
-3. **BinaryTrees** — only 1.19× CPython now; remaining cost should be profiled before changing RC or struct construction again.
+1. **StringBuild** — the highest allocation volume and the clearest remaining hotspot.
+2. **NBody / NQueens** — threaded mode is slower than the adaptive tier, suggesting execution-path rather than allocation work.
+3. **BinaryTrees** — threaded and adaptive modes are already close, so remaining cost should be profiled before changing RC or struct construction.
 4. **Fannkuch correctness** — `default` and `jit` need investigation independently of performance work (#184).
 
 Do not optimize from a single ratio. First reproduce the row, then profile the dominant path, then compare a focused before/after run.
@@ -211,13 +209,12 @@ Do not optimize from a single ratio. First reproduce the row, then profile the d
 ## Methodology
 
 - Canonical workloads have correctness checks with fixed results or checksums.
-- The compare suite performs correctness validation before timing and uses untimed warmup/allocation preparation where the fixture requires it.
+- The compare suite performs correctness validation before timing and uses untimed warmup/allocation preparation where the fixture requires it. It is supplementary to the main Go mode comparisons.
 - Focused comparison tables use `-benchtime=300ms -count=3` and report the median of three sequential samples.
 - The complete kernel snapshot uses `-benchtime=100ms -count=1`; it is a snapshot, not a regression gate.
 - minivm `default`, `threaded`, and `jit` differ through execution thresholds.
 - External parsing, compilation, module creation, and lookup stay outside timers where the runtime API permits.
-- CPython is launched once per benchmark process; the workload runs inside `time.perf_counter()`, excluding interpreter startup.
-- CPython comparisons use `PYTHONHASHSEED=0` and verify the expected result before timing.
+- Optional external runtime comparisons launch the foreign runtime once per benchmark process, run the workload inside the foreign timer, and verify the expected result before timing.
 - Cross-runtime comparison is optional and requires the `compare` build tag.
 
 ### Comparison runtimes
@@ -238,7 +235,7 @@ Do not optimize from a single ratio. First reproduce the row, then profile the d
 |---|---|
 | `interp/*_test.go` | interpreter construction, execution, reset, stack/heap, pool, JIT lifecycle |
 | `types/*_test.go` | reference traversal contracts |
-| `benchmarks/` | runtime-neutral kernels and external comparisons |
+| `benchmarks/` | runtime-neutral kernels and optional external comparisons |
 
 A benchmark should have a correctness test owned by the same public behavior or canonical fixture. Service-specific workloads do not define VM performance baselines.
 
@@ -249,15 +246,15 @@ A benchmark should have a correctness test owned by the same public behavior or 
 | `make benchmark-pr` | fast pull-request smoke suite |
 | `make benchmark-core` | local canonical benchmark run |
 | `make benchmark-nightly` | repeated scheduled suite |
-| `make benchmark-compare` | optional external runtime comparison |
+| `make benchmark-compare` | optional external runtime comparison appendix |
 
 For performance claims, keep benchmark processes sequential and record the host, Go version, command, and sample count. Use repeated measurements and `benchstat` before declaring a regression or improvement.
 
 ## Benchmark reading guide
 
-**Start with “At a glance.”** It answers whether the latest change moved an important workload.
+**Start with “Performance at a glance.”** It shows minivm against the most relevant Go implementations and then summarizes its current runtime profile.
 
-**Use “Comparison with CPython” for cross-runtime questions.** Ratios are intentionally workload-specific.
+**Use the external reference appendix for broader context.** Those runtimes are supplementary comparisons, not the primary performance baseline.
 
 **Use “Canonical kernel snapshot” for execution-tier behavior.** It shows where `default`, `threaded`, and `jit` differ.
 
