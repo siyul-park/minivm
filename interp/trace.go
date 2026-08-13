@@ -313,7 +313,9 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.trial = nil
 	out.work = nil
 	out.refbuf = nil
-	out.interned = map[string]types.Ref{}
+	// Speculative capture must not extend the committed buffer: a later
+	// committed append would rewrite bytes a captured string had published.
+	out.tail = nil
 	// Capture never serves a host ownership query, and every allocating opcode
 	// is unrecordable, so the clone only needs a writable index of its own.
 	out.owners = map[types.Value]int{}

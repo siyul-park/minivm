@@ -638,13 +638,13 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 			ok = l.refNull(ctx)
 		case instr.REF_IS_NULL:
 			ok = l.refIsNull(ctx, op)
-		case instr.REF_EQ, instr.REF_NE, instr.STRING_EQ, instr.STRING_NE:
-			// Ref and interned-string equality are boxed-word compares. With at
-			// most one owned operand the compare stays native; two owned
-			// operands fall back terminally because releasing both natively
-			// risks a double release when the second release deopts after the
-			// first already decremented a refcount inline.
-			terminal, okEq := l.refEq(ctx, op, op.op == instr.REF_NE || op.op == instr.STRING_NE)
+		case instr.REF_EQ, instr.REF_NE:
+			// Ref equality is a boxed-word compare. With at most one owned
+			// operand the compare stays native; two owned operands fall back
+			// terminally because releasing both natively risks a double release
+			// when the second release deopts after the first already
+			// decremented a refcount inline.
+			terminal, okEq := l.refEq(ctx, op, op.op == instr.REF_NE)
 			if !okEq {
 				return false, false
 			}
@@ -3068,9 +3068,9 @@ func (l arm64Lowerer) refIsNull(ctx *lowering, op step) bool {
 	return true
 }
 
-// refEq lowers REF_EQ/REF_NE and STRING_EQ/STRING_NE as a boxed-word compare
-// (strings are interned, so string equality is ref equality). At most one
-// operand may own its retain: a single owned operand releases like refIsNull,
+// refEq lowers REF_EQ/REF_NE as a boxed-word compare. string.eq and string.ne
+// compare content rather than ref identity, so they are not lowered here. At
+// most one operand may own its retain: a single owned operand releases like refIsNull,
 // while two owned operands report a terminal fallback because the second
 // release could deopt after the first already decremented a refcount inline.
 func (l arm64Lowerer) refEq(ctx *lowering, op step, negate bool) (bool, bool) {

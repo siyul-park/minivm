@@ -1141,6 +1141,44 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.concat const.get string.eq compares content, not ref identity",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name: "const.get const.get string.concat const.get string.ne compares content, not ref identity",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_NE),
+		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I1(false)},
+	},
+	{
+		name: "const.get const.get string.concat string.concat reuses the shared buffer without disturbing the shorter join",
+		program: program.New([]instr.Instruction{
+			// Keep the first join live in a local, extend a copy of it, then
+			// compare the local against its original content: an append that
+			// rewrote published bytes would change what the local reads.
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere")),
+			program.WithLocals(types.TypeString)),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name: "ref.null const.get string.eq on a non-string operand traps type mismatch",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.REF_NULL), instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("Go"))),
+		err: ErrTypeMismatch,
+	},
+	{
 		name: "const.get const.get string.lt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LT)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
@@ -1634,6 +1672,26 @@ var runTests = []struct {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		name: "const.get i32.const map.new const.get const.get string.concat map.get keys a string map by content",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		name: "const.get const.get string.concat i32.const map.new const.get map.get keys a string map stored under a computed key",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.CONST_GET, 2), instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
@@ -3148,14 +3206,13 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	type parityState struct {
-		code     types.ErrorCode
-		ip       int
-		fp       int
-		sp       int
-		stack    []types.Boxed
-		globals  []types.Boxed
-		rc       map[int]int
-		interned int
+		code    types.ErrorCode
+		ip      int
+		fp      int
+		sp      int
+		stack   []types.Boxed
+		globals []types.Boxed
+		rc      map[int]int
 	}
 
 	huge := int64(1) << 50
@@ -3192,6 +3249,21 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_ADD),
 				instr.New(instr.DROP),
 			}, program.WithLocals(types.TypeI64)),
+		},
+		{
+			// string.eq compares content and string.concat shares an append-only
+			// buffer, so neither lowers natively any more. Both paths must still
+			// agree on the result and on every refcount.
+			name: "string join and content equality preserve state",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+				instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+				instr.New(instr.DROP),
+			}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThereThere")),
+				program.WithLocals(types.TypeString)),
 		},
 		{
 			name: "local ref drop preserves ownership",
@@ -3263,14 +3335,13 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 
 				state := parityState{
-					code:     ErrorCode(err),
-					ip:       i.fr.ip,
-					fp:       i.fp,
-					sp:       i.sp,
-					stack:    append([]types.Boxed(nil), i.stack[:i.sp]...),
-					globals:  append([]types.Boxed(nil), i.globals...),
-					rc:       make(map[int]int),
-					interned: len(i.interned),
+					code:    ErrorCode(err),
+					ip:      i.fr.ip,
+					fp:      i.fp,
+					sp:      i.sp,
+					stack:   append([]types.Boxed(nil), i.stack[:i.sp]...),
+					globals: append([]types.Boxed(nil), i.globals...),
+					rc:      make(map[int]int),
 				}
 				for ref, count := range i.rc[1:] {
 					if count != 0 {

@@ -64,6 +64,7 @@ const (
 	mapIteratorI64
 	mapIteratorF32
 	mapIteratorF64
+	mapIteratorString
 	mapIteratorGeneric
 )
 
@@ -75,6 +76,7 @@ var (
 	_ Traceable = (*TypedMap[int64])(nil)
 	_ Traceable = (*TypedMap[float32])(nil)
 	_ Traceable = (*TypedMap[float64])(nil)
+	_ Traceable = (*TypedMap[string])(nil)
 	_ Traceable = (*MapIterator)(nil)
 	_ Iterator  = (*MapIterator)(nil)
 	_ Type      = (*MapType)(nil)
@@ -102,9 +104,14 @@ func NewMapForType(typ *MapType, capacity int) Value {
 		return NewTypedMap[float32](typ, capacity)
 	case KindF64:
 		return NewTypedMap[float64](typ, capacity)
-	default:
-		return NewMapWithCapacity(typ, capacity)
+	case KindRef:
+		// A declared string key has no identity to preserve, so it keys by
+		// content like every other typed key. Any other ref keys by heap ref.
+		if typ.Key.Equals(TypeString) {
+			return NewTypedMap[string](typ, capacity)
+		}
 	}
+	return NewMapWithCapacity(typ, capacity)
 }
 
 func NewMapWithCapacity(typ *MapType, capacity int) *Map {
@@ -142,6 +149,10 @@ func NewMapIterator(ref Ref, val Value) *MapIterator {
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorF64
 		it.iter = reflect.ValueOf(m.entries).MapRange()
+	case *TypedMap[string]:
+		it.typ = NewIteratorType(m.Typ.Key)
+		it.kind = mapIteratorString
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *Map:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorGeneric
@@ -156,7 +167,7 @@ func NewMapType(key Type, elem Type) *MapType {
 		Elem:        elem,
 		KeyKind:     key.Kind(),
 		ElemKind:    elem.Kind(),
-		TraceKeys:   key.Kind() == KindRef,
+		TraceKeys:   key.Kind() == KindRef && !key.Equals(TypeString),
 		TraceValues: elem.Kind() == KindRef || elem.Kind() == KindI64,
 	}
 }
@@ -310,6 +321,8 @@ func (it *MapIterator) Next() bool {
 		it.current = F32(float32(it.iter.Key().Float()))
 	case mapIteratorF64:
 		it.current = F64(it.iter.Key().Float())
+	case mapIteratorString:
+		it.current = String(it.iter.Key().String())
 	case mapIteratorGeneric:
 		key := it.iter.Key().Interface().(MapKey)
 		entry := it.iter.Value().Interface().(MapEntry)
@@ -414,6 +427,8 @@ func formatKey(k any) string {
 		return F32(v).String()
 	case float64:
 		return F64(v).String()
+	case string:
+		return String(v).String()
 	default:
 		return fmt.Sprint(v)
 	}

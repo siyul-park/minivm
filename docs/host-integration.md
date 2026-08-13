@@ -205,7 +205,7 @@ The built-in codec builds and caches one conversion plan per Go type.
 | `uint`, `uint64`, `uintptr` | `I64` | raw bits preserved |
 | `float32` | `F32` | |
 | `float64` | `F64` | |
-| `string` | `String` ref | heap-allocated and interned by the interpreter |
+| `string` | `String` ref | heap-allocated by the interpreter; equal contents need not share a ref |
 | `[]bool` | `I1Array` | one byte per element |
 | `[]int8`, `[]uint8`, `[]byte` | `I8Array` | raw bits preserved |
 | `[]int16`, `[]int32`, `[]uint16`, `[]uint32` | `I32Array` | raw bits preserved for unsigned values |

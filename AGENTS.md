@@ -169,6 +169,8 @@ Violations cause silent corruption or invalid execution.
 - Threaded closure errors should `panic`; `interp.Run()` recovers and annotates `at=<ip>`.
 - A `frame` separates `addr` (template/code index for code/profiler/JIT) from `ref` (heap index released on `RETURN`). They differ for closures; every frame-creating `CALL`/fused path must set both, and non-closure paths must reset `upvals = nil`.
 - `closure.new` takes the function ref from the stack top and transfers ownership of the function ref plus upvals into the closure.
+- Strings carry no identity invariant: every string comparison and every `string`-keyed map compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
+- `string.concat` never mutates a published string. Joins share one append-only buffer per interpreter and always publish a new ref; growth only writes above every published length, `Reset` clears the buffer, and a speculative trace clone must start its own.
 - Compile-time threaded code advances `c.ip`; runtime threaded execution advances `f.ip`.
 - JIT handlers return `true` only after lowering the opcode and advancing `s.ip` by its exact width.
 - On JIT type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.

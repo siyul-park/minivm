@@ -88,6 +88,25 @@ transfer, a guard exit stub, or a trap-fallback/module-completion redeem — tak
 exactly one retain first, so net counts stay exact and symmetric on every path,
 including deopts. See `docs/jit-internals.md` (Reference Ownership).
 
+## Shared String Buffers
+
+`string.concat` results share one append-only byte buffer per `Interpreter`.
+When a join's left operand ends exactly where that buffer ends, the right
+operand is appended past that end and the result is published as a **new** heap
+ref viewing the longer prefix; any other left operand starts a fresh buffer from
+a copy. Two rules keep this safe without consulting reference counts:
+
+- A published string is never mutated. Growth only writes above every published
+  length, so each ref keeps its own content however many holders it has, and a
+  reallocating append leaves earlier refs pointing at the old array.
+- The buffer is per-interpreter state, so `Reset` clears it and a speculative
+  trace clone starts its own. A committed append must never rewrite bytes a
+  captured string already published.
+
+The buffer keeps its backing array alive until the next join replaces it. That
+bounds the retention at one buffer, which is smaller than the per-join copies it
+replaces.
+
 ## Traceable Values
 
 Heap objects that can contain refs implement `types.Traceable`.

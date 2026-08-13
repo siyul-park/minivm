@@ -796,7 +796,7 @@ func (s *marshalState) boxRef(val types.Value) types.Boxed {
 	case types.Ref:
 		return types.BoxRef(int(v))
 	case types.String:
-		return types.BoxRef(int(s.interp.intern(string(v))))
+		return types.BoxRef(s.alloc(v))
 	default:
 		return types.BoxRef(s.alloc(val))
 	}
@@ -1151,6 +1151,23 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 					return nil, fmt.Errorf("map value: %w", err)
 				}
 				m.Set(keyFloat, value)
+			}
+		case *types.TypedMap[string]:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.value(iter.Key())
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				keyString, ok := key.(types.String)
+				if !ok {
+					return nil, fmt.Errorf("map key: %w: map key type=%s", ErrTypeMismatch, mt.Key)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(string(keyString), value)
 			}
 		case *types.Map:
 			iter := v.MapRange()
@@ -1520,6 +1537,8 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *conversion) unmarshaler {
 			size = m.Len()
 		case *types.TypedMap[float64]:
 			size = m.Len()
+		case *types.TypedMap[string]:
+			size = m.Len()
 		case *types.Map:
 			size = m.Len()
 		default:
@@ -1597,6 +1616,15 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *conversion) unmarshaler {
 					return
 				}
 				set(types.F64(key), elemValue)
+			})
+		case *types.TypedMap[string]:
+			m.Range(func(key string, value types.Boxed) {
+				elemValue, err := s.codec.resolve(s.interp, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.String(key), elemValue)
 			})
 		case *types.Map:
 			m.Range(func(mapKey types.MapKey, entry types.MapEntry) {

@@ -249,8 +249,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | native typed-array-length-style length read |
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | allocation stays interpreter-owned |
-| Strings | `STRING_EQ` | `string.eq` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
-| Strings | `STRING_NE` | `string.ne` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
+| Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | content compare stays threaded |
+| Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | content compare stays threaded |
 | Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | string comparisons stay threaded |
@@ -303,9 +303,15 @@ Coroutine tail calls preserve the current coroutine. On completion, `CORO_VALUE`
 
 `ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET` and `ARRAY_SLICE` retain copied ref elements. `ARRAY_SLICE` consumes the source array ref; use `DUP` first to keep it.
 
+### Strings
+
+Every string comparison, `string.eq` and `string.ne` included, compares content. Two strings with equal content compare equal whatever heap refs they occupy, so a computed join equals the literal it spells. All six comparisons require string operands and trap `ErrTypeMismatch` on any other ref; use `REF_EQ`, `REF_NE`, or `REF_IS_NULL` to test identity or null.
+
+`string.concat` allocates a fresh ref and never mutates a string already published. Successive joins share one append-only byte buffer, so accumulating a string in a loop costs no repeated prefix copy.
+
 ### Maps
 
-Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`. Ref keys use heap ref identity. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
+Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`. A map whose declared key type is `string` keys by content. Every other ref key uses heap ref identity. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
 
 ### Structured Errors
 

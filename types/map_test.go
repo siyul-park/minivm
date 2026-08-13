@@ -43,7 +43,7 @@ func TestNewMapForType(t *testing.T) {
 		{typ: types.NewMapType(types.TypeF32, types.TypeI32), want: (*types.TypedMap[float32])(nil)},
 		{typ: types.NewMapType(types.TypeF64, types.TypeI32), want: (*types.TypedMap[float64])(nil)},
 		{typ: types.NewMapType(types.TypeRef, types.TypeI32), want: (*types.Map)(nil)},
-		{typ: types.NewMapType(types.TypeString, types.TypeI32), want: (*types.Map)(nil)},
+		{typ: types.NewMapType(types.TypeString, types.TypeI32), want: (*types.TypedMap[string])(nil)},
 		{typ: types.NewMapType(structType, types.TypeI32), want: (*types.Map)(nil)},
 	}
 	for _, tt := range tests {
@@ -61,13 +61,13 @@ func TestNewMapIterator(t *testing.T) {
 }
 
 func TestNewMapType(t *testing.T) {
-	t.Run("reference key and i64 value", func(t *testing.T) {
+	t.Run("string key and i64 value", func(t *testing.T) {
 		typ := types.NewMapType(types.TypeString, types.TypeI64)
 		require.Equal(t, types.TypeString, typ.Key)
 		require.Equal(t, types.TypeI64, typ.Elem)
 		require.Equal(t, types.KindRef, typ.KeyKind)
 		require.Equal(t, types.KindI64, typ.ElemKind)
-		require.True(t, typ.TraceKeys)
+		require.False(t, typ.TraceKeys)
 		require.True(t, typ.TraceValues)
 	})
 
@@ -230,7 +230,7 @@ func TestTypedMap_String(t *testing.T) {
 	t.Run("fallback key", func(t *testing.T) {
 		m := types.NewTypedMap[string](types.NewMapType(types.TypeString, types.TypeI32), 0)
 		m.Set("foo", types.BoxI32(2))
-		require.Equal(t, "map[string]i32{foo: 2}", m.String())
+		require.Equal(t, "map[string]i32{\"foo\": 2}", m.String())
 	})
 }
 

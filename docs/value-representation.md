@@ -215,7 +215,9 @@ Arrays, structs, maps, closures, host objects, and iterators that hold refs must
 
 ## Strings, Arrays, Maps, and Iterators
 
-Strings created by interpreter opcodes and the marshaler are interned per `Interpreter`. Equal string contents share one heap ref while live.
+Strings are plain heap values with no identity invariant: equal contents may occupy different heap refs. Every string comparison compares content, and a map declared with a `string` key type keys by content, so nothing depends on two equal strings sharing a ref. Only the constant pool deduplicates, and only at load time, so identical string literals in one program still share one ref.
+
+`string.concat` results share one append-only byte buffer per `Interpreter`. A join whose left operand ends exactly where that buffer ends is published as a new ref viewing the longer prefix; bytes below any published length are never rewritten, so each string keeps its own content regardless of reference count.
 
 `TypeI1` and `TypeI8` are first-class stack kinds, not element-only types.
 
