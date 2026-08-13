@@ -1172,6 +1172,33 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "const.get const.get string.concat handles empty operands",
+		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)}, program.WithConstants(types.String(""), types.String(""))),
+		values:  []types.Value{types.String("")},
+	},
+	{
+		name: "const.get const.get string.concat reallocation preserves the earlier join",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 3), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(
+			types.String("abc"), types.String("def"), types.String("0123456789abcdef"), types.String("abcdef")),
+			program.WithLocals(types.TypeString)),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name: "const.get const.get string.concat uses a fresh buffer for a prefix that is not the tail",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT), instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.CONST_GET, 3), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("a"), types.String("b"), types.String("c"), types.String("ac"))),
+		values: []types.Value{types.I1(true)},
+	},
+	{
 		name: "ref.null const.get string.eq on a non-string operand traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.REF_NULL), instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_EQ),
@@ -1901,6 +1928,20 @@ var runTests = []struct {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("string.concat reads the result after releasing both last operand references", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.STRING_CONCAT)})
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("left")))
+		require.NoError(t, i.Push(types.String("right")))
+		require.NoError(t, i.Run(context.Background()))
+
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("leftright"), value)
+	})
+
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
 		names := make(map[string]struct{})
