@@ -1086,17 +1086,6 @@ var (
 			switch r0.Kind() {
 			case types.KindRef:
 				addr := r0.Ref()
-				if str, ok := c.heap[addr].(types.String); ok {
-					text := string(str)
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(ErrStackOverflow)
-						}
-						i.stack[i.sp] = types.BoxRef(int(i.intern(text)))
-						i.sp++
-						i.fr.ip += 3
-					}
-				}
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
@@ -3250,7 +3239,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				val := unboxRef[types.TypedArray[int32]](i, i.stack[i.sp-1])
-				i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(types.String(val)))))
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(string(val))))
 				i.fr.ip++
 			}
 		},
@@ -3271,10 +3260,28 @@ var (
 				if i.sp < 2 {
 					panic(ErrStackUnderflow)
 				}
-				v1 := unboxRef[types.String](i, i.stack[i.sp-1])
-				v2 := unboxRef[types.String](i, i.stack[i.sp-2])
+				right, left := i.stack[i.sp-1], i.stack[i.sp-2]
+				if left.Kind() != types.KindRef || right.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				leftAddr, rightAddr := left.Ref(), right.Ref()
+				leftText, leftOK := i.heap[leftAddr].(types.String)
+				if !leftOK {
+					panic(ErrTypeMismatch)
+				}
+				rightText, rightOK := i.heap[rightAddr].(types.String)
+				if !rightOK {
+					panic(ErrTypeMismatch)
+				}
+				if len(i.tail) != len(leftText) || unsafe.SliceData(i.tail) != unsafe.StringData(string(leftText)) {
+					i.tail = append(make([]byte, 0, len(leftText)+len(rightText)), leftText...)
+				}
+				i.tail = append(i.tail, rightText...)
+				text := types.String(unsafe.String(unsafe.SliceData(i.tail), len(i.tail)))
+				i.release(rightAddr)
+				i.release(leftAddr)
 				i.sp--
-				i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(v2 + v1))))
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(text))
 				i.fr.ip++
 			}
 		},
@@ -3284,10 +3291,8 @@ var (
 				if i.sp < 2 {
 					panic(ErrStackUnderflow)
 				}
-				v1 := i.stack[i.sp-1]
-				v2 := i.stack[i.sp-2]
-				i.releaseBox(v1)
-				i.releaseBox(v2)
+				v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+				v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 				i.sp--
 				i.stack[i.sp-1] = types.BoxI1(v2 == v1)
 				i.fr.ip++
@@ -3299,10 +3304,8 @@ var (
 				if i.sp < 2 {
 					panic(ErrStackUnderflow)
 				}
-				v1 := i.stack[i.sp-1]
-				v2 := i.stack[i.sp-2]
-				i.releaseBox(v1)
-				i.releaseBox(v2)
+				v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+				v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 				i.sp--
 				i.stack[i.sp-1] = types.BoxI1(v2 != v1)
 				i.fr.ip++
@@ -4453,6 +4456,11 @@ var (
 						if ok {
 							i.releaseBox(old)
 						}
+					case *types.TypedMap[string]:
+						old, ok := m.Set(string(unboxRef[types.String](i, key)), value)
+						if ok {
+							i.releaseBox(old)
+						}
 					case *types.Map:
 						var k types.MapKey
 						entry := types.MapEntry{Value: value}
@@ -4582,6 +4590,8 @@ var (
 					n = m.Len()
 				case *types.TypedMap[float64]:
 					n = m.Len()
+				case *types.TypedMap[string]:
+					n = m.Len()
 				case *types.Map:
 					n = m.Len()
 				default:
@@ -4643,6 +4653,13 @@ var (
 					}
 				case *types.TypedMap[float64]:
 					value, ok := m.Get(key.F64())
+					if ok {
+						result = value
+					} else {
+						result = m.Zero
+					}
+				case *types.TypedMap[string]:
+					value, ok := m.Get(string(unboxRef[types.String](i, key)))
 					if ok {
 						result = value
 					} else {
@@ -4762,6 +4779,11 @@ var (
 					if !found {
 						result = m.Zero
 					}
+				case *types.TypedMap[string]:
+					result, found = m.Get(string(unboxRef[types.String](i, key)))
+					if !found {
+						result = m.Zero
+					}
 				case *types.Map:
 					var k types.MapKey
 					keyRef := 0
@@ -4873,6 +4895,11 @@ var (
 					}
 				case *types.TypedMap[float64]:
 					old, ok := m.Set(key.F64(), value)
+					if ok {
+						i.releaseBox(old)
+					}
+				case *types.TypedMap[string]:
+					old, ok := m.Set(string(unboxRef[types.String](i, key)), value)
 					if ok {
 						i.releaseBox(old)
 					}
@@ -4990,6 +5017,11 @@ var (
 					if ok {
 						i.releaseBox(old)
 					}
+				case *types.TypedMap[string]:
+					old, ok := m.Delete(string(unboxRef[types.String](i, key)))
+					if ok {
+						i.releaseBox(old)
+					}
 				case *types.Map:
 					var k types.MapKey
 					keyRef := 0
@@ -5092,6 +5124,10 @@ var (
 					m.Clear(func(value types.Boxed) {
 						i.releaseBox(value)
 					})
+				case *types.TypedMap[string]:
+					m.Clear(func(value types.Boxed) {
+						i.releaseBox(value)
+					})
 				case *types.Map:
 					m.Clear(func(entry types.MapEntry) {
 						i.releaseBox(entry.Key)
@@ -5155,6 +5191,12 @@ var (
 					m.Range(func(k float64, _ types.Boxed) {
 						elems = append(elems, types.BoxF64(k))
 					})
+				case *types.TypedMap[string]:
+					keyType = m.Typ.Key
+					elems = make([]types.Boxed, 0, m.Len())
+					m.Range(func(k string, _ types.Boxed) {
+						elems = append(elems, types.BoxRef(i.alloc(types.String(k))))
+					})
 				case *types.Map:
 					keyType = m.Typ.Key
 					elems = make([]types.Boxed, 0, m.Len())
@@ -5208,7 +5250,7 @@ var (
 				}
 				addr := ref.Ref()
 				switch i.heap[addr].(type) {
-				case *types.TypedMap[int8], *types.TypedMap[bool], *types.TypedMap[int32], *types.TypedMap[int64], *types.TypedMap[float32], *types.TypedMap[float64], *types.Map:
+				case *types.TypedMap[int8], *types.TypedMap[bool], *types.TypedMap[int32], *types.TypedMap[int64], *types.TypedMap[float32], *types.TypedMap[float64], *types.TypedMap[string], *types.Map:
 				default:
 					panic(ErrTypeMismatch)
 				}

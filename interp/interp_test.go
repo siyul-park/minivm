@@ -1141,6 +1141,71 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.concat const.get string.eq compares content, not ref identity",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name: "const.get const.get string.concat const.get string.ne compares content, not ref identity",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_NE),
+		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I1(false)},
+	},
+	{
+		name: "const.get const.get string.concat string.concat reuses the shared buffer without disturbing the shorter join",
+		program: program.New([]instr.Instruction{
+			// Keep the first join live in a local, extend a copy of it, then
+			// compare the local against its original content: an append that
+			// rewrote published bytes would change what the local reads.
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere")),
+			program.WithLocals(types.TypeString)),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name:    "const.get const.get string.concat handles empty operands",
+		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)}, program.WithConstants(types.String(""), types.String(""))),
+		values:  []types.Value{types.String("")},
+	},
+	{
+		name: "const.get const.get string.concat reallocation preserves the earlier join",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 3), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(
+			types.String("abc"), types.String("def"), types.String("0123456789abcdef"), types.String("abcdef")),
+			program.WithLocals(types.TypeString)),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name: "const.get const.get string.concat uses a fresh buffer for a prefix that is not the tail",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT), instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.CONST_GET, 3), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("a"), types.String("b"), types.String("c"), types.String("ac"))),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		name: "ref.null const.get string.eq on a non-string operand traps type mismatch",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.REF_NULL), instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("Go"))),
+		err: ErrTypeMismatch,
+	},
+	{
 		name: "const.get const.get string.lt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LT)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
@@ -1637,6 +1702,26 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		name: "const.get i32.const map.new const.get const.get string.concat map.get keys a string map by content",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		name: "const.get const.get string.concat i32.const map.new const.get map.get keys a string map stored under a computed key",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.CONST_GET, 2), instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
 		name: "i32.const map.new_default map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 4), instr.New(instr.MAP_NEW_DEFAULT, 0),
@@ -1912,6 +1997,51 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
+	})
+
+	t.Run("string.concat reads the result after releasing both last operand references", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.STRING_CONCAT)})
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("left")))
+		require.NoError(t, i.Push(types.String("right")))
+		require.NoError(t, i.Run(context.Background()))
+
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("leftright"), value)
+	})
+
+	t.Run("releases every string.concat intermediate", func(t *testing.T) {
+		// Each join consumes both operands and publishes one result, so an
+		// accumulating loop holds one live string at a time. A join that kept an
+		// operand ref leaks one slot per iteration and exhausts a bounded heap.
+		b := program.NewBuilder()
+		loop := b.Label()
+		done := b.Label()
+		b.Locals(types.TypeString, types.TypeI32)
+		b.ConstGet(types.String("")).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4*heapRunway).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("x")).Emit(instr.STRING_CONCAT).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		i := New(prog, WithHeapLimit(heapRunway))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		got, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(4*heapRunway), got)
 	})
 
 	t.Run("STRUCT_GET fused on a declared struct local traps type mismatch when the runtime field's kind diverges from the declared field's kind", func(t *testing.T) {
@@ -3148,14 +3278,13 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	type parityState struct {
-		code     types.ErrorCode
-		ip       int
-		fp       int
-		sp       int
-		stack    []types.Boxed
-		globals  []types.Boxed
-		rc       map[int]int
-		interned int
+		code    types.ErrorCode
+		ip      int
+		fp      int
+		sp      int
+		stack   []types.Boxed
+		globals []types.Boxed
+		rc      map[int]int
 	}
 
 	huge := int64(1) << 50
@@ -3263,14 +3392,13 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 
 				state := parityState{
-					code:     ErrorCode(err),
-					ip:       i.fr.ip,
-					fp:       i.fp,
-					sp:       i.sp,
-					stack:    append([]types.Boxed(nil), i.stack[:i.sp]...),
-					globals:  append([]types.Boxed(nil), i.globals...),
-					rc:       make(map[int]int),
-					interned: len(i.interned),
+					code:    ErrorCode(err),
+					ip:      i.fr.ip,
+					fp:      i.fp,
+					sp:      i.sp,
+					stack:   append([]types.Boxed(nil), i.stack[:i.sp]...),
+					globals: append([]types.Boxed(nil), i.globals...),
+					rc:      make(map[int]int),
 				}
 				for ref, count := range i.rc[1:] {
 					if count != 0 {

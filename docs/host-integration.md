@@ -205,7 +205,7 @@ The built-in codec builds and caches one conversion plan per Go type.
 | `uint`, `uint64`, `uintptr` | `I64` | raw bits preserved |
 | `float32` | `F32` | |
 | `float64` | `F64` | |
-| `string` | `String` ref | heap-allocated and interned by the interpreter |
+| `string` | `String` ref | heap-allocated by the interpreter; equal contents need not share a ref |
 | `[]bool` | `I1Array` | one byte per element |
 | `[]int8`, `[]uint8`, `[]byte` | `I8Array` | raw bits preserved |
 | `[]int16`, `[]int32`, `[]uint16`, `[]uint32` | `I32Array` | raw bits preserved for unsigned values |
@@ -213,7 +213,8 @@ The built-in codec builds and caches one conversion plan per Go type.
 | `[]float32` | `F32Array` | |
 | `[]float64` | `F64Array` | |
 | other `[]T` | `*Array` ref | generic fallback |
-| `map[K]V` | `*Map` ref | heap-allocated |
+| `map[K]V` with a primitive or `string` key | `*TypedMap[K]` ref | key type drives the concrete map; content-keyed |
+| other `map[K]V` | `*Map` ref | heap ref identity keys |
 | data-only struct | `*Struct` ref | exported fields only |
 | struct with methods or unexported fields | `*HostObject` ref | preserves methods or hidden state |
 | defined scalar with methods | underlying scalar | keeps primitive fast path |

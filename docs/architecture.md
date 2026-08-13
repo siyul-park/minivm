@@ -135,12 +135,13 @@ Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple go
 
 ### Heap and Values
 
-- Heap index `0` is permanently `Null`.
+- Heap index `0` is a permanent `Null` sentinel and is never reclaimed.
 - Only `KindRef` values participate in reference counting.
+- `release()` must stay iterative, never recursive.
 - Heap indices are stable and must not move.
 - Values that contain refs must implement `types.Traceable`.
 - Large `i64` values may spill to the heap while preserving bytecode semantics.
-- Heap index 0 is a permanent null sentinel and is never reclaimed.
+- Strings carry no identity invariant: every comparison and every `string`-keyed map compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
 
 See `memory-model.md` and `value-representation.md` for the detailed rules.
 
@@ -153,7 +154,7 @@ A frame separates the function/template address from the callable reference. `RE
 | `addr` | function/template slot used for code, profiling, and JIT |
 | `ref` | callable heap ref released on return |
 
-For plain functions, `addr == ref`. For closures, `addr` points to the function template and `ref` points to the closure object.
+For plain functions, `addr == ref`. For closures, `addr` points to the function template and `ref` points to the closure object. Every frame-creating `CALL` or fused path must set both fields, and non-closure paths must reset `upvals = nil`. `closure.new` takes the function ref from the stack top and transfers ownership of that ref plus the upvals into the closure.
 
 ### Threaded Dispatch
 
@@ -170,7 +171,7 @@ The interpreter requests native compilation through `compiler.Compile(i, root)` 
 - Native code is speculative and guarded.
 - Blocks with declared entry state carry no register state across edges; stack and dirty locals are materialized in VM memory.
 - Native-call slots are fixed for an interpreter lifetime and published atomically on function-entry installation.
-- Unsupported paths must fall back to threaded execution.
+- Unsupported paths must fall back to threaded execution. A handler returns `true` only after lowering the opcode and advancing `s.ip` by its exact width; on type mismatch or unsupported lowering it returns `false` without mutating IR, stack, params, facts, or labels.
 - JIT handlers must not duplicate complex interpreter behavior unless they can own all semantics.
 - Guard failure materializes VM state and resumes threaded dispatch.
 - ARM64 label branches are range-checked and relaxed only to replacements that are already in range; an unreachable target falls back to threaded execution.

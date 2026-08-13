@@ -49,21 +49,27 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames   []frame
-	fr       *frame
-	stack    []types.Boxed
-	heap     []types.Value
-	base     int
-	target   int
-	interned map[string]types.Ref
-	owners   map[types.Value]int
-	free     []int
-	rc       []int
-	trial    []int
-	work     []int
-	refbuf   []types.Ref
-	arrays   pool[*types.Array]
-	structs  pool[*types.Struct]
+	frames  []frame
+	fr      *frame
+	stack   []types.Boxed
+	heap    []types.Value
+	base    int
+	target  int
+	owners  map[types.Value]int
+	free    []int
+	rc      []int
+	trial   []int
+	work    []int
+	refbuf  []types.Ref
+	arrays  pool[*types.Array]
+	structs pool[*types.Struct]
+
+	// tail is the append-only byte buffer the most recent string.concat
+	// published from. A join whose left operand ends exactly where tail ends
+	// extends it and publishes a new ref over the longer prefix; bytes below any
+	// published length are never rewritten, so every string already handed out
+	// keeps its own content whatever its reference count.
+	tail []byte
 
 	fp  int
 	sp  int
@@ -263,7 +269,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		frames:      make([]frame, opt.frame),
 		stack:       make([]types.Boxed, opt.stack),
 		heap:        make([]types.Value, 0, opt.heap),
-		interned:    make(map[string]types.Ref),
 		owners:      make(map[types.Value]int),
 		free:        make([]int, 0, opt.heap),
 		rc:          make([]int, 0, opt.heap),
@@ -277,6 +282,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	// Retain each constant root and nested edge as it becomes visible because a
 	// later constant may allocate and trigger GC. recount normalizes the final
 	// baseline after the whole constant pool has been boxed.
+	//
+	// dedup gives identical string literals one shared cell. Nothing depends on
+	// that sharing - every string comparison and string map key compares content
+	// - so it is a load-time pool economy only, and the index dies with the loop.
+	dedup := make(map[string]types.Ref)
 	for j, v := range prog.Constants {
 		var val types.Boxed
 		switch v := v.(type) {
@@ -304,12 +314,17 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			if addr := int(v); i.alive(addr) {
 				i.retain(addr)
 			}
-		default:
-			if s, ok := v.(types.String); ok {
-				val = types.BoxRef(int(i.intern(string(s))))
+		case types.String:
+			ref, seen := dedup[string(v)]
+			if seen {
+				i.retain(int(ref))
 			} else {
-				val = types.BoxRef(i.alloc(v))
+				ref = types.Ref(i.alloc(v))
+				dedup[string(v)] = ref
 			}
+			val = types.BoxRef(int(ref))
+		default:
+			val = types.BoxRef(i.alloc(v))
 			for _, ref := range i.refs(v) {
 				if addr := int(ref); i.alive(addr) {
 					i.retain(addr)
@@ -586,9 +601,6 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	if i.owner(val) >= 0 {
 		return 0, ErrTypeMismatch
 	}
-	if s, ok := val.(types.String); ok {
-		return int(i.intern(string(s))), nil
-	}
 	addr = i.alloc(val)
 	i.own(addr, val)
 	if fn, ok := val.(*types.Function); ok {
@@ -747,6 +759,7 @@ func (i *Interpreter) Reset() {
 	i.rc = rc[:i.base]
 	i.recount()
 	i.free = i.free[:0]
+	i.tail = nil
 
 	i.seed()
 	i.pace()
@@ -1755,7 +1768,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	case types.Ref:
 		return types.BoxRef(int(v))
 	case types.String:
-		return types.BoxRef(int(i.intern(string(v))))
+		return types.BoxRef(i.alloc(v))
 	default:
 		addr := i.alloc(v)
 		return types.BoxRef(addr)
@@ -1933,18 +1946,6 @@ func (i *Interpreter) structField(addr, at int) types.Boxed {
 	default:
 		panic(ErrTypeMismatch)
 	}
-}
-
-// intern returns a heap ref for s. Interpreters are single-threaded; callers
-// must not use one Interpreter concurrently from multiple goroutines.
-func (i *Interpreter) intern(s string) types.Ref {
-	if ref, ok := i.interned[s]; ok {
-		i.retain(int(ref))
-		return ref
-	}
-	ref := types.Ref(i.alloc(types.String(s)))
-	i.interned[s] = ref
-	return ref
 }
 
 func (i *Interpreter) unbox(val types.Boxed) types.Value {
@@ -2410,9 +2411,6 @@ func (i *Interpreter) reclaim(addr int, v types.Value) {
 func (i *Interpreter) finalize(addr int, v types.Value) {
 	if _, ok := v.(*types.Function); ok {
 		i.remove(addr)
-	}
-	if s, ok := v.(types.String); ok && i.interned[string(s)] == types.Ref(addr) {
-		delete(i.interned, string(s))
 	}
 	// External finalizers belong to committed execution, never speculative
 	// trace capture.

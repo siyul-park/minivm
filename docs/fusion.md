@@ -50,7 +50,7 @@ Threaded patterns are not a cross-backend registry. An ARM64 specialization is a
 
 RC elimination is local and proven by each closed lowering. A slot or constant source may be borrowed only when its ref is fully consumed inside the fused sequence. `REF_NULL` may omit its balanced retain/release, and `DUP` may avoid creating temporary ownership when its duplicate is consumed locally.
 
-Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yields, or control-flow boundaries. String constants remain standalone because loading interns them. Declared I64 slots retain numeric ownership semantics even when a large current value is heap-promoted.
+Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yields, or control-flow boundaries. String constants remain standalone because the constant pool deduplicates them at load. Declared I64 slots retain numeric ownership semantics even when a large current value is heap-promoted.
 
 ## Generation and Checks
 
