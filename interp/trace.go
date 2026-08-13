@@ -192,6 +192,12 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		}
 		st.terminal = terminalMutation
 		if op == instr.CALL && t.callsAnchor(&clone, a) {
+			if a.ip != 0 {
+				st.target = f.ip
+				st.cut = true
+				tr.ops = append(tr.ops, st)
+				return t.publish(a, tree, tr, partial, prof.CaptureReasonNone)
+			}
 			t.skipCall(&clone, a.addr)
 			st.callee = a.addr
 			tr.ops = append(tr.ops, st)
