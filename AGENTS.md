@@ -1,143 +1,35 @@
 # AGENTS.md
 
-Repository instructions for Codex and Claude Code.
+Repository instructions for Codex and Claude Code. Codex reads this file directly; Claude Code loads `.claude/CLAUDE.md`, which imports it.
 
-This file is the common agent contract. Codex reads `AGENTS.md` directly. Claude Code loads `.claude/CLAUDE.md`, which imports this file and adds Claude-specific reminders.
+`docs/coding-patterns.md` is the normative coding specification. Keep detailed rules there, not here. When instructions conflict, choose the more specific one and record the conflict in the final summary.
 
-Keep this file terse and actionable. Put detailed coding rules in `docs/coding-patterns.md`, not here.
-
-## Instruction Priority
-
-1. Follow the user's latest explicit request first.
-2. Follow the closest applicable repository instruction file.
-3. Use this file as the root repository workflow contract.
-4. Apply `docs/coding-patterns.md` as the normative coding specification.
-5. Match nearby code only when it is more specific and specification-compliant.
-
-If instructions conflict, choose the more specific instruction and record the conflict in the final summary.
-
-## Quick Commands
+## Commands
 
 ```bash
 make init              # install goimports/godoc and go install ./...
 make test              # go test -race ./...
+make lint              # goimports -w . && go vet ./...
+make generate          # regenerate interp/threaded.go from internal/cmd/geninterp
+make check-generated   # fail if the generated file is stale
+make build             # build ./dist/minivm
+make fuzz              # bounded trust-boundary fuzz smoke
+make coverage-check    # enforce recorded total-coverage baseline
 make benchmark-pr      # quick pull-request benchmark report
 make benchmark-core    # full canonical package + VM kernel suite
-make benchmark-compare # optional external runtime comparisons
-make fuzz              # bounded trust-boundary fuzz smoke
-make lint              # goimports -w . && go vet ./...
-make coverage          # CI-style full test run with coverage.out
-make coverage-check    # enforce recorded total-coverage baseline
-make build             # build ./dist/minivm
-
-go test -race ./...
-go test -race -run TestFoo ./interp/...
-go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp
-
-./dist/minivm          # interactive assembly REPL
+make benchmark-compare # external runtime comparisons (compare build tag)
 ```
 
-## Required Workflow
+Run a single test or a subset:
 
-1. Run `git status --short`; never overwrite or commit unrelated user changes.
-2. Prefer structural tools for symbol ownership and call-flow exploration; use grep/read for literal text and final verification.
-3. Read task-relevant docs from the Task Router before changing code or tests.
-4. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus sections selected by §1.3.
-5. Review top-down from package contract to mechanics and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
-6. Make the smallest correct change. Do not add speculative structure or preserve obsolete compatibility without an explicit contract.
-7. Validate the narrowest relevant behavior first, then race, static, generated, architecture, and benchmark checks warranted by the change.
-8. Run the Completion Gate before reporting done, committing a logical stage, opening a PR, or updating a PR.
+```bash
+go test -race -run TestFoo ./interp/...
+go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp
+```
 
-## Completion Gate
+`./dist/minivm` starts the interactive assembly REPL.
 
-Do not call work complete until every item is true:
-
-1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
-2. Top-down ownership and bottom-up symbol reviews are complete at the requested scope.
-3. Every affected symbol has a current reason to exist; removable symbols were removed, inlined, merged, narrowed, privatized, or renamed by role.
-4. The chosen algorithm and control flow are the simplest correct options found without a measured performance regression.
-5. Another simplification pass found no safe improvement.
-6. Declarations form a caller-before-callee staircase and follow specification §9.
-7. Tests follow specification §12 and assert only public observable behavior.
-8. Performance claims include the reproducible evidence required by specification §14.
-9. Commits and documentation follow specification §15, and unrelated user changes are absent.
-10. Any intentionally skipped simplification or validation is recorded with its reason.
-
-## Coding Standard Map
-
-`docs/coding-patterns.md` is normative. Use this map only for routing.
-
-| Need | Read in `docs/coding-patterns.md` |
-|---|---|
-| Every code/test change | §2, §16 |
-| Functions, helpers, naming | §3-§4 |
-| Types, constructors, public APIs | §5 |
-| Package and runtime ownership | §6-§8 |
-| Declaration and field order | §9 |
-| Errors and panic/recover | §10 |
-| Concurrency and lifecycle | §11 |
-| Tests and public specifications | §12 |
-| Generated and architecture code | §13 |
-| Performance and benchmarks | §14 |
-| Commits and documentation | §15 |
-
-## Task Router
-
-| Task | Read | Usually edit | Verify |
-|---|---|---|---|
-| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `instr/`, `interp/threaded.go`, `interp/jit_arm64.go` | `go test ./instr ./interp` |
-| Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
-| Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `interp/threaded.go`, `types/` | `go test ./interp ./types` |
-| JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `interp/jit*.go`, `asm/`, `asm/arm64/` | `go test ./asm/... ./interp` |
-| Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
-| Bytecode verification / untrusted input | `docs/verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
-| REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
-| Debugger / stepping | `docs/debugging.md`, `docs/profile.md` | `interp/debugger.go`, `cli/repl.go` | `go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp` |
-| Style-only change | `docs/coding-patterns.md` | touched package | package tests |
-| Concurrent VM use | `docs/architecture.md` (`interp/`) | `interp/pool.go` | `go test -race ./interp` |
-
-## Documentation Index
-
-Read only docs relevant to the task.
-
-| Document | Covers |
-|---|---|
-| `docs/architecture.md` | component map, package boundaries, ownership, execution flow |
-| `docs/value-representation.md` | NaN-boxed `Boxed`, kind encoding, I64 heap spilling, dynamic `ref` |
-| `docs/memory-model.md` | heap layout, reference counting, mark-and-sweep GC, invariants |
-| `docs/profile.md` | sampling profiles, tick cadence, JIT thresholds, metrics |
-| `docs/instruction-set.md` | full opcode reference: stack effects, operand widths, JIT status |
-| `docs/jit-internals.md` | trace JIT contracts: tracer, lowerer, frame journal, calls, loops |
-| `docs/pass-system.md` | analysis manager, transform pipeline, optimizer levels |
-| `docs/verification.md` | static bytecode validator: checks, error sentinels, limits |
-| `docs/coding-patterns.md` | style authority: principles, symbol review, naming, file layout, APIs, errors, tests, PR/docs rules |
-| `docs/guides/add-opcode.md` | end-to-end checklist for adding an instruction |
-| `docs/guides/add-architecture.md` | checklist for adding a JIT backend |
-| `docs/guides/repl.md` | REPL commands, bytecode debugging, branch syntax |
-| `docs/compatibility.md` | Go version, platform matrix, CGO, build tags, `unsafe` usage |
-| `docs/host-integration.md` | `HostFunction`, `Marshal`/`Unmarshal`, host objects |
-| `docs/testing.md` | executable specification layers, API ownership, opcode coverage |
-| `docs/benchmarks.md` | measured performance, cross-runtime comparison, methodology |
-| `docs/debugging.md` | debugger API, breakpoints, stepping, inspection |
-
-## Code Exploration
-
-Prefer `codegraph` MCP tools over grep/read for structural questions.
-
-| Question | Tool |
-|---|---|
-| Where is symbol X defined? | `codegraph_search` |
-| Focused context for a task/area | `codegraph_context` |
-| How does X reach Y? / trace the flow | `codegraph_trace` |
-| What calls Y? | `codegraph_callers` |
-| What does Y call? | `codegraph_callees` |
-| What breaks if I change Z? | `codegraph_impact` |
-| Show Y's signature/source | `codegraph_node` |
-| Survey several related symbols' source | `codegraph_explore` |
-| What files exist under path/ | `codegraph_files` |
-| Is the index healthy? | `codegraph_status` |
-
-## Project Map
+## Architecture
 
 ```text
 program.Program -> threader -> []func(*Interpreter) -> Interpreter.Run()
@@ -145,20 +37,56 @@ program.Program -> threader -> []func(*Interpreter) -> Interpreter.Run()
                                                         `- hot segments promoted to native ARM64
 ```
 
+Execution is a closure-threaded interpreter with an adaptive trace JIT. A `program.Program` is threaded into one closure per instruction; a profiler promotes hot segments to native ARM64 and falls back to the threaded closures for anything the backend cannot lower.
+
 | Package | Responsibility |
 |---|---|
 | `program/` | bytecode + constants container |
 | `instr/` | opcode definitions, encoding, parsing, formatting |
 | `types/` | boxed values, arrays, structs, strings, NaN boxing |
 | `interp/` | interpreter, threaded compiler, JIT driver |
-| `asm/` | virtual-register IR, register allocation, executable buffers |
-| `asm/arm64/` | ARM64 encoder, ABI, trampolines |
-| `pass/` | generic pass pipeline |
-| `analysis/` | shared analysis passes |
-| `transform/` | optimization transforms |
-| `optimize/` | optimization pipeline wiring |
-| `cli/` | CLI command tree, REPL, and shared value formatting |
-| `cmd/minivm/` | CLI entrypoint |
+| `asm/`, `asm/arm64/` | virtual-register IR, register allocation, executable buffers, ARM64 encoder/ABI |
+| `pass/`, `analysis/`, `transform/`, `optimize/` | pass pipeline, analyses, transforms, optimizer wiring |
+| `cli/`, `cmd/minivm/` | CLI command tree, REPL, entrypoint |
+
+**`interp/threaded.go` is generated.** Edit the emitters in `internal/cmd/geninterp/lower.go` (and fusion patterns in `pattern.go`), then run `make generate`. Never hand-edit the generated file.
+
+## Workflow
+
+1. Run `git status --short`; never overwrite or commit unrelated user changes.
+2. Read the Task Router docs for the area before changing code or tests.
+3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects.
+4. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
+5. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
+
+### Completion Gate
+
+Do not report work complete until all of these hold:
+
+1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
+2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
+3. A further simplification pass found no safe improvement.
+4. Tests follow §12 and assert only public observable behavior.
+5. Performance claims carry the reproducible before/after evidence §14 requires.
+6. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
+7. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
+8. Any intentionally skipped simplification or validation is recorded with its reason.
+
+## Task Router
+
+| Task | Read | Usually edit | Verify |
+|---|---|---|---|
+| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/cmd/geninterp/`, `instr/`, `interp/jit_arm64.go` | `go test ./instr ./interp` |
+| Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
+| Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
+| JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `interp/jit*.go`, `asm/`, `asm/arm64/` | `go test ./asm/... ./interp` |
+| Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
+| Bytecode verification / untrusted input | `docs/verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
+| REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
+| Debugger / stepping | `docs/debugging.md`, `docs/profile.md` | `interp/debugger.go`, `cli/repl.go` | `go test -race -run 'TestInterpreter_WithDebugger\|TestDebugger_Breakpoints' ./interp` |
+| Concurrent VM use | `docs/architecture.md` (`interp/`) | `interp/pool.go` | `go test -race ./interp` |
+
+`docs/README.md` indexes the full documentation set. Prefer `codegraph` MCP tools over grep for structural questions (definitions, callers, call flow, impact).
 
 ## Key Invariants
 
@@ -185,22 +113,21 @@ Violations cause silent corruption or invalid execution.
 
 ## Tests
 
-Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §12.
+Apply `docs/coding-patterns.md` §12; `docs/testing.md` carries ownership and opcode coverage status.
 
-- One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
+- One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`; sub-cases go under `t.Run`.
 - Every test package uses the production package name plus `_test` and acts as an importing client.
-- Put sub-cases under `t.Run`; do not split them into parallel top-level tests.
-- Keep setup, execution, and assertions visible unless specification §12 permits a real reusable abstraction.
-- Tests access no private symbol or representation; internal invariants are asserted through public observable behavior, generated output, or executable boundaries.
+- Tests access no private symbol or representation. Assert internal invariants through public behavior, generated output, or executable boundaries.
+- Keep setup, execution, and assertions visible unless §12 permits a real reusable abstraction.
 - Use `require`, not `assert`.
 
 ## Documentation Maintenance
 
-Update docs when behavior, invariants, commands, architecture, pitfalls, workflow, or conventions change. Use the owner matrix in `docs/coding-patterns.md` §15:
+Update docs when behavior, invariants, commands, architecture, workflow, or conventions change, using the owner matrix in `docs/coding-patterns.md` §15:
 
-- workflow / convention rules -> update both `AGENTS.md` and `.claude/CLAUDE.md`
-- invariants / pitfalls -> update `docs/architecture.md`
-- opcode semantics / JIT status -> update `docs/instruction-set.md`
-- JIT contracts / assembler APIs -> update `docs/jit-internals.md`
+- workflow / convention rules -> `AGENTS.md` and `.claude/CLAUDE.md`
+- invariants / pitfalls -> `docs/architecture.md`
+- opcode semantics / JIT status -> `docs/instruction-set.md`
+- JIT contracts / assembler APIs -> `docs/jit-internals.md`
 
-Keep edits terse and factual; document current behavior only; preserve formatting; verify Markdown.
+Keep edits terse and factual, document current behavior only, and preserve formatting.

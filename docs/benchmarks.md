@@ -19,12 +19,6 @@ only `IterativeFib` (1.30x); Wazero is ahead on `Sieve`, `TypedArraySum`,
 eager policy is slower than adaptive `default` on call-heavy kernels - 382.17 µs
 versus 39.60 µs on `RecursiveFib(20)` - so `default` is the tier to quote.
 
-**`StringBuild`**, this corpus's weakest kernel, moved from 1.63x slower than CPython
-to parity (1.04x) after `string.concat` stopped interning every intermediate and
-began sharing one append-only buffer. The same change cut the kernel from
-1,724,160 B/op to 85,408 B/op, a 20.2x reduction, and made `threaded` 1.62x faster
-in absolute terms.
-
 > **Environment**: August 13, 2026 - Apple M4 Pro - darwin/arm64 - Go 1.26.2 - CPython 3.13
 >
 > **Statistics**: every comparison table below is the median of `-benchtime=300ms -count=3`.
@@ -409,9 +403,9 @@ policy also compiles paths that adaptive `default` correctly declines, which is 
 it loses badly on `RecursiveFib(20)`.
 
 Allocation results are bounded: object-heavy kernels such as `StructTreeWalk` and
-`BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` is no longer an outlier
-at 85,408 B/op; its remaining 4,107 allocs/op come from the per-token UTF-32 array and
-string cells rather than from joining.
+`BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` holds 85,408 B/op, and
+its 4,107 allocs/op come from the per-token UTF-32 array and string cells rather than
+from joining.
 
 ## 8. Benchmark fixture inventory
 
