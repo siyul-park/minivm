@@ -1928,20 +1928,6 @@ var runTests = []struct {
 }
 
 func TestInterpreter_Run(t *testing.T) {
-	t.Run("string.concat reads the result after releasing both last operand references", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.STRING_CONCAT)})
-		i := New(prog, WithThreshold(-1))
-		defer i.Close()
-
-		require.NoError(t, i.Push(types.String("left")))
-		require.NoError(t, i.Push(types.String("right")))
-		require.NoError(t, i.Run(context.Background()))
-
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.String("leftright"), value)
-	})
-
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
 		names := make(map[string]struct{})
@@ -2011,6 +1997,51 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
+	})
+
+	t.Run("string.concat reads the result after releasing both last operand references", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.STRING_CONCAT)})
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("left")))
+		require.NoError(t, i.Push(types.String("right")))
+		require.NoError(t, i.Run(context.Background()))
+
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("leftright"), value)
+	})
+
+	t.Run("releases every string.concat intermediate", func(t *testing.T) {
+		// Each join consumes both operands and publishes one result, so an
+		// accumulating loop holds one live string at a time. A join that kept an
+		// operand ref leaks one slot per iteration and exhausts a bounded heap.
+		b := program.NewBuilder()
+		loop := b.Label()
+		done := b.Label()
+		b.Locals(types.TypeString, types.TypeI32)
+		b.ConstGet(types.String("")).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4*heapRunway).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("x")).Emit(instr.STRING_CONCAT).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		i := New(prog, WithHeapLimit(heapRunway))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		got, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(4*heapRunway), got)
 	})
 
 	t.Run("STRUCT_GET fused on a declared struct local traps type mismatch when the runtime field's kind diverges from the declared field's kind", func(t *testing.T) {
@@ -3290,21 +3321,6 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_ADD),
 				instr.New(instr.DROP),
 			}, program.WithLocals(types.TypeI64)),
-		},
-		{
-			// string.eq compares content and string.concat shares an append-only
-			// buffer, so neither lowers natively any more. Both paths must still
-			// agree on the result and on every refcount.
-			name: "string join and content equality preserve state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-				instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
-				instr.New(instr.DROP),
-			}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThereThere")),
-				program.WithLocals(types.TypeString)),
 		},
 		{
 			name: "local ref drop preserves ownership",

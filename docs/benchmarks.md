@@ -354,7 +354,7 @@ The `Traceable.Refs` benchmarks append into a caller-owned destination slice. Ev
 |---|---|---:|---:|---:|
 | `Array.Refs` | no refs | 3.148 | 0 | 0 |
 | `Array.Refs` | child refs | 2.678 | 0 | 0 |
-| `TypedMap.Refs` | child refs | 27.66 | 0 | 0 |
+| `TypedMap.Refs` | no refs | 27.66 | 0 | 0 |
 | `Map.Refs` | no refs | 2.137 | 0 | 0 |
 | `Map.Refs` | child refs | 31.73 | 0 | 0 |
 | `Struct.Refs` | no refs | 2.149 | 0 | 0 |
@@ -450,9 +450,13 @@ from joining.
 
 ```bash
 cd benchmarks
+# RecursiveFib/35 is excluded to match the published comparison protocol.
 go test -run='^$' \
-  -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' \
-  -benchmem -benchtime=100ms -count=3 ./...
+  -bench='^(BenchmarkControl|BenchmarkMemory|BenchmarkNumeric|BenchmarkCall_(ClosureCounter|NQueens|Fannkuch|IndirectRecursiveFib))' \
+  -benchmem -benchtime=300ms -count=3 .
+go test -run='^$' \
+  -bench='^BenchmarkCall_RecursiveFib$/^20$' \
+  -benchmem -benchtime=300ms -count=3 .
 ```
 
 ### Recursive Fibonacci
@@ -468,7 +472,7 @@ go test -run='^$' \
 
 ```bash
 go test -run='^$' \
-  -bench='^(BenchmarkNew|BenchmarkInterpreter_(Reset|Push|Pop|PopBoxed|Peek|Alloc|Retain|Release|StructGetLocalFusion|ArrayGetContainerFusion)|BenchmarkPool_(Get|Put))$' \
+  -bench='^(BenchmarkNew|BenchmarkInterpreter_(Run|Reset|Push|Pop|PopBoxed|Peek|Alloc|Retain|Release|StructGetLocalFusion|ArrayGetContainerFusion)|BenchmarkPool_(Get|Put))$' \
   -benchmem -benchtime=100ms -count=3 ./interp
 ```
 

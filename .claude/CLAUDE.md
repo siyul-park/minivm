@@ -26,7 +26,9 @@ Before reporting done, re-read every changed code and test file and verify:
 - Functions keep one abstraction level, single-use helpers remain inline unless they isolate real mechanics, and receiver-owned behavior is a method.
 - Declarations form a caller-before-callee staircase; fields and groups follow specification §9.
 - Public APIs remain minimal and compatible unless the user explicitly authorized a change.
-- Every test package uses the production package name plus `_test`, accesses no private symbol or representation, uses public observable behavior or a real artifact boundary, isolates arrange per subtest, matches production owners, and uses `require`.
+- Every test package uses the production package name plus `_test`, accesses no private symbol or representation, uses public observable behavior or a real artifact boundary, isolates arrange per subtest, and uses `require`.
+- No new test file was created without a matching production file, and new cases sit with the owner `docs/testing.md` assigns rather than in a new concept file.
+- Every applicable execution mode (threaded, fused, optimized, JIT) is covered, or the final summary states why a mode is not applicable.
 - Performance work has a baseline, profile-guided owner, correctness checks, and reproducible before/after evidence (specification §14).
 - Documentation, workflow, and conventions were updated in their specification §15 owner documents.
 

@@ -103,9 +103,11 @@ a copy. Two rules keep this safe without consulting reference counts:
   trace clone starts its own. A committed append must never rewrite bytes a
   captured string already published.
 
-The buffer keeps its backing array alive until the next join replaces it. That
-bounds the retention at one buffer, which is smaller than the per-join copies it
-replaces.
+`tail` keeps its current backing array alive until the next join replaces it, and
+a reallocating append leaves earlier refs owning the array they were published
+from. Retained storage is therefore not bounded to one buffer: every still
+reachable string holds its own backing array, exactly as separately copied
+strings would.
 
 ## Traceable Values
 

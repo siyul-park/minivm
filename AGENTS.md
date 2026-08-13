@@ -2,7 +2,9 @@
 
 Repository instructions for Codex and Claude Code. Codex reads this file directly; Claude Code loads `.claude/CLAUDE.md`, which imports it.
 
-`docs/coding-patterns.md` is the normative coding specification. Keep detailed rules there, not here. When instructions conflict, choose the more specific one and record the conflict in the final summary.
+`docs/coding-patterns.md` is the normative coding specification and is binding: a change that violates it is not complete, however well it works. Keep detailed rules there, not here.
+
+Read the section that governs the change before writing it. Nearby code is not a license - match an existing pattern only after confirming it is specification-compliant, because a non-compliant precedent will otherwise propagate. When instructions conflict, choose the more specific one and record the conflict in the final summary.
 
 ## Commands
 
@@ -66,7 +68,7 @@ Do not report work complete until all of these hold:
 1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
 2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
 3. A further simplification pass found no safe improvement.
-4. Tests follow §12 and assert only public observable behavior.
+4. Tests follow §12 and assert only public observable behavior. Any new test file has a matching production file, and every new case sits with the owner `docs/testing.md` assigns.
 5. Performance claims carry the reproducible before/after evidence §14 requires.
 6. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
 7. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
@@ -113,8 +115,11 @@ Violations cause silent corruption or invalid execution.
 
 ## Tests
 
-Apply `docs/coding-patterns.md` §12; `docs/testing.md` carries ownership and opcode coverage status.
+Apply `docs/coding-patterns.md` §12. Before adding a **new test file**, read §12.1 and the layer/owner table in `docs/testing.md`; most new coverage belongs in an existing owner, not a new file.
 
+- Each test file MUST match the production file owning the symbol: `foo_test.go` requires `foo.go`. The only exceptions are the per-package `fuzz_test.go` and `example_test.go` conventions. Catch-all concept files (`test_helpers_test.go`, or a `string_test.go` with no `string.go`) MUST NOT be created.
+- `docs/testing.md` assigns the owner by layer: runtime opcode behavior belongs to `interp.TestInterpreter_Run`, semantic parity to the owning transform/optimizer/interpreter test, internal invariants to the nearest public or artifact boundary.
+- A change touching threaded, fused, optimized, or JIT paths MUST cover every applicable mode, or state in the final summary why a mode is not applicable.
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`; sub-cases go under `t.Run`.
 - Every test package uses the production package name plus `_test` and acts as an importing client.
 - Tests access no private symbol or representation. Assert internal invariants through public behavior, generated output, or executable boundaries.

@@ -213,7 +213,8 @@ The built-in codec builds and caches one conversion plan per Go type.
 | `[]float32` | `F32Array` | |
 | `[]float64` | `F64Array` | |
 | other `[]T` | `*Array` ref | generic fallback |
-| `map[K]V` | `*Map` ref | heap-allocated |
+| `map[K]V` with a primitive or `string` key | `*TypedMap[K]` ref | key type drives the concrete map; content-keyed |
+| other `map[K]V` | `*Map` ref | heap ref identity keys |
 | data-only struct | `*Struct` ref | exported fields only |
 | struct with methods or unexported fields | `*HostObject` ref | preserves methods or hidden state |
 | defined scalar with methods | underlying scalar | keeps primitive fast path |
