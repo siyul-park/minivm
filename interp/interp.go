@@ -44,6 +44,8 @@ type Interpreter struct {
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
 	backedges   []bool
+	cold        []bool
+	misses      []uint8
 	coros       []bool
 	handlers    [][]instr.Handler
 	module      *types.Function
@@ -118,6 +120,11 @@ type option struct {
 
 const heapRunway = 64
 const loopWarmup = 8
+
+// giveupLimit is the number of consecutive unproductive observations - every
+// compilation root already tried and nothing installed - before giveup
+// permanently stops instrumenting a function. See checkGiveup.
+const giveupLimit = 2
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
@@ -257,6 +264,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		instrs:      make([][]byte, len(prog.Constants)+1),
 		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
 		backedges:   make([]bool, len(prog.Constants)+1),
+		cold:        make([]bool, len(prog.Constants)+1),
+		misses:      make([]uint8, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
 		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
 		exits:       map[anchor]func(*Interpreter){},
@@ -953,6 +962,13 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || entry.callable == nil {
 			continue
 		}
+		// A peer's publish can land on a function this interpreter already gave
+		// up on (see giveup); installing native code for it makes further
+		// instrumentation useful again, so resume it.
+		if a.addr < len(i.cold) && i.cold[a.addr] {
+			i.cold[a.addr] = false
+			i.misses[a.addr] = 0
+		}
 		// Save the original threaded handler once so deopt always resumes in the
 		// interpreter, but reinstall the latest native callable on every publish:
 		// a recompiled trace tree (with a hot side exit now inlined) must replace
@@ -972,12 +988,16 @@ func (i *Interpreter) install(mod *module, account bool) {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
 		stats := i.counters(a, entry)
+		// wd tracks trace-cut exits independent of stats: counters is a no-op
+		// under WithProfiler off (see i.counters), but a net-loss native entry
+		// must still be caught and retired without profiling enabled.
+		wd := newWatchdog(entry)
 		if entry.kind == entryLoop {
-			i.code[a.addr][a.ip] = i.loop(a, entry.callable, stats)
+			i.code[a.addr][a.ip] = i.loop(a, entry.callable, stats, wd)
 		} else if entry.kind == entryModule {
-			i.code[a.addr][a.ip] = i.start(a, entry.callable, stats)
+			i.code[a.addr][a.ip] = i.start(a, entry.callable, stats, wd)
 		} else {
-			i.code[a.addr][a.ip] = i.call(a, entry.callable, stats)
+			i.code[a.addr][a.ip] = i.call(a, entry.callable, stats, wd)
 		}
 	}
 }
@@ -1025,11 +1045,12 @@ func (i *Interpreter) safepoint() error {
 		}
 	}
 
-	// A warm function already has its entry trace installed. Its sampling and
-	// entry/loop capture are dead (those gates require the entry fallback nil)
-	// and its one-shot compile trigger has already fired, so the warm path pays
-	// only one indexed read here. A user profiler still needs per-tick samples.
-	if i.stub(f.addr) == nil {
+	// A warm function already has its entry trace installed, and a cold
+	// function has given up (every compilation root tried, nothing installed,
+	// see giveup): both skip observe's sampling, entry/loop capture, and
+	// one-shot compile trigger, paying only the indexed reads here. A user
+	// profiler still needs per-tick samples either way.
+	if i.stub(f.addr) == nil && !i.isCold(f.addr) {
 		if err := i.observe(f); err != nil {
 			return err
 		}
@@ -1080,7 +1101,35 @@ func (i *Interpreter) observe(f *frame) error {
 			return err
 		}
 	}
+	i.checkGiveup(f.addr, root)
 	return nil
+}
+
+// checkGiveup counts one unproductive observation when addr's entry root and
+// every loop header returned by i.tracer.headers have already been attempted
+// (recorded in i.tried) without installing any native code (see installed).
+// giveupLimit consecutive unproductive observations trigger giveup, which
+// permanently stops instrumenting addr. A root that has not been attempted
+// yet, or a function with anything installed, resets nothing and costs one
+// map lookup.
+func (i *Interpreter) checkGiveup(addr int, root anchor) {
+	if !i.tried[root] || i.installed(addr) {
+		return
+	}
+	for _, header := range i.tracer.headers(i, addr) {
+		if !i.tried[anchor{addr: addr, ip: header}] {
+			return
+		}
+	}
+	if addr < 0 || addr >= len(i.misses) {
+		return
+	}
+	if i.misses[addr] < math.MaxUint8 {
+		i.misses[addr]++
+	}
+	if i.misses[addr] >= giveupLimit {
+		i.giveup(addr)
+	}
 }
 
 // backedge receives the exact target of an unconditional backward
@@ -1127,9 +1176,10 @@ func (i *Interpreter) trace(f *frame) error {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
+func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
+		wd.enter()
 		ctx := i.journalPtr()
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -1143,6 +1193,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 
 		if i.journal[journalTrap] == trapNone {
 			i.popFrame()
+			i.checkRetire(root, wd, true)
 			return
 		}
 
@@ -1163,17 +1214,20 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 			}
 		default:
 			stats.exit(i.journal[journalExitID])
+			wd.exit(i.journal[journalExitID])
 			i.bailout(root)
 		}
+		i.checkRetire(root, wd, true)
 	}
 }
 
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
+func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
+		wd.enter()
 		ctx := i.journalPtr()
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -1185,6 +1239,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 		i.sp = int(i.journal[journalSP])
 		if i.journal[journalTrap] == trapNone {
 			i.complete()
+			i.checkRetire(root, wd, false)
 			return
 		}
 
@@ -1199,8 +1254,10 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 			}
 		default:
 			stats.exit(i.journal[journalExitID])
+			wd.exit(i.journal[journalExitID])
 			i.bailout(root)
 		}
+		i.checkRetire(root, wd, false)
 	}
 }
 
@@ -1211,9 +1268,10 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 // A spent budget yields to the safepoint and the Run loop re-enters native at
 // the header; a guarded side exit or the loop-exit edge leaves deopt with
 // i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
+func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
+		wd.enter()
 		ctx := i.journalPtr()
 		// Decouple the loop's safepoint cadence from tick: a native iteration does
 		// the work of a whole loop body, so yielding every tick (1 under exact
@@ -1230,6 +1288,7 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			} else {
 				i.popFrame()
 			}
+			i.checkRetire(root, wd, false)
 			return
 		}
 		i.deopt()
@@ -1243,6 +1302,7 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			}
 		case trapFallback:
 			stats.exit(i.journal[journalExitID])
+			wd.exit(i.journal[journalExitID])
 			// Record the exit as a branch so the tracer captures the leg and a
 			// hot in-loop branch recompiles the tree with the leg folded in.
 			i.exit(root)
@@ -1256,6 +1316,7 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 				}
 			}
 		}
+		i.checkRetire(root, wd, false)
 	}
 }
 
@@ -1414,24 +1475,87 @@ func (i *Interpreter) sample(f *frame) uint64 {
 // enableBackedges rethreads one hot function with exact unconditional
 // back-edge observation. Cold functions keep the original zero-overhead BR
 // handler until periodic sampling reaches the configured threshold.
+func (i *Interpreter) enableBackedges(addr int) {
+	if addr < 0 || addr >= len(i.backedges) || i.backedges[addr] {
+		return
+	}
+	i.rethread(addr, true)
+}
+
+// giveup permanently stops instrumenting addr once every compilation root has
+// been tried and nothing installed: further sampling, entry/loop capture, and
+// exact back-edge observation would only pay dispatch overhead for no benefit
+// (see checkGiveup). A function already rethreaded onto the exact-backedge
+// table reverts to the zero-overhead BR handler; sync still runs afterward so
+// a peer's later publish can still be adopted (see install).
+func (i *Interpreter) giveup(addr int) {
+	if addr < 0 || addr >= len(i.cold) || i.cold[addr] {
+		return
+	}
+	i.cold[addr] = true
+	if i.backedges[addr] {
+		i.rethread(addr, false)
+	}
+}
+
+// checkRetire evaluates wd's window (see watchdog.expired) once native code
+// has already finished making this dispatch's forward progress — a normal
+// return, a serviced yield, or a bailout have all already run — so retiring
+// a's installed entry here never skips a step the interpreter owed the
+// program. clearNatives is true only for a function-entry anchor (see
+// Interpreter.retire).
+func (i *Interpreter) checkRetire(a anchor, wd *watchdog, clearNatives bool) {
+	if wd.expired() {
+		i.retire(a, clearNatives)
+	}
+}
+
+// retire undoes install for anchor a once its watchdog finds it spends at
+// least retireCutThreshold of a retireWindow exiting through trace-cut (see
+// watchdog): it restores the shadowed threaded handler saved in i.exits,
+// clears a's function-entry call-fast-path slot in i.natives when
+// clearNatives is set (a null slot already makes callers fall back at the
+// CALL, see install), and calls giveup so addr is neither re-instrumented nor
+// recompiled. The threaded handler must be restored before giveup, because
+// giveup may rethread addr's whole table and preserves whatever i.code
+// currently holds at every live anchor (see rethread).
+//
+// retire only ever writes i.code, i.natives, and i.cold, all local to this
+// Interpreter, so it never reaches into a pool's shared published module (see
+// sync). It is safe to call from inside the very wrapper closure it replaces:
+// the caller is already done making this dispatch's progress and is about to
+// return to the Run loop.
+func (i *Interpreter) retire(a anchor, clearNatives bool) {
+	if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) {
+		return
+	}
+	if fn := i.exits[a]; fn != nil {
+		i.code[a.addr][a.ip] = fn
+	}
+	if clearNatives && a.addr < len(i.natives) {
+		atomic.StorePointer(&i.natives[a.addr], nil)
+	}
+	i.giveup(a.addr)
+}
+
+// rethread rebuilds addr's dispatch table for the given back-edge mode: true
+// installs the exact unconditional back-edge handler (see enableBackedges),
+// false reverts to the plain zero-overhead handler (see giveup).
 //
 // The rethreaded handlers are copied into the table already installed rather
 // than replacing it. Compile emits one handler per code byte, so both tables
 // describe the same function at the same length, and keeping that slice live
 // rewires every frame currently executing addr in place.
-func (i *Interpreter) enableBackedges(addr int) {
-	if addr < 0 || addr >= len(i.backedges) || i.backedges[addr] {
-		return
-	}
+func (i *Interpreter) rethread(addr int, backedge bool) {
 	fn, ok := i.function(addr)
 	if !ok || fn == nil {
 		return
 	}
-	c := i.threader(true)
+	c := i.threader(backedge)
 	installed := i.code[addr]
 	compiled := c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
 	// Rethreading replaces only interpreted handlers. Installed native entries
-	// stay live while their saved fallbacks advance to the exact-backedge table.
+	// stay live while their saved fallbacks advance to the rebuilt table.
 	for root := range i.exits {
 		if root.addr != addr || root.ip < 0 || root.ip >= len(compiled) || root.ip >= len(installed) {
 			continue
@@ -1443,7 +1567,7 @@ func (i *Interpreter) enableBackedges(addr int) {
 		compiled[root.ip] = installed[root.ip]
 	}
 	copy(installed, compiled)
-	i.backedges[addr] = true
+	i.backedges[addr] = backedge
 }
 
 func (i *Interpreter) stub(addr int) func(*Interpreter) {
@@ -1451,6 +1575,25 @@ func (i *Interpreter) stub(addr int) func(*Interpreter) {
 		return nil
 	}
 	return i.stubs[addr]
+}
+
+// isCold reports whether addr has given up (see giveup).
+func (i *Interpreter) isCold(addr int) bool {
+	return addr >= 0 && addr < len(i.cold) && i.cold[addr]
+}
+
+// installed reports whether any native entry is live for addr: either its
+// function-entry stub or a loop/side-exit anchor recorded in i.exits.
+func (i *Interpreter) installed(addr int) bool {
+	if i.stub(addr) != nil {
+		return true
+	}
+	for a := range i.exits {
+		if a.addr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 // deopt rebuilds VM frames from the native journal after a trap. Native frames
@@ -2056,6 +2199,12 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.backedges) {
 		i.backedges = append(i.backedges, make([]bool, n-len(i.backedges))...)
 	}
+	if addr >= len(i.cold) {
+		i.cold = append(i.cold, make([]bool, n-len(i.cold))...)
+	}
+	if addr >= len(i.misses) {
+		i.misses = append(i.misses, make([]uint8, n-len(i.misses))...)
+	}
 	if addr >= len(i.stubs) {
 		i.stubs = append(i.stubs, make([]func(*Interpreter), n-len(i.stubs))...)
 	}
@@ -2429,6 +2578,8 @@ func (i *Interpreter) remove(addr int) {
 	i.instrs[addr] = nil
 	i.code[addr] = nil
 	i.backedges[addr] = false
+	i.cold[addr] = false
+	i.misses[addr] = 0
 	i.stubs[addr] = nil
 	i.handlers[addr] = nil
 	i.coros[addr] = false

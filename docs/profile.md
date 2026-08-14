@@ -185,6 +185,26 @@ Threshold-zero mode installs exact unconditional-backedge observation immediatel
 
 Pool members use the same rounded threshold. With a shared cache, trigger counts are aggregated so only one member compiles at a time, while a per-function queue retains distinct exact loop roots and prioritizes newer side-exit work.
 
+## Give-up
+
+Sampling, trace capture, and exact back-edge observation are only worth their
+cost while compilation can still succeed. A function whose entry root and every
+loop header have all been attempted without installing native code is given up:
+it is marked cold, and a function already rethreaded onto the exact-backedge
+table reverts to the ordinary zero-overhead `BR` handler. A cold function skips
+`observe` entirely — no sampling for hotness, no capture, no compile trigger —
+while an attached profiler still receives its per-tick samples.
+
+Two unproductive observations trigger give-up. Capture rejections count against
+the same per-anchor attempt limit as every other rejection, including a
+mis-anchored entry, so a repeatedly unusable anchor stops being retried instead
+of costing one rejected capture per tick forever.
+
+A cold function resumes if native code later lands on it, which is how a pooled
+member adopts a module a peer published. `docs/jit-internals.md` covers
+retirement, the runtime counterpart that removes a native entry that is already
+installed but not paying for itself.
+
 minivm does not currently tier beyond the ARM64 trace backend.
 
 ## REPL Reporting

@@ -402,6 +402,21 @@ the rest, so kernels touching unlowered opcodes never stay native. `jit`'s eager
 policy also compiles paths that adaptive `default` correctly declines, which is why
 it loses badly on `RecursiveFib(20)`.
 
+The tables above predate the give-up and retirement rules (`docs/profile.md`,
+`docs/jit-internals.md`) and have not been re-measured as a full cross-runtime
+sweep since. Two measured effects those rules address, both reproducible with
+the commands in section 10:
+
+- A function that can never compile used to keep paying for the attempt. A CPU
+  profile of `PermutationFlips/default` attributed 11.9% to `Interpreter.backedge`
+  and 10.5% to `Interpreter.trace` with no native code ever installed;
+  `StringBuild` performed about 1,020 rejected trace captures per run.
+- A capture taken at an unlucky moment could install an entry that exits
+  `trace-cut` on half its invocations and never be replaced. `RecursiveFib(35)`
+  recorded 29.9M native entries against 14.9M trace-cut exits and ran 2.64x
+  slower under `default` than under `threaded`; interleaved `-benchtime=1x
+  -count=3` after retirement gives 760 ms versus 676 ms, a 1.13x residual.
+
 Allocation results are bounded: object-heavy kernels such as `StructTreeWalk` and
 `BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` holds 85,408 B/op, and
 its 4,107 allocs/op come from the per-token UTF-32 array and string cells rather than

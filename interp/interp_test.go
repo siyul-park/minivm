@@ -6,9 +6,11 @@ import (
 	"math"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
@@ -4982,6 +4984,183 @@ func TestWithProfiler(t *testing.T) {
 		require.Equal(t, float64(1), value)
 	})
 
+	t.Run("stops repeating rejected trace captures once a function gives up", func(t *testing.T) {
+		// A function that can never be traced (an unsupported opcode at its own
+		// entry) must not keep paying for a fresh capture attempt on every
+		// observation forever: giveup should make the rejected-capture count
+		// plateau instead of growing once per run.
+		b := program.NewBuilder()
+		typ := b.Type(types.TypeI32Array)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(typ)).Emit(instr.DROP)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(prof.New()))
+		defer i.Close()
+
+		rejected := func() float64 {
+			return i.samples.Value("vm_jit_trace_captures_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "outcome", Value: "rejected"}, prof.Label{Key: "reason", Value: "unsupported-op"})
+		}
+
+		require.NoError(t, i.Run(context.Background()))
+		i.Reset()
+		early := rejected()
+		require.Greater(t, early, float64(0))
+		require.True(t, i.isCold(0), "the function should have given up after repeated unproductive observations")
+
+		for range 16 {
+			require.NoError(t, i.Run(context.Background()))
+			i.Reset()
+		}
+		require.Equal(t, early, rejected(), "rejected-capture count must not grow once the function is cold")
+	})
+
+	t.Run("retires a native entry whose exits are dominated by trace-cut", func(t *testing.T) {
+		// Mirrors the RecursiveFib/35 regression: an installed native entry
+		// that spends at least a quarter of a retireWindow exiting through
+		// prof.ExitTraceCut (native code that knowingly stops mid-function,
+		// not a healthy kernel's normal loop-exit edge) must stop paying for
+		// itself. See fakeExitCallable for why every call still computes the
+		// correct result whether or not the entry has retired yet.
+		const iterations = int32(2000)
+		p := prof.New()
+		i, incAddr := installFakeExit(t, p, iterations, prof.ExitTraceCut)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(iterations), got)
+		require.True(t, i.isCold(incAddr), "the entry should have retired once its trace-cut rate crossed the window threshold")
+		require.True(t, i.natives[incAddr] == nil, "retire must clear the function-entry call-fast-path slot")
+
+		// flush syncs the interpreter's local sample collector into p: metrics
+		// live in i.samples until flush (see Interpreter.Close), so a mid-test
+		// check needs it directly instead of waiting for the deferred Close.
+		label := func() (float64, bool) {
+			i.flush()
+			return p.Metric("vm_jit_native_entries_total",
+				prof.Label{Key: "func", Value: strconv.Itoa(incAddr)}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
+		}
+		entries, ok := label()
+		require.True(t, ok)
+		require.Equal(t, float64(retireWindow), entries, "entries must stop growing once the entry retires")
+
+		for range 4 {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(iterations), got, "the program must still produce correct results through the restored threaded handler")
+		}
+
+		after, ok := label()
+		require.True(t, ok)
+		require.Equal(t, entries, after, "a retired entry must never produce another native entry")
+	})
+
+	t.Run("keeps a healthy native entry installed", func(t *testing.T) {
+		// A high exit rate alone is not a failure signal (see watchdog):
+		// Sieve, NQueens, and MatMul all exit on nearly every entry through
+		// their normal loop-exit edge and stay installed. A fake entry whose
+		// sole exit reason is prof.ExitLoop instead of prof.ExitTraceCut must
+		// never trip the watchdog, no matter how many windows it completes.
+		const iterations = int32(2000)
+		p := prof.New()
+		i, incAddr := installFakeExit(t, p, iterations, prof.ExitLoop)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(iterations), got)
+		require.False(t, i.isCold(incAddr))
+		require.True(t, i.natives[incAddr] != nil)
+
+		i.flush()
+		entries, ok := p.Metric("vm_jit_native_entries_total",
+			prof.Label{Key: "func", Value: strconv.Itoa(incAddr)}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
+		require.True(t, ok)
+		require.Equal(t, float64(iterations), entries, "a healthy entry must keep producing native entries")
+	})
+}
+
+// fakeExitCallable simulates one native fallback exit without depending on
+// real ARM64 code generation. Every call reports a genuine depth-1 frame
+// record (see Interpreter.deopt) that resumes at ip 0 of addr, exactly like a
+// real mid-function fallback: bailout runs the shadowed entry handler once
+// and ordinary threaded dispatch takes over from there. The fake never
+// computes anything itself, so every call is correct regardless of whether
+// the wrapper installed over it has retired yet (see Interpreter.retire).
+type fakeExitCallable struct {
+	i    *Interpreter
+	addr int
+}
+
+func (f fakeExitCallable) Call(unsafe.Pointer) error {
+	f.i.journal[journalDepth] = 1
+	f.i.journal[journalHead+recordAddr] = uint64(f.addr)
+	f.i.journal[journalHead+recordBP] = f.i.journal[journalBP]
+	f.i.journal[journalHead+recordIP] = 0
+	f.i.journal[journalHead+recordReturns] = 0
+	f.i.journal[journalTrap] = trapFallback
+	f.i.journal[journalExitID] = 1
+	return nil
+}
+
+func (f fakeExitCallable) Addr() unsafe.Pointer { return unsafe.Pointer(&f) }
+
+// installFakeExit builds a program whose top-level driving loop calls a
+// trivial increment function iterations times, then installs one fake native
+// entry (see fakeExitCallable) at the function's own anchor whose sole exit
+// descriptor carries reason. WithThreshold(-1) keeps the real tracer and
+// compiler out of the way so the fake entry is the only native code ever
+// installed. It returns the configured Interpreter and the function's
+// runtime address.
+func installFakeExit(t *testing.T, p *prof.Profiler, iterations int32, reason prof.ExitReason) (*Interpreter, int) {
+	t.Helper()
+
+	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Params(types.TypeI32).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).
+		MustBuild()
+
+	b := program.NewBuilder()
+	idx := b.Const(fn)
+	loop := b.Label()
+	done := b.Label()
+	b.Locals(types.TypeI32, types.TypeI32)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(iterations))).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, uint64(idx)).Emit(instr.CALL).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 1)
+	prog, err := b.Build()
+	require.NoError(t, err)
+	require.NoError(t, program.Verify(prog))
+
+	i := New(prog, WithProfiler(p), WithThreshold(-1))
+	incAddr := i.constants[idx].Ref()
+	root := anchor{addr: incAddr, ip: 0}
+	mod := &module{entries: map[anchor]native{
+		root: {
+			callable: fakeExitCallable{i: i, addr: incAddr},
+			kind:     entryFunction,
+			frontend: prof.FrontendTrace,
+			exits:    []exitDescriptor{{reason: reason, opcode: prof.OpcodeNone}},
+		},
+	}}
+	i.install(mod, false)
+	return i, incAddr
 }
 
 func TestWithFrame(t *testing.T) {

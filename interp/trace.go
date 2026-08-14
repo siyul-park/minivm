@@ -141,16 +141,21 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		t.mu.Unlock()
 		return captureResult{trace: tr}
 	}
-	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
-		t.mu.Unlock()
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
-	}
 	if tree == nil {
 		tree = t.tree(a)
 	}
 	if tree.attempts >= attemptLimit {
 		t.mu.Unlock()
 		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}
+	}
+	// A mis-anchored entry (a.ip==0 but the live frame isn't there) counts
+	// against tree.attempts like every other rejection, so it stops being
+	// retried after attemptLimit instead of costing a fresh clone-and-walk on
+	// every observation forever.
+	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
+		tree.attempts++
+		t.mu.Unlock()
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
 	tree.attempts++
 	t.mu.Unlock()

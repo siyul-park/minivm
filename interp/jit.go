@@ -38,6 +38,39 @@ type counters struct {
 	exits  []*prof.Counter
 }
 
+// retireWindow is the number of native entries a watchdog observes before
+// judging whether an installed anchor is paying for itself (see watchdog).
+const retireWindow = 1024
+
+// retireCutThreshold is the minimum count of trace-cut exits (see
+// prof.ExitTraceCut) within one retireWindow that marks the anchor as a net
+// loss rather than a healthy kernel's normal loop-exit or guard traffic.
+const retireCutThreshold = retireWindow / 4
+
+// watchdog counts native entries and trace-cut exits for one installed
+// anchor. Unlike counters, it is always live regardless of i.profiler: a
+// trace-cut exit is native code that knowingly stops mid-function (see
+// prof.ExitTraceCut) rather than completing its job or leaving through a
+// healthy loop-exit edge, so a high rate of it — not a high exit rate alone —
+// is the signal that the installed entry should be retired (see
+// Interpreter.retire).
+type watchdog struct {
+	cut     []bool // exit descriptor ID -> reason == prof.ExitTraceCut
+	entries uint32
+	cuts    uint32
+}
+
+// newWatchdog precomputes, for each of entry's exit descriptors, whether its
+// reason is prof.ExitTraceCut, so the watchdog's hot path only ever indexes a
+// []bool keyed by descriptor ID.
+func newWatchdog(entry native) *watchdog {
+	cut := make([]bool, len(entry.exits))
+	for id, exit := range entry.exits {
+		cut[id] = exit.reason == prof.ExitTraceCut
+	}
+	return &watchdog{cut: cut}
+}
+
 type compileResult struct {
 	module   *module
 	anchor   anchor
@@ -417,6 +450,37 @@ func (m counters) yield() {
 	if m.yields != nil {
 		m.yields.Inc()
 	}
+}
+
+// enter counts one invocation of the installed native entry.
+func (w *watchdog) enter() {
+	w.entries++
+}
+
+// exit counts one trace-cut fallback exit. encoded is i.journal[journalExitID]
+// exactly as counters.exit consumes it: the exit descriptor ID plus one, zero
+// meaning no descriptor.
+func (w *watchdog) exit(encoded uint64) {
+	if encoded == 0 {
+		return
+	}
+	id := int(encoded - 1)
+	if id >= 0 && id < len(w.cut) && w.cut[id] {
+		w.cuts++
+	}
+}
+
+// expired reports whether entries has reached retireWindow. It always resets
+// both counters so the next window starts clean; the return value tells the
+// caller whether this window's cut rate reached retireCutThreshold, meaning
+// the anchor should be retired (see Interpreter.retire).
+func (w *watchdog) expired() bool {
+	if w.entries < retireWindow {
+		return false
+	}
+	bad := w.cuts >= retireCutThreshold
+	w.entries, w.cuts = 0, 0
+	return bad
 }
 
 // push appends one operand to the symbolic stack.
