@@ -102,15 +102,25 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 The compiler builds one read-only `compileInput`, then runs two ordered frontends:
 
-1. `staticPlan` constructs a complete plan from verified bytecode and dataflow when no function entry is installed.
+1. `staticPlan` constructs complete plans from verified bytecode and dataflow: one entry plan when no entry is installed, plus one `entryLoop` plan per loop header (`headers`).
 2. `tracePlan` constructs plans from immutable runtime trace snapshots.
 3. If neither frontend produces a lowerable plan, threaded execution remains installed.
+
+The order depends on the requested root. An entry root tries the static frontend first: it plans the whole function deterministically and covers opcodes no trace can record. A loop root tries the trace frontend first, because a recorded loop specializes its body to the path actually taken - folded legs, a hoisted container - and the static loop plan is the fallback for a loop no trace could record.
 
 Both frontends return the same private `plan` model: ABI kind, a root block ID, flat blocks, entry states, ordinary steps, explicit edges, and spill policy. Every internal edge carries a block ID; unresolved edges retain only their threaded fallback anchor. Build, link, validation, accounting, and publication are centralized in the compiler.
 
 ## Static Frontend
 
-The static frontend analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, direct-call targets, declared struct types, and known i32 constants. A `STRUCT_GET` whose container carries a declared struct type (or references a known heap struct) and whose field index is a known in-bounds constant resolves its result kind statically; the planner synthesizes `step.seen` as the zero boxed value of that kind, and the lowering's runtime itab, type, and per-field kind guards keep it sound. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
+The static frontend analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, direct-call targets, declared struct types, and known i32 constants. A `STRUCT_GET` whose container carries a declared struct type (or references a known heap struct) and whose field index is a known in-bounds constant resolves its result kind statically; the planner synthesizes `step.seen` as the zero boxed value of that kind, and the lowering's runtime itab, type, and per-field kind guards keep it sound. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. An opcode `bridgeable` names (see Bridge) ends its block on that opcode instead of rejecting the whole function, provided `applyStep` can still model its stack effect; any other opcode the backend cannot lower, or one whose effect cannot be modeled, rejects the whole static plan for the function.
+
+A container's element kind resolves from the live heap cell when its identity is known, and otherwise from its declared array type (`types.ArrayType.ElemKind`) reached through the local, param, upvalue, or `REF_CAST` slot that carries it. Both are hints the runtime tag, itab, and bounds guards verify before any access, so a slot declared as an array that currently holds null or a differently shaped array deopts instead of being read. The declared type answers only in a call-free plan: the general array path combined with a native call still corrupts native state, so a calling function keeps resolving only from a constant container.
+
+Static plans compute `noSpill` exactly as trace plans do. A store path must never spill, and before declared array types let array code plan statically this was unreachable, because such a function had no static plan at all.
+
+Every root of a function is planned from one shared block list, but each `entryLoop` plan keeps only the blocks its own root reaches (`prune`), renumbered densely. The backend emits every block a plan holds, so an unpruned header would re-emit the whole function once per header - O(headers) redundant code size, register pressure, and branch range. Reachability follows `term.edges` and their tail continuations, plus one edge no terminator names: a `terminateBridge` block resumes at the block planned immediately after it, because resumption is a fresh external entry rather than a branch. A block list that does not satisfy that layout skips the root instead of emitting a plan whose resume target is missing.
+
+`noSpill` and the loop-carried registers are recomputed per pruned plan rather than inherited. A block the header cannot reach is never emitted, so its stores must not force the plan off the spill frame and its bridges must not strip the plan's carried registers.
 
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
@@ -312,6 +322,8 @@ Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter
 
 Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, enters the callee trace, and restores caller state on return.
 
+X26 carries the caller's spill base across a `BLR`. The callee is entered at its own offset zero, so it runs the frame prologue and repoints X26 at its own frame; the caller saves X26 into its 32-byte save area before the call and restores it immediately after, on both the normal and the trap path. A self-call (`BL` to `ctx.head`) needs no such save: it shares the caller's frame, and that stream cannot spill at all because the backward branch to `head` disables the spill frame (`asm/rewriter.go` `backEdge`).
+
 On deoptimization, native frames append enough journal records for Go to rebuild the VM call chain.
 
 `RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller's symbolic stack. `RETURN_CALL` tail-loop and tail-morph paths first preflight the retiring activation, then own forwarded arguments and release the retiring frame.
@@ -470,13 +482,27 @@ Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` are terminal mutations. Befor
 
 Mutation plans are always no-spill. Stores use the common fresh-register heap path; if the physical register budget is exhausted, `asm.Build` rejects native compilation with `CompileReasonRegisterPressure` and threaded execution remains installed. Native compilation must never spill a store path across a back-edge.
 
-Allocation and complex ref-bearing mutations stay threaded or terminate the native trace.
+Allocation and complex ref-bearing mutations either bridge (see Bridge) in a static plan or stay threaded/terminate the native trace in a trace plan.
+
+## Bridge
+
+A bridge deopts one opcode the backend cannot lower to the threaded interpreter and resumes native execution afterward, instead of ending the native entry outright. It generalizes the mechanism first built for `ARRAY_NEW_DEFAULT` alone.
+
+`bridgeable` (`interp/jit_plan.go`) is the single predicate naming every opcode eligible: the allocation family (`ARRAY_NEW`, `ARRAY_NEW_DEFAULT`, `ARRAY_SLICE`, `ARRAY_DELETE`, `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `MAP_NEW`, `MAP_NEW_DEFAULT`, `MAP_DELETE`, `MAP_CLEAR`, `REF_NEW`, `REF_SET`, `CLOSURE_NEW`, `STRING_NEW_UTF32`), the map/string/bulk-array opcodes jit_arm64.go otherwise lowers as an unconditional trap (`MAP_LEN`, `MAP_GET`, `MAP_LOOKUP`, `MAP_KEYS`, `MAP_ITER`, `STRING_ENCODE_UTF32`, `STRING_ITER`, `ARRAY_FILL`, `ARRAY_COPY`, `ARRAY_APPEND`, `MAP_SET`), structured errors (`ERROR_NEW`, `ERROR_CODE`, `THROW`), and `REF_TEST`/`REF_CAST`. An opcode already lowered natively (`ARRAY_GET`, `STRUCT_SET`, and so on) must never appear here: a bridge is strictly the fallback for opcodes with no native lowering. `YIELD`/`RESUME` are excluded even though the backend cannot lower them either — suspension cannot resume mid-frame into native code (see Suspension) — so they keep the unconditional terminal-fallback treatment in `arm64Lowerer.steps` instead.
+
+The static planner (`staticPlan`) is the frontend that acts on `bridgeable`: walking a function's bytecode, an opcode it names ends the current plan block with a `terminateBridge` terminator instead of becoming an ordinary step, and the remaining source instructions continue into a fresh block anchored right after it, marked `block.bridge`, carrying the post-op dataflow state so lowering reloads it exactly like any other state-backed block. `applyStep` must still be able to model the opcode's stack effect for the plan to proceed: fixed-arity opcodes use `instr.TypeOf`'s `Pop`/`Push` directly; the dynamic-arity ones (`STRUCT_NEW`, `MAP_NEW`, `CLOSURE_NEW`, `ARRAY_NEW`, `ARRAY_APPEND`) derive their count from the instruction's own operand, a known compile-time constant on the stack (`slot.valKnown`), or a statically resolved callee, matching how `program/verify.go`'s `flow()` computes the same opcodes' effects for verification; when none of these resolve the effect, the plan is rejected exactly as before. A pushed slot produced by a bridged opcode's own effect (a fresh allocation, a resolved element/field value) must be a new `backingStack` slot, never a mutated copy of an operand that existed before the bridge: after the bridge, `retainDeferred` has already taken a real retain for every deferred operand handed to the threaded closure, so continuing to mark a survivor as deferred (`backingLocal`/`backingGlobal`/`backingUpval`/`backingConst`) makes a later consumer elide a release that must run, leaking the retain (see Reference Ownership). `REF_CAST` (identity pass-through: pop, then push the same kind, narrowing `styp` when the declared target is a struct type) and `ARRAY_APPEND` (its array operand is never popped, so it survives on the stack) both learned this the hard way and construct a fresh slot instead of reusing the pre-bridge one.
+
+`arm64Lowerer.dispatch`, emitted once per callable, reads the journal's entry-IP cell at the top of the callable and, when it names a `block.bridge` anchor, branches directly to that block's label instead of falling into the normal anchor start; zero (every ordinary `Call`'s value) falls through unchanged. `arm64Lowerer.bridge` (`l.term`'s `terminateBridge` case) traps with `trapBridge` and the opcode's own IP, sharing `trapFallback`'s flush and `retainDeferred` handoff but carrying no exit descriptor — a bridge is productive continuation, not a trace-cut (see Retirement), and `watchdog.bridge` counts it on a separate counter so it can never inflate the trace-cut rate. `Interpreter.bridge` (`interp/interp.go`) is the Go-side half: it runs `i.code[f.addr][ip](i)` — the bridged opcode's own threaded closure — exactly once, then reports the IP native execution may resume at, or `ok=false` when it must not (the closure moved frame/function, made no forward progress, spent the wrapper's `loopBudget` of bridge cycles, or the new IP is not one the callable's `resumable` list carries an entry-dispatch label for). If the bridged opcode's own IP is 0 — the function's very first instruction — `i.code[f.addr][0]` is the native wrapper this call is already running inside (`install` overwrites only the anchor slot), so `Interpreter.bridge` runs the shadowed threaded handler (`i.stub`) instead of that wrapper, exactly as a `trapFallback` resuming at 0 already did (see the Loops section's header note).
+
+A bridge cycle re-enters through a fresh external `Call`, which never runs the loop-carry prologue (see `arm64Lowerer.dispatch` above): a carried register would be uninitialized garbage on such a resume. A bridge a plan can reach therefore keeps every local slot-backed instead of loop-carried. The scope is the plan, not the function: each loop plan carries only the blocks its own root reaches (see Static Frontend), so a bridge this header cannot reach is not compiled into this callable, has no resume label here, and does not disable carrying. A bridge that the header does reach but that sits outside the loop's own back-edge range still disables it; narrowing that residual case to "a bridge inside the loop body" is unimplemented follow-up work, tracked because it would need the carry-load prologue to run on every re-entry path, not just the callable's own head.
+
+`arrayKind` (`interp/jit_plan.go`) resolves an `ARRAY_GET`/`ARRAY_DELETE` element kind from a known constant container's concrete heap itab, matching `arrayGetKnown`'s native lowering, and otherwise from the declared array type — mirroring `structFieldKind`'s declared-struct-type resolution, which `STRUCT_GET` already relies on. The declared type answers only in a call-free plan (`callFree`). Lifting that gate lets `ARRAY_GET`'s general (non-constant) lowering path run alongside a native `CALL` in the same plan, and that combination corrupted native execution state on the next native call boundary (`runtime.mallocgc` SIGSEGV) instead of cleanly guarding and falling back the way `structFieldKind`'s equivalent case does. The `BLR` no longer clobbers the spill base (see Calls and Returns), so it no longer crashes, but three tests still diverge behaviourally, so the gate stands until that is understood. Until then a function containing a call keeps resolving `ARRAY_GET`, `ARRAY_LEN`, and `ARRAY_DELETE` only from a known constant container.
 
 ## Structured Errors
 
-`ERROR_NEW`, `ERROR_CODE`, and `THROW` are terminal fallback boundaries.
+`ERROR_NEW`, `ERROR_CODE`, and `THROW` bridge in a static plan (see Bridge) and remain terminal fallback boundaries in a trace plan.
 
-The tracer records them without stepping the clone. Native code deoptimizes at the opcode IP, and the threaded handler performs error allocation, code extraction, throw unwinding, and handler landing.
+The tracer records them without stepping the clone. In a trace plan, native code deoptimizes at the opcode IP with no resume, and the threaded handler performs error allocation, code extraction, throw unwinding, and handler landing.
 
 If any of these appears in an inlined callee frame, the trace aborts.
 
@@ -494,6 +520,22 @@ Entry wrappers and loop wrappers differ:
 Install only accepted callables. Rejected roots leave the existing threaded closure intact.
 
 Native wrappers must always leave the interpreter in a valid state for threaded redispatch.
+
+### Cooling and retirement
+
+Cooling is the compile-side half: a function whose entry root and every loop
+header have been attempted without installing anything stops being sampled,
+captured, and back-edge instrumented. `docs/profile.md` owns that rule.
+Retirement below is the runtime half, for native code that is already
+installed.
+
+### Retirement
+
+A trace can compile into a native entry that runs a few instructions and then always exits `trapFallback` with reason `prof.ExitTraceCut` — native code that knowingly stops mid-function — instead of completing its job or leaving through a healthy loop-exit edge. A high exit rate alone is not a failure signal (a healthy kernel like Sieve or NQueens exits on nearly every entry, through `loop-exit`); a high `trace-cut` rate specifically is, because the interpreter pays full bailout and re-entry cost for work the native code never finished.
+
+Each installed anchor gets a `watchdog`: two counters (entries, trace-cut exits) plus a `[]bool` precomputed at install time from the entry's exit descriptors, so the hot path never depends on the profiler being attached (unlike the Lifecycle Profiling counters above, which are no-ops when no profiler is set). `call`, `start`, and `loop` each count one entry per invocation and, on a fallback exit, one trace-cut exit when the resolved descriptor's reason is `prof.ExitTraceCut`. Every 1024 entries, if at least a quarter were trace-cut, the anchor retires: the shadowed threaded handler (saved at install time) replaces it in the local dispatch table, a function-entry anchor's `natives` call-fast-path slot is atomically cleared (a null slot already makes callers fall back at `CALL`), and the function is marked cold through the same `cool` a compile-side function that never installs anything uses, so it is neither re-instrumented nor recompiled. Otherwise the window resets and the entry keeps running.
+
+Retirement only ever mutates the local interpreter's dispatch table (`i.code`, `i.natives`, `i.cold`), never a pool's shared published module, so it is safe to run from inside the very wrapper closure it replaces. A later publish that lands on a cold function still resumes it (see Installation above).
 
 ## Tests
 

@@ -20,11 +20,12 @@ type module struct {
 }
 
 type native struct {
-	callable asm.Callable
-	kind     entryKind
-	frontend prof.Frontend
-	bytes    int
-	exits    []exitDescriptor
+	callable  asm.Callable
+	kind      entryKind
+	frontend  prof.Frontend
+	bytes     int
+	exits     []exitDescriptor
+	resumable []int
 }
 
 type exitDescriptor struct {
@@ -36,6 +37,24 @@ type counters struct {
 	entry  *prof.Counter
 	yields *prof.Counter
 	exits  []*prof.Counter
+}
+
+// watchdog counts native entries, trace-cut exits, and bridge cycles for one
+// installed anchor. Unlike counters, it is always live regardless of
+// i.profiler: a trace-cut exit is native code that knowingly stops
+// mid-function (see prof.ExitTraceCut) rather than completing its job or
+// leaving through a healthy loop-exit edge, so a high rate of it — not a high
+// exit rate alone — is the signal that the installed entry should be retired
+// (see Interpreter.retire). A bridge cycle (see Interpreter.bridge) is
+// productive work and must never count as a trace-cut, but an anchor that
+// spends most of its entries bridging pays the same deopt/re-enter cost as
+// one that trace-cuts, so it is tracked and retired the same way, just
+// through its own counter.
+type watchdog struct {
+	cut     []bool // exit descriptor ID -> reason == prof.ExitTraceCut
+	entries uint32
+	cuts    uint32
+	bridges uint32
 }
 
 type compileResult struct {
@@ -204,9 +223,10 @@ const (
 	journalGlobals        // &i.globals[0]; external entry in
 	journalBP             // current frame bp; external entry in
 	journalSP             // interpreter sp; external entry in/out
+	journalEntry          // bridge resume IP in; zero starts at the anchor
 	journalDepth          // trap-time frame records written; native read/write
 	journalCap            // frame budget capped by nativeFrameLimit; read-only
-	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
+	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield | trapBridge
 	journalNextIP         // resume/fallback IP out for the single-frame path
 	journalBudget         // back-edges remaining before the next safepoint; native read/write
 	journalActive         // active native call depth for frame-budget checks
@@ -232,6 +252,11 @@ const (
 	trapFallback
 	trapOverflow
 	trapYield
+	// trapBridge reports the IP of one opcode the backend cannot lower.
+	// journalNextIP carries that opcode's own IP; the Go wrapper runs its
+	// threaded closure exactly once and re-enters the same callable at the
+	// closure's new IP (see Interpreter.bridge and arm64Lowerer.dispatch).
+	trapBridge
 )
 
 // nativeFrameLimit caps generated call depth to the stack space reserved by
@@ -242,6 +267,15 @@ const nativeFrameLimit = 128
 // independent of tick so a hot loop amortizes the deopt/re-enter cost of a
 // yield over many iterations while still polling for cancellation and fuel.
 const loopBudget = 1 << 13
+
+// retireWindow is the number of native entries a watchdog observes before
+// judging whether an installed anchor is paying for itself (see watchdog).
+const retireWindow = 1024
+
+// retireCutThreshold is the minimum count of trace-cut exits (see
+// prof.ExitTraceCut) within one retireWindow that marks the anchor as a net
+// loss rather than a healthy kernel's normal loop-exit or guard traffic.
+const retireCutThreshold = retireWindow / 4
 
 func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 	kinds := fn.Slots()
@@ -273,10 +307,18 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	if !ok {
 		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
 	}
+	// Entry roots go to the static frontend first: it plans the whole function
+	// deterministically and covers opcodes no trace can record. Loop roots go
+	// to the trace frontend first, because a recorded loop specializes its
+	// body to the path actually taken - folded legs, a hoisted container - and
+	// the static loop plan is the fallback for a loop no trace could record.
 	frontends := [...]struct {
 		kind prof.Frontend
 		plan func(*compileInput) ([]plan, error)
 	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
+	if root.ip != 0 {
+		frontends[0], frontends[1] = frontends[1], frontends[0]
+	}
 	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
 	for _, frontend := range frontends {
 		plans, err := frontend.plan(input)
@@ -352,7 +394,13 @@ func (c *compiler) emit(input *compileInput, plan plan, mod *module, frontend pr
 		return prof.CompileReasonLoweringRejected, nil
 	}
 	exits := append([]exitDescriptor(nil), ctx.descriptors...)
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
+	var resumable []int
+	for _, block := range plan.blocks {
+		if block.bridge {
+			resumable = append(resumable, block.anchor.ip)
+		}
+	}
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits, resumable: resumable})
 }
 
 func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
@@ -417,6 +465,55 @@ func (m counters) yield() {
 	if m.yields != nil {
 		m.yields.Inc()
 	}
+}
+
+// enter counts one invocation of the installed native entry.
+// newWatchdog precomputes, for each of entry's exit descriptors, whether its
+// reason is prof.ExitTraceCut, so the watchdog's hot path only ever indexes a
+// []bool keyed by descriptor ID.
+func newWatchdog(entry native) *watchdog {
+	cut := make([]bool, len(entry.exits))
+	for id, exit := range entry.exits {
+		cut[id] = exit.reason == prof.ExitTraceCut
+	}
+	return &watchdog{cut: cut}
+}
+
+func (w *watchdog) enter() {
+	w.entries++
+}
+
+// exit counts one trace-cut fallback exit. encoded is i.journal[journalExitID]
+// exactly as counters.exit consumes it: the exit descriptor ID plus one, zero
+// meaning no descriptor.
+func (w *watchdog) exit(encoded uint64) {
+	if encoded == 0 {
+		return
+	}
+	id := int(encoded - 1)
+	if id >= 0 && id < len(w.cut) && w.cut[id] {
+		w.cuts++
+	}
+}
+
+// bridge counts one bridge cycle (see Interpreter.bridge). It is tracked
+// separately from exit so a bridge never counts toward the trace-cut rate.
+func (w *watchdog) bridge() {
+	w.bridges++
+}
+
+// failed reports whether this anchor lost the window it just completed: its
+// cut rate or bridge rate reached retireCutThreshold, so it should be retired
+// (see Interpreter.retire). A window shorter than retireWindow has decided
+// nothing yet; a completed one always resets every counter, so the next window
+// starts clean whichever way it went.
+func (w *watchdog) failed() bool {
+	if w.entries < retireWindow {
+		return false
+	}
+	bad := w.cuts >= retireCutThreshold || w.bridges >= retireCutThreshold
+	w.entries, w.cuts, w.bridges = 0, 0, 0
+	return bad
 }
 
 // push appends one operand to the symbolic stack.

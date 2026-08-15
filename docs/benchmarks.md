@@ -90,8 +90,8 @@ before making a performance claim.
 |  | Goja | 43.29 µs | 1,872 | 25 |
 |  | gpython | 35.62 µs | 5,704 | 30 |
 |  | Yaegi | 18.92 µs | 1,800 | 37 |
-| Native | minivm `default` | 1.64 µs | 1,048 | 2 |
-|  | minivm `jit` | 1.68 µs | 1,048 | 2 |
+| Native | minivm `default` | 1.27 µs | 1,048 | 2 |
+|  | minivm `jit` | 1.28 µs | 1,048 | 2 |
 |  | Wazero | **677.0 ns** | 8 | 1 |
 | Reference | Native Go | 268.6 ns | 0 | 0 |
 
@@ -313,8 +313,8 @@ before making a performance claim.
 | Interpreter | minivm `threaded` | **176.90 µs** | 6,216 | 6 |
 |  | CPython | 210.72 µs | 10 | 0 |
 |  | gpython | 701.09 µs | 90,712 | 9,350 |
-| Native | minivm `default` | **37.94 µs** | 6,216 | 6 |
-|  | minivm `jit` | 37.96 µs | 6,216 | 6 |
+| Native | minivm `default` | **16.01 µs** | 6,216 | 6 |
+|  | minivm `jit` | 15.98 µs | 6,216 | 6 |
 | Reference | Native Go | 2.66 µs | 6,144 | 3 |
 
 ## 4. Direct interpreter operations
@@ -387,7 +387,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 Within minivm, the strongest signal is the threaded-to-native gap on tight arithmetic:
 `IterativeFib` runs 510.6 ns threaded versus 40.5 ns under `default`, and `Sieve`
-11.40 µs versus 1.64 µs. That gap does not appear on call-heavy or allocation-heavy
+11.40 µs versus 1.27 µs. That gap does not appear on call-heavy or allocation-heavy
 kernels, where `threaded` is often the fastest minivm tier.
 
 In the interpreter tier the six losses cluster by shape. CPython leads `NQueens`,
@@ -401,6 +401,44 @@ native tier only lowers a subset of opcodes and falls back to threaded execution
 the rest, so kernels touching unlowered opcodes never stay native. `jit`'s eager
 policy also compiles paths that adaptive `default` correctly declines, which is why
 it loses badly on `RecursiveFib(20)`.
+
+The tables above predate the cooling and retirement rules (`docs/profile.md`,
+`docs/jit-internals.md`) and have not been re-measured as a full cross-runtime
+sweep since. Two measured effects those rules address, both reproducible with
+the commands in section 10:
+
+- A function that can never compile used to keep paying for the attempt. A CPU
+  profile of `PermutationFlips/default` attributed 11.9% to `Interpreter.backedge`
+  and 10.5% to `Interpreter.trace` with no native code ever installed;
+  `StringBuild` performed about 1,020 rejected trace captures per run.
+- A capture taken at an unlucky moment could install an entry that exits
+  `trace-cut` on half its invocations and never be replaced. `RecursiveFib(35)`
+  recorded 29.9M native entries against 14.9M trace-cut exits and ran 2.64x
+  slower under `default` than under `threaded`; interleaved `-benchtime=1x
+  -count=3` after retirement gives 760 ms versus 676 ms, a 1.13x residual.
+
+The `Sieve` and `MatMul` native rows above were re-measured with this section's
+own `-benchtime=300ms -count=3` after loop-header plans stopped carrying blocks
+their own root cannot reach (`prune`, see `docs/jit-internals.md`). Every other
+row, minivm and cross-runtime alike, is from the earlier sweep.
+
+The before/after evidence for that change is a separate A/B measurement and is
+quoted here at its own settings, not the table's: two full 19-kernel sweeps at
+`-benchtime=200ms -count=3`, run back to back on one machine so both halves see
+the same thermal state, compared with `benchstat`. It puts `Sieve` at 2.04 µs to
+1.29 µs and `MatMul` at 22.10 µs to 16.08 µs, every other kernel inside
+run-to-run noise, -2.6% geomean. Those figures differ slightly from the table
+rows above (1.27 µs and 16.01 µs) because they come from that separate sweep at
+a shorter `benchtime`; the table rows are the canonical ones. Only two kernels
+move, and both are the ones whose hot function holds more than one loop header.
+Reproduce the A/B with:
+
+```bash
+cd benchmarks
+go test -run='^$' -bench='.' -benchtime=200ms -count=3 . > new.txt
+git stash push && go test -run='^$' -bench='.' -benchtime=200ms -count=3 . > base.txt; git stash pop
+benchstat base.txt new.txt
+```
 
 Allocation results are bounded: object-heavy kernels such as `StructTreeWalk` and
 `BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` holds 85,408 B/op, and
@@ -438,6 +476,7 @@ from joining.
 - Inputs are deterministic.
 - Canonical comparison tables use `-benchtime=300ms -count=3` and report the median of three sequential samples.
 - Direct interpreter/API tables use a `100ms × 3` protocol.
+- An *interleaved* A/B measurement runs the two variants back to back on one machine, whole sweep against whole sweep, and compares them with `benchstat`. This machine swings by several percent across minutes, so a before/after claim taken from two runs separated in time is not evidence. Interleaved A/B figures are quoted at their own `benchtime` and are never mixed into the canonical tables.
 - Every runtime in a comparison table ran the same fixture in the same command and passed the same correctness check.
 - `make benchmark-core` remains the repository-wide smoke command, but the full command includes many non-runtime benchmarks and can exceed interactive command limits.
 - `RecursiveFib(35)` is excluded from the comparison tables: at roughly 1.2 s per operation the slower external runtimes make a `count=3` sweep impractical.

@@ -94,8 +94,11 @@ func newCompiler() (*compiler, error) {
 }
 
 // enter opens the framed callable: the entry at offset zero mirrors the
-// journal header into the pinned scratch registers, then the internal head —
-// the BL target for recursive trace calls — saves the link register.
+// journal header into the pinned scratch registers, dispatches an external
+// bridge re-entry to its resume block (see dispatch), then the internal head —
+// the BL target for recursive trace calls — saves the link register. A
+// recursive self-call branches straight to head and never runs the dispatch,
+// because it always starts its callee at IP zero.
 func (l arm64Lowerer) enter(ctx *lowering) {
 	a := ctx.assembler
 	a.Emit(
@@ -106,7 +109,38 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	vCtrl := ctx.pin(scratchCtrl)
 	active := ctx.pinTo(arm64.X15)
 	a.Emit(arm64.LDR(active, vCtrl, int16(journalActive*8)))
+	l.dispatch(ctx, vCtrl)
 	a.Bind(ctx.head)
+}
+
+// dispatch reads the journal's entry-IP cell and, when the Go wrapper set it
+// to resume a bridge (see Interpreter.bridge), branches directly to that
+// block's label instead of falling into the normal anchor start. Zero — the
+// value every ordinary Call leaves it at — falls through to the anchor
+// unchanged. Only blocks marked bridge (the resume point after a
+// terminateBridge step) participate; ordinary state-backed blocks stay
+// reachable only through internal branches.
+func (l arm64Lowerer) dispatch(ctx *lowering, vCtrl asm.VReg) {
+	var resumable []int
+	for id, block := range ctx.blocks {
+		if block.bridge {
+			resumable = append(resumable, id)
+		}
+	}
+	if len(resumable) == 0 {
+		return
+	}
+	a := ctx.assembler
+	entry := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(entry, vCtrl, int16(journalEntry*8)))
+	done := a.Label()
+	a.Emit(arm64.CMPI(entry, 0), arm64.BCondLabel(arm64.OpBEQ, done))
+	for _, id := range resumable {
+		want := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDI(want, uint64(ctx.blocks[id].anchor.ip))...)
+		a.Emit(arm64.CMP(entry, want), arm64.BCondLabel(arm64.OpBEQ, ctx.labels[id]))
+	}
+	a.Bind(done)
 }
 
 // emitExits emits every queued cold stub. A deferred ref in the exit
@@ -244,6 +278,8 @@ func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
 		return l.complete(ctx)
 	case terminateFallback:
 		return l.exit(ctx, block.term.ip, prof.ExitTraceCut, prof.OpcodeNone)
+	case terminateBridge:
+		return l.bridge(ctx, block.term.ip)
 	default:
 		return false
 	}
@@ -692,31 +728,41 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 		// shared static boxes. REF_TEST/REF_CAST stay threaded because they
 		// need structural type equality that an itab guard cannot express.
 		// MAP_* stay threaded because they reach into Go map internals the
-		// lowerer has no native access to.
+		// lowerer has no native access to. All of these are bridgeable (see
+		// bridgeable in interp/jit_plan.go): the static planner ends its
+		// block on the opcode instead of including it here, so this case is
+		// reached only when a trace records one as an ordinary mid-block
+		// step (see docs/jit-internals.md, Trace Recording) rather than a
+		// block terminator; the unconditional exit below still deopts
+		// cleanly for that shape.
 		case instr.STRING_ENCODE_UTF32,
 			instr.STRING_ITER,
 			instr.MAP_LEN,
 			instr.MAP_GET,
 			instr.MAP_LOOKUP,
 			instr.MAP_KEYS,
-			instr.MAP_ITER:
+			instr.MAP_ITER,
+			instr.REF_TEST,
+			instr.REF_CAST:
 			if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
 		case instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET:
 			// Bulk mutations stay interpreter-owned: the trace records them as
-			// terminal boundaries, so the compiled prefix runs native and this
-			// unconditional deopt hands the op to the threaded handler, which
-			// performs its own IP advance.
+			// terminal boundaries (also bridgeable for the static planner;
+			// see the comment above), so the compiled prefix runs native and
+			// this unconditional deopt hands the op to the threaded handler,
+			// which performs its own IP advance.
 			if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
 		case instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW:
-			// Allocation and handler landing stay interpreter-owned. Resume at
-			// op.ip because each threaded handler performs its own IP update or
-			// handler transfer.
+			// Allocation and handler landing stay interpreter-owned (also
+			// bridgeable for the static planner; see the comment above).
+			// Resume at op.ip because each threaded handler performs its own
+			// IP update or handler transfer.
 			if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
 				return false, false
 			}
@@ -1467,10 +1513,19 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.ADDI(nextSP, vBP, uint16(ctx.sp())))
 	oldBP := ctx.scratch[scratchBP]
 	oldSP := ctx.scratch[scratchSP]
+	// X26 is this activation's spill base. The callee is entered at its own
+	// offset zero, so it runs the frame prologue and repoints X26 at its own
+	// frame; on return that frame is dead. Save and restore X26 around the
+	// call - the 32-byte save area already has the room - or every spill
+	// reload after the call would address a dead frame. A self-call (BL to
+	// ctx.head) needs no such save: it shares this activation's frame, and
+	// that stream cannot spill at all, because its backward branch to head
+	// disables the spill frame (see asm/rewriter.go backEdge).
 	a.Emit(
 		arm64.SUBI(arm64.SP, arm64.SP, 32),
 		arm64.STP(oldBP, oldSP, arm64.SP, 0),
 		arm64.STR(arm64.LR, arm64.SP, 16),
+		arm64.STR(arm64.X26, arm64.SP, 24),
 	)
 	calleeBP := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
@@ -1495,6 +1550,9 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
 	a.Emit(arm64.MOV(arm64.X0, vCtrl))
 	a.Emit(arm64.BLR(callee))
+	// Restore the spill base before anything else: both the normal path and
+	// the trap path below may reload a spilled value.
+	a.Emit(arm64.LDR(arm64.X26, arm64.SP, 24))
 
 	vCtrl = ctx.pin(scratchCtrl)
 	trap := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -3874,7 +3932,9 @@ func (l arm64Lowerer) exit(ctx *lowering, resume int, reason prof.ExitReason, op
 // trap unwinds the inlined native state into the journal and returns to the Go
 // wrapper: every live value is flushed boxed, sp is published, the frame chain
 // is recorded resuming at resume, and the trap kind is reported. trapFallback
-// resumes threaded dispatch; trapYield re-enters native after a safepoint.
+// resumes threaded dispatch; trapYield re-enters native after a safepoint;
+// trapBridge hands exactly one opcode to the threaded interpreter and resumes
+// native afterward (see Interpreter.bridge).
 func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReason, opcode int) bool {
 	if !l.flush(ctx, flushSnapshot) {
 		return false
@@ -3883,18 +3943,31 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReas
 		return false
 	}
 	id := -1
-	if kind == trapFallback {
-		// trapFallback hands the flushed operand stack to the threaded
-		// interpreter, which releases each stack ref it pops. Re-take every
-		// deferred ref's retain from its backing slot first. trapYield never reaches
-		// here with a deferred live: its only caller commits first, and a
-		// committing flush rejects deferred refs (see flush).
+	if kind == trapFallback || kind == trapBridge {
+		// Both hand the flushed operand stack to code that adopts it as owned —
+		// the threaded interpreter on trapFallback, the one bridged closure on
+		// trapBridge — which releases each stack ref it pops. Re-take every
+		// deferred ref's retain from its backing slot first. trapYield never
+		// reaches here with a deferred live: its only caller commits first, and
+		// a committing flush rejects deferred refs (see flush).
 		l.retainDeferred(ctx)
+	}
+	if kind == trapFallback {
 		id = len(ctx.descriptors)
 		ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
 	}
 	l.trapFlushed(ctx, kind, resume, id)
 	return true
+}
+
+// bridge deopts one opcode the backend cannot lower: the Go wrapper runs that
+// opcode's own threaded closure once and re-enters this callable at the
+// closure's new IP (see Interpreter.bridge, dispatch). Unlike exit, it
+// carries no exit descriptor — a bridge is productive continuation, not a
+// trace-cut (see watchdog) — and the block that follows it in the plan needs
+// no branch here: it is reached only through a fresh external entry.
+func (l arm64Lowerer) bridge(ctx *lowering, ip int) bool {
+	return l.trap(ctx, trapBridge, ip, prof.ExitNone, prof.OpcodeNone)
 }
 
 func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
@@ -4440,7 +4513,9 @@ func lower(ctx *lowering, plan plan) bool {
 			}
 		}
 	}
-	l.enter(ctx)
+	// blocks, kind, and labels must exist before enter, because enter's entry
+	// dispatch (see arm64Lowerer.dispatch) branches to a bridge block's label
+	// on external re-entry.
 	ctx.blocks = plan.blocks
 	ctx.kind = plan.kind
 	for id, block := range ctx.blocks {
@@ -4448,6 +4523,7 @@ func lower(ctx *lowering, plan plan) bool {
 			ctx.labels[id] = ctx.assembler.Label()
 		}
 	}
+	l.enter(ctx)
 	root := plan.root
 	ctx.loopRoot = root
 	if _, ok := ctx.labels[root]; !ok {

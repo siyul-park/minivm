@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/siyul-park/minivm/asm"
@@ -551,7 +552,12 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
 
-			compiled := compiler.Compile(i, anchor{})
+			// Module code owning a loop compiles at the loop root, not at its
+			// entry: the entry runs once per execution while the loop carries
+			// the work, so the planner leaves that anchor to the loop.
+			headers := i.tracer.headers(i, 0)
+			require.NotEmpty(t, headers)
+			compiled := compiler.Compile(i, anchor{ip: headers[0]})
 			require.NoError(t, compiled.err)
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			i.install(compiled.module, false)
@@ -872,7 +878,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
 			i.fr.ip = header
-			i.loop(root, entry.callable, metrics)(i)
+			i.loop(root, entry, metrics, newWatchdog(entry))(i)
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
@@ -917,7 +923,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, entryFunction, entry.kind)
 
-			i.call(root, entry.callable, i.counters(root, entry))(i)
+			i.call(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
 			require.Equal(t, uint64(trapYield), i.journal[journalTrap])
 			require.Zero(t, i.journal[journalExitID])
 			yields, ok := local.Metric("vm_jit_native_yields_total",
@@ -1777,6 +1783,93 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 // container local derives the heap cell, shape guard, and slice header once
 // per native entry, so accesses keep only the bounds check and element op.
 // Every sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_StaticLoopEntry(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	// A loop header compiled by the static frontend must emit only the blocks
+	// its own root reaches, not every block of the function it belongs to (see
+	// prune). Two loop headers share one whole-function block list, so an
+	// unpruned header emits the whole function again and its entry ends up at
+	// least as large as the whole-function entry.
+	const size = int32(4096)
+	b := program.NewBuilder()
+	arrayTyp := b.Type(types.TypeI32Array)
+	b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+	fill := b.Label()
+	scan := b.Label()
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(fill)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(fill)
+	b.Bind(scan)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	require.NoError(t, err)
+
+	profile := prof.New()
+	jit := New(prog, WithProfiler(profile))
+	threaded := New(prog, WithThreshold(-1))
+	for n := 0; n < 16; n++ {
+		require.NoError(t, jit.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+		require.Equal(t, types.BoxI32(size), got)
+		require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+		jit.Reset()
+		threaded.Reset()
+	}
+	require.NoError(t, jit.Close())
+	require.NoError(t, threaded.Close())
+
+	var entry, header float64
+	var entered bool
+	for _, metric := range profile.Metrics() {
+		kind, frontend := "", ""
+		for _, label := range metric.Labels {
+			switch label.Key {
+			case "kind":
+				kind = label.Value
+			case "frontend":
+				frontend = label.Value
+			}
+		}
+		if frontend != "static" {
+			continue
+		}
+		switch {
+		case metric.Name == "vm_jit_entry_bytes_total" && kind == "start":
+			entry = metric.Value
+		case metric.Name == "vm_jit_entry_bytes_total" && kind == "loop":
+			header = metric.Value
+		case metric.Name == "vm_jit_native_entries_total" && kind == "loop":
+			entered = metric.Value > 0
+		}
+	}
+	require.NotZero(t, entry, "expected a whole-module static entry")
+	require.NotZero(t, header, "expected a static loop-header entry")
+	require.True(t, entered, "the static loop entry was never invoked")
+	require.Less(t, header, entry, "the loop header emitted blocks its own root cannot reach")
+}
+
 func TestARM64_HoistedContainerLoop(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
@@ -1831,20 +1924,22 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		// Hoisted loops must not pay per-access deopts: the only native exits
-		// are the loops' own cold branches.
+		// are the loops' own cold branches. ARRAY_NEW_DEFAULT's bridge (see
+		// bridgeable in interp/jit_plan.go) combined with ARRAY_GET's
+		// declared-array-type resolution (see arrayKind) now let the static
+		// planner cover this whole module - fill loop, scan loop, and all -
+		// as one flat entry with no exits at all, which the compiler tries
+		// before the trace frontend's loop-anchored hoist path; either
+		// frontend winning satisfies "no per-access exits".
 		var entries float64
-		var loopBytes bool
+		var sawBytes bool
 		for _, metric := range profile.Metrics() {
 			switch metric.Name {
 			case "vm_jit_native_entries_total":
 				entries += metric.Value
 			case "vm_jit_entry_bytes_total":
-				for _, label := range metric.Labels {
-					if label.Key == "kind" && label.Value == "loop" {
-						loopBytes = true
-						require.Less(t, metric.Value, float64(16<<10), "loop body was duplicated instead of using a back-edge")
-					}
-				}
+				sawBytes = true
+				require.Less(t, metric.Value, float64(16<<10), "loop body was duplicated instead of using a back-edge")
 			case "vm_jit_native_exits_total":
 				for _, label := range metric.Labels {
 					if label.Key == "reason" {
@@ -1854,7 +1949,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			}
 		}
 		require.Greater(t, entries, float64(0))
-		require.True(t, loopBytes, "expected a loop entry byte metric")
+		require.True(t, sawBytes, "expected a native entry byte metric")
 	})
 
 	t.Run("the prologue shape guard deopts to the header", func(t *testing.T) {
@@ -1914,18 +2009,25 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
 
-		var shapes float64
+		// The null-container iterations must leave native execution through a
+		// guard rather than running the access. Which guard owns that exit
+		// depends on the frontend that compiled the entry: the trace loop
+		// plan's hoist prologue guards the container shape once per entry,
+		// while a static whole-function plan guards the value where it is
+		// used. Both are correct; the contract asserted here is that a null
+		// container always deopts, never executes natively.
+		var guards float64
 		for _, metric := range profile.Metrics() {
 			if metric.Name != "vm_jit_native_exits_total" {
 				continue
 			}
 			for _, label := range metric.Labels {
-				if label.Key == "reason" && label.Value == "guard-shape" {
-					shapes += metric.Value
+				if label.Key == "reason" && strings.HasPrefix(label.Value, "guard-") {
+					guards += metric.Value
 				}
 			}
 		}
-		require.Greater(t, shapes, float64(0), "null entries must deopt through the prologue shape guard")
+		require.Greater(t, guards, float64(0), "null entries must deopt through a guard")
 	})
 
 	t.Run("a bounds deopt inside the loop matches threaded", func(t *testing.T) {
@@ -2107,18 +2209,17 @@ func TestARM64_StructSetLoop(t *testing.T) {
 	}
 
 	storeTests := []struct {
-		name       string
-		typ        *types.StructType
-		field      uint64
-		steps      []instr.Instruction
-		want       types.Boxed
-		checkExits bool
+		name  string
+		typ   *types.StructType
+		field uint64
+		steps []instr.Instruction
+		want  types.Boxed
 	}{
 		{
 			name:  "i32 field store loop stays native",
 			typ:   types.NewStructType(types.NewStructField(types.TypeI32)),
 			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)},
-			want:  types.BoxI32(24), checkExits: true,
+			want:  types.BoxI32(24),
 		},
 		{
 			name:  "i64 field store loop",
@@ -2178,21 +2279,13 @@ func TestARM64_StructSetLoop(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, tt.field).Emit(instr.STRUCT_GET)
 			prog, err := b.Build()
 			require.NoError(t, err)
-			profile := runParity(t, prog, tt.want)
-			if tt.checkExits {
-				found := false
-				for _, metric := range profile.Metrics() {
-					if metric.Name != "vm_jit_native_exits_total" {
-						continue
-					}
-					for _, label := range metric.Labels {
-						if label.Key == "reason" && label.Value == "loop-exit" {
-							found = true
-						}
-					}
-				}
-				require.True(t, found, "missing native loop-exit metric")
-			}
+			// STRUCT_NEW_DEFAULT now bridges (see bridgeable in
+			// interp/jit_plan.go), so the static planner covers this whole
+			// module - loop included - as one flat native entry instead of
+			// falling back to a trace-compiled loop anchor with its own
+			// cold loop-exit branch; runParity already asserts native
+			// entries were emitted.
+			runParity(t, prog, tt.want)
 		})
 	}
 
@@ -2650,5 +2743,401 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 		runStatic(t, prog, types.BoxI32(6))
+	})
+}
+
+// TestARM64_BridgedOpcodes protects the generalized bridge mechanism
+// (bridgeable in interp/jit_plan.go): every opcode the ARM64 backend cannot
+// lower now ends its block as a bridge instead of rejecting the whole
+// function, so the static planner can compile object-shaped code that used
+// to stay fully threaded. Each subtest exercises one bridgeable opcode
+// family inside a hot loop and diffs the JIT run against a threaded twin
+// across repeated Run+Reset cycles, on both result and exact refcount.
+func TestARM64_BridgedOpcodes(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runParity := func(t *testing.T, prog *program.Program) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, gotErr := jit.PopBoxed()
+			want, wantErr := threaded.PopBoxed()
+			require.NoError(t, gotErr)
+			require.NoError(t, wantErr)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		// Close flushes each interpreter's private sample collector into the
+		// shared profiler (see Interpreter.Close), so entries must be read
+		// only after both are closed.
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0), "expected native code to be installed")
+	}
+
+	runParityErr := func(t *testing.T, prog *program.Program) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 32; n++ {
+			gotErr := jit.Run(context.Background())
+			wantErr := threaded.Run(context.Background())
+			require.Error(t, wantErr)
+			require.Error(t, gotErr)
+			require.Equal(t, wantErr.Error(), gotErr.Error(), "error diverged from threaded on iteration %d", n)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0), "expected native code to be installed")
+	}
+
+	t.Run("allocation family: struct.new, array.new, closure.new, and ref.new", func(t *testing.T) {
+		const size = int32(16)
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32))
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32).
+			Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		structIdx := b.Type(structTyp)
+		fnIdx := b.Const(fn)
+		b.Locals(types.TypeI32Array, structTyp, types.TypeRef, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// arr = array.new([i, i+1], count=2)
+		b.Emit(instr.LOCAL_GET, 3)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.I32_CONST, 2)
+		b.Emit(instr.ARRAY_NEW, uint64(arrTyp))
+		b.Emit(instr.LOCAL_SET, 0)
+		// s = struct.new(field0=i, field1=i+1)
+		b.Emit(instr.LOCAL_GET, 3)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.STRUCT_NEW, uint64(structIdx))
+		b.Emit(instr.LOCAL_SET, 1)
+		// c = closure.new(capture=i, fn) - created and released every iteration
+		b.Emit(instr.LOCAL_GET, 3)
+		b.Emit(instr.CONST_GET, uint64(fnIdx))
+		b.Emit(instr.CLOSURE_NEW)
+		b.Emit(instr.LOCAL_SET, 2)
+		// ref.new(i), then drop it - exercises create-then-release
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.REF_NEW).Emit(instr.DROP)
+		// sum += struct.get(s, 0). arr is deliberately left unread: both
+		// ARRAY_GET and ARRAY_LEN only lower natively for a known constant
+		// container (see arrayKind in interp/jit_plan.go and arrayLen in
+		// interp/jit_arm64.go, which reads the trace-only op.shape a static
+		// plan never populates), so arr's local-backed value is exercised
+		// only through create-and-release across LOCAL_SET each iteration.
+		b.Emit(instr.LOCAL_GET, 4)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 4)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("allocation family: ref.test and ref.cast against a declared struct type", func(t *testing.T) {
+		const size = int32(16)
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32))
+
+		b := program.NewBuilder()
+		typIdx := b.Type(structTyp)
+		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typIdx)).Emit(instr.LOCAL_SET, 0)
+		// ref.test[structTyp](s) is always true here; drop it, only the bridge
+		// and its release matter.
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_TEST, uint64(typIdx)).Emit(instr.DROP)
+		// ref.cast[structTyp](s) always succeeds against its own declared
+		// type; the field-0 read afterward proves the cast value is intact.
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, uint64(typIdx))
+		b.Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("map family: map.new, map.set, map.len, map.delete, and map.clear", func(t *testing.T) {
+		const size = int32(16)
+		mapTyp := types.NewMapType(types.TypeI32, types.TypeI32)
+
+		b := program.NewBuilder()
+		typIdx := b.Type(mapTyp)
+		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// m = map.new({i: i*2}, count=1)
+		b.Emit(instr.LOCAL_GET, 1)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_MUL)
+		b.Emit(instr.I32_CONST, 1)
+		b.Emit(instr.MAP_NEW, uint64(typIdx))
+		b.Emit(instr.LOCAL_SET, 0)
+		// map.set(m, key=i+100, value=i+1)
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 100).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.MAP_SET)
+		// sum += map.len(m)
+		b.Emit(instr.LOCAL_GET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN)
+		b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		// map.delete(m, key=i+100)
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 100).Emit(instr.I32_ADD)
+		b.Emit(instr.MAP_DELETE)
+		// map.clear(m)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_CLEAR)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("string family: string.new_utf32, string.encode_utf32, and string.iter", func(t *testing.T) {
+		const size = int32(16)
+		b := program.NewBuilder()
+		charTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeRef, types.TypeI32Array, types.TypeRef, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 5)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// arr = new i32[1]; arr[0] = 65+i
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(charTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 65).Emit(instr.I32_ADD)
+		b.Emit(instr.ARRAY_SET)
+		// str = string.new_utf32(arr)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_NEW_UTF32).Emit(instr.LOCAL_SET, 1)
+		// codepoints = string.encode_utf32(str)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_ENCODE_UTF32).Emit(instr.LOCAL_SET, 2)
+		// iter = string.iter(str) - created and released every iteration
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_ITER).Emit(instr.LOCAL_SET, 3)
+		// sum += string.len(str). codepoints is deliberately left unread:
+		// ARRAY_LEN and ARRAY_GET only lower natively for a known constant
+		// container (see arrayKind in interp/jit_plan.go and arrayLen in
+		// interp/jit_arm64.go), so its local-backed value is exercised only
+		// through create-and-release across LOCAL_SET each iteration.
+		// string.len needs no such container-shape hint: it guards against
+		// the fixed string itab directly (see stringLen in
+		// interp/jit_arm64.go).
+		b.Emit(instr.LOCAL_GET, 5)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_LEN)
+		b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 5)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 5)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("bulk array family: array.fill, array.append, array.copy, and array.slice", func(t *testing.T) {
+		const size = int32(16)
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32Array, types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// arr = new i32[4]; arr.fill(offset=0, value=i, count=4)
+		b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 4)
+		b.Emit(instr.ARRAY_FILL)
+		// arr.append([i+1], count=1); ARRAY_APPEND leaves the array ref on the
+		// stack for chaining (see arrayAppend in
+		// internal/cmd/geninterp/lower.go), so drop it here since arr is
+		// already reachable through local 0.
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.I32_CONST, 1)
+		b.Emit(instr.ARRAY_APPEND)
+		b.Emit(instr.DROP)
+		// dst = new i32[5]; array.copy(dst, 0, arr, 0, 4)
+		b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0)
+		b.Emit(instr.I32_CONST, 4)
+		b.Emit(instr.ARRAY_COPY)
+		// slice = arr[0:2]
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_SLICE).Emit(instr.LOCAL_SET, 2)
+		// sum += i. dst and slice are deliberately left unread: ARRAY_GET
+		// and ARRAY_LEN only lower natively for a known constant container
+		// (see arrayKind in interp/jit_plan.go and arrayLen in
+		// interp/jit_arm64.go), so their local-backed values are exercised
+		// only through create-and-release across LOCAL_SET each iteration.
+		b.Emit(instr.LOCAL_GET, 4)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 4)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("bulk array family: array.delete on a known constant container", func(t *testing.T) {
+		// array.delete only resolves its removed-element kind statically for
+		// a known constant container (see arrayKind in
+		// interp/jit_plan.go), the same restriction ARRAY_GET has always
+		// had; this exercises the bridge with that supported shape.
+		//
+		// array.delete shrinks and shifts its container in place, and the
+		// jit and threaded interpreters below are both built from the same
+		// prog, whose constant array a fresh *Interpreter does not deep-copy
+		// per instance: every element is the same value so the result stays
+		// independent of which interpreter's prior runs already shifted the
+		// shared backing array, and the array is sized well beyond every
+		// run's total deletions so it never underflows across Reset cycles.
+		const size = int32(8)
+		values := make(types.TypedArray[int32], size*256)
+		for i := range values {
+			values[i] = 7
+		}
+		b := program.NewBuilder()
+		arr := b.Const(values)
+		b.Locals(types.TypeI32, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, uint64(arr)).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_DELETE).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("error family: error.new and error.code", func(t *testing.T) {
+		const size = int32(16)
+		b := program.NewBuilder()
+		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// err = error.new(code=42, payload=i)
+		b.Emit(instr.LOCAL_GET, 1)
+		b.Emit(instr.I32_CONST, 42)
+		b.Emit(instr.ERROR_NEW)
+		b.Emit(instr.LOCAL_SET, 0)
+		// sum += error.code(err)
+		b.Emit(instr.LOCAL_GET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.ERROR_CODE)
+		b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog)
+	})
+
+	t.Run("error family: throw after a bridged allocation stays uncaught", func(t *testing.T) {
+		const size = int32(8)
+		b := program.NewBuilder()
+		b.Locals(types.TypeI32)
+		loop := b.Label()
+		throwPoint := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(throwPoint)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(throwPoint)
+		// error.new(code=99, payload=count); throw - two adjacent bridgeable
+		// opcodes in a row exercise the bridge-of-a-bridge resume path.
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.I32_CONST, 99)
+		b.Emit(instr.ERROR_NEW)
+		b.Emit(instr.THROW)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParityErr(t, prog)
 	})
 }

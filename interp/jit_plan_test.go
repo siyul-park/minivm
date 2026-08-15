@@ -166,6 +166,66 @@ func TestNoSpill(t *testing.T) {
 	}}}))
 }
 
+func TestPlan_Prune(t *testing.T) {
+	t.Run("keeps only what the root reaches", func(t *testing.T) {
+		source := plan{
+			anchor: anchor{addr: 1},
+			kind:   entryFunction,
+			blocks: []block{
+				{anchor: anchor{addr: 1}, term: terminator{kind: terminateBranch, edges: []edge{{anchor: anchor{addr: 1, ip: 4}, block: 1}}}},
+				{anchor: anchor{addr: 1, ip: 4}, term: terminator{kind: terminateBranchIf, edges: []edge{
+					{anchor: anchor{addr: 1, ip: 4}, block: 1},
+					{anchor: anchor{addr: 1, ip: 8}, block: 2},
+				}}},
+				{anchor: anchor{addr: 1, ip: 8}, term: terminator{kind: terminateReturn}},
+			},
+		}
+
+		got, ok := source.prune(1)
+		require.True(t, ok)
+		require.Equal(t, anchor{addr: 1, ip: 4}, got.anchor)
+		require.Len(t, got.blocks, 2)
+		require.Equal(t, 0, got.root)
+		require.Equal(t, []edge{
+			{anchor: anchor{addr: 1, ip: 4}, block: 0},
+			{anchor: anchor{addr: 1, ip: 8}, block: 1},
+		}, got.blocks[0].term.edges)
+		require.Equal(t, 1, source.blocks[1].term.edges[0].block, "source edges stay renumbered for their own root")
+	})
+
+	t.Run("keeps the block a bridge resumes at", func(t *testing.T) {
+		source := plan{
+			anchor: anchor{addr: 1},
+			kind:   entryFunction,
+			blocks: []block{
+				{anchor: anchor{addr: 1}, term: terminator{kind: terminateBridge, ip: 0}},
+				{anchor: anchor{addr: 1, ip: 4}, bridge: true, term: terminator{kind: terminateReturn}},
+			},
+		}
+
+		got, ok := source.prune(0)
+		require.True(t, ok)
+		require.Len(t, got.blocks, 2)
+		require.True(t, got.blocks[1].bridge)
+	})
+
+	t.Run("rejects a bridge with no resume block", func(t *testing.T) {
+		source := plan{
+			anchor: anchor{addr: 1},
+			kind:   entryFunction,
+			blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateBridge, ip: 0}}},
+		}
+
+		_, ok := source.prune(0)
+		require.False(t, ok)
+	})
+
+	t.Run("rejects a root outside the block list", func(t *testing.T) {
+		_, ok := plan{}.prune(0)
+		require.False(t, ok)
+	})
+}
+
 func TestStaticPlan(t *testing.T) {
 	builder := instr.NewBuilder()
 	other := builder.Label()
@@ -485,7 +545,7 @@ func TestTracePlan(t *testing.T) {
 	})
 }
 
-func TestLoopCarried(t *testing.T) {
+func TestCarried(t *testing.T) {
 	loop := func(steps []step) []block {
 		return []block{{
 			steps: steps,
@@ -509,7 +569,7 @@ func TestLoopCarried(t *testing.T) {
 			{op: instr.LOCAL_SET, args: [2]uint64{4}},
 		})
 
-		require.Equal(t, []int{0, 1}, loopCarried(fn, blocks))
+		require.Equal(t, []int{0, 1}, carried(fn, blocks))
 	})
 
 	t.Run("requires a root backedge", func(t *testing.T) {
@@ -520,7 +580,7 @@ func TestLoopCarried(t *testing.T) {
 		})
 		blocks[0].term.edges[0].block = noBlock
 
-		require.Nil(t, loopCarried(fn, blocks))
+		require.Nil(t, carried(fn, blocks))
 	})
 
 	t.Run("ignores initialization before the loop", func(t *testing.T) {
@@ -538,7 +598,7 @@ func TestLoopCarried(t *testing.T) {
 			},
 		}
 
-		require.Nil(t, loopCarried(fn, blocks))
+		require.Nil(t, carried(fn, blocks))
 	})
 
 	t.Run("rejects calls", func(t *testing.T) {
@@ -549,7 +609,7 @@ func TestLoopCarried(t *testing.T) {
 			{op: instr.CALL},
 		})
 
-		require.Nil(t, loopCarried(fn, blocks))
+		require.Nil(t, carried(fn, blocks))
 	})
 
 	t.Run("rejects register overflow", func(t *testing.T) {
@@ -563,7 +623,7 @@ func TestLoopCarried(t *testing.T) {
 			)
 		}
 
-		require.Nil(t, loopCarried(fn, loop(steps)))
+		require.Nil(t, carried(fn, loop(steps)))
 	})
 }
 

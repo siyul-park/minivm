@@ -342,6 +342,80 @@ func TestAssembler_Build(t *testing.T) {
 			require.Equal(t, want, values[0])
 		}
 	})
+
+	t.Run("self-recursive call clobbers the caller's spill slots", func(t *testing.T) {
+		// A BL to a label bound in this same build runs the shared epilogue
+		// on return (Resume), but Frame() only reserves the spill area
+		// again — it never gives the callee a fresh base the way the true
+		// entry prologue (Enter) does. A recursive activation therefore
+		// spills into the exact physical addresses its caller is still
+		// using.
+		//
+		// head is bound before any spilling code, so it stands in for
+		// ctx.head in interp/jit_arm64.go: both the initial external entry
+		// and every recursive BL fall through to the same point. Recursing
+		// twice (depth 2) is required to observe corruption: the innermost
+		// activation (depth 0) is a trivial base case that touches no
+		// spill slot, so it cannot clobber anything. The middle activation
+		// (depth 1) runs the same register-heavy body as the outer one,
+		// spilling into the same slots the outer activation is still
+		// holding live across its own call — that overwrite is what a fix
+		// must prevent.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+		result := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(result, arm64.X1))
+
+		head := assembler.Label()
+		base := assembler.Label()
+		assembler.Bind(head)
+
+		depth := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDR(depth, ctx, 0))
+		assembler.Emit(arm64.CBZLabel(depth, base))
+
+		// Hold far more values live across the recursive call than the
+		// integer bank has allocatable registers: every value's only other
+		// use is in the fold loop after the BL, so several must be spilled
+		// before the call and reloaded after it.
+		const wide = 40
+		values := make([]asm.VReg, wide)
+		for i := range values {
+			values[i] = assembler.Reg(asm.RegTypeInt, asm.Width64)
+			assembler.Emit(arm64.LDI(values[i], uint64(i*7+11))...)
+		}
+
+		next := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.SUBI(next, depth, 1))
+		assembler.Emit(arm64.STR(next, ctx, 0))
+		assembler.Emit(arm64.BLLabel(head))
+
+		sum := result
+		for _, v := range values {
+			folded := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			assembler.Emit(arm64.ADD(folded, sum, v))
+			sum = folded
+		}
+		assembler.Emit(arm64.MOV(result, sum))
+		assembler.Emit(arm64.RET())
+
+		assembler.Bind(base)
+		assembler.Emit(arm64.LDI(result, 1)...)
+		assembler.Emit(arm64.RET())
+
+		// The build must refuse rather than emit that overwrite. A BL to a
+		// label bound earlier in the stream is a backward branch, so the
+		// same rule that keeps a loop from spilling (see backEdge) also
+		// keeps a self-recursive build from spilling: with the frame
+		// unavailable, exhausting the register bank rejects the build
+		// instead of silently sharing one spill area between activations.
+		// interp/jit.go's publish turns this into "keep threaded dispatch".
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable,
+			"a self-recursive build must reject rather than share one spill area between activations")
+	})
 }
 
 // emitWideSum loads n distinct values, keeps every one live, and folds them
