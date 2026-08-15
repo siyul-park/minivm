@@ -2231,6 +2231,12 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 			}()
 
+			// ARRAY_GET's declared/const-array kind resolution (see arrayKind
+			// in interp/jit_plan.go) now lets the static planner cover this
+			// whole module, in-loop branch included, as one flat entry that
+			// the compiler tries before the trace frontend's loop-anchored
+			// fold path; either frontend must still avoid a repeated
+			// exit-and-reenter round trip for the in-loop branch.
 			entries := float64(0)
 			for _, metric := range profile.Metrics() {
 				if metric.Name != "vm_jit_native_entries_total" {
@@ -2240,11 +2246,11 @@ func TestInterpreter_Run(t *testing.T) {
 				for _, label := range metric.Labels {
 					labels[label.Key] = label.Value
 				}
-				if labels["func"] == "0" && labels["kind"] == "loop" && labels["frontend"] == "trace" {
+				if labels["func"] == "0" {
 					entries += metric.Value
 				}
 			}
-			require.Greater(t, entries, float64(0), "expected a scan-loop native entry metric")
+			require.Greater(t, entries, float64(0), "expected a native entry metric")
 			require.Less(t, entries/runs, float64(8), "in-loop branch still exits the native loop")
 		})
 
@@ -4985,29 +4991,45 @@ func TestWithProfiler(t *testing.T) {
 	})
 
 	t.Run("stops repeating rejected trace captures once a function gives up", func(t *testing.T) {
-		// A function that can never be traced (an unsupported opcode at its own
-		// entry) must not keep paying for a fresh capture attempt on every
-		// observation forever: giveup should make the rejected-capture count
-		// plateau instead of growing once per run.
-		b := program.NewBuilder()
-		typ := b.Type(types.TypeI32Array)
-		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(typ)).Emit(instr.DROP)
-		prog, err := b.Build()
-		require.NoError(t, err)
+		// A function neither frontend can compile must not keep paying for a
+		// fresh capture attempt on every observation forever: giveup should
+		// make the capture-attempt count plateau instead of growing once per
+		// run. Closure creation over a dynamically loaded function reference
+		// is such a shape: the static planner only resolves CLOSURE_NEW's
+		// capture count from a directly known constant function (see
+		// applyStep in interp/jit_plan.go), and the tracer cannot record
+		// CLOSURE_NEW at all (see unrecordableReason in interp/trace.go), so
+		// routing the reference through a local defeats both frontends.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.DROP),
+		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).MustBuild()),
+			program.WithLocals(types.TypeRef))
 		require.NoError(t, program.Verify(prog))
 
 		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(prof.New()))
 		defer i.Close()
 
-		rejected := func() float64 {
-			return i.samples.Value("vm_jit_trace_captures_total",
-				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
-				prof.Label{Key: "outcome", Value: "rejected"}, prof.Label{Key: "reason", Value: "unsupported-op"})
+		captures := func() float64 {
+			var total float64
+			for _, metric := range i.samples.Metrics() {
+				if metric.Name == "vm_jit_trace_captures_total" {
+					total += metric.Value
+				}
+			}
+			return total
 		}
 
-		require.NoError(t, i.Run(context.Background()))
-		i.Reset()
-		early := rejected()
+		for range 4 {
+			require.NoError(t, i.Run(context.Background()))
+			i.Reset()
+		}
+		early := captures()
 		require.Greater(t, early, float64(0))
 		require.True(t, i.isCold(0), "the function should have given up after repeated unproductive observations")
 
@@ -5015,7 +5037,7 @@ func TestWithProfiler(t *testing.T) {
 			require.NoError(t, i.Run(context.Background()))
 			i.Reset()
 		}
-		require.Equal(t, early, rejected(), "rejected-capture count must not grow once the function is cold")
+		require.Equal(t, early, captures(), "capture attempts must not grow once the function is cold")
 	})
 
 	t.Run("retires a native entry whose exits are dominated by trace-cut", func(t *testing.T) {
@@ -6666,8 +6688,17 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		row := []float64{10, 20}
+		// The array parameter is declared as a generic ref, not
+		// types.TypeF64Array: a declared array type now lets the static
+		// planner resolve ARRAY_GET's element kind on its own (see atyp and
+		// arrayKind in interp/jit_plan.go), which would compile this whole
+		// function statically before the tracer ever learns a branch
+		// continuation. ARRAY_GET's own runtime type check is unaffected by
+		// the declared parameter type, so this keeps the exact behavior this
+		// test exercises: a live ref value carried across BR_IF in a trace
+		// the static frontend cannot compile.
 		b := types.NewFunctionBuilder(nil).
-			Params(types.TypeI32, types.TypeF64Array).
+			Params(types.TypeI32, types.TypeRef).
 			Returns(types.TypeF64)
 		neg := b.Label()
 		b.Emit(instr.New(instr.LOCAL_GET, 1)).

@@ -20,11 +20,12 @@ type module struct {
 }
 
 type native struct {
-	callable asm.Callable
-	kind     entryKind
-	frontend prof.Frontend
-	bytes    int
-	exits    []exitDescriptor
+	callable  asm.Callable
+	kind      entryKind
+	frontend  prof.Frontend
+	bytes     int
+	exits     []exitDescriptor
+	resumable []int
 }
 
 type exitDescriptor struct {
@@ -47,17 +48,22 @@ const retireWindow = 1024
 // loss rather than a healthy kernel's normal loop-exit or guard traffic.
 const retireCutThreshold = retireWindow / 4
 
-// watchdog counts native entries and trace-cut exits for one installed
-// anchor. Unlike counters, it is always live regardless of i.profiler: a
-// trace-cut exit is native code that knowingly stops mid-function (see
-// prof.ExitTraceCut) rather than completing its job or leaving through a
-// healthy loop-exit edge, so a high rate of it — not a high exit rate alone —
-// is the signal that the installed entry should be retired (see
-// Interpreter.retire).
+// watchdog counts native entries, trace-cut exits, and bridge cycles for one
+// installed anchor. Unlike counters, it is always live regardless of
+// i.profiler: a trace-cut exit is native code that knowingly stops
+// mid-function (see prof.ExitTraceCut) rather than completing its job or
+// leaving through a healthy loop-exit edge, so a high rate of it — not a high
+// exit rate alone — is the signal that the installed entry should be retired
+// (see Interpreter.retire). A bridge cycle (see Interpreter.bridge) is
+// productive work and must never count as a trace-cut, but an anchor that
+// spends most of its entries bridging pays the same deopt/re-enter cost as
+// one that trace-cuts, so it is tracked and retired the same way, just
+// through its own counter.
 type watchdog struct {
 	cut     []bool // exit descriptor ID -> reason == prof.ExitTraceCut
 	entries uint32
 	cuts    uint32
+	bridges uint32
 }
 
 // newWatchdog precomputes, for each of entry's exit descriptors, whether its
@@ -237,9 +243,10 @@ const (
 	journalGlobals        // &i.globals[0]; external entry in
 	journalBP             // current frame bp; external entry in
 	journalSP             // interpreter sp; external entry in/out
+	journalEntry          // bridge resume IP in; zero starts at the anchor
 	journalDepth          // trap-time frame records written; native read/write
 	journalCap            // frame budget capped by nativeFrameLimit; read-only
-	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
+	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield | trapBridge
 	journalNextIP         // resume/fallback IP out for the single-frame path
 	journalBudget         // back-edges remaining before the next safepoint; native read/write
 	journalActive         // active native call depth for frame-budget checks
@@ -265,6 +272,11 @@ const (
 	trapFallback
 	trapOverflow
 	trapYield
+	// trapBridge reports the IP of one opcode the backend cannot lower.
+	// journalNextIP carries that opcode's own IP; the Go wrapper runs its
+	// threaded closure exactly once and re-enters the same callable at the
+	// closure's new IP (see Interpreter.bridge and arm64Lowerer.dispatch).
+	trapBridge
 )
 
 // nativeFrameLimit caps generated call depth to the stack space reserved by
@@ -306,10 +318,18 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	if !ok {
 		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
 	}
+	// Entry roots go to the static frontend first: it plans the whole function
+	// deterministically and covers opcodes no trace can record. Loop roots go
+	// to the trace frontend first, because a recorded loop specializes its
+	// body to the path actually taken - folded legs, a hoisted container - and
+	// the static loop plan is the fallback for a loop no trace could record.
 	frontends := [...]struct {
 		kind prof.Frontend
 		plan func(*compileInput) ([]plan, error)
 	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
+	if root.ip != 0 {
+		frontends[0], frontends[1] = frontends[1], frontends[0]
+	}
 	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
 	for _, frontend := range frontends {
 		plans, err := frontend.plan(input)
@@ -385,7 +405,13 @@ func (c *compiler) emit(input *compileInput, plan plan, mod *module, frontend pr
 		return prof.CompileReasonLoweringRejected, nil
 	}
 	exits := append([]exitDescriptor(nil), ctx.descriptors...)
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
+	var resumable []int
+	for _, block := range plan.blocks {
+		if block.bridge {
+			resumable = append(resumable, block.anchor.ip)
+		}
+	}
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits, resumable: resumable})
 }
 
 func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
@@ -470,16 +496,23 @@ func (w *watchdog) exit(encoded uint64) {
 	}
 }
 
+// bridge counts one bridge cycle (see Interpreter.bridge). It is tracked
+// separately from exit so a bridge never counts toward the trace-cut rate.
+func (w *watchdog) bridge() {
+	w.bridges++
+}
+
 // expired reports whether entries has reached retireWindow. It always resets
-// both counters so the next window starts clean; the return value tells the
-// caller whether this window's cut rate reached retireCutThreshold, meaning
-// the anchor should be retired (see Interpreter.retire).
+// every counter so the next window starts clean; the return value tells the
+// caller whether this window's cut rate or bridge rate reached
+// retireCutThreshold, meaning the anchor should be retired (see
+// Interpreter.retire).
 func (w *watchdog) expired() bool {
 	if w.entries < retireWindow {
 		return false
 	}
-	bad := w.cuts >= retireCutThreshold
-	w.entries, w.cuts = 0, 0
+	bad := w.cuts >= retireCutThreshold || w.bridges >= retireCutThreshold
+	w.entries, w.cuts, w.bridges = 0, 0, 0
 	return bad
 }
 

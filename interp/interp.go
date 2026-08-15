@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"unsafe"
 
@@ -987,17 +988,28 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if entry.kind == entryFunction && a.addr < len(i.natives) {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
+		// A module loop root owns the hot body far better than the whole-module
+		// entry plan that also contains it, and an installed entry answers
+		// i.code[0][0] and keeps execution inside itself, so the loop stub
+		// would never be dispatched. Retire the entry in favour of the loop.
+		// Only module code: its entry runs once per execution, while a
+		// function entry carries the call path and must stay.
+		if entry.kind == entryLoop && a.addr == 0 {
+			if shadowed := i.exits[anchor{addr: 0}]; shadowed != nil {
+				i.code[0][0] = shadowed
+			}
+		}
 		stats := i.counters(a, entry)
 		// wd tracks trace-cut exits independent of stats: counters is a no-op
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
 		if entry.kind == entryLoop {
-			i.code[a.addr][a.ip] = i.loop(a, entry.callable, stats, wd)
+			i.code[a.addr][a.ip] = i.loop(a, entry, stats, wd)
 		} else if entry.kind == entryModule {
-			i.code[a.addr][a.ip] = i.start(a, entry.callable, stats, wd)
+			i.code[a.addr][a.ip] = i.start(a, entry, stats, wd)
 		} else {
-			i.code[a.addr][a.ip] = i.call(a, entry.callable, stats, wd)
+			i.code[a.addr][a.ip] = i.call(a, entry, stats, wd)
 		}
 	}
 }
@@ -1045,12 +1057,15 @@ func (i *Interpreter) safepoint() error {
 		}
 	}
 
-	// A warm function already has its entry trace installed, and a cold
-	// function has given up (every compilation root tried, nothing installed,
-	// see giveup): both skip observe's sampling, entry/loop capture, and
-	// one-shot compile trigger, paying only the indexed reads here. A user
-	// profiler still needs per-tick samples either way.
-	if i.stub(f.addr) == nil && !i.isCold(f.addr) {
+	// A cold function has given up - every compilation root tried - and skips
+	// observe's sampling, entry/loop capture, and compile trigger, paying only
+	// the indexed read here. An installed entry is NOT such a function: its
+	// loop headers are separate roots that compile on their own, and a loop
+	// that becomes hot after its entry installed still has to reach them.
+	// observe's own gates keep the already-tried roots cheap, and checkGiveup
+	// turns the function cold once nothing is left to try. A user profiler
+	// still needs per-tick samples either way.
+	if !i.isCold(f.addr) {
 		if err := i.observe(f); err != nil {
 			return err
 		}
@@ -1113,7 +1128,7 @@ func (i *Interpreter) observe(f *frame) error {
 // yet, or a function with anything installed, resets nothing and costs one
 // map lookup.
 func (i *Interpreter) checkGiveup(addr int, root anchor) {
-	if !i.tried[root] || i.installed(addr) {
+	if !i.tried[root] {
 		return
 	}
 	for _, header := range i.tracer.headers(i, addr) {
@@ -1176,86 +1191,159 @@ func (i *Interpreter) trace(f *frame) error {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
-		stats.enter()
-		wd.enter()
-		ctx := i.journalPtr()
-		i.fr.code = nil
-		i.fr.upvals = nil
-		// Refresh the back-edge budget like loop does: an entry trace can carry a
-		// self tail-call back-edge (see tailLoop) that polls the safepoint every
-		// loopBudget iterations, re-entering native here after each yield.
-		i.journal[journalBudget] = loopBudget
-		if err := callable.Call(ctx); err != nil {
-			panic(err)
-		}
-
-		if i.journal[journalTrap] == trapNone {
-			i.popFrame()
-			i.checkRetire(root, wd, true)
-			return
-		}
-
-		// A trap rebuilt the native call chain into real VM frames; resume the
-		// innermost in the interpreter, surface a frame overflow, or service a
-		// loop safepoint.
-		i.sp = int(i.journal[journalSP])
-		i.deopt()
-		switch i.journal[journalTrap] {
-		case trapOverflow:
-			panic(ErrFrameOverflow)
-		case trapYield:
-			stats.yield()
-			// A loop back-edge spent its budget. deopt left i.fr at the loop header;
-			// run coordination, then let the threaded Run loop continue from there.
-			if err := i.safepoint(); err != nil {
+		resume := uint64(0)
+		for cycles := 0; ; cycles++ {
+			stats.enter()
+			wd.enter()
+			ctx := i.journalPtr()
+			i.journal[journalEntry] = resume
+			i.fr.code = nil
+			i.fr.upvals = nil
+			// Refresh the back-edge budget like loop does: an entry trace can carry a
+			// self tail-call back-edge (see tailLoop) that polls the safepoint every
+			// loopBudget iterations, re-entering native here after each yield.
+			i.journal[journalBudget] = loopBudget
+			if err := entry.callable.Call(ctx); err != nil {
 				panic(err)
 			}
-		default:
-			stats.exit(i.journal[journalExitID])
-			wd.exit(i.journal[journalExitID])
-			i.bailout(root)
+
+			if i.journal[journalTrap] == trapNone {
+				i.popFrame()
+				break
+			}
+
+			// A trap rebuilt the native call chain into real VM frames; resume the
+			// innermost in the interpreter, surface a frame overflow, or service a
+			// loop safepoint.
+			i.sp = int(i.journal[journalSP])
+			i.deopt()
+			if i.journal[journalTrap] == trapBridge {
+				wd.bridge()
+				next, ok := i.bridge(root, entry, cycles)
+				if ok {
+					resume = next
+					continue
+				}
+				break
+			}
+			switch i.journal[journalTrap] {
+			case trapOverflow:
+				panic(ErrFrameOverflow)
+			case trapYield:
+				stats.yield()
+				// A loop back-edge spent its budget. deopt left i.fr at the loop header;
+				// run coordination, then let the threaded Run loop continue from there.
+				if err := i.safepoint(); err != nil {
+					panic(err)
+				}
+			default:
+				stats.exit(i.journal[journalExitID])
+				wd.exit(i.journal[journalExitID])
+				i.bailout(root)
+			}
+			break
 		}
 		i.checkRetire(root, wd, true)
 	}
 }
 
+// bridge runs the one opcode native code could not lower, through its own
+// threaded closure, and reports the IP native execution may resume at. The
+// trap already handed the interpreter a fully flushed, owned operand stack
+// (see arm64Lowerer.bridge), so the closure runs exactly as it would under
+// ordinary threaded dispatch.
+//
+// ok is false whenever native execution must not resume, and the caller
+// continues in the interpreter instead: the closure moved to another frame or
+// function (a call or a return), it made no forward progress, the new IP is
+// not one the callable can be re-entered at (only a block the planner marked
+// as a bridge resume carries an entry dispatch label, see
+// arm64Lowerer.dispatch), or this dispatch has already bridged its budget of
+// cycles — that last case keeps a bridge-dense function reaching the Run
+// loop's safepoints instead of cycling here indefinitely.
+func (i *Interpreter) bridge(root anchor, entry native, cycles int) (uint64, bool) {
+	f := i.fr
+	if cycles >= loopBudget || f.addr != root.addr {
+		return 0, false
+	}
+	ip := f.ip
+	if ip < 0 || ip >= len(i.code[f.addr]) {
+		return 0, false
+	}
+	// Run the threaded handler, never whatever occupies the dispatch slot. An
+	// installed native entry lives in that slot - the function entry at ip 0
+	// this wrapper is already running inside, or a loop header compiled as its
+	// own root - and invoking it here would re-enter native code from inside
+	// this wrapper, resetting the journal the outer activation is about to
+	// reuse. i.exits keeps the shadowed threaded closure for exactly this
+	// case, the same one bailout uses when a fallback resumes on an anchor.
+	closure := i.code[f.addr][ip]
+	if shadowed, installed := i.exits[anchor{addr: f.addr, ip: ip}]; installed {
+		if shadowed == nil {
+			return 0, false
+		}
+		closure = shadowed
+	}
+	closure(i)
+	if i.fr != f || f.addr != root.addr || f.ip <= ip {
+		return 0, false
+	}
+	if !slices.Contains(entry.resumable, f.ip) {
+		return 0, false
+	}
+	return uint64(f.ip), true
+}
+
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
-		stats.enter()
-		wd.enter()
-		ctx := i.journalPtr()
-		i.fr.code = nil
-		i.fr.upvals = nil
-		i.journal[journalBudget] = loopBudget
-		if err := callable.Call(ctx); err != nil {
-			panic(err)
-		}
-
-		i.sp = int(i.journal[journalSP])
-		if i.journal[journalTrap] == trapNone {
-			i.complete()
-			i.checkRetire(root, wd, false)
-			return
-		}
-
-		i.deopt()
-		switch i.journal[journalTrap] {
-		case trapOverflow:
-			panic(ErrFrameOverflow)
-		case trapYield:
-			stats.yield()
-			if err := i.safepoint(); err != nil {
+		resume := uint64(0)
+		for cycles := 0; ; cycles++ {
+			stats.enter()
+			wd.enter()
+			ctx := i.journalPtr()
+			i.journal[journalEntry] = resume
+			i.fr.code = nil
+			i.fr.upvals = nil
+			i.journal[journalBudget] = loopBudget
+			if err := entry.callable.Call(ctx); err != nil {
 				panic(err)
 			}
-		default:
-			stats.exit(i.journal[journalExitID])
-			wd.exit(i.journal[journalExitID])
-			i.bailout(root)
+
+			i.sp = int(i.journal[journalSP])
+			if i.journal[journalTrap] == trapNone {
+				i.complete()
+				break
+			}
+
+			i.deopt()
+			if i.journal[journalTrap] == trapBridge {
+				wd.bridge()
+				next, ok := i.bridge(root, entry, cycles)
+				if ok {
+					resume = next
+					continue
+				}
+				break
+			}
+			switch i.journal[journalTrap] {
+			case trapOverflow:
+				panic(ErrFrameOverflow)
+			case trapYield:
+				stats.yield()
+				if err := i.safepoint(); err != nil {
+					panic(err)
+				}
+			default:
+				stats.exit(i.journal[journalExitID])
+				wd.exit(i.journal[journalExitID])
+				i.bailout(root)
+			}
+			break
 		}
 		i.checkRetire(root, wd, false)
 	}
@@ -1268,53 +1356,66 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters, 
 // A spent budget yields to the safepoint and the Run loop re-enters native at
 // the header; a guarded side exit or the loop-exit edge leaves deopt with
 // i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
-		stats.enter()
-		wd.enter()
-		ctx := i.journalPtr()
-		// Decouple the loop's safepoint cadence from tick: a native iteration does
-		// the work of a whole loop body, so yielding every tick (1 under exact
-		// dispatch) would drown the loop in deopt/re-enter churn. Run many
-		// iterations natively between safepoints instead.
-		i.journal[journalBudget] = loopBudget
-		if err := callable.Call(ctx); err != nil {
-			panic(err)
-		}
-		i.sp = int(i.journal[journalSP])
-		if i.journal[journalTrap] == trapNone {
-			if root.addr == 0 {
-				i.complete()
-			} else {
-				i.popFrame()
-			}
-			i.checkRetire(root, wd, false)
-			return
-		}
-		i.deopt()
-		switch i.journal[journalTrap] {
-		case trapOverflow:
-			panic(ErrFrameOverflow)
-		case trapYield:
-			stats.yield()
-			if err := i.safepoint(); err != nil {
+		resume := uint64(0)
+		for cycles := 0; ; cycles++ {
+			stats.enter()
+			wd.enter()
+			ctx := i.journalPtr()
+			i.journal[journalEntry] = resume
+			// Decouple the loop's safepoint cadence from tick: a native iteration does
+			// the work of a whole loop body, so yielding every tick (1 under exact
+			// dispatch) would drown the loop in deopt/re-enter churn. Run many
+			// iterations natively between safepoints instead.
+			i.journal[journalBudget] = loopBudget
+			if err := entry.callable.Call(ctx); err != nil {
 				panic(err)
 			}
-		case trapFallback:
-			stats.exit(i.journal[journalExitID])
-			wd.exit(i.journal[journalExitID])
-			// Record the exit as a branch so the tracer captures the leg and a
-			// hot in-loop branch recompiles the tree with the leg folded in.
-			i.exit(root)
-			// An exit that resumes at the header itself made no progress — the
-			// header slot holds this native stub, so dispatching it again would
-			// livelock (the hoist prologue's shape guard exits here). Run the
-			// shadowed threaded handler once so the interpreter advances.
-			if i.fr.addr == root.addr && i.fr.ip == root.ip {
-				if fn := i.exits[root]; fn != nil {
-					fn(i)
+			i.sp = int(i.journal[journalSP])
+			if i.journal[journalTrap] == trapNone {
+				if root.addr == 0 {
+					i.complete()
+				} else {
+					i.popFrame()
+				}
+				break
+			}
+			i.deopt()
+			if i.journal[journalTrap] == trapBridge {
+				wd.bridge()
+				next, ok := i.bridge(root, entry, cycles)
+				if ok {
+					resume = next
+					continue
+				}
+				break
+			}
+			switch i.journal[journalTrap] {
+			case trapOverflow:
+				panic(ErrFrameOverflow)
+			case trapYield:
+				stats.yield()
+				if err := i.safepoint(); err != nil {
+					panic(err)
+				}
+			case trapFallback:
+				stats.exit(i.journal[journalExitID])
+				wd.exit(i.journal[journalExitID])
+				// Record the exit as a branch so the tracer captures the leg and a
+				// hot in-loop branch recompiles the tree with the leg folded in.
+				i.exit(root)
+				// An exit that resumes at the header itself made no progress — the
+				// header slot holds this native stub, so dispatching it again would
+				// livelock (the hoist prologue's shape guard exits here). Run the
+				// shadowed threaded handler once so the interpreter advances.
+				if i.fr.addr == root.addr && i.fr.ip == root.ip {
+					if fn := i.exits[root]; fn != nil {
+						fn(i)
+					}
 				}
 			}
+			break
 		}
 		i.checkRetire(root, wd, false)
 	}
@@ -1696,6 +1797,7 @@ func (i *Interpreter) journalPtr() unsafe.Pointer {
 	i.journal[journalCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
 	i.journal[journalTrap] = trapNone
 	i.journal[journalExitID] = 0
+	i.journal[journalEntry] = 0
 	i.journal[journalBudget] = uint64(i.tick)
 	i.journal[journalActive] = 0
 	return unsafe.Pointer(&i.journal[0])

@@ -42,6 +42,9 @@ type compileInput struct {
 	constants []types.Boxed
 	globals   []types.Kind
 	heap      []types.Value
+	// decl is the program's declared-type table, indexed by the type operand
+	// of STRUCT_NEW and REF_CAST (see program.WithTypes).
+	decl      []types.Type
 	installed bool
 }
 
@@ -70,6 +73,10 @@ type entryKind uint8
 type block struct {
 	anchor anchor
 	tail   bool
+	// bridge marks a block reached only by a bridge resume (see
+	// terminateBridge): arm64Lowerer.dispatch treats its anchor.ip as a valid
+	// external re-entry IP alongside the plan's normal anchor.
+	bridge bool
 	state  []slot
 	steps  []step
 	term   terminator
@@ -84,6 +91,7 @@ type slot struct {
 	callee      int
 	calleeKnown bool
 	styp        *types.StructType
+	atyp        *types.ArrayType
 	val         int32
 	valKnown    bool
 }
@@ -118,6 +126,13 @@ const (
 	terminateReturn
 	terminateComplete
 	terminateFallback
+	// terminateBridge deopts one opcode the backend cannot lower to the
+	// threaded interpreter and resumes natively afterward (see
+	// arm64Lowerer.bridge). ip names that opcode's own IP; the block reached
+	// after it (marked block.bridge) carries the resume state and needs no
+	// edge, because resumption happens through a fresh external entry, not a
+	// branch within this callable.
+	terminateBridge
 )
 
 const (
@@ -139,6 +154,7 @@ func input(i *Interpreter, addr int) (*compileInput, bool) {
 		constants: i.constants,
 		globals:   i.globalKinds(),
 		heap:      i.heap,
+		decl:      i.types,
 		installed: i.stub(addr) != nil,
 	}, true
 }
@@ -178,7 +194,7 @@ func (p plan) valid() bool {
 	}
 	for _, block := range p.blocks {
 		switch block.term.kind {
-		case terminateFallthrough, terminateReturn, terminateComplete, terminateFallback:
+		case terminateFallthrough, terminateReturn, terminateComplete, terminateFallback, terminateBridge:
 			if len(block.term.edges) != 0 {
 				return false
 			}
@@ -217,17 +233,17 @@ func (p plan) valid() bool {
 }
 
 func staticPlan(input *compileInput) ([]plan, error) {
-	if input == nil || input.function == nil || len(input.function.Code) == 0 || input.installed {
+	if input == nil || input.function == nil || len(input.function.Code) == 0 {
 		return nil, nil
 	}
-	if input.address == 0 {
-		for ip := 0; ip < len(input.function.Code); {
-			inst := instr.Instruction(input.function.Code[ip:])
-			if inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL {
-				return nil, nil
-			}
-			ip += inst.Width()
-		}
+	// A declared array type may only answer arrayKind in a call-free plan.
+	// The general array path combined with a native call still corrupts
+	// native state (see docs/jit-internals.md); until that is root-caused,
+	// a calling function keeps resolving element kinds only from a constant
+	// container, exactly as before declared types were consulted.
+	declared := callFree(input.function.Code)
+	if input.address == 0 && !declared {
+		return nil, nil
 	}
 
 	blocks, err := analysis.Blocks(input.function)
@@ -235,7 +251,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 		return nil, err
 	}
 	constants, heap := input.constants, input.heap
-	facts, ok := planStates(input.function, blocks, constants, input.globals, heap)
+	facts, ok := planStates(input.function, blocks, constants, input.globals, heap, input.decl, declared)
 	if !ok {
 		return nil, nil
 	}
@@ -245,7 +261,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 		entryType = entryModule
 	}
 	result := plan{anchor: anchor{addr: input.address}, kind: entryType}
-	result.blocks = make([]block, len(blocks))
+	result.blocks = make([]block, 0, len(blocks))
 	locals := localTypes(input.function)
 	for idx, source := range blocks {
 		target := block{anchor: anchor{addr: input.address, ip: source.Start}}
@@ -268,13 +284,29 @@ func staticPlan(input *compileInput) ([]plan, error) {
 					step.known = true
 				}
 			}
-			// Static steps carry no recorded observation, but structGet reads
-			// op.seen.Kind() for the result kind; synthesize the zero boxed
-			// value of the statically resolved field kind. Runtime itab, type,
-			// and per-field kind guards keep the lowering sound regardless.
-			if inst.Opcode() == instr.STRUCT_GET && len(flow) >= 2 {
-				if kind, ok := structFieldKind(heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
-					step.seen = types.Zero(kind)
+			// Static steps carry no recorded observation, but structGet and
+			// arrayGet read op.seen.Kind() for the result kind; synthesize the
+			// zero boxed value of the statically resolved kind. Runtime itab,
+			// type, bounds, and per-field kind guards keep the lowering sound
+			// regardless - a slot that currently holds null or a differently
+			// shaped container deopts before the access.
+			//
+			// A constant container is the one case arrayGet does not need this
+			// for: arrayGetKnown reads the shape straight out of the constant
+			// heap value. Every other container resolves through its declared
+			// array type (see arrayKind), and without a synthesized seen the
+			// general path would lower against the zero kind and read the
+			// element at the wrong width.
+			if len(flow) >= 2 {
+				switch inst.Opcode() {
+				case instr.STRUCT_GET:
+					if kind, ok := structFieldKind(heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
+						step.seen = types.Zero(kind)
+					}
+				case instr.ARRAY_GET:
+					if kind, ok := arrayKind(heap, flow[len(flow)-2], declared); ok {
+						step.seen = types.Zero(kind)
+					}
 				}
 			}
 			switch inst.Opcode() {
@@ -287,10 +319,26 @@ func staticPlan(input *compileInput) ([]plan, error) {
 			case instr.RETURN:
 				target.term = terminator{kind: terminateReturn, ip: ip}
 			default:
-				target.steps = append(target.steps, step)
+				if bridgeable(inst.Opcode()) {
+					// The backend cannot lower this opcode, so it ends the block as
+					// a bridge: the Go wrapper runs its own threaded closure once
+					// and re-enters natively at next (see terminateBridge). The
+					// remaining source instructions continue into a fresh block
+					// anchored at next, carrying the post-op dataflow state so
+					// lowering reloads it exactly like any other state-backed
+					// block.
+					target.term = terminator{kind: terminateBridge, ip: ip}
+				} else {
+					target.steps = append(target.steps, step)
+				}
 			}
-			if !applyStep(input.function, locals, constants, input.globals, heap, &flow, inst) {
+			if !applyStep(input.function, locals, constants, input.globals, heap, input.decl, declared, &flow, inst) {
 				return nil, nil
+			}
+			if bridgeable(inst.Opcode()) {
+				result.blocks = append(result.blocks, target)
+				target = block{anchor: anchor{addr: input.address, ip: next}, bridge: true}
+				target.state = append([]slot{}, flow...)
 			}
 			ip = next
 		}
@@ -305,15 +353,96 @@ func staticPlan(input *compileInput) ([]plan, error) {
 				target.term = terminator{kind: terminateBranch, ip: source.End, hot: -1, edges: []edge{jump(input.address, source.End)}}
 			}
 		}
-		result.blocks[idx] = target
+		result.blocks = append(result.blocks, target)
 	}
 	roots := make(map[anchor]int, len(result.blocks))
 	for id, block := range result.blocks {
 		roots[block.anchor] = id
 	}
 	wire(&result, roots)
+	// Store paths must never spill, exactly as they must not in a trace plan
+	// (see noSpill): they use the common fresh-register heap path, and a
+	// spilled store across a branch or back-edge is unsound. Before declared
+	// array types let array code plan statically this was unreachable, because
+	// such a function had no static plan at all.
+	result.noSpill = noSpill(result.blocks)
 	result.carried = loopCarried(input.function, result.blocks)
-	return []plan{result}, nil
+	// A bridge cycle re-enters through a fresh external Call, which never runs
+	// the loop-carry prologue (see arm64Lowerer.dispatch), so a carried
+	// register would be uninitialized garbage on resume. A bridge anywhere in
+	// the function keeps every local slot-backed instead.
+	for _, block := range result.blocks {
+		if block.bridge {
+			result.carried = nil
+			break
+		}
+	}
+	// The same whole-function blocks serve every root this function can be
+	// compiled at. The entry plan owns the function's ABI, and each loop
+	// header additionally gets a plan that re-enters the live frame there, so
+	// a loop that becomes hot before its function does no longer needs a
+	// recorded trace to get native code.
+	loops := headers(result.blocks)
+	plans := make([]plan, 0, 2)
+	if !input.installed {
+		plans = append(plans, result)
+	}
+	for _, id := range loops {
+		header := result
+		header.anchor = result.blocks[id].anchor
+		header.kind = entryLoop
+		header.root = id
+		plans = append(plans, header)
+	}
+	return plans, nil
+}
+
+// headers returns the block IDs a backward edge targets: this function's loop
+// headers, where a hot loop re-enters. A header at IP zero is excluded because
+// the entry plan already owns that anchor.
+func headers(blocks []block) []int {
+	var out []int
+	seen := map[int]bool{}
+	for _, source := range blocks {
+		for _, edge := range source.term.edges {
+			if edge.block == noBlock || edge.anchor.ip <= 0 || edge.anchor.ip >= source.anchor.ip || seen[edge.block] {
+				continue
+			}
+			seen[edge.block] = true
+			out = append(out, edge.block)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// bridgeable reports whether op is an opcode the ARM64 backend cannot lower
+// natively but the threaded closure can still perform exactly once: the
+// static planner ends its block on op instead of rejecting the whole
+// function (see terminateBridge), and arm64Lowerer.bridge deopts to run op's
+// own threaded closure before resuming native execution at the following
+// block (see arm64Lowerer.dispatch). An opcode already lowered natively (for
+// example ARRAY_GET or STRUCT_SET) MUST NOT appear here: a bridge is strictly
+// the fallback for opcodes with no native lowering. YIELD and RESUME are
+// excluded even though the backend cannot lower them either: suspension
+// cannot resume mid-frame into native code (see docs/jit-internals.md,
+// Suspension), so they keep their unconditional terminal-fallback treatment
+// in arm64Lowerer.steps instead of becoming a bridge.
+func bridgeable(op instr.Opcode) bool {
+	switch op {
+	case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.ARRAY_SLICE, instr.ARRAY_DELETE,
+		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+		instr.MAP_NEW, instr.MAP_NEW_DEFAULT, instr.MAP_DELETE, instr.MAP_CLEAR,
+		instr.REF_NEW, instr.REF_SET, instr.CLOSURE_NEW, instr.STRING_NEW_UTF32,
+		instr.STRING_ENCODE_UTF32, instr.STRING_ITER,
+		instr.MAP_LEN, instr.MAP_GET, instr.MAP_LOOKUP, instr.MAP_KEYS, instr.MAP_ITER,
+		instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET,
+		instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW,
+		instr.REF_TEST, instr.REF_CAST:
+		return true
+	default:
+		return false
+	}
 }
 
 func tracePlan(input *compileInput) ([]plan, error) {
@@ -858,7 +987,7 @@ func noSpill(blocks []block) bool {
 	return false
 }
 
-func planStates(fn *types.Function, blocks []*analysis.BasicBlock, constants []types.Boxed, globals []types.Kind, heap []types.Value) ([][]slot, bool) {
+func planStates(fn *types.Function, blocks []*analysis.BasicBlock, constants []types.Boxed, globals []types.Kind, heap []types.Value, decl []types.Type, declared bool) ([][]slot, bool) {
 	if len(fn.Handlers) > 0 {
 		return nil, false
 	}
@@ -874,7 +1003,7 @@ func planStates(fn *types.Function, blocks []*analysis.BasicBlock, constants []t
 		idx := work[len(work)-1]
 		work = work[:len(work)-1]
 		state := append([]slot(nil), states[idx]...)
-		if !applyBlock(fn, locals, constants, globals, heap, blocks[idx], &state) {
+		if !applyBlock(fn, locals, constants, globals, heap, decl, declared, blocks[idx], &state) {
 			return nil, false
 		}
 		for _, succ := range blocks[idx].Succs {
@@ -936,10 +1065,10 @@ func mergeSlot(dst *slot, src slot) (bool, bool) {
 	return changed, true
 }
 
-func applyBlock(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, block *analysis.BasicBlock, state *[]slot) bool {
+func applyBlock(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, decl []types.Type, declared bool, block *analysis.BasicBlock, state *[]slot) bool {
 	for ip := block.Start; ip < block.End; {
 		inst := instr.Instruction(fn.Code[ip:])
-		if !applyStep(fn, locals, constants, globals, heap, state, inst) {
+		if !applyStep(fn, locals, constants, globals, heap, decl, declared, state, inst) {
 			return false
 		}
 		ip += inst.Width()
@@ -947,7 +1076,7 @@ func applyBlock(fn *types.Function, locals []types.Type, constants []types.Boxed
 	return true
 }
 
-func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, state *[]slot, inst instr.Instruction) bool {
+func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, decl []types.Type, declared bool, state *[]slot, inst instr.Instruction) bool {
 	push := func(value slot) { *state = append(*state, value) }
 	pop := func(count int) bool {
 		if len(*state) < count {
@@ -965,7 +1094,8 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		styp, _ := locals[idx].(*types.StructType)
-		push(slot{kind: locals[idx].Kind(), backing: backingLocal, slot: idx, styp: styp})
+		atyp, _ := locals[idx].(*types.ArrayType)
+		push(slot{kind: locals[idx].Kind(), backing: backingLocal, slot: idx, styp: styp, atyp: atyp})
 		return true
 	case instr.LOCAL_TEE:
 		return len(*state) > 0
@@ -975,7 +1105,8 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		styp, _ := fn.Captures[idx].(*types.StructType)
-		push(slot{kind: fn.Captures[idx].Kind(), backing: backingUpval, slot: idx, styp: styp})
+		atyp, _ := fn.Captures[idx].(*types.ArrayType)
+		push(slot{kind: fn.Captures[idx].Kind(), backing: backingUpval, slot: idx, styp: styp, atyp: atyp})
 		return true
 	case instr.GLOBAL_GET:
 		idx := int(inst.Operand(0))
@@ -1036,7 +1167,7 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		array := (*state)[len(*state)-2]
-		kind, ok := arrayKind(heap, array)
+		kind, ok := arrayKind(heap, array, declared)
 		if !ok || !pop(2) {
 			return false
 		}
@@ -1076,8 +1207,135 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			returns = len(fn.Typ.Returns)
 		}
 		return len(*state) >= returns
-	case instr.STRUCT_NEW, instr.MAP_NEW, instr.CLOSURE_NEW:
-		return false
+	case instr.REF_CAST:
+		// A successful cast validates the operand's declared type in place
+		// and leaves the same boxed value on the stack (see refCast in
+		// internal/cmd/geninterp/lower.go); its kind never changes. REF_CAST
+		// is bridged (see bridgeable), so the resume block's operand is a
+		// fresh retain taken by retainDeferred, not the pre-cast operand's
+		// backing slot; push a new backingStack slot instead of mutating the
+		// existing one in place, or the resume block would elide a release
+		// that must run and leak the retain. Narrow a struct-typed target so
+		// a later STRUCT_GET can resolve its field kind statically, the same
+		// way a declared struct-typed local does.
+		if len(*state) == 0 {
+			return false
+		}
+		top := (*state)[len(*state)-1]
+		cast := slot{kind: top.kind}
+		if idx := int(inst.Operand(0)); idx < len(decl) {
+			if styp, ok := decl[idx].(*types.StructType); ok {
+				cast.styp = styp
+			}
+			if atyp, ok := decl[idx].(*types.ArrayType); ok {
+				cast.atyp = atyp
+			}
+		}
+		(*state)[len(*state)-1] = cast
+		return true
+	case instr.ARRAY_DELETE:
+		// The removed element's kind is the array's element kind, resolved
+		// the same way ARRAY_GET resolves it.
+		if len(*state) < 2 {
+			return false
+		}
+		kind, ok := arrayKind(heap, (*state)[len(*state)-2], declared)
+		if !ok || !pop(2) {
+			return false
+		}
+		push(slot{kind: kind})
+		return true
+	case instr.ARRAY_NEW:
+		// ARRAY_NEW's element count is a runtime i32 on top of the elements
+		// (see arrayNew in internal/cmd/geninterp/lower.go), not the fixed
+		// two-operand shape instr.TypeOf approximates for the verifier; the
+		// effect is only knowable when that count is a known constant.
+		if len(*state) == 0 {
+			return false
+		}
+		count := (*state)[len(*state)-1]
+		if count.kind != types.KindI32 || !count.valKnown || count.val < 0 {
+			return false
+		}
+		if !pop(1 + int(count.val)) {
+			return false
+		}
+		push(slot{kind: types.KindRef})
+		return true
+	case instr.STRUCT_NEW:
+		// STRUCT_NEW's arity is not on the operand stack: it pops exactly one
+		// value per field of its declared struct type (see structNew in
+		// internal/cmd/geninterp/lower.go).
+		idx := int(inst.Operand(0))
+		if idx >= len(decl) {
+			return false
+		}
+		styp, ok := decl[idx].(*types.StructType)
+		if !ok || !pop(len(styp.Fields)) {
+			return false
+		}
+		push(slot{kind: types.KindRef, styp: styp})
+		return true
+	case instr.MAP_NEW:
+		// MAP_NEW's entry count is a runtime i32 pushed ahead of it, not a
+		// bytecode operand (see mapNew in internal/cmd/geninterp/lower.go);
+		// the effect is only knowable when that count is a known constant.
+		if len(*state) == 0 {
+			return false
+		}
+		count := (*state)[len(*state)-1]
+		if count.kind != types.KindI32 || !count.valKnown || count.val < 0 {
+			return false
+		}
+		if !pop(1 + int(count.val)*2) {
+			return false
+		}
+		push(slot{kind: types.KindRef})
+		return true
+	case instr.CLOSURE_NEW:
+		// CLOSURE_NEW pops its captures plus the function reference below
+		// them (see create in internal/cmd/geninterp/lower.go); the capture
+		// count is only knowable when that reference resolves to a known
+		// heap function, exactly like the CONST_GET+CALL fusion in
+		// arm64Lowerer.fuse.
+		if len(*state) == 0 {
+			return false
+		}
+		callee := (*state)[len(*state)-1]
+		if !callee.refKnown || callee.ref <= 0 || callee.ref >= len(heap) {
+			return false
+		}
+		target, ok := heap[callee.ref].(*types.Function)
+		if !ok || !pop(1+len(target.Captures)) {
+			return false
+		}
+		push(slot{kind: types.KindRef})
+		return true
+	case instr.ARRAY_APPEND:
+		// ARRAY_APPEND's value count is a runtime i32 on top of the values
+		// (see arrayAppend in internal/cmd/geninterp/lower.go); the array
+		// reference below the values is never popped, so it stays on the
+		// stack afterward. ARRAY_APPEND is bridged (see bridgeable), so that
+		// surviving operand is a fresh retain taken by retainDeferred after
+		// the bridge, not the pre-append operand's backing slot (see the
+		// same note on REF_CAST above): replace it with a fresh backingStack
+		// slot instead of leaving the existing one, or a later consumer that
+		// elides its release for a deferred backing would leak the retain.
+		if len(*state) == 0 {
+			return false
+		}
+		count := (*state)[len(*state)-1]
+		if count.kind != types.KindI32 || !count.valKnown || count.val < 0 {
+			return false
+		}
+		if !pop(1 + int(count.val)) {
+			return false
+		}
+		if len(*state) == 0 {
+			return false
+		}
+		(*state)[len(*state)-1] = slot{kind: types.KindRef}
+		return true
 	}
 	typ := inst.Type()
 	if typ.Pop == nil && typ.Push == nil || !pop(len(typ.Pop)) {
@@ -1092,8 +1350,30 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 	return true
 }
 
-func arrayKind(heap []types.Value, array slot) (types.Kind, bool) {
+// arrayKind resolves an ARRAY_GET/ARRAY_DELETE result kind statically from a
+// known constant heap ref's concrete primitive typed-array itab.
+//
+// A declared-array-type fallback (mirroring structFieldKind's declared-
+// struct-type resolution) was tried and reverted: unlike a struct's declared
+// type, a container's declared array type let staticPlan populate step.seen
+// for ARRAY_GET on a non-constant container, and lowering that combination
+// alongside a native CALL in the same plan corrupted native execution state
+// (observed as a runtime.mallocgc SIGSEGV on the next native call boundary,
+// not a clean deopt) instead of just guarding and falling back like
+// structFieldKind's equivalent case does. Left as follow-up work: root-cause
+// the guarded ARRAY_GET/native-CALL interaction in jit_arm64.go before
+// reintroducing a declared-type fallback here.
+// arrayKind resolves an array's element kind. A container whose identity is
+// known resolves from the live heap cell; otherwise the declared array type
+// answers, exactly as a declared struct type answers structFieldKind. Both are
+// hints: the lowering's runtime tag and itab guards verify the shape before any
+// access, so a slot declared as an array that currently holds null or a
+// differently shaped array deopts instead of reading it.
+func arrayKind(heap []types.Value, array slot, declared bool) (types.Kind, bool) {
 	if !array.refKnown || array.ref <= 0 || array.ref >= len(heap) {
+		if declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
+			return array.atyp.ElemKind, true
+		}
 		return 0, false
 	}
 	switch heap[array.ref].(type) {
@@ -1147,4 +1427,17 @@ func localTypes(fn *types.Function) []types.Type {
 		result = append(result, fn.Typ.Params...)
 	}
 	return append(result, fn.Locals...)
+}
+
+// callFree reports whether code contains no call. A call-free plan is the only
+// place a declared array type may stand in for an observed container shape.
+func callFree(code []byte) bool {
+	for ip := 0; ip < len(code); {
+		inst := instr.Instruction(code[ip:])
+		if inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL {
+			return false
+		}
+		ip += inst.Width()
+	}
+	return true
 }
