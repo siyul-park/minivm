@@ -417,14 +417,28 @@ the commands in section 10:
   slower under `default` than under `threaded`; interleaved `-benchtime=1x
   -count=3` after retirement gives 760 ms versus 676 ms, a 1.13x residual.
 
-The `Sieve` and `MatMul` native rows above were re-measured after loop-header
-plans stopped carrying blocks their own root cannot reach (`prune`, see
-`docs/jit-internals.md`). Every other row, minivm and cross-runtime alike, is
-from the earlier sweep. Interleaved `-benchtime=200ms -count=3` over the full
-19-kernel set puts that change at `Sieve` 2.04 µs to 1.29 µs and `MatMul`
-22.10 µs to 16.08 µs, with every other kernel inside run-to-run noise and a
--2.6% geomean; the two that move are the kernels whose hot function holds more
-than one loop header.
+The `Sieve` and `MatMul` native rows above were re-measured with this section's
+own `-benchtime=300ms -count=3` after loop-header plans stopped carrying blocks
+their own root cannot reach (`prune`, see `docs/jit-internals.md`). Every other
+row, minivm and cross-runtime alike, is from the earlier sweep.
+
+The before/after evidence for that change is a separate A/B measurement and is
+quoted here at its own settings, not the table's: two full 19-kernel sweeps at
+`-benchtime=200ms -count=3`, run back to back on one machine so both halves see
+the same thermal state, compared with `benchstat`. It puts `Sieve` at 2.04 µs to
+1.29 µs and `MatMul` at 22.10 µs to 16.08 µs, every other kernel inside
+run-to-run noise, -2.6% geomean. Those figures differ slightly from the table
+rows above (1.27 µs and 16.01 µs) because they come from that separate sweep at
+a shorter `benchtime`; the table rows are the canonical ones. Only two kernels
+move, and both are the ones whose hot function holds more than one loop header.
+Reproduce the A/B with:
+
+```bash
+cd benchmarks
+go test -run='^$' -bench='.' -benchtime=200ms -count=3 . > new.txt
+git stash push && go test -run='^$' -bench='.' -benchtime=200ms -count=3 . > base.txt; git stash pop
+benchstat base.txt new.txt
+```
 
 Allocation results are bounded: object-heavy kernels such as `StructTreeWalk` and
 `BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` holds 85,408 B/op, and
@@ -462,6 +476,7 @@ from joining.
 - Inputs are deterministic.
 - Canonical comparison tables use `-benchtime=300ms -count=3` and report the median of three sequential samples.
 - Direct interpreter/API tables use a `100ms × 3` protocol.
+- An *interleaved* A/B measurement runs the two variants back to back on one machine, whole sweep against whole sweep, and compares them with `benchstat`. This machine swings by several percent across minutes, so a before/after claim taken from two runs separated in time is not evidence. Interleaved A/B figures are quoted at their own `benchtime` and are never mixed into the canonical tables.
 - Every runtime in a comparison table ran the same fixture in the same command and passed the same correctness check.
 - `make benchmark-core` remains the repository-wide smoke command, but the full command includes many non-runtime benchmarks and can exceed interactive command limits.
 - `RecursiveFib(35)` is excluded from the comparison tables: at roughly 1.2 s per operation the slower external runtimes make a `count=3` sweep impractical.

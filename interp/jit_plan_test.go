@@ -166,7 +166,7 @@ func TestNoSpill(t *testing.T) {
 	}}}))
 }
 
-func TestPrune(t *testing.T) {
+func TestPlan_Prune(t *testing.T) {
 	t.Run("keeps only what the root reaches", func(t *testing.T) {
 		source := plan{
 			anchor: anchor{addr: 1},
@@ -181,7 +181,7 @@ func TestPrune(t *testing.T) {
 			},
 		}
 
-		got, ok := prune(source, 1)
+		got, ok := source.prune(1)
 		require.True(t, ok)
 		require.Equal(t, anchor{addr: 1, ip: 4}, got.anchor)
 		require.Len(t, got.blocks, 2)
@@ -203,7 +203,7 @@ func TestPrune(t *testing.T) {
 			},
 		}
 
-		got, ok := prune(source, 0)
+		got, ok := source.prune(0)
 		require.True(t, ok)
 		require.Len(t, got.blocks, 2)
 		require.True(t, got.blocks[1].bridge)
@@ -216,12 +216,12 @@ func TestPrune(t *testing.T) {
 			blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateBridge, ip: 0}}},
 		}
 
-		_, ok := prune(source, 0)
+		_, ok := source.prune(0)
 		require.False(t, ok)
 	})
 
 	t.Run("rejects a root outside the block list", func(t *testing.T) {
-		_, ok := prune(plan{}, 0)
+		_, ok := plan{}.prune(0)
 		require.False(t, ok)
 	})
 }

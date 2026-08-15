@@ -1783,6 +1783,93 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 // container local derives the heap cell, shape guard, and slice header once
 // per native entry, so accesses keep only the bounds check and element op.
 // Every sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_StaticLoopEntry(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	// A loop header compiled by the static frontend must emit only the blocks
+	// its own root reaches, not every block of the function it belongs to (see
+	// prune). Two loop headers share one whole-function block list, so an
+	// unpruned header emits the whole function again and its entry ends up at
+	// least as large as the whole-function entry.
+	const size = int32(4096)
+	b := program.NewBuilder()
+	arrayTyp := b.Type(types.TypeI32Array)
+	b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+	fill := b.Label()
+	scan := b.Label()
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(fill)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(fill)
+	b.Bind(scan)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	require.NoError(t, err)
+
+	profile := prof.New()
+	jit := New(prog, WithProfiler(profile))
+	threaded := New(prog, WithThreshold(-1))
+	for n := 0; n < 16; n++ {
+		require.NoError(t, jit.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+		require.Equal(t, types.BoxI32(size), got)
+		require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+		jit.Reset()
+		threaded.Reset()
+	}
+	require.NoError(t, jit.Close())
+	require.NoError(t, threaded.Close())
+
+	var entry, header float64
+	var entered bool
+	for _, metric := range profile.Metrics() {
+		kind, frontend := "", ""
+		for _, label := range metric.Labels {
+			switch label.Key {
+			case "kind":
+				kind = label.Value
+			case "frontend":
+				frontend = label.Value
+			}
+		}
+		if frontend != "static" {
+			continue
+		}
+		switch {
+		case metric.Name == "vm_jit_entry_bytes_total" && kind == "start":
+			entry = metric.Value
+		case metric.Name == "vm_jit_entry_bytes_total" && kind == "loop":
+			header = metric.Value
+		case metric.Name == "vm_jit_native_entries_total" && kind == "loop":
+			entered = metric.Value > 0
+		}
+	}
+	require.NotZero(t, entry, "expected a whole-module static entry")
+	require.NotZero(t, header, "expected a static loop-header entry")
+	require.True(t, entered, "the static loop entry was never invoked")
+	require.Less(t, header, entry, "the loop header emitted blocks its own root cannot reach")
+}
+
 func TestARM64_HoistedContainerLoop(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")

@@ -379,7 +379,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 		plans = append(plans, result)
 	}
 	for _, id := range loops {
-		header, ok := prune(result, id)
+		header, ok := result.prune(id)
 		if !ok {
 			continue
 		}
@@ -413,7 +413,11 @@ func carriedLocals(fn *types.Function, blocks []block) []int {
 // list does not satisfy the bridge-successor layout described below, in which
 // case the caller must skip this root rather than emit a plan missing a resume
 // target.
-func prune(p plan, root int) (plan, bool) {
+//
+// It has one caller. The reachability walk and the renumbering it forces are a
+// closed mechanic with its own failure mode, and inlining them would leave
+// staticPlan mixing block-graph bookkeeping with the planning it exists to do.
+func (p plan) prune(root int) (plan, bool) {
 	if root < 0 || root >= len(p.blocks) {
 		return plan{}, false
 	}
