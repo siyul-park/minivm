@@ -366,7 +366,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 	// array types let array code plan statically this was unreachable, because
 	// such a function had no static plan at all.
 	result.noSpill = noSpill(result.blocks)
-	result.carried = carriedLocals(input.function, result.blocks)
+	result.carried = carried(input.function, result.blocks)
 	// The entry plan owns the function's ABI and reaches every block. Each loop
 	// header additionally gets a plan that re-enters the live frame there, so a
 	// loop that becomes hot before its function does no longer needs a recorded
@@ -388,24 +388,10 @@ func staticPlan(input *compileInput) ([]plan, error) {
 		// emitted, so its stores must not force this plan off the spill frame
 		// and its bridges must not strip its loop-carried registers.
 		header.noSpill = noSpill(header.blocks)
-		header.carried = carriedLocals(input.function, header.blocks)
+		header.carried = carried(input.function, header.blocks)
 		plans = append(plans, header)
 	}
 	return plans, nil
-}
-
-// carriedLocals returns the locals a plan may hold in registers across its
-// blocks. A bridge cycle re-enters through a fresh external Call, which never
-// runs the loop-carry prologue (see arm64Lowerer.dispatch), so a carried
-// register would be uninitialized garbage on resume: a bridge anywhere in the
-// plan keeps every local slot-backed instead.
-func carriedLocals(fn *types.Function, blocks []block) []int {
-	for _, block := range blocks {
-		if block.bridge {
-			return nil
-		}
-	}
-	return loopCarried(fn, blocks)
 }
 
 // prune returns the plan rooted at root: the blocks reachable from it,
@@ -624,7 +610,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			}
 		}
 		wire(&planned, roots)
-		planned.carried = loopCarried(input.function, planned.blocks)
+		planned.carried = carried(input.function, planned.blocks)
 		if kind == entryLoop {
 			planned.hoist = hoistable(input.function, planned.blocks)
 		}
@@ -634,14 +620,24 @@ func tracePlan(input *compileInput) ([]plan, error) {
 	return plans, nil
 }
 
-// loopCarried returns the inline scalar locals that a call-free native loop
-// may keep authoritative in registers until an exit. The plan must contain a
+// carried returns the inline scalar locals that a call-free native loop may
+// keep authoritative in registers until an exit. The blocks must contain a
 // real backward edge; straight-line prefixes keep the VM slots authoritative.
 // Refs and i64s stay slot-backed because their load and ownership guards can
 // deopt while the register set is only partly prepared.
-func loopCarried(fn *types.Function, blocks []block) []int {
+//
+// A bridge among the blocks disqualifies them all: a bridge cycle re-enters
+// through a fresh external Call, which never runs the loop-carry prologue (see
+// arm64Lowerer.dispatch), so a carried register would be uninitialized garbage
+// on resume.
+func carried(fn *types.Function, blocks []block) []int {
 	if fn == nil {
 		return nil
+	}
+	for _, block := range blocks {
+		if block.bridge {
+			return nil
+		}
 	}
 	type loopRange struct {
 		addr       int

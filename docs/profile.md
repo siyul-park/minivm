@@ -185,11 +185,11 @@ Threshold-zero mode installs exact unconditional-backedge observation immediatel
 
 Pool members use the same rounded threshold. With a shared cache, trigger counts are aggregated so only one member compiles at a time, while a per-function queue retains distinct exact loop roots and prioritizes newer side-exit work.
 
-## Give-up
+## Cooling
 
 Sampling, trace capture, and exact back-edge observation are only worth their
 cost while compilation can still succeed. A function whose entry root and every
-loop header have all been attempted is given up: it is marked cold, and a
+loop header have all been attempted is cooled: it is marked cold, and a
 function already rethreaded onto the exact-backedge table reverts to the
 ordinary zero-overhead `BR` handler. A cold function skips `observe` entirely —
 no sampling for hotness, no capture, no compile trigger — while an attached
@@ -201,7 +201,7 @@ has no remaining purpose; installed entries stay installed and keep running.
 Withdrawing the instrumentation is worth several percent on kernels whose hot
 functions do install, so this is a deliberate rule, not an oversight.
 
-Two unproductive observations trigger give-up. Capture rejections count against
+Two unproductive observations cool a function. Capture rejections count against
 the same per-anchor attempt limit as every other rejection, including a
 mis-anchored entry, so a repeatedly unusable anchor stops being retried instead
 of costing one rejected capture per tick forever.

@@ -521,9 +521,9 @@ Install only accepted callables. Rejected roots leave the existing threaded clos
 
 Native wrappers must always leave the interpreter in a valid state for threaded redispatch.
 
-### Give-up and retirement
+### Cooling and retirement
 
-Give-up is the compile-side half: a function whose entry root and every loop
+Cooling is the compile-side half: a function whose entry root and every loop
 header have been attempted without installing anything stops being sampled,
 captured, and back-edge instrumented. `docs/profile.md` owns that rule.
 Retirement below is the runtime half, for native code that is already
@@ -533,7 +533,7 @@ installed.
 
 A trace can compile into a native entry that runs a few instructions and then always exits `trapFallback` with reason `prof.ExitTraceCut` — native code that knowingly stops mid-function — instead of completing its job or leaving through a healthy loop-exit edge. A high exit rate alone is not a failure signal (a healthy kernel like Sieve or NQueens exits on nearly every entry, through `loop-exit`); a high `trace-cut` rate specifically is, because the interpreter pays full bailout and re-entry cost for work the native code never finished.
 
-Each installed anchor gets a `watchdog`: two counters (entries, trace-cut exits) plus a `[]bool` precomputed at install time from the entry's exit descriptors, so the hot path never depends on the profiler being attached (unlike the Lifecycle Profiling counters above, which are no-ops when no profiler is set). `call`, `start`, and `loop` each count one entry per invocation and, on a fallback exit, one trace-cut exit when the resolved descriptor's reason is `prof.ExitTraceCut`. Every 1024 entries, if at least a quarter were trace-cut, the anchor retires: the shadowed threaded handler (saved at install time) replaces it in the local dispatch table, a function-entry anchor's `natives` call-fast-path slot is atomically cleared (a null slot already makes callers fall back at `CALL`), and the function is marked cold through the same `giveup` a compile-side function that never installs anything uses, so it is neither re-instrumented nor recompiled. Otherwise the window resets and the entry keeps running.
+Each installed anchor gets a `watchdog`: two counters (entries, trace-cut exits) plus a `[]bool` precomputed at install time from the entry's exit descriptors, so the hot path never depends on the profiler being attached (unlike the Lifecycle Profiling counters above, which are no-ops when no profiler is set). `call`, `start`, and `loop` each count one entry per invocation and, on a fallback exit, one trace-cut exit when the resolved descriptor's reason is `prof.ExitTraceCut`. Every 1024 entries, if at least a quarter were trace-cut, the anchor retires: the shadowed threaded handler (saved at install time) replaces it in the local dispatch table, a function-entry anchor's `natives` call-fast-path slot is atomically cleared (a null slot already makes callers fall back at `CALL`), and the function is marked cold through the same `cool` a compile-side function that never installs anything uses, so it is neither re-instrumented nor recompiled. Otherwise the window resets and the entry keeps running.
 
 Retirement only ever mutates the local interpreter's dispatch table (`i.code`, `i.natives`, `i.cold`), never a pool's shared published module, so it is safe to run from inside the very wrapper closure it replaces. A later publish that lands on a cold function still resumes it (see Installation above).
 

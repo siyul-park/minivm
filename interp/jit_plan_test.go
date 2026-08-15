@@ -545,7 +545,7 @@ func TestTracePlan(t *testing.T) {
 	})
 }
 
-func TestLoopCarried(t *testing.T) {
+func TestCarried(t *testing.T) {
 	loop := func(steps []step) []block {
 		return []block{{
 			steps: steps,
@@ -569,7 +569,7 @@ func TestLoopCarried(t *testing.T) {
 			{op: instr.LOCAL_SET, args: [2]uint64{4}},
 		})
 
-		require.Equal(t, []int{0, 1}, loopCarried(fn, blocks))
+		require.Equal(t, []int{0, 1}, carried(fn, blocks))
 	})
 
 	t.Run("requires a root backedge", func(t *testing.T) {
@@ -580,7 +580,7 @@ func TestLoopCarried(t *testing.T) {
 		})
 		blocks[0].term.edges[0].block = noBlock
 
-		require.Nil(t, loopCarried(fn, blocks))
+		require.Nil(t, carried(fn, blocks))
 	})
 
 	t.Run("ignores initialization before the loop", func(t *testing.T) {
@@ -598,7 +598,7 @@ func TestLoopCarried(t *testing.T) {
 			},
 		}
 
-		require.Nil(t, loopCarried(fn, blocks))
+		require.Nil(t, carried(fn, blocks))
 	})
 
 	t.Run("rejects calls", func(t *testing.T) {
@@ -609,7 +609,7 @@ func TestLoopCarried(t *testing.T) {
 			{op: instr.CALL},
 		})
 
-		require.Nil(t, loopCarried(fn, blocks))
+		require.Nil(t, carried(fn, blocks))
 	})
 
 	t.Run("rejects register overflow", func(t *testing.T) {
@@ -623,7 +623,7 @@ func TestLoopCarried(t *testing.T) {
 			)
 		}
 
-		require.Nil(t, loopCarried(fn, loop(steps)))
+		require.Nil(t, carried(fn, loop(steps)))
 	})
 }
 

@@ -122,10 +122,10 @@ type option struct {
 const heapRunway = 64
 const loopWarmup = 8
 
-// giveupLimit is the number of consecutive unproductive observations - every
-// compilation root already tried and nothing installed - before giveup
-// permanently stops instrumenting a function. See checkGiveup.
-const giveupLimit = 2
+// coolLimit is the number of consecutive unproductive observations - every
+// compilation root already tried and nothing installed - before a function
+// is cooled and stops being instrumented. See checkCool.
+const coolLimit = 2
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
@@ -963,8 +963,8 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || entry.callable == nil {
 			continue
 		}
-		// A peer's publish can land on a function this interpreter already gave
-		// up on (see giveup); installing native code for it makes further
+		// A peer's publish can land on a function this interpreter already
+		// cooled (see cool); installing native code for it makes further
 		// instrumentation useful again, so resume it.
 		if a.addr < len(i.cold) && i.cold[a.addr] {
 			i.cold[a.addr] = false
@@ -1062,7 +1062,7 @@ func (i *Interpreter) safepoint() error {
 	// the indexed read here. An installed entry is NOT such a function: its
 	// loop headers are separate roots that compile on their own, and a loop
 	// that becomes hot after its entry installed still has to reach them.
-	// observe's own gates keep the already-tried roots cheap, and checkGiveup
+	// observe's own gates keep the already-tried roots cheap, and checkCool
 	// turns the function cold once nothing is left to try. A user profiler
 	// still needs per-tick samples either way.
 	if !i.isCold(f.addr) {
@@ -1124,15 +1124,15 @@ func (i *Interpreter) observe(f *frame) error {
 			return err
 		}
 	}
-	i.checkGiveup(f.addr, root)
+	i.checkCool(f.addr, root)
 	return nil
 }
 
-// checkGiveup counts one unproductive observation when addr's entry root and
+// checkCool counts one unproductive observation when addr's entry root and
 // every loop header returned by i.tracer.headers have already been attempted
-// (recorded in i.tried). giveupLimit consecutive such observations trigger
-// giveup, which permanently stops instrumenting addr. A root still waiting to
-// be attempted resets nothing and costs one map lookup.
+// (recorded in i.tried). coolLimit consecutive such observations cool addr,
+// which permanently stops instrumenting it. A root still waiting to be
+// attempted resets nothing and costs one map lookup.
 //
 // Whether anything installed is deliberately not consulted. Once every root
 // has been attempted there is nothing further to compile, so continuing to
@@ -1140,7 +1140,7 @@ func (i *Interpreter) observe(f *frame) error {
 // function that installed native code pays that overhead in the tier that
 // wins, and its installed entries keep running. checkRetire, not this, is what
 // reacts to native code that turned out not to pay for itself.
-func (i *Interpreter) checkGiveup(addr int, root anchor) {
+func (i *Interpreter) checkCool(addr int, root anchor) {
 	if !i.tried[root] {
 		return
 	}
@@ -1155,8 +1155,8 @@ func (i *Interpreter) checkGiveup(addr int, root anchor) {
 	if i.misses[addr] < math.MaxUint8 {
 		i.misses[addr]++
 	}
-	if i.misses[addr] >= giveupLimit {
-		i.giveup(addr)
+	if i.misses[addr] >= coolLimit {
+		i.cool(addr)
 	}
 }
 
@@ -1596,13 +1596,13 @@ func (i *Interpreter) enableBackedges(addr int) {
 	i.rethread(addr, true)
 }
 
-// giveup permanently stops instrumenting addr once every compilation root has
+// cool permanently stops instrumenting addr once every compilation root has
 // been tried and nothing installed: further sampling, entry/loop capture, and
 // exact back-edge observation would only pay dispatch overhead for no benefit
-// (see checkGiveup). A function already rethreaded onto the exact-backedge
+// (see checkCool). A function already rethreaded onto the exact-backedge
 // table reverts to the zero-overhead BR handler; sync still runs afterward so
 // a peer's later publish can still be adopted (see install).
-func (i *Interpreter) giveup(addr int) {
+func (i *Interpreter) cool(addr int) {
 	if addr < 0 || addr >= len(i.cold) || i.cold[addr] {
 		return
 	}
@@ -1619,7 +1619,7 @@ func (i *Interpreter) giveup(addr int) {
 // program. clearNatives is true only for a function-entry anchor (see
 // Interpreter.retire).
 func (i *Interpreter) checkRetire(a anchor, wd *watchdog, clearNatives bool) {
-	if wd.expired() {
+	if wd.failed() {
 		i.retire(a, clearNatives)
 	}
 }
@@ -1629,9 +1629,9 @@ func (i *Interpreter) checkRetire(a anchor, wd *watchdog, clearNatives bool) {
 // watchdog): it restores the shadowed threaded handler saved in i.exits,
 // clears a's function-entry call-fast-path slot in i.natives when
 // clearNatives is set (a null slot already makes callers fall back at the
-// CALL, see install), and calls giveup so addr is neither re-instrumented nor
-// recompiled. The threaded handler must be restored before giveup, because
-// giveup may rethread addr's whole table and preserves whatever i.code
+// CALL, see install), and calls cool so addr is neither re-instrumented nor
+// recompiled. The threaded handler must be restored before cool, because
+// cool may rethread addr's whole table and preserves whatever i.code
 // currently holds at every live anchor (see rethread).
 //
 // retire only ever writes i.code, i.natives, and i.cold, all local to this
@@ -1649,12 +1649,12 @@ func (i *Interpreter) retire(a anchor, clearNatives bool) {
 	if clearNatives && a.addr < len(i.natives) {
 		atomic.StorePointer(&i.natives[a.addr], nil)
 	}
-	i.giveup(a.addr)
+	i.cool(a.addr)
 }
 
 // rethread rebuilds addr's dispatch table for the given back-edge mode: true
 // installs the exact unconditional back-edge handler (see enableBackedges),
-// false reverts to the plain zero-overhead handler (see giveup).
+// false reverts to the plain zero-overhead handler (see cool).
 //
 // The rethreaded handlers are copied into the table already installed rather
 // than replacing it. Compile emits one handler per code byte, so both tables
@@ -1691,7 +1691,7 @@ func (i *Interpreter) stub(addr int) func(*Interpreter) {
 	return i.stubs[addr]
 }
 
-// isCold reports whether addr has given up (see giveup).
+// isCold reports whether addr has been cooled (see cool).
 func (i *Interpreter) isCold(addr int) bool {
 	return addr >= 0 && addr < len(i.cold) && i.cold[addr]
 }
@@ -2444,17 +2444,17 @@ func (i *Interpreter) own(addr int, val types.Value) {
 	}
 	// A hint survives only while its slot still holds it, so at most one per
 	// occupied slot is live. Twice that many entries means half are stale, and
-	// pruning then costs one pass per as many insertions as it discards.
+	// trimming then costs one pass per as many insertions as it discards.
 	if len(i.owners) >= max(2*(len(i.heap)-len(i.free)), heapRunway) {
-		i.prune()
+		i.trim()
 	}
 	i.owners[val] = addr
 }
 
-// prune drops every hint the heap no longer backs, keeping the index
+// trim drops every hint the heap no longer backs, keeping the index
 // proportional to the values the host actually holds without charging hint
 // removal to release and sweep.
-func (i *Interpreter) prune() {
+func (i *Interpreter) trim() {
 	for val, addr := range i.owners {
 		if !i.holds(addr, val) {
 			delete(i.owners, val)

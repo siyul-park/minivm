@@ -4992,7 +4992,7 @@ func TestWithProfiler(t *testing.T) {
 
 	t.Run("stops repeating rejected trace captures once a function gives up", func(t *testing.T) {
 		// A function neither frontend can compile must not keep paying for a
-		// fresh capture attempt on every observation forever: giveup should
+		// fresh capture attempt on every observation forever: cool should
 		// make the capture-attempt count plateau instead of growing once per
 		// run. Closure creation over a dynamically loaded function reference
 		// is such a shape: the static planner only resolves CLOSURE_NEW's

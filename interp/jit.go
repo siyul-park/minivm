@@ -502,12 +502,12 @@ func (w *watchdog) bridge() {
 	w.bridges++
 }
 
-// expired reports whether entries has reached retireWindow. It always resets
-// every counter so the next window starts clean; the return value tells the
-// caller whether this window's cut rate or bridge rate reached
-// retireCutThreshold, meaning the anchor should be retired (see
-// Interpreter.retire).
-func (w *watchdog) expired() bool {
+// failed reports whether this anchor lost the window it just completed: its
+// cut rate or bridge rate reached retireCutThreshold, so it should be retired
+// (see Interpreter.retire). A window shorter than retireWindow has decided
+// nothing yet; a completed one always resets every counter, so the next window
+// starts clean whichever way it went.
+func (w *watchdog) failed() bool {
 	if w.entries < retireWindow {
 		return false
 	}

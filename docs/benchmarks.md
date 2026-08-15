@@ -402,7 +402,7 @@ the rest, so kernels touching unlowered opcodes never stay native. `jit`'s eager
 policy also compiles paths that adaptive `default` correctly declines, which is why
 it loses badly on `RecursiveFib(20)`.
 
-The tables above predate the give-up and retirement rules (`docs/profile.md`,
+The tables above predate the cooling and retirement rules (`docs/profile.md`,
 `docs/jit-internals.md`) and have not been re-measured as a full cross-runtime
 sweep since. Two measured effects those rules address, both reproducible with
 the commands in section 10:
