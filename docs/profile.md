@@ -189,11 +189,17 @@ Pool members use the same rounded threshold. With a shared cache, trigger counts
 
 Sampling, trace capture, and exact back-edge observation are only worth their
 cost while compilation can still succeed. A function whose entry root and every
-loop header have all been attempted without installing native code is given up:
-it is marked cold, and a function already rethreaded onto the exact-backedge
-table reverts to the ordinary zero-overhead `BR` handler. A cold function skips
-`observe` entirely — no sampling for hotness, no capture, no compile trigger —
-while an attached profiler still receives its per-tick samples.
+loop header have all been attempted is given up: it is marked cold, and a
+function already rethreaded onto the exact-backedge table reverts to the
+ordinary zero-overhead `BR` handler. A cold function skips `observe` entirely —
+no sampling for hotness, no capture, no compile trigger — while an attached
+profiler still receives its per-tick samples.
+
+Whether a root installed anything does not matter here. Every root has been
+tried either way, so nothing further can be compiled and the instrumentation
+has no remaining purpose; installed entries stay installed and keep running.
+Withdrawing the instrumentation is worth several percent on kernels whose hot
+functions do install, so this is a deliberate rule, not an oversight.
 
 Two unproductive observations trigger give-up. Capture rejections count against
 the same per-anchor attempt limit as every other rejection, including a

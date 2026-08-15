@@ -166,6 +166,66 @@ func TestNoSpill(t *testing.T) {
 	}}}))
 }
 
+func TestPrune(t *testing.T) {
+	t.Run("keeps only what the root reaches", func(t *testing.T) {
+		source := plan{
+			anchor: anchor{addr: 1},
+			kind:   entryFunction,
+			blocks: []block{
+				{anchor: anchor{addr: 1}, term: terminator{kind: terminateBranch, edges: []edge{{anchor: anchor{addr: 1, ip: 4}, block: 1}}}},
+				{anchor: anchor{addr: 1, ip: 4}, term: terminator{kind: terminateBranchIf, edges: []edge{
+					{anchor: anchor{addr: 1, ip: 4}, block: 1},
+					{anchor: anchor{addr: 1, ip: 8}, block: 2},
+				}}},
+				{anchor: anchor{addr: 1, ip: 8}, term: terminator{kind: terminateReturn}},
+			},
+		}
+
+		got, ok := prune(source, 1)
+		require.True(t, ok)
+		require.Equal(t, anchor{addr: 1, ip: 4}, got.anchor)
+		require.Len(t, got.blocks, 2)
+		require.Equal(t, 0, got.root)
+		require.Equal(t, []edge{
+			{anchor: anchor{addr: 1, ip: 4}, block: 0},
+			{anchor: anchor{addr: 1, ip: 8}, block: 1},
+		}, got.blocks[0].term.edges)
+		require.Equal(t, 1, source.blocks[1].term.edges[0].block, "source edges stay renumbered for their own root")
+	})
+
+	t.Run("keeps the block a bridge resumes at", func(t *testing.T) {
+		source := plan{
+			anchor: anchor{addr: 1},
+			kind:   entryFunction,
+			blocks: []block{
+				{anchor: anchor{addr: 1}, term: terminator{kind: terminateBridge, ip: 0}},
+				{anchor: anchor{addr: 1, ip: 4}, bridge: true, term: terminator{kind: terminateReturn}},
+			},
+		}
+
+		got, ok := prune(source, 0)
+		require.True(t, ok)
+		require.Len(t, got.blocks, 2)
+		require.True(t, got.blocks[1].bridge)
+	})
+
+	t.Run("rejects a bridge with no resume block", func(t *testing.T) {
+		source := plan{
+			anchor: anchor{addr: 1},
+			kind:   entryFunction,
+			blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateBridge, ip: 0}}},
+		}
+
+		_, ok := prune(source, 0)
+		require.False(t, ok)
+	})
+
+	t.Run("rejects a root outside the block list", func(t *testing.T) {
+		_, ok := prune(plan{}, 0)
+		require.False(t, ok)
+	})
+}
+
 func TestStaticPlan(t *testing.T) {
 	builder := instr.NewBuilder()
 	other := builder.Label()

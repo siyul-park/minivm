@@ -1091,6 +1091,14 @@ func (i *Interpreter) safepoint() error {
 // profile collector, captures the entry trace on the first hot entry tick, and
 // captures a hot loop header sampled mid-function. A solo interpreter also fires
 // its one-shot entry compile here once the sample count crosses the threshold.
+//
+// The entry capture deliberately runs on every entry tick instead of behind the
+// threshold gate the loop capture and the compile share. That compile is
+// one-shot per root, so a trace must already be published when it fires;
+// deferring the capture to the same tick leaves a deeply recursive function with
+// only deep, unrecordable states to record from, and it then never installs.
+// tree.attempts caps the untaken cost at attemptLimit clones per anchor.
+//
 // The caller guarantees the entry fallback is still nil, so the gates that the
 // threaded safepoint used to repeat on that lookup are already satisfied.
 func (i *Interpreter) observe(f *frame) error {
@@ -1122,11 +1130,16 @@ func (i *Interpreter) observe(f *frame) error {
 
 // checkGiveup counts one unproductive observation when addr's entry root and
 // every loop header returned by i.tracer.headers have already been attempted
-// (recorded in i.tried) without installing any native code (see installed).
-// giveupLimit consecutive unproductive observations trigger giveup, which
-// permanently stops instrumenting addr. A root that has not been attempted
-// yet, or a function with anything installed, resets nothing and costs one
-// map lookup.
+// (recorded in i.tried). giveupLimit consecutive such observations trigger
+// giveup, which permanently stops instrumenting addr. A root still waiting to
+// be attempted resets nothing and costs one map lookup.
+//
+// Whether anything installed is deliberately not consulted. Once every root
+// has been attempted there is nothing further to compile, so continuing to
+// sample, capture, and observe back-edges only costs dispatch overhead - a
+// function that installed native code pays that overhead in the tier that
+// wins, and its installed entries keep running. checkRetire, not this, is what
+// reacts to native code that turned out not to pay for itself.
 func (i *Interpreter) checkGiveup(addr int, root anchor) {
 	if !i.tried[root] {
 		return
@@ -1220,13 +1233,12 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 			i.sp = int(i.journal[journalSP])
 			i.deopt()
 			if i.journal[journalTrap] == trapBridge {
-				wd.bridge()
-				next, ok := i.bridge(root, entry, cycles)
-				if ok {
-					resume = next
-					continue
+				next, ok := i.bridge(root, entry, wd, cycles)
+				if !ok {
+					break
 				}
-				break
+				resume = next
+				continue
 			}
 			switch i.journal[journalTrap] {
 			case trapOverflow:
@@ -1250,8 +1262,10 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 }
 
 // bridge runs the one opcode native code could not lower, through its own
-// threaded closure, and reports the IP native execution may resume at. The
-// trap already handed the interpreter a fully flushed, owned operand stack
+// threaded closure, records the crossing on wd, and reports the IP native
+// execution may resume at. Counting here rather than at each of the three
+// wrappers keeps the tally with the crossing it measures (see watchdog).
+// The trap already handed the interpreter a fully flushed, owned operand stack
 // (see arm64Lowerer.bridge), so the closure runs exactly as it would under
 // ordinary threaded dispatch.
 //
@@ -1263,7 +1277,8 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 // arm64Lowerer.dispatch), or this dispatch has already bridged its budget of
 // cycles — that last case keeps a bridge-dense function reaching the Run
 // loop's safepoints instead of cycling here indefinitely.
-func (i *Interpreter) bridge(root anchor, entry native, cycles int) (uint64, bool) {
+func (i *Interpreter) bridge(root anchor, entry native, wd *watchdog, cycles int) (uint64, bool) {
+	wd.bridge()
 	f := i.fr
 	if cycles >= loopBudget || f.addr != root.addr {
 		return 0, false
@@ -1322,13 +1337,12 @@ func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watch
 
 			i.deopt()
 			if i.journal[journalTrap] == trapBridge {
-				wd.bridge()
-				next, ok := i.bridge(root, entry, cycles)
-				if ok {
-					resume = next
-					continue
+				next, ok := i.bridge(root, entry, wd, cycles)
+				if !ok {
+					break
 				}
-				break
+				resume = next
+				continue
 			}
 			switch i.journal[journalTrap] {
 			case trapOverflow:
@@ -1383,13 +1397,12 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 			}
 			i.deopt()
 			if i.journal[journalTrap] == trapBridge {
-				wd.bridge()
-				next, ok := i.bridge(root, entry, cycles)
-				if ok {
-					resume = next
-					continue
+				next, ok := i.bridge(root, entry, wd, cycles)
+				if !ok {
+					break
 				}
-				break
+				resume = next
+				continue
 			}
 			switch i.journal[journalTrap] {
 			case trapOverflow:
@@ -1681,20 +1694,6 @@ func (i *Interpreter) stub(addr int) func(*Interpreter) {
 // isCold reports whether addr has given up (see giveup).
 func (i *Interpreter) isCold(addr int) bool {
 	return addr >= 0 && addr < len(i.cold) && i.cold[addr]
-}
-
-// installed reports whether any native entry is live for addr: either its
-// function-entry stub or a loop/side-exit anchor recorded in i.exits.
-func (i *Interpreter) installed(addr int) bool {
-	if i.stub(addr) != nil {
-		return true
-	}
-	for a := range i.exits {
-		if a.addr == addr {
-			return true
-		}
-	}
-	return false
 }
 
 // deopt rebuilds VM frames from the native journal after a trap. Native frames

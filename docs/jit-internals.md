@@ -118,6 +118,10 @@ A container's element kind resolves from the live heap cell when its identity is
 
 Static plans compute `noSpill` exactly as trace plans do. A store path must never spill, and before declared array types let array code plan statically this was unreachable, because such a function had no static plan at all.
 
+Every root of a function is planned from one shared block list, but each `entryLoop` plan keeps only the blocks its own root reaches (`prune`), renumbered densely. The backend emits every block a plan holds, so an unpruned header would re-emit the whole function once per header - O(headers) redundant code size, register pressure, and branch range. Reachability follows `term.edges` and their tail continuations, plus one edge no terminator names: a `terminateBridge` block resumes at the block planned immediately after it, because resumption is a fresh external entry rather than a branch. A block list that does not satisfy that layout skips the root instead of emitting a plan whose resume target is missing.
+
+`noSpill` and the loop-carried registers are recomputed per pruned plan rather than inherited. A block the header cannot reach is never emitted, so its stores must not force the plan off the spill frame and its bridges must not strip the plan's carried registers.
+
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
 ## Trace Recording

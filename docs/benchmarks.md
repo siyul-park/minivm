@@ -90,8 +90,8 @@ before making a performance claim.
 |  | Goja | 43.29 µs | 1,872 | 25 |
 |  | gpython | 35.62 µs | 5,704 | 30 |
 |  | Yaegi | 18.92 µs | 1,800 | 37 |
-| Native | minivm `default` | 1.64 µs | 1,048 | 2 |
-|  | minivm `jit` | 1.68 µs | 1,048 | 2 |
+| Native | minivm `default` | 1.27 µs | 1,048 | 2 |
+|  | minivm `jit` | 1.28 µs | 1,048 | 2 |
 |  | Wazero | **677.0 ns** | 8 | 1 |
 | Reference | Native Go | 268.6 ns | 0 | 0 |
 
@@ -313,8 +313,8 @@ before making a performance claim.
 | Interpreter | minivm `threaded` | **176.90 µs** | 6,216 | 6 |
 |  | CPython | 210.72 µs | 10 | 0 |
 |  | gpython | 701.09 µs | 90,712 | 9,350 |
-| Native | minivm `default` | **37.94 µs** | 6,216 | 6 |
-|  | minivm `jit` | 37.96 µs | 6,216 | 6 |
+| Native | minivm `default` | **16.01 µs** | 6,216 | 6 |
+|  | minivm `jit` | 15.98 µs | 6,216 | 6 |
 | Reference | Native Go | 2.66 µs | 6,144 | 3 |
 
 ## 4. Direct interpreter operations
@@ -387,7 +387,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 Within minivm, the strongest signal is the threaded-to-native gap on tight arithmetic:
 `IterativeFib` runs 510.6 ns threaded versus 40.5 ns under `default`, and `Sieve`
-11.40 µs versus 1.64 µs. That gap does not appear on call-heavy or allocation-heavy
+11.40 µs versus 1.27 µs. That gap does not appear on call-heavy or allocation-heavy
 kernels, where `threaded` is often the fastest minivm tier.
 
 In the interpreter tier the six losses cluster by shape. CPython leads `NQueens`,
@@ -416,6 +416,15 @@ the commands in section 10:
   recorded 29.9M native entries against 14.9M trace-cut exits and ran 2.64x
   slower under `default` than under `threaded`; interleaved `-benchtime=1x
   -count=3` after retirement gives 760 ms versus 676 ms, a 1.13x residual.
+
+The `Sieve` and `MatMul` native rows above were re-measured after loop-header
+plans stopped carrying blocks their own root cannot reach (`prune`, see
+`docs/jit-internals.md`). Every other row, minivm and cross-runtime alike, is
+from the earlier sweep. Interleaved `-benchtime=200ms -count=3` over the full
+19-kernel set puts that change at `Sieve` 2.04 µs to 1.29 µs and `MatMul`
+22.10 µs to 16.08 µs, with every other kernel inside run-to-run noise and a
+-2.6% geomean; the two that move are the kernels whose hot function holds more
+than one loop header.
 
 Allocation results are bounded: object-heavy kernels such as `StructTreeWalk` and
 `BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` holds 85,408 B/op, and

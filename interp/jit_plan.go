@@ -366,35 +366,118 @@ func staticPlan(input *compileInput) ([]plan, error) {
 	// array types let array code plan statically this was unreachable, because
 	// such a function had no static plan at all.
 	result.noSpill = noSpill(result.blocks)
-	result.carried = loopCarried(input.function, result.blocks)
-	// A bridge cycle re-enters through a fresh external Call, which never runs
-	// the loop-carry prologue (see arm64Lowerer.dispatch), so a carried
-	// register would be uninitialized garbage on resume. A bridge anywhere in
-	// the function keeps every local slot-backed instead.
-	for _, block := range result.blocks {
-		if block.bridge {
-			result.carried = nil
-			break
-		}
-	}
-	// The same whole-function blocks serve every root this function can be
-	// compiled at. The entry plan owns the function's ABI, and each loop
-	// header additionally gets a plan that re-enters the live frame there, so
-	// a loop that becomes hot before its function does no longer needs a
-	// recorded trace to get native code.
+	result.carried = carriedLocals(input.function, result.blocks)
+	// The entry plan owns the function's ABI and reaches every block. Each loop
+	// header additionally gets a plan that re-enters the live frame there, so a
+	// loop that becomes hot before its function does no longer needs a recorded
+	// trace to get native code. That plan carries only the blocks its own root
+	// can reach: the backend emits every block a plan holds, so sharing the
+	// whole-function list would re-emit the entire function once per header.
 	loops := headers(result.blocks)
-	plans := make([]plan, 0, 2)
+	plans := make([]plan, 0, 1+len(loops))
 	if !input.installed {
 		plans = append(plans, result)
 	}
 	for _, id := range loops {
-		header := result
-		header.anchor = result.blocks[id].anchor
+		header, ok := prune(result, id)
+		if !ok {
+			continue
+		}
 		header.kind = entryLoop
-		header.root = id
+		// Recomputed, not inherited: a block the header cannot reach is never
+		// emitted, so its stores must not force this plan off the spill frame
+		// and its bridges must not strip its loop-carried registers.
+		header.noSpill = noSpill(header.blocks)
+		header.carried = carriedLocals(input.function, header.blocks)
 		plans = append(plans, header)
 	}
 	return plans, nil
+}
+
+// carriedLocals returns the locals a plan may hold in registers across its
+// blocks. A bridge cycle re-enters through a fresh external Call, which never
+// runs the loop-carry prologue (see arm64Lowerer.dispatch), so a carried
+// register would be uninitialized garbage on resume: a bridge anywhere in the
+// plan keeps every local slot-backed instead.
+func carriedLocals(fn *types.Function, blocks []block) []int {
+	for _, block := range blocks {
+		if block.bridge {
+			return nil
+		}
+	}
+	return loopCarried(fn, blocks)
+}
+
+// prune returns the plan rooted at root: the blocks reachable from it,
+// renumbered densely, anchored where root is. It reports false when the block
+// list does not satisfy the bridge-successor layout described below, in which
+// case the caller must skip this root rather than emit a plan missing a resume
+// target.
+func prune(p plan, root int) (plan, bool) {
+	if root < 0 || root >= len(p.blocks) {
+		return plan{}, false
+	}
+	keep := make([]bool, len(p.blocks))
+	order := []int{root}
+	keep[root] = true
+	visit := func(next int) {
+		if next < 0 || next >= len(p.blocks) || keep[next] {
+			return
+		}
+		keep[next] = true
+		order = append(order, next)
+	}
+	for n := 0; n < len(order); n++ {
+		source := p.blocks[order[n]]
+		for _, edge := range source.term.edges {
+			visit(edge.block)
+			for _, tail := range edge.tail {
+				visit(tail)
+			}
+		}
+		// No edge names a bridge resume block: resumption is a fresh external
+		// entry, not a branch (see terminateBridge). The planner appends it
+		// immediately after the block that bridges into it.
+		if source.term.kind == terminateBridge {
+			resume := order[n] + 1
+			if resume >= len(p.blocks) || !p.blocks[resume].bridge {
+				return plan{}, false
+			}
+			visit(resume)
+		}
+	}
+
+	ids := make([]int, len(p.blocks))
+	out := plan{anchor: p.blocks[root].anchor, hoist: p.hoist}
+	out.blocks = make([]block, 0, len(order))
+	for id, live := range keep {
+		if !live {
+			ids[id] = noBlock
+			continue
+		}
+		ids[id] = len(out.blocks)
+		out.blocks = append(out.blocks, p.blocks[id])
+	}
+	out.root = ids[root]
+	for id := range out.blocks {
+		// The edges are the source plan's until copied, and every root shares
+		// one block list, so rewriting them in place would corrupt its peers.
+		edges := append([]edge(nil), out.blocks[id].term.edges...)
+		for n, e := range edges {
+			if e.block != noBlock {
+				edges[n].block = ids[e.block]
+			}
+			if len(e.tail) > 0 {
+				tail := make([]int, len(e.tail))
+				for k, t := range e.tail {
+					tail[k] = ids[t]
+				}
+				edges[n].tail = tail
+			}
+		}
+		out.blocks[id].term.edges = edges
+	}
+	return out, true
 }
 
 // headers returns the block IDs a backward edge targets: this function's loop
@@ -1350,19 +1433,6 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 	return true
 }
 
-// arrayKind resolves an ARRAY_GET/ARRAY_DELETE result kind statically from a
-// known constant heap ref's concrete primitive typed-array itab.
-//
-// A declared-array-type fallback (mirroring structFieldKind's declared-
-// struct-type resolution) was tried and reverted: unlike a struct's declared
-// type, a container's declared array type let staticPlan populate step.seen
-// for ARRAY_GET on a non-constant container, and lowering that combination
-// alongside a native CALL in the same plan corrupted native execution state
-// (observed as a runtime.mallocgc SIGSEGV on the next native call boundary,
-// not a clean deopt) instead of just guarding and falling back like
-// structFieldKind's equivalent case does. Left as follow-up work: root-cause
-// the guarded ARRAY_GET/native-CALL interaction in jit_arm64.go before
-// reintroducing a declared-type fallback here.
 // arrayKind resolves an array's element kind. A container whose identity is
 // known resolves from the live heap cell; otherwise the declared array type
 // answers, exactly as a declared struct type answers structFieldKind. Both are

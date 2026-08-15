@@ -39,15 +39,6 @@ type counters struct {
 	exits  []*prof.Counter
 }
 
-// retireWindow is the number of native entries a watchdog observes before
-// judging whether an installed anchor is paying for itself (see watchdog).
-const retireWindow = 1024
-
-// retireCutThreshold is the minimum count of trace-cut exits (see
-// prof.ExitTraceCut) within one retireWindow that marks the anchor as a net
-// loss rather than a healthy kernel's normal loop-exit or guard traffic.
-const retireCutThreshold = retireWindow / 4
-
 // watchdog counts native entries, trace-cut exits, and bridge cycles for one
 // installed anchor. Unlike counters, it is always live regardless of
 // i.profiler: a trace-cut exit is native code that knowingly stops
@@ -64,17 +55,6 @@ type watchdog struct {
 	entries uint32
 	cuts    uint32
 	bridges uint32
-}
-
-// newWatchdog precomputes, for each of entry's exit descriptors, whether its
-// reason is prof.ExitTraceCut, so the watchdog's hot path only ever indexes a
-// []bool keyed by descriptor ID.
-func newWatchdog(entry native) *watchdog {
-	cut := make([]bool, len(entry.exits))
-	for id, exit := range entry.exits {
-		cut[id] = exit.reason == prof.ExitTraceCut
-	}
-	return &watchdog{cut: cut}
 }
 
 type compileResult struct {
@@ -288,6 +268,15 @@ const nativeFrameLimit = 128
 // yield over many iterations while still polling for cancellation and fuel.
 const loopBudget = 1 << 13
 
+// retireWindow is the number of native entries a watchdog observes before
+// judging whether an installed anchor is paying for itself (see watchdog).
+const retireWindow = 1024
+
+// retireCutThreshold is the minimum count of trace-cut exits (see
+// prof.ExitTraceCut) within one retireWindow that marks the anchor as a net
+// loss rather than a healthy kernel's normal loop-exit or guard traffic.
+const retireCutThreshold = retireWindow / 4
+
 func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 	kinds := fn.Slots()
 	upvals := types.Kinds(fn.Captures)
@@ -479,6 +468,17 @@ func (m counters) yield() {
 }
 
 // enter counts one invocation of the installed native entry.
+// newWatchdog precomputes, for each of entry's exit descriptors, whether its
+// reason is prof.ExitTraceCut, so the watchdog's hot path only ever indexes a
+// []bool keyed by descriptor ID.
+func newWatchdog(entry native) *watchdog {
+	cut := make([]bool, len(entry.exits))
+	for id, exit := range entry.exits {
+		cut[id] = exit.reason == prof.ExitTraceCut
+	}
+	return &watchdog{cut: cut}
+}
+
 func (w *watchdog) enter() {
 	w.entries++
 }
