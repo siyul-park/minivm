@@ -1454,17 +1454,17 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		ctx.push(marker)
 		return false
 	}
-	popped := true
+	// The BLR slot path cannot serve a call to the function being emitted: it
+	// has published no slot yet. So a self callee either takes selfCall or is
+	// rejected outright - falling through would compute the callee frame from a
+	// stack that still carries the marker.
 	if op.callee == ctx.addr {
-		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
-			if l.selfCall(ctx, op, target, params) {
-				return true
-			}
-			ctx.push(marker)
-			return false
+		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 &&
+			l.selfCall(ctx, op, target, params) {
+			return true
 		}
 		ctx.push(marker)
-		popped = false
+		return false
 	}
 
 	a := ctx.assembler
@@ -1475,16 +1475,14 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.LDR(callee, natives, int16(op.callee*8)))
 	ready := a.Label()
 	a.Emit(arm64.CBNZLabel(callee, ready))
-	if popped {
-		ctx.push(marker)
-	}
+	// The threaded fallback re-executes the whole CALL, so the exit has to see
+	// the marker this lowering already consumed.
+	ctx.push(marker)
 	if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
 		return false
 	}
 	a.Bind(ready)
-	if popped {
-		ctx.pop()
-	}
+	ctx.pop()
 
 	// A real BLR hands this caller's flushed operand stack to the interpreter
 	// when the callee traps (the unwind adopts the caller frames), and passes
