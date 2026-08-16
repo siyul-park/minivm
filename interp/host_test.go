@@ -187,22 +187,22 @@ func TestNewHostObject(t *testing.T) {
 
 	t.Run("keeps host field access out of speculative capture", func(t *testing.T) {
 		for _, tc := range []struct {
-			name   string
-			code   []instr.Instruction
-			values []types.Value
-			want   int32
+			name string
+			code []instr.Instruction
+			args []types.Value
+			want int32
 		}{
 			{
-				name:   "read",
-				code:   []instr.Instruction{instr.New(instr.STRUCT_GET), instr.New(instr.DROP)},
-				values: []types.Value{types.I32(0)},
-				want:   2,
+				name: "read",
+				code: []instr.Instruction{instr.New(instr.STRUCT_GET), instr.New(instr.DROP)},
+				args: []types.Value{types.I32(0)},
+				want: 2,
 			},
 			{
-				name:   "write",
-				code:   []instr.Instruction{instr.New(instr.STRUCT_SET)},
-				values: []types.Value{types.I32(0), types.I32(8)},
-				want:   8,
+				name: "write",
+				code: []instr.Instruction{instr.New(instr.STRUCT_SET)},
+				args: []types.Value{types.I32(0), types.I32(8)},
+				want: 8,
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -212,8 +212,8 @@ func TestNewHostObject(t *testing.T) {
 				host, err := interp.NewHostObject(i, struct{ Value int32 }{Value: 2})
 				require.NoError(t, err)
 				require.NoError(t, i.Push(host))
-				for _, value := range tc.values {
-					require.NoError(t, i.Push(value))
+				for _, arg := range tc.args {
+					require.NoError(t, i.Push(arg))
 				}
 				require.NoError(t, i.Run(context.Background()))
 				require.NoError(t, i.Close())
