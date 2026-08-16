@@ -1449,6 +1449,9 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		return false
 	}
 	if op.callee == ctx.addr {
+		if !l.checkReturns(target) {
+			return false
+		}
 		marker := ctx.pop()
 		if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
 			ctx.push(marker)
@@ -2375,6 +2378,9 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 		}
 	} else {
 		closureRef = 0
+	}
+	if op.callee == ctx.addr && !l.checkReturns(target) {
+		return false
 	}
 	ctx.pop()
 	if ctx.count() < params || !l.checkArgs(ctx, target, params) {
