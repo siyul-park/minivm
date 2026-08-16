@@ -182,7 +182,7 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 
 		code := clone.instrs[f.addr]
 		op := instr.Opcode(code[f.ip])
-		if reason := t.unrecordableReason(&clone, op); reason != prof.CaptureReasonNone {
+		if reason := t.reason(&clone, op); reason != prof.CaptureReasonNone {
 			return t.publish(a, tree, tr, aborted, reason)
 		}
 
@@ -748,7 +748,7 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 	return hs
 }
 
-func (t *tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
+func (t *tracer) reason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
 	// A host object's reads and writes run against the interpreter it was built
 	// with rather than the one executing the opcode. Check only the field-access
 	// operand, whose position is defined by the instruction stack contract.

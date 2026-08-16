@@ -4967,7 +4967,7 @@ func TestWithProfiler(t *testing.T) {
 		// is such a shape: the static planner only resolves CLOSURE_NEW's
 		// capture count from a directly known constant function (see
 		// applyStep in interp/jit_plan.go), and the tracer cannot record
-		// CLOSURE_NEW at all (see unrecordableReason in interp/trace.go), so
+		// CLOSURE_NEW at all (see tracer.reason), so
 		// routing the reference through a local defeats both frontends.
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
