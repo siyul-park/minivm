@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -470,6 +471,34 @@ func TestTracer_Capture(t *testing.T) {
 		require.Nil(t, tracer.rootAt(anchor{}))
 	})
 
+	t.Run("refuses to step a host object read", func(t *testing.T) {
+		// A HostObject boxes into the interpreter it was built with, so stepping
+		// its read would allocate on the interpreter being cloned from rather
+		// than on the clone. The heap limit here leaves no headroom: one stolen
+		// cell is the difference between running and exhausting it.
+		tracer := newTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.DUP),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.STRUCT_GET),
+			instr.New(instr.DROP),
+			instr.New(instr.DROP),
+		})
+		i := New(prog, withTracer(tracer), WithHeap(3), WithHeapLimit(3))
+		defer i.Close()
+
+		host, err := NewHostObject(i, struct{ Value int32 }{Value: 4})
+		require.NoError(t, err)
+		require.NoError(t, i.Push(host))
+		before := len(i.heap)
+
+		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		require.Nil(t, result.trace)
+		require.Equal(t, prof.CaptureReasonHostObject, result.reason)
+		require.Equal(t, before, len(i.heap))
+
+		require.NoError(t, i.Run(context.Background()))
+	})
 }
 
 func TestTracer_OrdersAnchors(t *testing.T) {

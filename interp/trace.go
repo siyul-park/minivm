@@ -749,6 +749,26 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 }
 
 func (t *tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
+	// A host object's reads and writes run against the interpreter it was built
+	// with rather than the one executing the opcode - HostObject.Field boxes
+	// into that interpreter's heap. Stepping one here would allocate on the
+	// interpreter this walk is a speculative clone of, so refuse the trace
+	// instead of mutating live state. Only the operands an access can name are
+	// examined: a container is the top of the stack for a read and sits under
+	// the value for a write.
+	for depth := 1; depth <= 2 && depth <= i.sp; depth++ {
+		box := i.stack[i.sp-depth]
+		if box.Kind() != types.KindRef {
+			continue
+		}
+		addr := box.Ref()
+		if addr < 0 || addr >= len(i.heap) {
+			continue
+		}
+		if _, ok := i.heap[addr].(*HostObject); ok {
+			return prof.CaptureReasonHostObject
+		}
+	}
 	if instr.IsCall(op) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
 			return prof.CaptureReasonNone

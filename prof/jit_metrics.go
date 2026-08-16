@@ -82,6 +82,7 @@ var (
 		CaptureReasonAttemptLimit:   "attempt-limit",
 		CaptureReasonInvalidAnchor:  "invalid-anchor",
 		CaptureReasonHostCall:       "host-call",
+		CaptureReasonHostObject:     "host-object",
 		CaptureReasonTailClosure:    "tail-closure",
 		CaptureReasonUnsupportedOp:  "unsupported-op",
 		CaptureReasonNestedTerminal: "nested-terminal",
