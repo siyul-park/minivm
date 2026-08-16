@@ -9,6 +9,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -162,9 +163,9 @@ func TestNewHostObject(t *testing.T) {
 
 		require.Equal(t, types.BoxI32(1), host.Field(host.Typ.FieldIndex("Count")))
 		bump := host.Field(host.Typ.FieldIndex("Bump"))
-		context := host.Field(host.Typ.FieldIndex("Context"))
+		contextValue := host.Field(host.Typ.FieldIndex("Context"))
 		touch := host.Field(host.Typ.FieldIndex("Touch"))
-		require.Equal(t, []types.Ref{types.Ref(bump.Ref()), types.Ref(context.Ref()), types.Ref(touch.Ref())}, host.Refs(nil))
+		require.Equal(t, []types.Ref{types.Ref(bump.Ref()), types.Ref(contextValue.Ref()), types.Ref(touch.Ref())}, host.Refs(nil))
 		fn, err := i.Load(bump.Ref())
 		require.NoError(t, err)
 		returns, err := fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxI32(4)})
@@ -182,6 +183,51 @@ func TestNewHostObject(t *testing.T) {
 		var got hostFields
 		require.NoError(t, i.Unmarshal(host, &got))
 		require.Equal(t, int32(9), got.Count)
+	})
+
+	t.Run("keeps host field access out of speculative capture", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			code []instr.Instruction
+			args []types.Value
+			want int32
+		}{
+			{
+				name: "read",
+				code: []instr.Instruction{instr.New(instr.STRUCT_GET), instr.New(instr.DROP)},
+				args: []types.Value{types.I32(0)},
+				want: 2,
+			},
+			{
+				name: "write",
+				code: []instr.Instruction{instr.New(instr.STRUCT_SET)},
+				args: []types.Value{types.I32(0), types.I32(8)},
+				want: 8,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				p := prof.New()
+				prog := program.New(tc.code)
+				i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1), interp.WithThreshold(0))
+				host, err := interp.NewHostObject(i, struct{ Value int32 }{Value: 2})
+				require.NoError(t, err)
+				require.NoError(t, i.Push(host))
+				for _, arg := range tc.args {
+					require.NoError(t, i.Push(arg))
+				}
+				require.NoError(t, i.Run(context.Background()))
+				require.Equal(t, types.BoxI32(tc.want), host.Field(host.Typ.FieldIndex("Value")))
+				require.NoError(t, i.Close())
+
+				value, ok := p.Metric("vm_jit_trace_captures_total",
+					prof.Label{Key: "func", Value: "0"},
+					prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "outcome", Value: "rejected"},
+					prof.Label{Key: "reason", Value: "host-object"})
+				require.True(t, ok)
+				require.Equal(t, float64(1), value)
+			})
+		}
 	})
 
 	t.Run("uses built-in planner and converters with a custom codec", func(t *testing.T) {

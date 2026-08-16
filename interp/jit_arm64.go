@@ -1445,18 +1445,26 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		return false
 	}
 	params := len(target.Typ.Params)
-	if ctx.count() < params+1 {
+	if ctx.count() < params+1 || op.callee > 4095 || !l.checkReturns(target) {
 		return false
 	}
+
+	marker := ctx.pop()
+	if marker.fn != op.callee || !l.checkArgs(ctx, target, params) {
+		ctx.push(marker)
+		return false
+	}
+	popped := true
 	if op.callee == ctx.addr {
-		marker := ctx.pop()
-		if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
+		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
+			if l.selfCall(ctx, op, target, params) {
+				return true
+			}
+			ctx.push(marker)
 			return false
 		}
-		return l.selfCall(ctx, op, target, params)
-	}
-	if !l.checkReturns(target) {
-		return false
+		ctx.push(marker)
+		popped = false
 	}
 
 	a := ctx.assembler
@@ -1464,21 +1472,20 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	natives := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(natives, vCtrl, int16(journalNatives*8)))
 	callee := a.Reg(asm.RegTypeInt, asm.Width64)
-	if op.callee > 4095 {
-		return false
-	}
 	a.Emit(arm64.LDR(callee, natives, int16(op.callee*8)))
 	ready := a.Label()
 	a.Emit(arm64.CBNZLabel(callee, ready))
+	if popped {
+		ctx.push(marker)
+	}
 	if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
 		return false
 	}
 	a.Bind(ready)
-
-	marker := ctx.pop()
-	if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
-		return false
+	if popped {
+		ctx.pop()
 	}
+
 	// A real BLR hands this caller's flushed operand stack to the interpreter
 	// when the callee traps (the unwind adopts the caller frames), and passes
 	// each ref argument to the callee as an owned param it releases on RETURN.
@@ -1534,10 +1541,12 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		a.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(len(localKinds))))
 	}
 	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
-	a.Emit(arm64.MOV(arm64.X0, vCtrl))
-	a.Emit(arm64.BLR(callee))
-	// Restore the spill base before anything else: both the normal path and
-	// the trap path below may reload a spilled value.
+	a.Emit(
+		arm64.STR(calleeBP, vCtrl, int16(journalBP*8)),
+		arm64.STR(calleeSP, vCtrl, int16(journalSP*8)),
+		arm64.MOV(arm64.X0, vCtrl),
+		arm64.BLR(callee),
+	)
 	a.Emit(arm64.LDR(arm64.X26, arm64.SP, 24))
 
 	vCtrl = ctx.pin(scratchCtrl)
@@ -1558,6 +1567,8 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
 	a.Emit(
 		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
+		arm64.STR(oldBP, vCtrl, int16(journalBP*8)),
+		arm64.STR(oldSP, vCtrl, int16(journalSP*8)),
 		arm64.LDR(arm64.LR, arm64.SP, 16),
 		arm64.ADDI(arm64.SP, arm64.SP, 32),
 	)
@@ -2363,6 +2374,9 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	} else {
 		closureRef = 0
 	}
+	if op.callee == ctx.addr && !l.checkReturns(target) {
+		return false
+	}
 	ctx.pop()
 	if ctx.count() < params || !l.checkArgs(ctx, target, params) {
 		return false
@@ -2411,38 +2425,14 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	return true
 }
 
-// selfCall emits a framed native recursion into this trace's own head:
-// flush state, check the frame budget, swap bp/sp, BL, propagate traps by
-// recording the live frame chain, and reload everything afterwards because the
-// callee owns every allocatable register.
-//
-// Both call forms reach here, so the preconditions of that BL belong here
-// rather than at either call site. ctx.head is the function's real entry only
-// for a whole-function plan: a loop plan's head is its loop header, which has
-// no parameter prologue. An inlined frame's recursion likewise re-enters the
-// callee, not this head, and a closure body would need its captures rebound.
+// selfCall lowers recursion through the function entry.
 func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, params int) bool {
-	// ctx.head is this plan's entry, and the BL below re-enters it with the
-	// prologue's own frame layout. That is only the callee's real entry when the
-	// live frame is the plan's own: an inlined frame is some other function's
-	// activation, so branching to ctx.head from inside one lays A's parameter
-	// prologue over B's frame. ctx.kind is checked with it because a loop plan's
-	// head is a loop header with no prologue at all.
 	if ctx.kind != entryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !l.checkReturns(target) {
 		return false
 	}
 
 	a := ctx.assembler
-	// This BL re-enters compiled code from the top; when the callee traps, the
-	// journal unwind adopts THIS caller's flushed operand stack and the
-	// interpreter releases each stack ref it later pops. Frame isolation once
-	// suggested a local-backed deferral was safe (recursion cannot address an
-	// ancestor's locals), but the callee-trap unwind adopts the caller's
-	// flushed stack regardless of which slot backs the deferral, and the
-	// recursion may also run arbitrary GLOBAL_SET/UPVAL_SET on shared storage
-	// this trace cannot see. So every deferred ref must own its retain before
-	// the call. (The committing flush below also rejects any deferred it still
-	// sees, so this sweep is what keeps such traces compiling.)
+	// Own deferred refs before the callee can mutate their backing storage.
 	if !l.ownRefs(ctx) {
 		return false
 	}

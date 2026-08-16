@@ -182,7 +182,7 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 
 		code := clone.instrs[f.addr]
 		op := instr.Opcode(code[f.ip])
-		if reason := t.unrecordableReason(&clone, op); reason != prof.CaptureReasonNone {
+		if reason := t.reason(&clone, op); reason != prof.CaptureReasonNone {
 			return t.publish(a, tree, tr, aborted, reason)
 		}
 
@@ -748,7 +748,28 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 	return hs
 }
 
-func (t *tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
+func (t *tracer) reason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
+	// A host object's reads and writes run against the interpreter it was built
+	// with rather than the one executing the opcode. Check only the field-access
+	// operand, whose position is defined by the instruction stack contract.
+	depth := 0
+	switch op {
+	case instr.STRUCT_GET:
+		depth = 2
+	case instr.STRUCT_SET:
+		depth = 3
+	}
+	if depth != 0 && i.sp >= depth {
+		box := i.stack[i.sp-depth]
+		if box.Kind() == types.KindRef {
+			addr := box.Ref()
+			if addr >= 0 && addr < len(i.heap) {
+				if _, ok := i.heap[addr].(*HostObject); ok {
+					return prof.CaptureReasonHostObject
+				}
+			}
+		}
+	}
 	if instr.IsCall(op) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
 			return prof.CaptureReasonNone
