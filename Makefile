@@ -1,4 +1,9 @@
-coverage-min ?= 72.8
+# Measured on the CI runner, which is amd64. The arm64 JIT backend does not
+# compile there, but the portable planner, tracer, and JIT core do - and the
+# tests that exercise them skip on amd64, so they count as uncovered. The
+# number is therefore lower than an arm64 run reports. Raising it needs
+# portable tests for those files, not a different threshold.
+coverage-min ?= 63.5
 benchmark-pr-time ?= 100ms
 benchmark-time ?= 1s
 benchmark-count ?= 5
