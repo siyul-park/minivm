@@ -271,7 +271,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 			inst := instr.Instruction(input.function.Code[ip:])
 			next := ip + inst.Width()
 			step := step{op: inst.Opcode(), args: args(inst), fn: input.address, ip: ip}
-			if (inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL) && len(flow) > 0 {
+			if instr.IsCall(inst.Opcode()) && len(flow) > 0 {
 				callee := flow[len(flow)-1]
 				if callee.calleeKnown {
 					step.callee = callee.callee
@@ -667,7 +667,7 @@ func carried(fn *types.Function, blocks []block) []int {
 			}
 		}
 		for _, step := range block.steps {
-			if step.op == instr.CALL || step.op == instr.RETURN_CALL {
+			if instr.IsCall(step.op) {
 				return nil
 			}
 			if !inside {
@@ -717,12 +717,11 @@ func hoistable(fn *types.Function, blocks []block) *hoist {
 	banned := make([]bool, len(locals))
 	for _, block := range blocks {
 		for _, step := range block.steps {
-			switch step.op {
-			case instr.CALL, instr.RETURN_CALL:
+			if instr.IsCall(step.op) {
 				return nil
-			case instr.LOCAL_SET, instr.LOCAL_TEE:
-				local := int(step.args[0])
-				if local < len(banned) {
+			}
+			if instr.WritesLocal(step.op) {
+				if local := int(step.args[0]); local < len(banned) {
 					banned[local] = true
 				}
 			}
@@ -1061,8 +1060,7 @@ func wire(p *plan, roots map[anchor]int) {
 func noSpill(blocks []block) bool {
 	for _, block := range blocks {
 		for _, step := range block.steps {
-			switch step.op {
-			case instr.ARRAY_SET, instr.STRUCT_SET:
+			if instr.StoresContainer(step.op) {
 				return true
 			}
 		}
@@ -1504,7 +1502,7 @@ func localTypes(fn *types.Function) []types.Type {
 func callFree(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
-		if inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL {
+		if instr.IsCall(inst.Opcode()) {
 			return false
 		}
 		ip += inst.Width()

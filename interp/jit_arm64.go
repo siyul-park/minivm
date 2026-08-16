@@ -830,7 +830,7 @@ func (l arm64Lowerer) fuse(ctx *lowering, ops []step, idx int) int {
 		width += operand
 	}
 	if consumer.ip != source.ip+width || source.op != instr.CONST_GET ||
-		(consumer.op != instr.CALL && consumer.op != instr.RETURN_CALL) {
+		!instr.IsCall(consumer.op) {
 		return 0
 	}
 	constant := int(source.args[0])
@@ -4556,7 +4556,7 @@ func lower(ctx *lowering, plan plan) bool {
 	ctx.leaf = true
 	for _, block := range plan.blocks {
 		for _, step := range block.steps {
-			if step.op == instr.CALL || step.op == instr.RETURN_CALL {
+			if instr.IsCall(step.op) {
 				ctx.leaf = false
 			}
 		}
