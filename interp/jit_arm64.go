@@ -1591,7 +1591,8 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	l.clearLocals(ctx)
 	l.reload(ctx)
 	for idx, typ := range rets {
-		ctx.push(value{reg: regs[idx], kind: typ.Kind(), raw: true})
+		out := typ.Kind()
+		ctx.push(value{reg: regs[idx], kind: out, raw: out != types.KindRef})
 	}
 	return true
 }
@@ -2556,7 +2557,8 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 		}
 	}
 	for k, typ := range rets {
-		ctx.push(value{reg: regs[k], kind: typ.Kind(), raw: true})
+		out := typ.Kind()
+		ctx.push(value{reg: regs[k], kind: out, raw: out != types.KindRef})
 	}
 	return true
 }
@@ -2566,7 +2568,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 func (l arm64Lowerer) checkReturns(target *types.Function) bool {
 	for _, typ := range target.Typ.Returns {
 		switch typ.Kind() {
-		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
 		default:
 			return false
 		}
