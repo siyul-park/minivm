@@ -3286,18 +3286,63 @@ func (l arm64Lowerer) stringLen(ctx *lowering, op step) bool {
 	return true
 }
 
+// elemShape describes how a typed array stores one element: the concrete heap
+// itab a container must carry, the byte offset its element data begins at, the
+// log2 element width, and whether a loaded element is an unboxed payload. The
+// primitive arrays pack their payloads and share a slice header at offset zero;
+// a ref array stores boxed elements after its own header.
+type elemShape struct {
+	itab  uintptr
+	base  int16
+	scale uint8
+	raw   bool
+}
+
+// elemShapes is the one place the element storage layout is written down.
+// arrayGet, arraySet, arrayLen, and the planner's hoist eligibility all resolve
+// through it, so a new element kind is one row rather than an edit to each.
+var elemShapes = []struct {
+	kind  types.Kind
+	shape elemShape
+}{
+	{types.KindI1, elemShape{itab: heapArrayI1, raw: true}},
+	{types.KindI8, elemShape{itab: heapArrayI8, raw: true}},
+	{types.KindI32, elemShape{itab: heapArrayI32, scale: 2, raw: true}},
+	{types.KindI64, elemShape{itab: heapArrayI64, scale: 3, raw: true}},
+	{types.KindF32, elemShape{itab: heapArrayF32, scale: 2, raw: true}},
+	{types.KindF64, elemShape{itab: heapArrayF64, scale: 3, raw: true}},
+	{types.KindRef, elemShape{itab: heapArrayRef, base: int16(arrayElems)}},
+}
+
+// elemShapeOf resolves the storage shape of an element kind.
+func elemShapeOf(kind types.Kind) (elemShape, bool) {
+	for _, row := range elemShapes {
+		if row.kind == kind {
+			return row.shape, true
+		}
+	}
+	return elemShape{}, false
+}
+
+// elemShapeByItab resolves the storage shape of a container's concrete itab.
+func elemShapeByItab(want uintptr) (elemShape, bool) {
+	for _, row := range elemShapes {
+		if row.shape.itab == want {
+			return row.shape, true
+		}
+	}
+	return elemShape{}, false
+}
+
 func (l arm64Lowerer) arrayLen(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	base := int16(0)
-	switch op.shape.itab {
-	case heapArrayI1, heapArrayI8, heapArrayI32, heapArrayI64, heapArrayF32, heapArrayF64:
-	case heapArrayRef:
-		base = int16(arrayElems)
-	default:
+	shape, ok := elemShapeByItab(op.shape.itab)
+	if !ok {
 		return false
 	}
+	base := shape.base
 	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
@@ -3327,39 +3372,11 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		return false
 	}
 	kind := op.seen.Kind()
-	var want uintptr
-	var base int16
-	var scale uint8
-	var raw bool
-	switch kind {
-	case types.KindI1:
-		want = heapArrayI1
-		raw = true
-	case types.KindI8:
-		want = heapArrayI8
-		raw = true
-	case types.KindI32:
-		want = heapArrayI32
-		scale = 2
-		raw = true
-	case types.KindI64:
-		want = heapArrayI64
-		scale = 3
-		raw = true
-	case types.KindF32:
-		want = heapArrayF32
-		scale = 2
-		raw = true
-	case types.KindF64:
-		want = heapArrayF64
-		scale = 3
-		raw = true
-	case types.KindRef:
-		want = heapArrayRef
-		base = int16(arrayElems)
-	default:
+	shape, ok := elemShapeOf(kind)
+	if !ok {
 		return false
 	}
+	want, base, scale, raw := shape.itab, shape.base, shape.scale, shape.raw
 	if op.shape.itab != 0 && op.shape.itab != want {
 		return false
 	}
@@ -3450,32 +3467,11 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) (bool, bool) {
 	}
 	container := ctx.values[len(ctx.values)-3]
 	kind := ctx.values[len(ctx.values)-1].kind
-	var want uintptr
-	var base int16
-	var scale uint8
-	switch kind {
-	case types.KindI1:
-		want = heapArrayI1
-	case types.KindI8:
-		want = heapArrayI8
-	case types.KindI32:
-		want = heapArrayI32
-		scale = 2
-	case types.KindI64:
-		want = heapArrayI64
-		scale = 3
-	case types.KindF32:
-		want = heapArrayF32
-		scale = 2
-	case types.KindF64:
-		want = heapArrayF64
-		scale = 3
-	case types.KindRef:
-		want = heapArrayRef
-		base = int16(arrayElems)
-	default:
+	shape, ok := elemShapeOf(kind)
+	if !ok {
 		return false, false
 	}
+	want, base, scale := shape.itab, shape.base, shape.scale
 	if op.shape.itab != 0 && op.shape.itab != want {
 		return false, false
 	}
