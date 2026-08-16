@@ -2380,7 +2380,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	if ctx.count() < params || !l.checkArgs(ctx, target, params) {
 		return false
 	}
-	if op.callee == ctx.addr && ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
+	if op.callee == ctx.addr {
 		return l.selfCall(ctx, op, target, params)
 	}
 	if len(ctx.frames) >= 4 {
@@ -2429,16 +2429,12 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 // recording the live frame chain, and reload everything afterwards because the
 // callee owns every allocatable register.
 //
-// Call lowering selects this path only when ctx.head is the real function
-// entry for the live frame. A loop header has no entry prologue, and an inline
-// frame belongs to another activation; captured targets also need their
-// captures rebound, so all three cases stay on their ordinary call paths.
+// ctx.head is this plan's entry, so it is safe only for the plan's own
+// whole-function frame and a non-capturing target.
 func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, params int) bool {
-	// call and directCall select this path only for a whole-function entry with
-	// its own live frame and a non-capturing target. The BL below re-enters that
-	// plan's entry prologue; an inlined frame or loop head must use the ordinary
-	// call path instead.
-	if !l.checkReturns(target) {
+	// ctx.head is this plan's entry, so it is safe only for the plan's own
+	// whole-function frame and a non-capturing target.
+	if ctx.kind != entryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !l.checkReturns(target) {
 		return false
 	}
 
