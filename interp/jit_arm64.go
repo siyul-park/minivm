@@ -32,7 +32,6 @@ const (
 const (
 	sliceData   = 0
 	sliceLen    = 8
-	arrayElems  = int(unsafe.Offsetof(types.Array{}.Elems))
 	structTyp   = int(unsafe.Offsetof(types.Struct{}.Typ))
 	structData  = int(unsafe.Offsetof(types.Struct{}.Data))
 	closureUpvs = int(unsafe.Offsetof(types.Closure{}.Upvals))
@@ -62,23 +61,6 @@ var (
 	tagI64 = types.Tag(types.KindI64)
 	tagF32 = types.Tag(types.KindF32)
 	tagRef = types.Tag(types.KindRef)
-)
-
-var (
-	heapI32       = itab(types.I32(0))
-	heapF32       = itab(types.F32(0))
-	heapF64       = itab(types.F64(0))
-	heapArrayI1   = itab(types.TypedArray[bool](nil))
-	heapArrayI8   = itab(types.TypedArray[int8](nil))
-	heapArrayI32  = itab(types.TypedArray[int32](nil))
-	heapArrayI64  = itab(types.TypedArray[int64](nil))
-	heapArrayF32  = itab(types.TypedArray[float32](nil))
-	heapArrayF64  = itab(types.TypedArray[float64](nil))
-	heapArrayRef  = itab((*types.Array)(nil))
-	heapString    = itab(types.String(""))
-	heapStruct    = itab((*types.Struct)(nil))
-	heapError     = itab((*types.Error)(nil))
-	heapCoroutine = itab((*coroutine)(nil))
 )
 
 func newCompiler() (*compiler, error) {
@@ -3279,48 +3261,6 @@ func (l arm64Lowerer) stringLen(ctx *lowering, op step) bool {
 // log2 element width, and whether a loaded element is an unboxed payload. The
 // primitive arrays pack their payloads and share a slice header at offset zero;
 // a ref array stores boxed elements after its own header.
-type elemShape struct {
-	itab  uintptr
-	base  int16
-	scale uint8
-	raw   bool
-}
-
-// elemShapes is the one place the element storage layout is written down.
-// arrayGet, arraySet, arrayLen, and the planner's hoist eligibility all resolve
-// through it, so a new element kind is one row rather than an edit to each.
-var elemShapes = []struct {
-	kind  types.Kind
-	shape elemShape
-}{
-	{types.KindI1, elemShape{itab: heapArrayI1, raw: true}},
-	{types.KindI8, elemShape{itab: heapArrayI8, raw: true}},
-	{types.KindI32, elemShape{itab: heapArrayI32, scale: 2, raw: true}},
-	{types.KindI64, elemShape{itab: heapArrayI64, scale: 3, raw: true}},
-	{types.KindF32, elemShape{itab: heapArrayF32, scale: 2, raw: true}},
-	{types.KindF64, elemShape{itab: heapArrayF64, scale: 3, raw: true}},
-	{types.KindRef, elemShape{itab: heapArrayRef, base: int16(arrayElems)}},
-}
-
-// elemShapeOf resolves the storage shape of an element kind.
-func elemShapeOf(kind types.Kind) (elemShape, bool) {
-	for _, row := range elemShapes {
-		if row.kind == kind {
-			return row.shape, true
-		}
-	}
-	return elemShape{}, false
-}
-
-// elemShapeByItab resolves the storage shape of a container's concrete itab.
-func elemShapeByItab(want uintptr) (elemShape, bool) {
-	for _, row := range elemShapes {
-		if row.shape.itab == want {
-			return row.shape, true
-		}
-	}
-	return elemShape{}, false
-}
 
 func (l arm64Lowerer) arrayLen(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {

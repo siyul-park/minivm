@@ -2,6 +2,7 @@ package interp
 
 import (
 	"errors"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/prof"
@@ -277,6 +278,75 @@ const retireWindow = 1024
 // prof.ExitTraceCut) within one retireWindow that marks the anchor as a net
 // loss rather than a healthy kernel's normal loop-exit or guard traffic.
 const retireCutThreshold = retireWindow / 4
+
+// arrayElems is where a ref array's elements begin. It sits here with the
+// shape table rather than with the lowering offsets because the portable
+// planner reads it through elemShapes.
+const arrayElems = int(unsafe.Offsetof(types.Array{}.Elems))
+
+// The heap itabs the backends and the planner compare against. They are
+// runtime type identities rather than lowering detail, so they belong with
+// the portable JIT core: jit_plan.go resolves element layout on every
+// architecture, including ones with no native backend at all.
+var (
+	heapI32       = itab(types.I32(0))
+	heapF32       = itab(types.F32(0))
+	heapF64       = itab(types.F64(0))
+	heapArrayI1   = itab(types.TypedArray[bool](nil))
+	heapArrayI8   = itab(types.TypedArray[int8](nil))
+	heapArrayI32  = itab(types.TypedArray[int32](nil))
+	heapArrayI64  = itab(types.TypedArray[int64](nil))
+	heapArrayF32  = itab(types.TypedArray[float32](nil))
+	heapArrayF64  = itab(types.TypedArray[float64](nil))
+	heapArrayRef  = itab((*types.Array)(nil))
+	heapString    = itab(types.String(""))
+	heapStruct    = itab((*types.Struct)(nil))
+	heapError     = itab((*types.Error)(nil))
+	heapCoroutine = itab((*coroutine)(nil))
+)
+
+type elemShape struct {
+	itab  uintptr
+	base  int16
+	scale uint8
+	raw   bool
+}
+
+// elemShapes is the one place the element storage layout is written down.
+// arrayGet, arraySet, arrayLen, and the planner's hoist eligibility all resolve
+// through it, so a new element kind is one row rather than an edit to each.
+var elemShapes = []struct {
+	kind  types.Kind
+	shape elemShape
+}{
+	{types.KindI1, elemShape{itab: heapArrayI1, raw: true}},
+	{types.KindI8, elemShape{itab: heapArrayI8, raw: true}},
+	{types.KindI32, elemShape{itab: heapArrayI32, scale: 2, raw: true}},
+	{types.KindI64, elemShape{itab: heapArrayI64, scale: 3, raw: true}},
+	{types.KindF32, elemShape{itab: heapArrayF32, scale: 2, raw: true}},
+	{types.KindF64, elemShape{itab: heapArrayF64, scale: 3, raw: true}},
+	{types.KindRef, elemShape{itab: heapArrayRef, base: int16(arrayElems)}},
+}
+
+// elemShapeOf resolves the storage shape of an element kind.
+func elemShapeOf(kind types.Kind) (elemShape, bool) {
+	for _, row := range elemShapes {
+		if row.kind == kind {
+			return row.shape, true
+		}
+	}
+	return elemShape{}, false
+}
+
+// elemShapeByItab resolves the storage shape of a container's concrete itab.
+func elemShapeByItab(want uintptr) (elemShape, bool) {
+	for _, row := range elemShapes {
+		if row.shape.itab == want {
+			return row.shape, true
+		}
+	}
+	return elemShape{}, false
+}
 
 func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 	kinds := fn.Slots()
