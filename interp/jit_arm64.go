@@ -1452,15 +1452,8 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		return false
 	}
 	params := len(target.Typ.Params)
-	if ctx.count() < params+1 {
+	if ctx.count() < params+1 || !l.checkReturns(target) {
 		return false
-	}
-	for _, typ := range target.Typ.Returns {
-		switch typ.Kind() {
-		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
-		default:
-			return false
-		}
 	}
 
 	a := ctx.assembler
@@ -2438,17 +2431,11 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	// activation, so branching to ctx.head from inside one lays A's parameter
 	// prologue over B's frame. ctx.kind is checked with it because a loop plan's
 	// head is a loop header with no prologue at all.
-	if ctx.kind != entryFunction || len(ctx.frames) != 1 {
+	if ctx.kind != entryFunction || len(ctx.frames) != 1 || !l.checkReturns(target) {
 		return false
 	}
+
 	a := ctx.assembler
-	for _, typ := range target.Typ.Returns {
-		switch typ.Kind() {
-		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
-		default:
-			return false
-		}
-	}
 	// This BL re-enters compiled code from the top; when the callee traps, the
 	// journal unwind adopts THIS caller's flushed operand stack and the
 	// interpreter releases each stack ref it later pops. Frame isolation once
@@ -2557,6 +2544,19 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	}
 	for k, typ := range rets {
 		ctx.push(value{reg: regs[k], kind: typ.Kind(), raw: true})
+	}
+	return true
+}
+
+// checkReturns verifies every return kind fits the registers a native call
+// hands results back in.
+func (l arm64Lowerer) checkReturns(target *types.Function) bool {
+	for _, typ := range target.Typ.Returns {
+		switch typ.Kind() {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+		default:
+			return false
+		}
 	}
 	return true
 }
