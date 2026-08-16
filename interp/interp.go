@@ -731,8 +731,9 @@ func (i *Interpreter) Reset() {
 			}
 		case *types.Array:
 			if len(i.arrays.values) < keepArrays {
-				clear(value.Elems)
-				*value = types.Array{}
+				clear(value.Elems[:cap(value.Elems)])
+				value.Typ = nil
+				value.Elems = value.Elems[:0]
 				i.arrays.put(value)
 			}
 		}
@@ -2268,14 +2269,28 @@ func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
 	return types.NewStruct(typ)
 }
 
-// newArray reuses only headers invalidated by Reset. Element storage remains
-// fresh so construction keeps its zeroing and memory-retention behavior.
+// newArray reuses headers invalidated by Reset.
 func (i *Interpreter) newArray(typ *types.ArrayType, elems []types.Boxed) *types.Array {
 	if array, ok := i.arrays.get(); ok {
 		*array = types.Array{Typ: typ, Elems: elems}
 		return array
 	}
 	return &types.Array{Typ: typ, Elems: elems}
+}
+
+// newArraySized reuses the backing storage retained with a reset array header.
+func (i *Interpreter) newArraySized(typ *types.ArrayType, size int) *types.Array {
+	array, ok := i.arrays.get()
+	if !ok {
+		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
+	}
+	if cap(array.Elems) < size {
+		array.Elems = make([]types.Boxed, size)
+	} else {
+		array.Elems = array.Elems[:size]
+	}
+	array.Typ = typ
+	return array
 }
 
 func (i *Interpreter) reuse(val types.Value) (int, bool) {
