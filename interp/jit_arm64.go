@@ -111,6 +111,7 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	a.Emit(arm64.LDR(active, vCtrl, int16(journalActive*8)))
 	l.dispatch(ctx, vCtrl)
 	a.Bind(ctx.head)
+	l.zeroLocals(ctx)
 }
 
 // dispatch reads the journal's entry-IP cell and, when the Go wrapper set it
@@ -1535,16 +1536,6 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.MOV(ctx.pinTo(oldBP), calleeBP))
 
 	localKinds := target.Slots()
-	if len(localKinds) > params {
-		stack := ctx.pin(scratchStack)
-		base := l.base(ctx, stack)
-		for idx := params; idx < len(localKinds); idx++ {
-			zero := types.Zero(localKinds[idx])
-			reg := a.Reg(asm.RegTypeInt, asm.Width64)
-			a.Emit(arm64.LDI(reg, uint64(zero))...)
-			a.Emit(arm64.STR(reg, base, int16((ctx.sp()-params+idx)*8)))
-		}
-	}
 	calleeSP := calleeBP
 	if len(localKinds) > 0 {
 		calleeSP = a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2730,6 +2721,33 @@ func (l arm64Lowerer) checkArgs(ctx *lowering, target *types.Function, params in
 	return true
 }
 
+// zeroLocals clears the entry frame's non-parameter locals, matching the clear
+// threaded CALL performs before it transfers control. The callee owns this, not
+// its callers: a frame opens on stack space an earlier frame may have left
+// populated, and every entry path - the Go wrapper, directCall's BLR, and
+// selfCall's BL to head - arrives here with bp already pointing at the new
+// frame. Skipping it hands the callee stale boxed words, so its first LOCAL_SET
+// releases a ref it never owned and RETURN teardown releases the rest.
+//
+// Only a whole-function entry may do this. A loop plan re-enters a frame whose
+// locals are live, and module code has no caller to have cleared them.
+func (l arm64Lowerer) zeroLocals(ctx *lowering) {
+	if ctx.kind != entryFunction || len(ctx.frames) == 0 {
+		return
+	}
+	kinds := ctx.frames[0].kinds
+	if len(kinds) <= ctx.params {
+		return
+	}
+	a := ctx.assembler
+	base := l.base(ctx, ctx.pin(scratchStack))
+	for idx := ctx.params; idx < len(kinds); idx++ {
+		reg := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDI(reg, uint64(types.Zero(kinds[idx])))...)
+		a.Emit(arm64.STR(reg, base, int16(idx*8)))
+	}
+}
+
 // initLocals fills frame f with call arguments in its parameter slots and
 // a raw zero in every remaining local, matching threaded tail()/CALL's clear.
 // Each slot is loaded and dirty so the next flush commits it to the VM stack.
@@ -3559,7 +3577,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) (bool, bool) {
 		}
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
-	if op.terminal || kind == types.KindRef {
+	if op.terminal {
 		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op)), true
 	}
 	return true, false
@@ -3746,7 +3764,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) (bool, bool) {
 		a.Emit(arm64.STRR(stored, dataPtr, idx))
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
-	if op.terminal || kind == types.KindRef {
+	if op.terminal {
 		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op)), true
 	}
 	return true, false

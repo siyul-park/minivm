@@ -90,6 +90,7 @@ type lowering struct {
 
 	addr       int
 	loopRoot   int
+	params     int
 	returns    int
 	kind       entryKind
 	leaf       bool
@@ -418,6 +419,7 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	}
 	if input.function.Typ != nil {
 		ctx.returns = len(input.function.Typ.Returns)
+		ctx.params = len(input.function.Typ.Params)
 	}
 	ctx.frames = append(ctx.frames, newActivation(input.address, input.function, 0, 0))
 	return ctx
