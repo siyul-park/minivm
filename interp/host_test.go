@@ -216,6 +216,7 @@ func TestNewHostObject(t *testing.T) {
 					require.NoError(t, i.Push(arg))
 				}
 				require.NoError(t, i.Run(context.Background()))
+				require.Equal(t, types.BoxI32(tc.want), host.Field(host.Typ.FieldIndex("Value")))
 				require.NoError(t, i.Close())
 
 				value, ok := p.Metric("vm_jit_trace_captures_total",
@@ -225,7 +226,6 @@ func TestNewHostObject(t *testing.T) {
 					prof.Label{Key: "reason", Value: "host-object"})
 				require.True(t, ok)
 				require.Equal(t, float64(1), value)
-				require.Equal(t, types.BoxI32(tc.want), host.Field(host.Typ.FieldIndex("Value")))
 			})
 		}
 	})

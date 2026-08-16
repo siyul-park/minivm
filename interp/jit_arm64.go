@@ -1451,13 +1451,12 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	if op.callee == ctx.addr {
 		marker := ctx.pop()
 		if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
+			ctx.push(marker)
 			return false
 		}
 		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
 			return l.selfCall(ctx, op, target, params)
 		}
-		// Unsafe self-calls use the ordinary BLR slot path below. Put the
-		// marker back so that path consumes the complete CALL operand stack.
 		ctx.push(marker)
 	}
 	if !l.checkReturns(target) {
