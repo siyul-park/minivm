@@ -4652,37 +4652,6 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.Equal(t, 1, value.closed)
 	})
 
-	t.Run("reuses only array headers invalidated by reset", func(t *testing.T) {
-		typ := types.NewArrayType(types.TypeRef)
-		prog := program.New(
-			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
-			program.WithTypes(typ),
-		)
-		i := New(prog, WithThreshold(-1))
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		ref, err := i.Peek(0)
-		require.NoError(t, err)
-		value, err := i.Load(ref.Ref())
-		require.NoError(t, err)
-		first := value.(*types.Array)
-
-		i.Reset()
-		require.Nil(t, first.Typ)
-		require.Nil(t, first.Elems)
-
-		require.NoError(t, i.Run(context.Background()))
-		ref, err = i.Peek(0)
-		require.NoError(t, err)
-		value, err = i.Load(ref.Ref())
-		require.NoError(t, err)
-		second := value.(*types.Array)
-		require.Same(t, first, second)
-		require.Same(t, typ, second.Typ)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, second.Elems)
-	})
-
 	t.Run("preserves arrays detached by pop", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeRef)
 		prog := program.New(

@@ -3500,7 +3500,7 @@ var (
 					if i.sp < size+1 {
 						panic(ErrStackUnderflow)
 					}
-					val := i.newArray(typ, make([]types.Boxed, size))
+					val := i.newArraySized(typ, size)
 					copy(val.Elems, i.stack[i.sp-size-1:i.sp-1])
 					i.sp -= size
 					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -3610,7 +3610,7 @@ var (
 					if size < 0 {
 						panic(ErrSegmentationFault)
 					}
-					val := i.newArray(typ, make([]types.Boxed, size))
+					val := i.newArraySized(typ, int(size))
 					for j := range val.Elems {
 						val.Elems[j] = types.BoxedNull
 					}
