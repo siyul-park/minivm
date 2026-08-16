@@ -1445,25 +1445,26 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		return false
 	}
 	params := len(target.Typ.Params)
-	if ctx.count() < params+1 {
+	if ctx.count() < params+1 || op.callee > 4095 || !l.checkReturns(target) {
 		return false
 	}
+
+	marker := ctx.pop()
+	if marker.fn != op.callee || !l.checkArgs(ctx, target, params) {
+		ctx.push(marker)
+		return false
+	}
+	popped := true
 	if op.callee == ctx.addr {
-		if !l.checkReturns(target) {
-			return false
-		}
-		marker := ctx.pop()
-		if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
+		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
+			if l.selfCall(ctx, op, target, params) {
+				return true
+			}
 			ctx.push(marker)
 			return false
 		}
-		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
-			return l.selfCall(ctx, op, target, params)
-		}
 		ctx.push(marker)
-	}
-	if !l.checkReturns(target) {
-		return false
+		popped = false
 	}
 
 	a := ctx.assembler
@@ -1471,21 +1472,20 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	natives := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(natives, vCtrl, int16(journalNatives*8)))
 	callee := a.Reg(asm.RegTypeInt, asm.Width64)
-	if op.callee > 4095 {
-		return false
-	}
 	a.Emit(arm64.LDR(callee, natives, int16(op.callee*8)))
 	ready := a.Label()
 	a.Emit(arm64.CBNZLabel(callee, ready))
+	if popped {
+		ctx.push(marker)
+	}
 	if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
 		return false
 	}
 	a.Bind(ready)
-
-	marker := ctx.pop()
-	if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
-		return false
+	if popped {
+		ctx.pop()
 	}
+
 	// A real BLR hands this caller's flushed operand stack to the interpreter
 	// when the callee traps (the unwind adopts the caller frames), and passes
 	// each ref argument to the callee as an owned param it releases on RETURN.
