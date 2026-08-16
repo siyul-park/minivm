@@ -741,14 +741,10 @@ func hoistable(fn *types.Function, blocks []block) *hoist {
 				if depth > len(stack) || step.op == instr.ARRAY_SET && step.terminal {
 					return
 				}
-				switch step.shape.itab {
-				case itab(types.TypedArray[bool](nil)),
-					itab(types.TypedArray[int8](nil)),
-					itab(types.TypedArray[int32](nil)),
-					itab(types.TypedArray[int64](nil)),
-					itab(types.TypedArray[float32](nil)),
-					itab(types.TypedArray[float64](nil)):
-				default:
+				// Only the primitive typed arrays hoist: a ref array's
+				// elements carry ownership, which a cached slice header
+				// cannot account for.
+				if shape, ok := elemShapeByItab(step.shape.itab); !ok || !shape.raw {
 					return
 				}
 				local := stack[len(stack)-depth]
