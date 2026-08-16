@@ -162,6 +162,15 @@ type activation struct {
 	returns  int
 }
 
+// isLoadedAt reports whether local idx currently lives in a register. It is the
+// one test for that: locals holds whichever register a value was last
+// materialized into, and a native call clears the state without clearing that
+// name, so a reader that consults locals alone sees a register the callee has
+// since overwritten (see docs/jit-internals.md).
+func (f *activation) isLoadedAt(idx int) bool {
+	return f.state[idx]&localLoaded != 0
+}
+
 // carriedLocal is one root-frame scalar whose register is authoritative until
 // a native loop exits. slot remains the VM home committed by cold paths.
 type carriedLocal struct {

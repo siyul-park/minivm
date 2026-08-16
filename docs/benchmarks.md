@@ -138,7 +138,7 @@ before making a performance claim.
 |  | Goja | 1.37 ms | 4,680 | 39 |
 |  | gpython | 3.90 ms | 10,158,202 | 109,494 |
 |  | Yaegi | 10.98 ms | 13,059,853 | 394,041 |
-| Native | minivm `default` | 487.40 µs | 0 | 0 |
+| Native | minivm `default` | 67.80 µs | 0 | 0 |
 |  | minivm `jit` | 695.33 µs | 0 | 0 |
 |  | Wazero | **42.34 µs** | 8 | 1 |
 | Reference | Native Go | 15.72 µs | 0 | 0 |

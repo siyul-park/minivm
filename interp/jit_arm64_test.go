@@ -1418,6 +1418,77 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 	require.Greater(t, entries, float64(0), "self-recursive function must retain native coverage")
 }
 
+// TestARM64_SelfCallFrameLocals protects the frame teardown that follows a
+// native self-call. The callee owns every allocatable register, so the caller's
+// cached local registers do not survive the BL; the teardown has to read each
+// ref local from its VM stack slot instead of boxing the register it used to
+// live in. Reading the stale register released whatever the recursion left
+// behind, which faulted inside the Go runtime rather than diverging quietly.
+//
+// The shape matters: the ref local is read before it is written, which is what
+// gives it a cached register live across the call, and the recursion has to run
+// deep enough to reach the entry compile.
+func TestARM64_SelfCallFrameLocals(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Params(types.TypeI32).
+		Locals(types.TypeRef)
+	base := b.Label()
+	fn := b.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
+		BrIf(base).
+		Emit(
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.REF_IS_NULL),
+			instr.New(instr.I32_CONST, 1000), instr.New(instr.I32_MUL),
+			instr.New(instr.CONST_GET, 1), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).
+		Bind(base).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+		MustBuild()
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.I32_CONST, 8),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		},
+		program.WithConstants(fn, types.String("s")),
+	)
+
+	profile := prof.New()
+	jit := New(prog, WithProfiler(profile), WithTick(1))
+	threaded := New(prog, WithThreshold(-1))
+	for n := range 16 {
+		require.NoError(t, jit.Run(context.Background()), "iteration %d", n)
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+		require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+		jit.Reset()
+		threaded.Reset()
+	}
+	require.NoError(t, threaded.Close())
+	require.NoError(t, jit.Close())
+
+	var entries float64
+	for _, metric := range profile.Metrics() {
+		if metric.Name == "vm_jit_native_entries_total" {
+			entries += metric.Value
+		}
+	}
+	require.Greater(t, entries, float64(0), "expected native code to be installed")
+}
+
 // TestARM64_MutualEntries protects nested native entry frames.
 func TestARM64_MutualEntries(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
