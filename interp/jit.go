@@ -162,15 +162,6 @@ type activation struct {
 	returns  int
 }
 
-// isLoadedAt reports whether local idx currently lives in a register. It is the
-// one test for that: locals holds whichever register a value was last
-// materialized into, and a native call clears the state without clearing that
-// name, so a reader that consults locals alone sees a register the callee has
-// since overwritten (see docs/jit-internals.md).
-func (f *activation) isLoadedAt(idx int) bool {
-	return f.state[idx]&localLoaded != 0
-}
-
 // carriedLocal is one root-frame scalar whose register is authoritative until
 // a native loop exits. slot remains the VM home committed by cold paths.
 type carriedLocal struct {
@@ -215,6 +206,16 @@ type sideExit struct {
 // dedicated asm-level API — it is purely an interp-side JIT policy decision
 // (see noSpill), not a generic assembler concern.
 type noSpillArch struct{ asm.Arch }
+
+// elemShape is how one array element kind is stored: the concrete container
+// itab, the byte offset its data begins at, the shift from index to byte, and
+// whether the element is raw rather than boxed.
+type elemShape struct {
+	itab  uintptr
+	base  int16
+	scale uint8
+	raw   bool
+}
 
 const (
 	scratchStack = iota
@@ -314,13 +315,6 @@ var (
 	heapCoroutine = itab((*coroutine)(nil))
 )
 
-type elemShape struct {
-	itab  uintptr
-	base  int16
-	scale uint8
-	raw   bool
-}
-
 // elemShapes is the one place the element storage layout is written down.
 // arrayGet, arraySet, arrayLen, and the planner's hoist eligibility all resolve
 // through it, so a new element kind is one row rather than an edit to each.
@@ -375,6 +369,15 @@ func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 		opBase:  opBase,
 		returns: returns,
 	}
+}
+
+// isLoadedAt reports whether local idx currently lives in a register. It is the
+// one test for that: locals holds whichever register a value was last
+// materialized into, and a native call clears the state without clearing that
+// name, so a reader that consults locals alone sees a register the callee has
+// since overwritten (see docs/jit-internals.md).
+func (f *activation) isLoadedAt(idx int) bool {
+	return f.state[idx]&localLoaded != 0
 }
 
 func (c *compiler) Close() error {
