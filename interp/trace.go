@@ -240,7 +240,7 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 
 		t.finish(&clone, &st, op)
 		tr.ops = append(tr.ops, st)
-		if op == instr.CALL || op == instr.RETURN_CALL {
+		if instr.IsCall(op) {
 			hasCall = true
 		}
 		// A backward edge to a different header starts a distinct loop trace.
@@ -749,7 +749,7 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 }
 
 func (t *tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
-	if (op == instr.CALL || op == instr.RETURN_CALL) && i.sp > 0 {
+	if instr.IsCall(op) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
 			return prof.CaptureReasonNone
 		}

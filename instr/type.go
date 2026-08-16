@@ -17,7 +17,33 @@ type Type struct {
 	Widths   []int
 	Pop      []Kind
 	Push     []Kind
+	Flags    Flag
 }
+
+// Flag records the properties of an opcode that consumers outside the decoder
+// keep asking about. They are static facts about the instruction, so they live
+// with the rest of its metadata rather than being re-derived from opcode lists
+// at each use site.
+type Flag uint8
+
+const (
+	// FlagCall transfers control into another function.
+	FlagCall Flag = 1 << iota
+	// FlagLocalWrite assigns the local slot named by the first operand.
+	FlagLocalWrite
+	// FlagContainerStore writes an element or field into a heap container.
+	FlagContainerStore
+)
+
+// IsCall reports whether op transfers control into another function.
+func IsCall(op Opcode) bool { return TypeOf(op).Flags&FlagCall != 0 }
+
+// WritesLocal reports whether op assigns the local slot its first operand names.
+func WritesLocal(op Opcode) bool { return TypeOf(op).Flags&FlagLocalWrite != 0 }
+
+// StoresContainer reports whether op writes an element or field into a heap
+// container.
+func StoresContainer(op Opcode) bool { return TypeOf(op).Flags&FlagContainerStore != 0 }
 
 var types = map[Opcode]Type{
 	NOP:         {Mnemonic: "nop"},
@@ -33,9 +59,9 @@ var types = map[Opcode]Type{
 
 	SELECT: {Mnemonic: "select"},
 
-	CALL:        {Mnemonic: "call"},
+	CALL:        {Mnemonic: "call", Flags: FlagCall},
 	RETURN:      {Mnemonic: "return"},
-	RETURN_CALL: {Mnemonic: "return_call"},
+	RETURN_CALL: {Mnemonic: "return_call", Flags: FlagCall},
 
 	YIELD:      {Mnemonic: "yield", Pop: []Kind{KindAny}, Push: []Kind{KindAny}},
 	RESUME:     {Mnemonic: "resume", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindRef}},
@@ -47,8 +73,8 @@ var types = map[Opcode]Type{
 	GLOBAL_TEE: {Mnemonic: "global.tee", Widths: []int{2}},
 
 	LOCAL_GET: {Mnemonic: "local.get", Widths: []int{1}},
-	LOCAL_SET: {Mnemonic: "local.set", Widths: []int{1}, Pop: []Kind{KindAny}},
-	LOCAL_TEE: {Mnemonic: "local.tee", Widths: []int{1}},
+	LOCAL_SET: {Mnemonic: "local.set", Widths: []int{1}, Pop: []Kind{KindAny}, Flags: FlagLocalWrite},
+	LOCAL_TEE: {Mnemonic: "local.tee", Widths: []int{1}, Flags: FlagLocalWrite},
 
 	CONST_GET: {Mnemonic: "const.get", Widths: []int{2}},
 
@@ -245,7 +271,7 @@ var types = map[Opcode]Type{
 
 	ARRAY_LEN:    {Mnemonic: "array.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
 	ARRAY_GET:    {Mnemonic: "array.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
-	ARRAY_SET:    {Mnemonic: "array.set", Pop: []Kind{KindAny, KindI32, KindRef}},
+	ARRAY_SET:    {Mnemonic: "array.set", Pop: []Kind{KindAny, KindI32, KindRef}, Flags: FlagContainerStore},
 	ARRAY_FILL:   {Mnemonic: "array.fill", Pop: []Kind{KindI32, KindAny, KindI32, KindRef}},
 	ARRAY_COPY:   {Mnemonic: "array.copy", Pop: []Kind{KindI32, KindI32, KindRef, KindI32, KindRef}},
 	ARRAY_APPEND: {Mnemonic: "array.append"},
@@ -256,7 +282,7 @@ var types = map[Opcode]Type{
 	STRUCT_NEW_DEFAULT: {Mnemonic: "struct.new_default", Widths: []int{2}, Push: []Kind{KindRef}},
 
 	STRUCT_GET: {Mnemonic: "struct.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
-	STRUCT_SET: {Mnemonic: "struct.set", Pop: []Kind{KindAny, KindI32, KindRef}},
+	STRUCT_SET: {Mnemonic: "struct.set", Pop: []Kind{KindAny, KindI32, KindRef}, Flags: FlagContainerStore},
 
 	MAP_NEW:         {Mnemonic: "map.new", Widths: []int{2}},
 	MAP_NEW_DEFAULT: {Mnemonic: "map.new_default", Widths: []int{2}, Pop: []Kind{KindI32}, Push: []Kind{KindRef}},
