@@ -1127,6 +1127,105 @@ func TestCompiler_Compile(t *testing.T) {
 	})
 }
 
+// TestARM64_SelfCallFromInlinedFrame protects selfCall's live-frame
+// precondition. selfCall lowers recursion as a BL back to ctx.head, which
+// re-enters the plan's entry prologue - correct only when the live frame is
+// that plan's own. It used to check neither ctx.kind nor len(ctx.frames), and
+// the trace frontend reaches it with a foreign frame live: any CALL in a
+// function-entry-anchored trace whose callee ref matches the anchor is recorded
+// as an ordinary self CALL, including one nested inside an already-inlined
+// callee's body. So A inlining B (frames 1 -> 2) and B calling back into A
+// arrives at selfCall with two frames, and the BL lays A's parameter prologue
+// over B's activation.
+//
+// The mutual recursion below reaches that state by passing both callees as ref
+// parameters, so no callee is a static constant, A's static plan is rejected
+// outright, and the trace frontend is the only one left. B carries three locals
+// A does not, so the two frame shapes differ; with matching shapes the
+// corruption happens to be survivable, and with differing ones the process
+// segfaults inside the Go runtime on main.
+func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	// A(n, selfA, selfB): if n <= 0 return 0; return 1 + selfB(n-1, selfA, selfB)
+	aBuilder := types.NewFunctionBuilder(nil).
+		Params(types.TypeI32, types.TypeRef, types.TypeRef).
+		Returns(types.TypeI32)
+	baseA := aBuilder.Label()
+	aFn := aBuilder.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
+		BrIf(baseA).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).
+		Bind(baseA).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	// B(n, selfA, selfB): three extra locals widen B's frame past A's, then it
+	// calls back into A - the self call that reaches selfCall with B's frame
+	// live. Local 5 stays live across that call so the frame cannot be elided.
+	bBuilder := types.NewFunctionBuilder(nil).
+		Params(types.TypeI32, types.TypeRef, types.TypeRef).
+		Locals(types.TypeI32, types.TypeI32, types.TypeI32).
+		Returns(types.TypeI32)
+	baseB := bBuilder.Label()
+	bFn := bBuilder.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
+		BrIf(baseB).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 3),
+			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4),
+			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 5),
+			instr.New(instr.LOCAL_GET, 3),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 5), instr.New(instr.I32_SUB), instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).
+		Bind(baseB).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	// Depth is varied so the trace tree keeps rebuilding and the self call is
+	// reached from inlined frames at many recursion depths.
+	for depth := 1; depth <= 16; depth++ {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(depth)),
+				instr.New(instr.CONST_GET, 0), // selfA
+				instr.New(instr.CONST_GET, 1), // selfB
+				instr.New(instr.CONST_GET, 0), // callee
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(aFn, bFn),
+		)
+
+		jit := New(prog, WithThreshold(0), WithTick(1))
+		threaded := New(prog, WithThreshold(-1))
+		for iter := 0; iter < 125; iter++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "depth %d iteration %d", depth, iter)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "depth %d iteration %d", depth, iter)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+	}
+}
+
 // SelfCallWithRefArg protects a self-recursive function that forwards its own
 // callee ref as an argument. flush used to refuse a committing flush whenever
 // any live operand was a KindRef, including a ref parameter merely passed
@@ -1190,6 +1289,102 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 		}
 	}
 	require.Greater(t, entries, float64(0))
+}
+
+// TestARM64_RefReturn protects the retain ordering at a native entry frame's
+// RETURN. ret took the return value's retain after guardFrame had already read
+// the backing local's refcount, and guardFrame deopts whenever rc <= pending.
+// A function that allocates a node into a local and returns it sits exactly at
+// that boundary - rc == pending == 1, the node being held only by that local -
+// so every such RETURN deopted: 512 guard-value exits against 1024 native
+// entries for the program below, which is the shape benchmarks/memory_test.go's
+// structTreeWalk and binaryTrees builders use. Taking the retain first raises rc
+// above pending, and the following releaseFrame brings it back down to the one
+// live reference the caller now owns.
+//
+// A spurious deopt is invisible to a value or refcount oracle, because the
+// interpreter finishes the RETURN correctly either way. The guard-value exit
+// count is therefore the assertion that carries this test; the parity checks
+// alongside it only rule out the retain leaking or freeing.
+func TestARM64_RefReturn(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	t.Run("entry frame returns a singly-owned frame local", func(t *testing.T) {
+		const iterations = int32(512)
+		nodeType := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("val")))
+		// build(v): n = STRUCT_NEW_DEFAULT; n.val = v; return n. Local 1 is the
+		// only holder of n at RETURN, so its refcount equals the frame's pending
+		// count and guardFrame's rc <= pending check is exactly straddled.
+		buildFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+			Params(types.TypeI32).
+			Locals(types.TypeRef).
+			Emit(
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.STRUCT_SET),
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN),
+			).
+			MustBuild()
+
+		// The module driver calls build in a loop so build's own entry warms up
+		// and compiles within a single Run.
+		b := program.NewBuilder()
+		b.Type(nodeType)
+		b.Const(buildFn)
+		b.Locals(types.TypeI32, types.TypeI32) // 0=i, 1=sum
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(iterations))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(buildFn).Emit(instr.CALL)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		jit := New(prog, WithProfiler(profile))
+		threaded := New(prog, WithThreshold(-1))
+		for n := 0; n < 64; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(iterations*(iterations-1)/2), got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		var entries, guardValueExits float64
+		for _, metric := range profile.Metrics() {
+			switch metric.Name {
+			case "vm_jit_native_entries_total":
+				entries += metric.Value
+			case "vm_jit_native_exits_total":
+				for _, label := range metric.Labels {
+					if label.Key == "reason" && label.Value == "guard-value" {
+						guardValueExits += metric.Value
+					}
+				}
+			}
+		}
+		require.Greater(t, entries, float64(0), "expected native code to be installed")
+		require.Zero(t, guardValueExits, "guardFrame spuriously deopted a RETURN of a singly-owned frame local")
+	})
 }
 
 // DeferredRefElision protects Phase 3 of the JIT refcount-elision work:
