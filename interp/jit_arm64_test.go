@@ -1127,6 +1127,105 @@ func TestCompiler_Compile(t *testing.T) {
 	})
 }
 
+// TestARM64_SelfCallFromInlinedFrame protects selfCall's live-frame
+// precondition. selfCall lowers recursion as a BL back to ctx.head, which
+// re-enters the plan's entry prologue - correct only when the live frame is
+// that plan's own. It used to check neither ctx.kind nor len(ctx.frames), and
+// the trace frontend reaches it with a foreign frame live: any CALL in a
+// function-entry-anchored trace whose callee ref matches the anchor is recorded
+// as an ordinary self CALL, including one nested inside an already-inlined
+// callee's body. So A inlining B (frames 1 -> 2) and B calling back into A
+// arrives at selfCall with two frames, and the BL lays A's parameter prologue
+// over B's activation.
+//
+// The mutual recursion below reaches that state by passing both callees as ref
+// parameters, so no callee is a static constant, A's static plan is rejected
+// outright, and the trace frontend is the only one left. B carries three locals
+// A does not, so the two frame shapes differ; with matching shapes the
+// corruption happens to be survivable, and with differing ones the process
+// segfaults inside the Go runtime on main.
+func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	// A(n, selfA, selfB): if n <= 0 return 0; return 1 + selfB(n-1, selfA, selfB)
+	aBuilder := types.NewFunctionBuilder(nil).
+		Params(types.TypeI32, types.TypeRef, types.TypeRef).
+		Returns(types.TypeI32)
+	baseA := aBuilder.Label()
+	aFn := aBuilder.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
+		BrIf(baseA).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).
+		Bind(baseA).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	// B(n, selfA, selfB): three extra locals widen B's frame past A's, then it
+	// calls back into A - the self call that reaches selfCall with B's frame
+	// live. Local 5 stays live across that call so the frame cannot be elided.
+	bBuilder := types.NewFunctionBuilder(nil).
+		Params(types.TypeI32, types.TypeRef, types.TypeRef).
+		Locals(types.TypeI32, types.TypeI32, types.TypeI32).
+		Returns(types.TypeI32)
+	baseB := bBuilder.Label()
+	bFn := bBuilder.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
+		BrIf(baseB).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 3),
+			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4),
+			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 5),
+			instr.New(instr.LOCAL_GET, 3),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 5), instr.New(instr.I32_SUB), instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).
+		Bind(baseB).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	// Depth is varied so the trace tree keeps rebuilding and the self call is
+	// reached from inlined frames at many recursion depths.
+	for depth := 1; depth <= 16; depth++ {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(depth)),
+				instr.New(instr.CONST_GET, 0), // selfA
+				instr.New(instr.CONST_GET, 1), // selfB
+				instr.New(instr.CONST_GET, 0), // callee
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(aFn, bFn),
+		)
+
+		jit := New(prog, WithThreshold(0), WithTick(1))
+		threaded := New(prog, WithThreshold(-1))
+		for iter := 0; iter < 125; iter++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "depth %d iteration %d", depth, iter)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "depth %d iteration %d", depth, iter)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+	}
+}
+
 // SelfCallWithRefArg protects a self-recursive function that forwards its own
 // callee ref as an argument. flush used to refuse a committing flush whenever
 // any live operand was a KindRef, including a ref parameter merely passed

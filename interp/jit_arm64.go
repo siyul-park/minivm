@@ -2432,6 +2432,15 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 // recording the live frame chain, and reload everything afterwards because the
 // callee owns every allocatable register.
 func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, params int) bool {
+	// ctx.head is this plan's entry, and the BL below re-enters it with the
+	// prologue's own frame layout. That is only the callee's real entry when the
+	// live frame is the plan's own: an inlined frame is some other function's
+	// activation, so branching to ctx.head from inside one lays A's parameter
+	// prologue over B's frame. ctx.kind is checked with it because a loop plan's
+	// head is a loop header with no prologue at all.
+	if ctx.kind != entryFunction || len(ctx.frames) != 1 {
+		return false
+	}
 	a := ctx.assembler
 	for _, typ := range target.Typ.Returns {
 		switch typ.Kind() {
