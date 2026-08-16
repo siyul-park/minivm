@@ -1387,6 +1387,99 @@ func TestARM64_RefReturn(t *testing.T) {
 	})
 }
 
+// TestARM64_DirectSelfCall covers the fused constant-marker form of
+// recursion, `const.get fn; call` where fn is the function being compiled.
+// It is the shape every direct recursive call takes, and lowering it is what
+// lets the static frontend plan a recursive function at all: while it was
+// rejected, such a function had no whole-function plan and depended on a
+// recorded trace, whose coverage varies with how much of the recursion the
+// recording happened to reach. The sub-cases therefore assert both the value
+// and that the emitted entry came from the static frontend.
+func TestARM64_DirectSelfCall(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	build := func(n int32) *program.Program {
+		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Params(types.TypeI32)
+		base := b.Label()
+		fn := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
+			BrIf(base).
+			Emit(
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+			).
+			Bind(base).
+			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+		return program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(uint32(n))),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		)
+	}
+
+	for _, tc := range []struct {
+		name string
+		n    int32
+		want int32
+	}{
+		{name: "shallow recursion", n: 12, want: 144},
+		{name: "recursion deeper than one trace can record", n: 24, want: 46368},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prog := build(tc.n)
+			profile := prof.New()
+			jit := New(prog, WithProfiler(profile))
+			threaded := New(prog, WithThreshold(-1))
+
+			for range 8 {
+				require.NoError(t, jit.Run(context.Background()))
+				require.NoError(t, threaded.Run(context.Background()))
+				got, err := jit.PopBoxed()
+				require.NoError(t, err)
+				want, err := threaded.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, want, got)
+				require.Equal(t, types.BoxI32(tc.want), got)
+				jit.Reset()
+				threaded.Reset()
+			}
+			require.NoError(t, threaded.Close())
+			require.NoError(t, jit.Close())
+
+			var static, entries float64
+			for _, metric := range profile.Metrics() {
+				switch metric.Name {
+				case "vm_jit_entry_emits_total":
+					var frontend, fn string
+					for _, label := range metric.Labels {
+						switch label.Key {
+						case "frontend":
+							frontend = label.Value
+						case "func":
+							fn = label.Value
+						}
+					}
+					if frontend == "static" && fn == "1" {
+						static += metric.Value
+					}
+				case "vm_jit_native_entries_total":
+					entries += metric.Value
+				}
+			}
+			require.Greater(t, static, float64(0), "recursive function must get a static whole-function entry")
+			require.Greater(t, entries, float64(0))
+		})
+	}
+}
+
 // DeferredRefElision protects Phase 3 of the JIT refcount-elision work:
 // LOCAL_GET/GLOBAL_GET/UPVAL_GET of a ref defers its retain to the backing
 // slot instead of taking one immediately, and ARRAY_GET/ARRAY_SET elide their

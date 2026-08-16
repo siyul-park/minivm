@@ -15,9 +15,24 @@ It trails on six: CPython leads `NQueens` (1.44x), `NBody` (1.38x), `Fannkuch`
 
 **Native tier.** This tier is not yet competitive with Wazero. minivm `default` leads
 only `IterativeFib` (1.30x); Wazero is ahead on `Sieve`, `TypedArraySum`,
-`BranchTree`, `RecursiveFib(20)`, and `IndirectRecursiveFib`. Note also that `jit`'s
-eager policy is slower than adaptive `default` on call-heavy kernels - 382.17 µs
-versus 39.60 µs on `RecursiveFib(20)` - so `default` is the tier to quote.
+`BranchTree`, `RecursiveFib(20)`, and `IndirectRecursiveFib`. `default` is the tier
+to quote: it matches or beats `jit` everywhere except `RecursiveFib(20)`, where the
+two are within 2% of each other.
+
+Recursion scales with depth in the native tier. `RecursiveFib(35)` is excluded
+from the comparison tables in section 3 because the slower external runtimes make
+a `count=3` sweep impractical at roughly a second per operation, so both depths
+are recorded here at `-benchtime=300ms -count=3`; neither allocates.
+
+| Kernel | `default` | `threaded` | Wazero |
+|---|---:|---:|---:|
+| `RecursiveFib(35)` | 56.7 ms | 412.5 ms | 44.4 ms |
+| `RecursiveFib(20)` | 42.9 µs | 310.7 µs | 33.2 µs |
+
+`default` is 7.3x faster than the interpreter at depth 35 and 7.2x at depth 20,
+and sits 1.28x and 1.29x behind Wazero. `AllocationGraph`, `BinaryTrees`,
+`ClosureCounter`, `PermutationFlips`, and `StructTreeWalk` are the kernels where
+`default` still trails `threaded`.
 
 > **Environment**: August 13, 2026 - Apple M4 Pro - darwin/arm64 - Go 1.26.2 - CPython 3.13
 >
@@ -108,8 +123,8 @@ before making a performance claim.
 |  | Goja | 1.52 ms | 4,680 | 39 |
 |  | gpython | 3.89 ms | 9,807,919 | 109,494 |
 |  | Yaegi | 4.50 ms | 8,302,177 | 192,840 |
-| Native | minivm `default` | 39.60 µs | 0 | 0 |
-|  | minivm `jit` | 382.17 µs | 0 | 0 |
+| Native | minivm `default` | 42.85 µs | 0 | 0 |
+|  | minivm `jit` | 42.15 µs | 0 | 0 |
 |  | Wazero | **33.20 µs** | 8 | 1 |
 | Reference | Native Go | 14.61 µs | 0 | 0 |
 
@@ -398,9 +413,7 @@ problem rather than a dispatch problem.
 
 In the native tier, Wazero is ahead on five of the six kernels it shares. minivm's
 native tier only lowers a subset of opcodes and falls back to threaded execution for
-the rest, so kernels touching unlowered opcodes never stay native. `jit`'s eager
-policy also compiles paths that adaptive `default` correctly declines, which is why
-it loses badly on `RecursiveFib(20)`.
+the rest, so kernels touching unlowered opcodes never stay native.
 
 The tables above predate the cooling and retirement rules (`docs/profile.md`,
 `docs/jit-internals.md`) and have not been re-measured as a full cross-runtime
