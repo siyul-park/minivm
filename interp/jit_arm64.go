@@ -935,11 +935,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		addr := l.base(ctx, vStack)
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, addr, int16((f.base+idx)*8)))
-		if pop && deferred {
-			l.releaseBox(ctx, old, pre, op.ip)
-		} else {
-			l.releaseBoxExcept(ctx, old, boxed, pre, op.ip)
-		}
+		l.releaseOverwritten(ctx, old, boxed, pop && deferred, pre, op.ip)
 		if _, ok := l.own(ctx, vp); !ok {
 			return false
 		}
@@ -1029,11 +1025,7 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		if pop && deferred {
-			l.releaseBox(ctx, old, pre, op.ip)
-		} else {
-			l.releaseBoxExcept(ctx, old, boxed, pre, op.ip)
-		}
+		l.releaseOverwritten(ctx, old, boxed, pop && deferred, pre, op.ip)
 		if _, ok := l.own(ctx, vp); !ok {
 			return false
 		}
@@ -3102,11 +3094,7 @@ func (l arm64Lowerer) upvalSet(ctx *lowering, op step) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		if deferred {
-			l.releaseBox(ctx, old, pre, op.ip)
-		} else {
-			l.releaseBoxExcept(ctx, old, boxed, pre, op.ip)
-		}
+		l.releaseOverwritten(ctx, old, boxed, deferred, pre, op.ip)
 		if _, ok := l.own(ctx, vp); !ok {
 			return false
 		}
@@ -3548,11 +3536,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) (bool, bool) {
 	if kind == types.KindRef {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
-		if deferred {
-			l.releaseBox(ctx, old, pre, op.ip)
-		} else {
-			l.releaseBoxExcept(ctx, old, val.reg, pre, op.ip)
-		}
+		l.releaseOverwritten(ctx, old, val.reg, deferred, pre, op.ip)
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false, false
 		}
@@ -3737,11 +3721,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) (bool, bool) {
 	if kind == types.KindRef {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
-		if deferred {
-			l.releaseBox(ctx, old, pre, op.ip)
-		} else {
-			l.releaseBoxExcept(ctx, old, val.reg, pre, op.ip)
-		}
+		l.releaseOverwritten(ctx, old, val.reg, deferred, pre, op.ip)
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false, false
 		}
@@ -3776,13 +3756,19 @@ func (l arm64Lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
 	return out
 }
 
-// errorGet reads a guest Error's payload. It mirrors the threaded handler:
-// retain a ref payload first, then release the consumed error handle.
-func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
+// payloadGet reads a single payload word out of a guarded heap object and
+// pushes it, mirroring the threaded handlers: retain a ref payload first, then
+// release the consumed handle. ERROR_GET and CORO_VALUE differ only in which
+// itab they guard and which word they read, so they share this.
+//
+// The exclusive-owner guard on the ref case exists only to protect a
+// release-triggered free: with no release to follow, the container cannot
+// reach zero here, so a borrowed handle skips it.
+func (l arm64Lowerer) payloadGet(ctx *lowering, op step, want uintptr, offset int16) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	if op.shape.itab != heapError {
+	if op.shape.itab != want {
 		return false
 	}
 	owned := ctx.values[len(ctx.values)-1].backing == backingStack
@@ -3796,10 +3782,10 @@ func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
 		return false
 	}
 	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, heapError, fail)
+	l.guardItab(ctx, itab, want, fail)
 
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(dst, data, int16(errorValue)))
+	ctx.assembler.Emit(arm64.LDR(dst, data, offset))
 	kind := op.seen.Kind()
 	switch kind {
 	case types.KindI64:
@@ -3813,9 +3799,6 @@ func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
 		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
 	case types.KindRef:
 		if !owned {
-			// No release follows, so the container can never hit zero here:
-			// the exclusive-owner guard below exists only to protect a
-			// release-triggered free, and is moot without one.
 			l.retainBox(ctx, dst)
 			ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
 			break
@@ -3844,6 +3827,10 @@ func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
 		return false
 	}
 	return true
+}
+
+func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
+	return l.payloadGet(ctx, op, heapError, int16(errorValue))
 }
 
 // coroDone reads a coroutine handle's done flag and pushes it as an i32 (0 or
@@ -3884,68 +3871,7 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 // The stored field is a full Boxed, so its representation matches a global
 // slot (see globalGet) — scalars push raw, refs stay boxed.
 func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
-	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
-		return false
-	}
-	if op.shape.itab != heapCoroutine {
-		return false
-	}
-	owned := ctx.values[len(ctx.values)-1].backing == backingStack
-	pre := ctx.pre()
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
-	if !ok {
-		return false
-	}
-	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
-	if !ok {
-		return false
-	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, heapCoroutine, fail)
-
-	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(dst, data, int16(coroValue)))
-	kind := op.seen.Kind()
-	switch kind {
-	case types.KindI64:
-		if !l.guardI64(ctx, dst, op.ip) {
-			return false
-		}
-		dst = l.sign64(ctx, dst)
-		if owned {
-			l.releaseRef(ctx, addr, pre, op.ip)
-		}
-		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
-	case types.KindRef:
-		if !owned {
-			l.retainBox(ctx, dst)
-			ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
-			break
-		}
-		base := l.rcBase(ctx)
-		rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
-		ctx.assembler.Emit(arm64.CMPI(rc, 1))
-		shared := ctx.assembler.Label()
-		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGT, shared))
-		ctx.values = append(ctx.values[:0], pre...)
-		if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
-			return false
-		}
-		ctx.assembler.Bind(shared)
-		ctx.values = append(ctx.values[:0], pre...)
-		l.retainBox(ctx, dst)
-		l.releaseRef(ctx, addr, pre, op.ip)
-		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
-	case types.KindI32, types.KindF32, types.KindF64:
-		if owned {
-			l.releaseRef(ctx, addr, pre, op.ip)
-		}
-		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
-	default:
-		return false
-	}
-	return true
+	return l.payloadGet(ctx, op, heapCoroutine, int16(coroValue))
 }
 
 // guardI64 deopts when v is a heap-promoted i64.
@@ -4168,6 +4094,20 @@ func (l arm64Lowerer) report(ctx *lowering, vCtrl asm.VReg, trap, nextIP int) {
 	vIP := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(vIP, uint64(nextIP))...)
 	a.Emit(arm64.STR(vIP, vCtrl, int16(journalNextIP*8)))
+}
+
+// releaseOverwritten drops the retain a slot held before it is overwritten.
+// The outgoing and incoming values may be the same address, and releasing it
+// first would free a value the store is about to publish - but only an owned
+// incoming value can alias that way, because a deferred one still borrows its
+// own backing slot's retain. So the aliasing check is needed exactly when the
+// incoming value is not deferred.
+func (l arm64Lowerer) releaseOverwritten(ctx *lowering, old, val asm.VReg, deferred bool, pre []value, ip int) {
+	if deferred {
+		l.releaseBox(ctx, old, pre, ip)
+		return
+	}
+	l.releaseBoxExcept(ctx, old, val, pre, ip)
 }
 
 func (l arm64Lowerer) releaseBoxExcept(ctx *lowering, old, val asm.VReg, pre []value, ip int) {
