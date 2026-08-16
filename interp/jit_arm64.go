@@ -1541,17 +1541,12 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		a.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(len(localKinds))))
 	}
 	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
-	// The callee entry reloads BP/SP from the journal header, not from the
-	// caller's pinned registers. Publish the callee frame before BLR so a
-	// nested native entry starts from the frame it was actually passed.
 	a.Emit(
 		arm64.STR(calleeBP, vCtrl, int16(journalBP*8)),
 		arm64.STR(calleeSP, vCtrl, int16(journalSP*8)),
 		arm64.MOV(arm64.X0, vCtrl),
 		arm64.BLR(callee),
 	)
-	// Restore the spill base before anything else: both the normal path and
-	// the trap path below may reload a spilled value.
 	a.Emit(arm64.LDR(arm64.X26, arm64.SP, 24))
 
 	vCtrl = ctx.pin(scratchCtrl)
@@ -2430,31 +2425,14 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	return true
 }
 
-// selfCall emits a framed native recursion into this trace's own head:
-// flush state, check the frame budget, swap bp/sp, BL, propagate traps by
-// recording the live frame chain, and reload everything afterwards because the
-// callee owns every allocatable register.
-//
-// ctx.head is this plan's entry, so it is safe only for the plan's own
-// whole-function frame and a non-capturing target.
+// selfCall lowers recursion through the function entry.
 func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, params int) bool {
-	// ctx.head is this plan's entry, so it is safe only for the plan's own
-	// whole-function frame and a non-capturing target.
 	if ctx.kind != entryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !l.checkReturns(target) {
 		return false
 	}
 
 	a := ctx.assembler
-	// This BL re-enters compiled code from the top; when the callee traps, the
-	// journal unwind adopts THIS caller's flushed operand stack and the
-	// interpreter releases each stack ref it later pops. Frame isolation once
-	// suggested a local-backed deferral was safe (recursion cannot address an
-	// ancestor's locals), but the callee-trap unwind adopts the caller's
-	// flushed stack regardless of which slot backs the deferral, and the
-	// recursion may also run arbitrary GLOBAL_SET/UPVAL_SET on shared storage
-	// this trace cannot see. So every deferred ref must own its retain before
-	// the call. (The committing flush below also rejects any deferred it still
-	// sees, so this sweep is what keeps such traces compiling.)
+	// Own deferred refs before the callee can mutate their backing storage.
 	if !l.ownRefs(ctx) {
 		return false
 	}

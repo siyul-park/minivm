@@ -1418,12 +1418,7 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 	require.Greater(t, entries, float64(0), "self-recursive function must retain native coverage")
 }
 
-// TestARM64_MutualEntries protects nested native function entries. A
-// callee entered through BLR reads its initial BP/SP from the journal header,
-// so the caller must publish the callee frame there before the call and restore
-// its own frame afterward. Without that handoff, A -> B -> A keeps entering the
-// native entries with the wrong stack frame and eventually reaches frame
-// overflow even though the threaded recursion terminates.
+// TestARM64_MutualEntries protects nested native entry frames.
 func TestARM64_MutualEntries(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
