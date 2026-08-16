@@ -2830,11 +2830,10 @@ func (l arm64Lowerer) guardFrame(ctx *lowering, f *activation, ip int) ([]asm.VR
 		if kind != types.KindRef {
 			continue
 		}
-		v := f.locals[i]
 		var ref asm.VReg
-		if v.reg.Width() != asm.WidthUndefined {
+		if f.isLoadedAt(i) {
 			var ok bool
-			ref, ok = l.box(ctx, v)
+			ref, ok = l.box(ctx, f.locals[i])
 			if !ok {
 				return nil, false
 			}
@@ -2989,7 +2988,7 @@ func (l arm64Lowerer) reload(ctx *lowering) {
 // integer locals (i8, i1) share the i32 representation, so they load the same
 // way and keep their kind.
 func (l arm64Lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
-	if f.state[idx]&localLoaded != 0 {
+	if f.isLoadedAt(idx) {
 		return true
 	}
 	kind := f.kinds[idx]
