@@ -1226,6 +1226,126 @@ func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
 	}
 }
 
+// TestARM64_CalleeLocals covers the callee frame's non-parameter locals. A frame
+// opens on stack space an earlier frame may have left populated, and threaded
+// CALL clears that range before transferring control, so native code must too.
+// Neither native call path did it reliably: selfCall emitted no clear at all,
+// and directCall's clear was computed against the wrong frame base. A callee
+// therefore started with stale boxed words - its first LOCAL_SET released a ref
+// it never owned, and RETURN teardown released the rest.
+//
+// Both sub-cases read the local BEFORE writing it and fold the answer into the
+// result, so a stale slot shows up as a wrong value rather than only as a
+// refcount drift. The control has no non-parameter local, which is the shape
+// every pre-existing self-call test used - len(Slots()) == params leaves the
+// uninitialized range empty, which is why none of them caught this.
+func TestARM64_CalleeLocals(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	// Each level contributes 1000 when its ref local reads back null, as the
+	// threaded interpreter guarantees, and 0 when it reads stale stack data.
+	const perLevel = 1000
+
+	runParity := func(t *testing.T, prog *program.Program) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithProfiler(profile))
+		threaded := New(prog, WithThreshold(-1))
+		for n := 0; n < 64; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0), "expected native code to be installed")
+	}
+
+	// probe reads ref local 1 before assigning it, scales the answer, and leaves
+	// it on the stack for the caller to fold in.
+	probe := []instr.Instruction{
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.REF_IS_NULL),
+		instr.New(instr.I32_CONST, perLevel), instr.New(instr.I32_MUL),
+		instr.New(instr.CONST_GET, 2), instr.New(instr.LOCAL_SET, 1),
+	}
+
+	t.Run("self-recursion through selfCall", func(t *testing.T) {
+		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Params(types.TypeI32).
+			Locals(types.TypeRef)
+		base := b.Label()
+		body := append(append([]instr.Instruction{}, probe...),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		)
+		fn := b.
+			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
+			BrIf(base).
+			Emit(body...).
+			Bind(base).
+			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+
+		runParity(t, program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 12),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			},
+			program.WithConstants(fn, fn, types.String("s")),
+		))
+	})
+
+	t.Run("mutual recursion through directCall", func(t *testing.T) {
+		// Neither callee is the function being compiled, so each CALL lowers
+		// through directCall's natives-slot BLR rather than selfCall's BL.
+		build := func(other uint64) *types.Function {
+			b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Params(types.TypeI32).
+				Locals(types.TypeRef)
+			base := b.Label()
+			body := append(append([]instr.Instruction{}, probe...),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, other), instr.New(instr.CALL),
+				instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+			)
+			return b.
+				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
+				BrIf(base).
+				Emit(body...).
+				Bind(base).
+				Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+				MustBuild()
+		}
+
+		runParity(t, program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			},
+			program.WithConstants(build(1), build(0), types.String("s")),
+		))
+	})
+}
+
 // SelfCallWithRefArg protects a self-recursive function that forwards its own
 // callee ref as an argument. flush used to refuse a committing flush whenever
 // any live operand was a KindRef, including a ref parameter merely passed
@@ -2977,23 +3097,22 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 	})
 }
 
-// RefContainerStoreRemainsTerminal pins the arraySet and structSet terminal
-// rule: a ref-kind ARRAY_SET/STRUCT_SET keeps exiting to the interpreter via
-// op.terminal || kind == types.KindRef even when the store is not literally
-// the last step of its block. Dropping the kind==KindRef disjunct was tried
-// for both opcodes and reverted for both: whenever a ref container store's
-// native continuation is itself nested inside another native self-recursive
-// call, refcounts diverge from the threaded twin (observed -1 and -2
-// relative to threaded), and results diverge with them. The defect tracked
-// to the interaction between a live native frame continuing past a ref
-// store and a subsequent BL to the same compiled entry, not to either
-// store's own guards, but pinning it down further was out of scope, so both
-// opcodes stay conservative. Each sub-case below allocates a container,
-// stores a recursive call's result into it (so the store is never the
-// block's last step, matching the shape that broke), and returns the
-// container; recursion depths 0-1 pass even with the bug present, so this
-// exercises depths up to 8 to keep the diverging depths (>= 2) covered.
-func TestARM64_RefContainerStoreRemainsTerminal(t *testing.T) {
+// RefContainerStore covers a ref-kind ARRAY_SET/STRUCT_SET whose native
+// continuation is nested inside a native self-recursive call. Both stores used
+// to exit to the interpreter unconditionally on a ref element or field, because
+// letting them continue drove refcounts negative against a threaded twin from
+// recursion depth two upward. That was never a defect in either store: the
+// cause was selfCall and directCall handing a callee a frame whose
+// non-parameter locals were never cleared (see zeroLocals), so the callee's
+// first LOCAL_SET released a stale boxed word it never owned. Lifting the store
+// rule is simply what first admitted a function holding a ref local into native
+// lowering, which is why the two looked connected.
+//
+// Each sub-case allocates a container, stores a recursive call's result into it
+// so the store is never the block's last step, and returns the container.
+// Depths zero and one passed even with the defect present, so the depths that
+// diverged are the ones that matter here.
+func TestARM64_RefContainerStore(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
