@@ -2778,16 +2778,22 @@ func (l arm64Lowerer) ret(ctx *lowering, ip int) bool {
 	}
 	a := ctx.assembler
 	f := ctx.frame()
-	refs, ok := l.guardFrame(ctx, f, ip)
-	if !ok {
-		return false
-	}
 	// A native entry frame owns every ref local/parameter until RETURN. Retain
-	// deferred return values before the local-slot cleanup below.
+	// deferred return values before guardFrame reads their refcount: guardFrame
+	// deopts when rc <= pending, and a return backed by a frame-owned local
+	// (rc == pending, e.g. a freshly allocated node held only by that local) would
+	// spuriously fail the guard unless this retain lands first. Taking it here
+	// makes rc == pending + 1, so the guard passes and the following
+	// releaseFrame's decrement leaves the exact one live reference the caller now
+	// owns.
 	for idx := 0; idx < ctx.returns; idx++ {
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx]); !ok {
 			return false
 		}
+	}
+	refs, ok := l.guardFrame(ctx, f, ip)
+	if !ok {
+		return false
 	}
 	l.releaseFrame(ctx, refs)
 	vStack := ctx.pin(scratchStack)
