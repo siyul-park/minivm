@@ -1311,6 +1311,44 @@ func TestARM64_RefReturn(t *testing.T) {
 		t.Skip("native JIT is only available on arm64")
 	}
 
+	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithProfiler(profile))
+		threaded := New(prog, WithThreshold(-1))
+		for n := 0; n < 64; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		var entries, guardValueExits float64
+		for _, metric := range profile.Metrics() {
+			switch metric.Name {
+			case "vm_jit_native_entries_total":
+				entries += metric.Value
+			case "vm_jit_native_exits_total":
+				for _, label := range metric.Labels {
+					if label.Key == "reason" && label.Value == "guard-value" {
+						guardValueExits += metric.Value
+					}
+				}
+			}
+		}
+		require.Greater(t, entries, float64(0), "expected native code to be installed")
+		require.Zero(t, guardValueExits, "guardFrame spuriously deopted a RETURN of a singly-owned frame local")
+	}
+
 	t.Run("entry frame returns a singly-owned frame local", func(t *testing.T) {
 		const iterations = int32(512)
 		nodeType := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("val")))
@@ -1350,40 +1388,53 @@ func TestARM64_RefReturn(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		profile := prof.New()
-		jit := New(prog, WithProfiler(profile))
-		threaded := New(prog, WithThreshold(-1))
-		for n := 0; n < 64; n++ {
-			require.NoError(t, jit.Run(context.Background()))
-			require.NoError(t, threaded.Run(context.Background()))
-			got, err := jit.PopBoxed()
-			require.NoError(t, err)
-			want, err := threaded.PopBoxed()
-			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, types.BoxI32(iterations*(iterations-1)/2), got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
-			jit.Reset()
-			threaded.Reset()
-		}
-		require.NoError(t, jit.Close())
-		require.NoError(t, threaded.Close())
+		runParity(t, prog, types.BoxI32(iterations*(iterations-1)/2))
+	})
 
-		var entries, guardValueExits float64
-		for _, metric := range profile.Metrics() {
-			switch metric.Name {
-			case "vm_jit_native_entries_total":
-				entries += metric.Value
-			case "vm_jit_native_exits_total":
-				for _, label := range metric.Labels {
-					if label.Key == "reason" && label.Value == "guard-value" {
-						guardValueExits += metric.Value
-					}
-				}
-			}
-		}
-		require.Greater(t, entries, float64(0), "expected native code to be installed")
-		require.Zero(t, guardValueExits, "guardFrame spuriously deopted a RETURN of a singly-owned frame local")
+	t.Run("self-recursive ref return through selfCall", func(t *testing.T) {
+		nodeType := types.NewStructType(
+			types.NewStructField(types.TypeI32, types.FieldWithName("val")),
+			types.NewStructField(types.TypeRef, types.FieldWithName("next")),
+		)
+		// chain(d): n = STRUCT_NEW_DEFAULT; n.val = d; if d > 0, n.next =
+		// chain(d-1); return n. Every level's RETURN hands back a node whose
+		// refcount is exactly 1 (held only by local 1), so the self-recursive
+		// call inside the body (CONST_GET 0; CALL, where 0 is this function's
+		// own constant index) must lower through selfCall - which rejected any
+		// ref-returning target before checkReturns admitted KindRef.
+		chainBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+			Params(types.TypeI32).
+			Locals(types.TypeRef)
+		done := chainBuilder.Label()
+		chainFn := chainBuilder.
+			Emit(
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.STRUCT_SET),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+			).
+			BrIf(done).
+			Emit(
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				instr.New(instr.STRUCT_SET),
+			).
+			Bind(done).
+			Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)).
+			MustBuild()
+
+		const depth = int32(16)
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(uint32(depth))),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			},
+			program.WithConstants(chainFn),
+			program.WithTypes(nodeType),
+		)
+		runParity(t, prog, types.BoxI32(depth))
 	})
 }
 
@@ -2923,6 +2974,223 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 		runParity(t, prog, types.BoxI32(size*(size-1)/2+5))
+	})
+}
+
+// RefContainerStoreRemainsTerminal pins the arraySet and structSet terminal
+// rule: a ref-kind ARRAY_SET/STRUCT_SET keeps exiting to the interpreter via
+// op.terminal || kind == types.KindRef even when the store is not literally
+// the last step of its block. Dropping the kind==KindRef disjunct was tried
+// for both opcodes and reverted for both: whenever a ref container store's
+// native continuation is itself nested inside another native self-recursive
+// call, refcounts diverge from the threaded twin (observed -1 and -2
+// relative to threaded), and results diverge with them. The defect tracked
+// to the interaction between a live native frame continuing past a ref
+// store and a subsequent BL to the same compiled entry, not to either
+// store's own guards, but pinning it down further was out of scope, so both
+// opcodes stay conservative. Each sub-case below allocates a container,
+// stores a recursive call's result into it (so the store is never the
+// block's last step, matching the shape that broke), and returns the
+// container; recursion depths 0-1 pass even with the bug present, so this
+// exercises depths up to 8 to keep the diverging depths (>= 2) covered.
+func TestARM64_RefContainerStoreRemainsTerminal(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	depths := []int32{0, 1, 2, 3, 5, 8}
+
+	t.Run("ref-element ARRAY_SET nested in self-recursion", func(t *testing.T) {
+		// build() is self-recursive (it CONST_GETs and CALLs its own constant
+		// index), so its entry compiles through the static frontend before any
+		// trace could exist. arr[0]'s ARRAY_SET is immediately followed by
+		// arr[1]'s ARRAY_SET in the same block, so neither is the block's last
+		// step.
+		build := func(t *testing.T, depth int32) *program.Program {
+			t.Helper()
+			arrTyp := types.NewArrayType(types.TypeRef)
+			buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+				Params(types.TypeI32).
+				Locals(types.TypeRef)
+			buildDone := buildBuilder.Label()
+			buildFn := buildBuilder.
+				Emit(
+					instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+					instr.New(instr.LOCAL_SET, 1),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+				).
+				BrIf(buildDone).
+				Emit(
+					// arr[0] = build(d-1)
+					instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+					instr.New(instr.ARRAY_SET),
+					// arr[1] = build(d-1)
+					instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+					instr.New(instr.ARRAY_SET),
+				).
+				Bind(buildDone).
+				Emit(
+					instr.New(instr.LOCAL_GET, 1),
+					instr.New(instr.RETURN),
+				).
+				MustBuild()
+
+			checkBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Params(types.TypeRef)
+			nullCase := checkBuilder.Label()
+			checkFn := checkBuilder.
+				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
+				BrIf(nullCase).
+				Emit(
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_CAST, 0),
+					instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+					instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_CAST, 0),
+					instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+					instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+					instr.New(instr.I32_ADD), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+				).
+				Bind(nullCase).
+				Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+				MustBuild()
+
+			return program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, uint64(uint32(depth))),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+					instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+				},
+				program.WithConstants(buildFn, checkFn),
+				program.WithTypes(arrTyp),
+			)
+		}
+
+		for _, depth := range depths {
+			prog := build(t, depth)
+			want := types.BoxI32(int32(1)<<uint(depth+1) - 1)
+
+			jit := New(prog, WithTick(1), WithThreshold(0))
+			threaded := New(prog, WithTick(1), WithThreshold(-1))
+			for n := 0; n < 8; n++ {
+				require.NoError(t, jit.Run(context.Background()))
+				require.NoError(t, threaded.Run(context.Background()))
+				got, err := jit.PopBoxed()
+				require.NoError(t, err)
+				ref, err := threaded.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, ref, got, "result diverged from threaded at depth %d iteration %d", depth, n)
+				require.Equal(t, want, got, "result diverged from expected node count at depth %d", depth)
+				require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded at depth %d iteration %d", depth, n)
+				jit.Reset()
+				threaded.Reset()
+			}
+			require.NoError(t, jit.Close())
+			require.NoError(t, threaded.Close())
+		}
+	})
+
+	t.Run("ref-field STRUCT_SET nested in self-recursion", func(t *testing.T) {
+		// build() is self-recursive (it CONST_GETs and CALLs its own constant
+		// index), so its entry compiles through the static frontend before any
+		// trace could exist. n.left's STRUCT_SET is immediately followed by
+		// n.right's STRUCT_SET in the same block, so neither is the block's
+		// last step.
+		build := func(t *testing.T, depth int32) *program.Program {
+			t.Helper()
+			nodeType := types.NewStructType(
+				types.NewStructField(types.TypeI32, types.FieldWithName("value")),
+				types.NewStructField(types.TypeRef, types.FieldWithName("left")),
+				types.NewStructField(types.TypeRef, types.FieldWithName("right")),
+			)
+			buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+				Params(types.TypeI32).
+				Locals(types.TypeRef)
+			buildDone := buildBuilder.Label()
+			buildFn := buildBuilder.
+				Emit(
+					instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
+					instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.STRUCT_SET),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+				).
+				BrIf(buildDone).
+				Emit(
+					// n.left = build(d-1)
+					instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+					instr.New(instr.STRUCT_SET),
+					// n.right = build(d-1)
+					instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 2),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+					instr.New(instr.STRUCT_SET),
+				).
+				Bind(buildDone).
+				Emit(
+					instr.New(instr.LOCAL_GET, 1),
+					instr.New(instr.RETURN),
+				).
+				MustBuild()
+
+			checkBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Params(types.TypeRef)
+			nullCase := checkBuilder.Label()
+			checkFn := checkBuilder.
+				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
+				BrIf(nullCase).
+				Emit(
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_CAST, 0),
+					instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+					instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
+					instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+					instr.New(instr.I32_ADD), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+				).
+				Bind(nullCase).
+				Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+				MustBuild()
+
+			return program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, uint64(uint32(depth))),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+					instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+				},
+				program.WithConstants(buildFn, checkFn),
+				program.WithTypes(nodeType),
+			)
+		}
+
+		for _, depth := range depths {
+			prog := build(t, depth)
+			want := types.BoxI32(int32(1)<<uint(depth+1) - 1)
+
+			jit := New(prog, WithTick(1), WithThreshold(0))
+			threaded := New(prog, WithTick(1), WithThreshold(-1))
+			for n := 0; n < 8; n++ {
+				require.NoError(t, jit.Run(context.Background()))
+				require.NoError(t, threaded.Run(context.Background()))
+				got, err := jit.PopBoxed()
+				require.NoError(t, err)
+				ref, err := threaded.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, ref, got, "result diverged from threaded at depth %d iteration %d", depth, n)
+				require.Equal(t, want, got, "result diverged from expected node count at depth %d", depth)
+				require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded at depth %d iteration %d", depth, n)
+				jit.Reset()
+				threaded.Reset()
+			}
+			require.NoError(t, jit.Close())
+			require.NoError(t, threaded.Close())
+		}
 	})
 }
 
