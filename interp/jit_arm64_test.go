@@ -1404,11 +1404,91 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 
 	var entries float64
 	for _, metric := range profile.Metrics() {
-		if metric.Name == "vm_jit_native_entries_total" {
+		if metric.Name != "vm_jit_native_entries_total" {
+			continue
+		}
+		labels := map[string]string{}
+		for _, label := range metric.Labels {
+			labels[label.Key] = label.Value
+		}
+		if labels["func"] == "1" {
 			entries += metric.Value
 		}
 	}
-	require.Greater(t, entries, float64(0))
+	require.Greater(t, entries, float64(0), "self-recursive function must retain native coverage")
+}
+
+// TestARM64_MutualNativeEntries protects nested native function entries. A
+// callee entered through BLR reads its initial BP/SP from the journal header,
+// so the caller must publish the callee frame there before the call and restore
+// its own frame afterward. Without that handoff, A -> B -> A keeps entering the
+// native entries with the wrong stack frame and eventually reaches frame
+// overflow even though the threaded recursion terminates.
+func TestARM64_MutualNativeEntries(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	build := func(other uint64) *types.Function {
+		b := types.NewFunctionBuilder(nil).
+			Params(types.TypeI32).
+			Returns(types.TypeI32)
+		base := b.Label()
+		b.Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+		).BrIf(base)
+		b.Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, other), instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+		)
+		b.Bind(base).
+			Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
+		return b.MustBuild()
+	}
+
+	const depth = int32(40)
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.I32_CONST, uint64(uint32(depth))),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		},
+		program.WithConstants(build(1), build(0)),
+	)
+
+	profile := prof.New()
+	jit := New(prog, WithProfiler(profile), WithTick(1), WithThreshold(1))
+	threaded := New(prog, WithThreshold(-1))
+	for range 16 {
+		require.NoError(t, jit.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Equal(t, types.BoxI32(0), got)
+		require.Equal(t, threaded.rc[1:], jit.rc[1:])
+		jit.Reset()
+		threaded.Reset()
+	}
+	require.NoError(t, threaded.Close())
+	require.NoError(t, jit.Close())
+
+	entries := map[string]float64{}
+	for _, metric := range profile.Metrics() {
+		if metric.Name != "vm_jit_native_entries_total" {
+			continue
+		}
+		labels := map[string]string{}
+		for _, label := range metric.Labels {
+			labels[label.Key] = label.Value
+		}
+		entries[labels["func"]] += metric.Value
+	}
+	require.Greater(t, entries["1"], float64(0), "function A must install a native entry")
+	require.Greater(t, entries["2"], float64(0), "function B must install a native entry")
 }
 
 // TestARM64_RefReturn protects the retain ordering at a native entry frame's

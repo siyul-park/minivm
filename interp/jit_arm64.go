@@ -1453,7 +1453,12 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
 			return false
 		}
-		return l.selfCall(ctx, op, target, params)
+		if ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
+			return l.selfCall(ctx, op, target, params)
+		}
+		// Unsafe self-calls use the ordinary BLR slot path below. Put the
+		// marker back so that path consumes the complete CALL operand stack.
+		ctx.push(marker)
 	}
 	if !l.checkReturns(target) {
 		return false
@@ -1534,8 +1539,15 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		a.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(len(localKinds))))
 	}
 	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
-	a.Emit(arm64.MOV(arm64.X0, vCtrl))
-	a.Emit(arm64.BLR(callee))
+	// The callee entry reloads BP/SP from the journal header, not from the
+	// caller's pinned registers. Publish the callee frame before BLR so a
+	// nested native entry starts from the frame it was actually passed.
+	a.Emit(
+		arm64.STR(calleeBP, vCtrl, int16(journalBP*8)),
+		arm64.STR(calleeSP, vCtrl, int16(journalSP*8)),
+		arm64.MOV(arm64.X0, vCtrl),
+		arm64.BLR(callee),
+	)
 	// Restore the spill base before anything else: both the normal path and
 	// the trap path below may reload a spilled value.
 	a.Emit(arm64.LDR(arm64.X26, arm64.SP, 24))
@@ -1558,6 +1570,8 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
 	a.Emit(
 		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
+		arm64.STR(oldBP, vCtrl, int16(journalBP*8)),
+		arm64.STR(oldSP, vCtrl, int16(journalSP*8)),
 		arm64.LDR(arm64.LR, arm64.SP, 16),
 		arm64.ADDI(arm64.SP, arm64.SP, 32),
 	)
@@ -2367,7 +2381,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	if ctx.count() < params || !l.checkArgs(ctx, target, params) {
 		return false
 	}
-	if op.callee == ctx.addr {
+	if op.callee == ctx.addr && ctx.kind == entryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 {
 		return l.selfCall(ctx, op, target, params)
 	}
 	if len(ctx.frames) >= 4 {
@@ -2416,19 +2430,16 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 // recording the live frame chain, and reload everything afterwards because the
 // callee owns every allocatable register.
 //
-// Both call forms reach here, so the preconditions of that BL belong here
-// rather than at either call site. ctx.head is the function's real entry only
-// for a whole-function plan: a loop plan's head is its loop header, which has
-// no parameter prologue. An inlined frame's recursion likewise re-enters the
-// callee, not this head, and a closure body would need its captures rebound.
+// Call lowering selects this path only when ctx.head is the real function
+// entry for the live frame. A loop header has no entry prologue, and an inline
+// frame belongs to another activation; captured targets also need their
+// captures rebound, so all three cases stay on their ordinary call paths.
 func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, params int) bool {
-	// ctx.head is this plan's entry, and the BL below re-enters it with the
-	// prologue's own frame layout. That is only the callee's real entry when the
-	// live frame is the plan's own: an inlined frame is some other function's
-	// activation, so branching to ctx.head from inside one lays A's parameter
-	// prologue over B's frame. ctx.kind is checked with it because a loop plan's
-	// head is a loop header with no prologue at all.
-	if ctx.kind != entryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !l.checkReturns(target) {
+	// call and directCall select this path only for a whole-function entry with
+	// its own live frame and a non-capturing target. The BL below re-enters that
+	// plan's entry prologue; an inlined frame or loop head must use the ordinary
+	// call path instead.
+	if !l.checkReturns(target) {
 		return false
 	}
 
