@@ -85,7 +85,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Control | `BR_IF` | `br_if` | ◐ | 🔲 | recorded branch guard or loop back-edge |
 | Control | `BR_TABLE` | `br_table` | ◐ | 🔲 | recorded table branch with fallback |
 | Stack | `SELECT` | `select` | ✅ | 🔲 | — |
-| Control | `CALL` | `call` | ◐ | 🔲 | bytecode/closure calls lower; host or unsupported callees fall back |
+| Control | `CALL` | `call` | ◐ | 🔲 | bytecode/closure calls lower, self-recursion included; host or unsupported callees fall back |
 | Control | `RETURN` | `return` | ✅ | 🔲 | trace return or stitched continuation |
 | Control | `RETURN_CALL` | `return_call` | ◐ | 🔲 | tail loop or tail morph when target shape is supported |
 | Coroutines | `YIELD` | `yield` | ◐ | 🔲 | terminal fallback to coroutine suspension |

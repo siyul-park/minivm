@@ -1448,11 +1448,21 @@ func (l arm64Lowerer) marked(ctx *lowering) bool {
 
 func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	target := resolve(ctx.module, ctx.heap, op.callee)
-	if op.callee == ctx.addr || target == nil || target.Typ == nil || ctx.count() < 1 {
+	if target == nil || target.Typ == nil || ctx.count() < 1 {
 		return false
 	}
 	params := len(target.Typ.Params)
-	if ctx.count() < params+1 || !l.checkReturns(target) {
+	if ctx.count() < params+1 {
+		return false
+	}
+	if op.callee == ctx.addr {
+		marker := ctx.pop()
+		if marker.fn != op.callee || ctx.count() < params || !l.checkArgs(ctx, target, params) {
+			return false
+		}
+		return l.selfCall(ctx, op, target, params)
+	}
+	if !l.checkReturns(target) {
 		return false
 	}
 
@@ -2374,9 +2384,6 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 		return false
 	}
 	if op.callee == ctx.addr {
-		if len(target.Captures) > 0 {
-			return false
-		}
 		return l.selfCall(ctx, op, target, params)
 	}
 	if len(ctx.frames) >= 4 {
@@ -2424,6 +2431,12 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 // flush state, check the frame budget, swap bp/sp, BL, propagate traps by
 // recording the live frame chain, and reload everything afterwards because the
 // callee owns every allocatable register.
+//
+// Both call forms reach here, so the preconditions of that BL belong here
+// rather than at either call site. ctx.head is the function's real entry only
+// for a whole-function plan: a loop plan's head is its loop header, which has
+// no parameter prologue. An inlined frame's recursion likewise re-enters the
+// callee, not this head, and a closure body would need its captures rebound.
 func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, params int) bool {
 	// ctx.head is this plan's entry, and the BL below re-enters it with the
 	// prologue's own frame layout. That is only the callee's real entry when the
@@ -2431,7 +2444,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	// activation, so branching to ctx.head from inside one lays A's parameter
 	// prologue over B's frame. ctx.kind is checked with it because a loop plan's
 	// head is a loop header with no prologue at all.
-	if ctx.kind != entryFunction || len(ctx.frames) != 1 || !l.checkReturns(target) {
+	if ctx.kind != entryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !l.checkReturns(target) {
 		return false
 	}
 
