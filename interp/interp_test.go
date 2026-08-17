@@ -2104,7 +2104,7 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 	}
 
-	t.Run("keeps cold backedges on ordinary dispatch", func(t *testing.T) {
+	t.Run("never tiers up below an unreachable threshold", func(t *testing.T) {
 		b := program.NewBuilder()
 		loop := b.Label()
 		done := b.Label()
@@ -2135,12 +2135,11 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(64), value)
 		require.Empty(t, i.tracer.loops)
-		require.Empty(t, i.loopHits)
 		require.Empty(t, i.tried)
 	})
 
 	if runtime.GOARCH == "arm64" {
-		t.Run("preserves native handlers when enabling backedges", func(t *testing.T) {
+		t.Run("preserves native handlers when cooling backedges", func(t *testing.T) {
 			b := program.NewBuilder()
 			loop := b.Label()
 			done := b.Label()
@@ -2172,11 +2171,13 @@ func TestInterpreter_Run(t *testing.T) {
 			i.exits[root] = fallback
 			i.code[0][root.ip] = native
 
-			i.enableBackedges(0)
+			require.True(t, i.backedges[0])
+
+			i.cool(0)
 
 			require.Equal(t, reflect.ValueOf(native).Pointer(), reflect.ValueOf(i.code[0][root.ip]).Pointer())
 			require.NotNil(t, i.exits[root])
-			require.True(t, i.backedges[0])
+			require.False(t, i.backedges[0])
 		})
 	}
 
@@ -5025,7 +5026,7 @@ func TestWithProfiler(t *testing.T) {
 		got, err := i.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(iterations), got)
-		require.True(t, i.isCold(incAddr), "the entry should have retired once its trace-cut rate crossed the window threshold")
+		require.True(t, i.isCold(incAddr), "the entry should have retired once its give-up rate crossed the window threshold")
 		require.True(t, i.natives[incAddr] == nil, "retire must clear the function-entry call-fast-path slot")
 
 		// flush syncs the interpreter's local sample collector into p: metrics
@@ -5660,6 +5661,18 @@ func TestWithTick(t *testing.T) {
 }
 
 func TestWithThreshold(t *testing.T) {
+	t.Run("entry counter saturates", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		i := New(prog, WithThreshold(1))
+		defer i.Close()
+
+		i.entries[0] = math.MaxUint64
+		i.trigger = math.MaxUint64
+		i.tried[anchor{addr: 0}] = true
+		require.NoError(t, i.hit())
+		require.Equal(t, uint64(math.MaxUint64), i.entries[0])
+	})
+
 	t.Run("disabled", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
 		i := New(prog, WithThreshold(-1))
@@ -5687,7 +5700,7 @@ func TestWithThreshold(t *testing.T) {
 		require.False(t, recorded)
 
 		i.fr.ip = 0
-		require.NoError(t, i.observe(i.fr))
+		i.entered()
 		require.NotNil(t, i.tracer.rootAt(anchor{addr: 0, ip: 0}))
 	})
 
@@ -5907,6 +5920,128 @@ func TestWithThreshold(t *testing.T) {
 			return
 		}
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	// A do-while loop closes on a backward BR_IF, and a jump table can close one
+	// on a backward case. Neither shape appears in the benchmark suite, where
+	// every header is closed by an unconditional BR, so nothing else here would
+	// notice if those two handlers stopped reporting their back edges.
+	t.Run("tiers up a loop closed by a backward br_if", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 1100).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithThreshold(3))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1100), v)
+
+		headers := i.tracer.headers(i, 0)
+		require.NotEmpty(t, headers)
+		require.True(t, i.tried[anchor{ip: headers[0]}], "the backward br_if never reported its header")
+	})
+
+	t.Run("tiers up a loop closed by a backward br_table case", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := program.NewBuilder()
+		loop := b.Label()
+		done := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 1100).
+			Emit(instr.I32_GE_S).
+			BrTable(done, loop).
+			Bind(done).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithThreshold(3))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1100), v)
+
+		headers := i.tracer.headers(i, 0)
+		require.NotEmpty(t, headers)
+		require.True(t, i.tried[anchor{ip: headers[0]}], "the backward br_table case never reported its header")
+	})
+
+	// RESUME builds its frame by hand instead of going through the shared call
+	// helper, so a coroutine body is the one entry the generated hook can miss.
+	t.Run("counts entries into a resumed coroutine", func(t *testing.T) {
+		body := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.RETURN)).
+			MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RESUME),
+			instr.New(instr.CORO_VALUE),
+		}, program.WithConstants(body))
+		i := New(prog, WithThreshold(1<<20))
+		defer i.Close()
+
+		for range 4 {
+			require.NoError(t, i.Run(context.Background()))
+			_, err := i.Pop()
+			require.NoError(t, err)
+			i.Reset()
+		}
+		require.Equal(t, uint64(8), i.entries[1], "CALL and RESUME each enter the coroutine once per run")
+	})
+
+	// A function only ever reached from a host callback is entered through the
+	// one-instruction trampoline invoke installs, not through the module's own
+	// table, so it counts only if that trampoline carries the hook too.
+	t.Run("counts entries made through a host callback", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32},
+		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(fn))
+		i := New(prog, WithThreshold(1<<20))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		ref, err := i.PopBoxed()
+		require.NoError(t, err)
+
+		var add func(int32) (int32, error)
+		require.NoError(t, i.Unmarshal(ref, &add))
+		for n := range 4 {
+			got, err := add(int32(n))
+			require.NoError(t, err)
+			require.Equal(t, int32(n)+1, got)
+		}
+		require.Equal(t, uint64(4), i.entries[ref.Ref()], "the invoke trampoline never counted its callee")
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {

@@ -104,7 +104,9 @@ A typical execution follows this path:
 
 5. Run
    ├─ threaded dispatch executes bytecode
-   ├─ tick path handles context, fuel, hooks, and samples
+   ├─ call and back-edge counters decide what is hot
+   ├─ tick path handles context, fuel, hooks, samples, and a pool's shared-module
+   │  handshake, and is skipped when none of them is attached
    └─ ARM64 JIT may compile hot traces
 
 6. Close or reset
@@ -121,7 +123,8 @@ A typical execution follows this path:
 |---|---|
 | `instrs` | raw bytecode per function slot |
 | `code` | threaded dispatch closures or native wrappers |
-| `tracer` | profile samples and trace recording |
+| `tracer` | trace recording |
+| `entries` | hot-event count per function, the JIT tier-up trigger |
 | `frames` | call stack |
 | `stack` | operand stack |
 | `heap`, `rc`, `free`, `trial`, `work` | heap storage, exact counts, reusable slots, and cycle-collection scratch |

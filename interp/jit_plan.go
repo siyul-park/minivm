@@ -54,6 +54,7 @@ type plan struct {
 	root    int
 	blocks  []block
 	carried []int
+	tails   map[*record][]int
 	hoist   *hoist
 	noSpill bool
 }
@@ -964,18 +965,37 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	return blocks
 }
 
+// suffix plans the continuation a conditional branch falls through to: the rest
+// of the trace from the first op that leaves the branch's frame depth.
+//
+// Results are memoized on the first op of the suffix. Every branch in a trace
+// asks for a suffix, and nested branches ask for suffixes of each other's
+// suffixes, so planning each one afresh costs time exponential in the number of
+// branches - a recorded call tree with a hundred of them never finishes. The op
+// pointer is the right key because all suffixes of one trace index into its own
+// ops array, and a suffix strictly advances, so the memo is never asked for an
+// entry still being built.
 func suffix(p *plan, tr *trace, idx int, input *compileInput) []int {
 	depth := tr.ops[idx].depth
 	for at := idx + 1; at < len(tr.ops); at++ {
 		if tr.ops[at].depth >= depth {
 			continue
 		}
+		key := &tr.ops[at]
+		if ids, ok := p.tails[key]; ok {
+			return ids
+		}
 		tail := &trace{
 			anchor: anchor{addr: tr.ops[at].fn, ip: tr.ops[at].ip},
 			ops:    tr.ops[at:],
 			status: tr.status,
 		}
-		return store(p, split(p, tail, input), true)
+		ids := store(p, split(p, tail, input), true)
+		if p.tails == nil {
+			p.tails = map[*record][]int{}
+		}
+		p.tails[key] = ids
+		return ids
 	}
 	return nil
 }

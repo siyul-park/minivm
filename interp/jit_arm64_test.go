@@ -130,9 +130,9 @@ func TestARM64_Backedge(t *testing.T) {
 		attempted []bool
 		installed bool
 	}{
-		{name: "compiles module loop", limit: 64, threshold: 0, attempted: []bool{true}, installed: true},
-		{name: "warms eager loop", limit: 4, threshold: 0, attempted: []bool{false, true}},
-		{name: "keeps sample threshold", limit: 4, threshold: 1, attempted: []bool{false, false}},
+		{name: "compiles module loop", limit: 64, threshold: 8, attempted: []bool{true}, installed: true},
+		{name: "warms loop across runs", limit: 4, threshold: 3, attempted: []bool{false, true}},
+		{name: "keeps hot threshold", limit: 4, threshold: 64, attempted: []bool{false, false}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
