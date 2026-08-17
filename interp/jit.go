@@ -552,13 +552,29 @@ func (m counters) yield() {
 }
 
 // enter counts one invocation of the installed native entry.
+// unproductive reports whether an exit means the native entry gave up on work it
+// was compiled to do. A guard failure and a cold branch both say the recording
+// predicted the program wrong, and a trace cut says the code knowingly stopped
+// mid-function; each pays full bailout and re-entry for nothing. A loop exit is
+// how a loop normally ends and a terminal op is a deopt the plan intended, so
+// neither counts.
+func unproductive(reason prof.ExitReason) bool {
+	switch reason {
+	case prof.ExitTraceCut, prof.ExitColdBranch,
+		prof.ExitGuardKind, prof.ExitGuardShape, prof.ExitGuardBounds, prof.ExitGuardValue:
+		return true
+	default:
+		return false
+	}
+}
+
 // newWatchdog precomputes, for each of entry's exit descriptors, whether its
 // reason is prof.ExitTraceCut, so the watchdog's hot path only ever indexes a
 // []bool keyed by descriptor ID.
 func newWatchdog(entry native) *watchdog {
 	cut := make([]bool, len(entry.exits))
 	for id, exit := range entry.exits {
-		cut[id] = exit.reason == prof.ExitTraceCut
+		cut[id] = unproductive(exit.reason)
 	}
 	return &watchdog{cut: cut}
 }
