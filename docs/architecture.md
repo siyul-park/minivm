@@ -105,7 +105,8 @@ A typical execution follows this path:
 5. Run
    ├─ threaded dispatch executes bytecode
    ├─ call and back-edge counters decide what is hot
-   ├─ tick path handles context, fuel, hooks, and samples, and is skipped without them
+   ├─ tick path handles context, fuel, hooks, samples, and a pool's shared-module
+   │  handshake, and is skipped when none of them is attached
    └─ ARM64 JIT may compile hot traces
 
 6. Close or reset

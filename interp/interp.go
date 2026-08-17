@@ -1032,7 +1032,7 @@ func (i *Interpreter) install(mod *module, account bool) {
 			}
 		}
 		stats := i.counters(a, entry)
-		// wd tracks trace-cut exits independent of stats: counters is a no-op
+		// wd tracks give-up exits independent of stats: counters is a no-op
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
@@ -1756,9 +1756,8 @@ func (i *Interpreter) checkRetire(a anchor, wd *watchdog, clearNatives bool) {
 	}
 }
 
-// retire undoes install for anchor a once its watchdog finds it spends at
-// least retireCutThreshold of a retireWindow exiting through trace-cut (see
-// watchdog): it restores the shadowed threaded handler saved in i.exits,
+// retire undoes install for anchor a once its watchdog finds it spends at least
+// retireGiveUpThreshold of a retireWindow giving up (see watchdog): it restores the shadowed threaded handler saved in i.exits,
 // clears a's function-entry call-fast-path slot in i.natives when
 // clearNatives is set (a null slot already makes callers fall back at the
 // CALL, see install), and calls cool so addr is neither re-instrumented nor

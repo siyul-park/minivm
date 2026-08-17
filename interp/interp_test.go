@@ -5026,7 +5026,7 @@ func TestWithProfiler(t *testing.T) {
 		got, err := i.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(iterations), got)
-		require.True(t, i.isCold(incAddr), "the entry should have retired once its trace-cut rate crossed the window threshold")
+		require.True(t, i.isCold(incAddr), "the entry should have retired once its give-up rate crossed the window threshold")
 		require.True(t, i.natives[incAddr] == nil, "retire must clear the function-entry call-fast-path slot")
 
 		// flush syncs the interpreter's local sample collector into p: metrics

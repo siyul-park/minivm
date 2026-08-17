@@ -474,10 +474,12 @@ one machine, 60 rows, median -0.7%. Nineteen rows improve by 5% or more:
 | `PermutationFlips` `default` | 141.16 µs | 118.60 µs | -16% |
 | `AllocationGraph` `jit` | 7.99 µs | 6.94 µs | -13% |
 | `AllocationGraph` `default` | 7.93 µs | 6.93 µs | -13% |
+| `BranchTree` `threaded` | 944.7 ns | 845.9 ns | -10% |
 | `NQueens` `jit` | 228.37 µs | 206.54 µs | -10% |
 | `NQueens` `default` | 228.32 µs | 207.49 µs | -9% |
 | `Fannkuch` `default` | 687.06 µs | 638.76 µs | -7% |
-| `BinaryTrees` `jit`, `default` | 2.01 ms | 1.90 ms | -5% |
+| `BinaryTrees` `jit` | 2.01 ms | 1.90 ms | -5% |
+| `BinaryTrees` `default` | 2.01 ms | 1.91 ms | -5% |
 | `SpectralNorm` `jit` | 62.32 µs | 59.09 µs | -5% |
 
 Nothing regresses by more than 5%. The largest are `RecursiveFib(20)` `threaded`
@@ -496,7 +498,8 @@ Reproduce with:
 cd benchmarks
 go test -c -o /tmp/new.test .
 git stash push && go test -c -o /tmp/base.test .; git stash pop
-for r in 1 2 3; do
+: > base.txt; : > new.txt
+for _ in 1 2 3; do
   /tmp/base.test -test.run='^$' -test.bench=. -test.benchtime=300ms >> base.txt
   /tmp/new.test  -test.run='^$' -test.bench=. -test.benchtime=300ms >> new.txt
 done

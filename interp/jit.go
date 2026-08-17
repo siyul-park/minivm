@@ -40,21 +40,20 @@ type counters struct {
 	exits  []*prof.Counter
 }
 
-// watchdog counts native entries, trace-cut exits, and bridge cycles for one
+// watchdog counts native entries, give-up exits, and bridge cycles for one
 // installed anchor. Unlike counters, it is always live regardless of
-// i.profiler: a trace-cut exit is native code that knowingly stops
-// mid-function (see prof.ExitTraceCut) rather than completing its job or
-// leaving through a healthy loop-exit edge, so a high rate of it — not a high
-// exit rate alone — is the signal that the installed entry should be retired
-// (see Interpreter.retire). A bridge cycle (see Interpreter.bridge) is
-// productive work and must never count as a trace-cut, but an anchor that
-// spends most of its entries bridging pays the same deopt/re-enter cost as
-// one that trace-cuts, so it is tracked and retired the same way, just
-// through its own counter.
+// i.profiler: a give-up exit is one where the entry abandoned the work it was
+// compiled for (see unproductive) rather than completing its job or leaving
+// through a healthy loop-exit edge, so a high rate of it — not a high exit rate
+// alone — is the signal that the installed entry should be retired (see
+// Interpreter.retire). A bridge cycle (see Interpreter.bridge) is productive
+// work and must never count as one, but an anchor that spends most of its
+// entries bridging pays the same deopt/re-enter cost, so it is tracked and
+// retired the same way, just through its own counter.
 type watchdog struct {
-	cut     []bool // exit descriptor ID -> reason == prof.ExitTraceCut
+	gaveUp  []bool // exit descriptor ID -> unproductive(reason)
 	entries uint32
-	cuts    uint32
+	giveUps uint32
 	bridges uint32
 }
 
@@ -284,10 +283,10 @@ const loopBudget = 1 << 13
 // judging whether an installed anchor is paying for itself (see watchdog).
 const retireWindow = 1024
 
-// retireCutThreshold is the minimum count of trace-cut exits (see
-// prof.ExitTraceCut) within one retireWindow that marks the anchor as a net
-// loss rather than a healthy kernel's normal loop-exit or guard traffic.
-const retireCutThreshold = retireWindow / 4
+// retireGiveUpThreshold is the minimum count of give-up exits (see unproductive)
+// within one retireWindow that marks the anchor as a net loss rather than a
+// healthy kernel's normal loop-exit traffic.
+const retireGiveUpThreshold = retireWindow / 4
 
 // arrayElems is where a ref array's elements begin. It sits here with the
 // shape table rather than with the lowering offsets because the portable
@@ -568,22 +567,22 @@ func unproductive(reason prof.ExitReason) bool {
 	}
 }
 
-// newWatchdog precomputes, for each of entry's exit descriptors, whether its
-// reason is prof.ExitTraceCut, so the watchdog's hot path only ever indexes a
+// newWatchdog precomputes, for each of entry's exit descriptors, whether taking
+// it means the entry gave up, so the watchdog's hot path only ever indexes a
 // []bool keyed by descriptor ID.
 func newWatchdog(entry native) *watchdog {
-	cut := make([]bool, len(entry.exits))
+	gaveUp := make([]bool, len(entry.exits))
 	for id, exit := range entry.exits {
-		cut[id] = unproductive(exit.reason)
+		gaveUp[id] = unproductive(exit.reason)
 	}
-	return &watchdog{cut: cut}
+	return &watchdog{gaveUp: gaveUp}
 }
 
 func (w *watchdog) enter() {
 	w.entries++
 }
 
-// exit counts one trace-cut fallback exit. encoded is i.journal[journalExitID]
+// exit counts one give-up fallback exit. encoded is i.journal[journalExitID]
 // exactly as counters.exit consumes it: the exit descriptor ID plus one, zero
 // meaning no descriptor.
 func (w *watchdog) exit(encoded uint64) {
@@ -591,19 +590,19 @@ func (w *watchdog) exit(encoded uint64) {
 		return
 	}
 	id := int(encoded - 1)
-	if id >= 0 && id < len(w.cut) && w.cut[id] {
-		w.cuts++
+	if id >= 0 && id < len(w.gaveUp) && w.gaveUp[id] {
+		w.giveUps++
 	}
 }
 
 // bridge counts one bridge cycle (see Interpreter.bridge). It is tracked
-// separately from exit so a bridge never counts toward the trace-cut rate.
+// separately from exit so a bridge never counts toward the give-up rate.
 func (w *watchdog) bridge() {
 	w.bridges++
 }
 
 // failed reports whether this anchor lost the window it just completed: its
-// cut rate or bridge rate reached retireCutThreshold, so it should be retired
+// give-up rate or bridge rate reached retireGiveUpThreshold, so it is retired
 // (see Interpreter.retire). A window shorter than retireWindow has decided
 // nothing yet; a completed one always resets every counter, so the next window
 // starts clean whichever way it went.
@@ -611,8 +610,8 @@ func (w *watchdog) failed() bool {
 	if w.entries < retireWindow {
 		return false
 	}
-	bad := w.cuts >= retireCutThreshold || w.bridges >= retireCutThreshold
-	w.entries, w.cuts, w.bridges = 0, 0, 0
+	bad := w.giveUps >= retireGiveUpThreshold || w.bridges >= retireGiveUpThreshold
+	w.entries, w.giveUps, w.bridges = 0, 0, 0
 	return bad
 }
 
