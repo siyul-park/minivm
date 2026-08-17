@@ -453,6 +453,56 @@ git stash push && go test -run='^$' -bench='.' -benchtime=200ms -count=3 . > bas
 benchstat base.txt new.txt
 ```
 
+Tiering up moved off instruction sampling and onto call and back-edge counters
+(`docs/profile.md`). That is a policy change, not a lowering change: it alters
+which roots compile and in what order, so most native-tier rows above are stale
+for the two JIT tiers. The evidence is a separate A/B at its own settings - two
+full sweeps at the table's own `-benchtime=300ms -count=3`, run back to back on
+one machine, 60 rows, median -0.7%. Nineteen rows improve by 5% or more:
+
+| Kernel | before | after | |
+|---|---:|---:|---:|
+| `IndirectRecursiveFib` `jit` | 1.00 ms | 106.80 µs | -89% |
+| `TypedArraySum` `jit` | 765.6 ns | 462.2 ns | -40% |
+| `TypedArraySum` `default` | 763.5 ns | 462.1 ns | -39% |
+| `Fannkuch` `jit` | 919.04 µs | 641.36 µs | -30% |
+| `IterativeFib` `jit` | 64.3 ns | 45.1 ns | -30% |
+| `IterativeFib` `default` | 64.4 ns | 46.3 ns | -28% |
+| `StringBuild` `jit` | 540.43 µs | 414.18 µs | -23% |
+| `SortStress` `default` | 106.27 µs | 82.54 µs | -22% |
+| `PermutationFlips` `jit` | 142.10 µs | 118.84 µs | -16% |
+| `PermutationFlips` `default` | 141.16 µs | 118.60 µs | -16% |
+| `AllocationGraph` `jit` | 7.99 µs | 6.94 µs | -13% |
+| `AllocationGraph` `default` | 7.93 µs | 6.93 µs | -13% |
+| `NQueens` `jit` | 228.37 µs | 206.54 µs | -10% |
+| `NQueens` `default` | 228.32 µs | 207.49 µs | -9% |
+| `Fannkuch` `default` | 687.06 µs | 638.76 µs | -7% |
+| `BinaryTrees` `jit`, `default` | 2.01 ms | 1.90 ms | -5% |
+| `SpectralNorm` `jit` | 62.32 µs | 59.09 µs | -5% |
+
+Nothing regresses by more than 5%. The largest are `RecursiveFib(20)` `threaded`
+(+5%) and `NBody` `jit` (+5%). The first is the entry counter's own cost on a
+kernel that is almost entirely calls; the second is one extra loop root that
+`NBody` enters only 161 times, too few to complete the 1024-entry window the
+retirement watchdog judges on. Both were measured repeatedly; the rest of the
+positive column sits inside this machine's run-to-run drift.
+
+The absolute numbers in that A/B are not comparable with the tables above -
+the same `main` kernels measured 30-50% slower on the day it ran than when the
+tables were recorded - which is why no row above was rewritten from it.
+Reproduce with:
+
+```bash
+cd benchmarks
+go test -c -o /tmp/new.test .
+git stash push && go test -c -o /tmp/base.test .; git stash pop
+for r in 1 2 3; do
+  /tmp/base.test -test.run='^$' -test.bench=. -test.benchtime=300ms >> base.txt
+  /tmp/new.test  -test.run='^$' -test.bench=. -test.benchtime=300ms >> new.txt
+done
+benchstat base.txt new.txt
+```
+
 Allocation results are bounded: object-heavy kernels such as `StructTreeWalk` and
 `BinaryTrees` stay at 768 B/op and 8 allocs/op. `StringBuild` holds 85,408 B/op, and
 its 4,107 allocs/op come from the per-token UTF-32 array and string cells rather than
