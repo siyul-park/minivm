@@ -456,9 +456,11 @@ benchstat base.txt new.txt
 Tiering up moved off instruction sampling and onto call and back-edge counters
 (`docs/profile.md`). That is a policy change, not a lowering change: it alters
 which roots compile and in what order, so most native-tier rows above are stale
-for the two JIT tiers. The evidence is a separate A/B at its own settings - two
-full sweeps at the table's own `-benchtime=300ms -count=3`, run back to back on
-one machine, 60 rows, median -0.7%. Nineteen rows improve by 5% or more:
+for the two JIT tiers. The evidence is a separate A/B at its own settings and its own environment -
+August 16, 2026, Apple M4 Pro, darwin/arm64, Go 1.26.2 - two full sweeps at the
+table's own `-benchtime=300ms -count=3`, both sides built as test binaries and
+run back to back so they see the same thermal state. 60 rows, median -0.7%.
+Nineteen rows improve by 5% or more:
 
 | Kernel | before | after | |
 |---|---:|---:|---:|

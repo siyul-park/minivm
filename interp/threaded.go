@@ -244,7 +244,7 @@ var (
 					i.fr.ip += 1
 					i.fp++
 					i.fr = f
-					if i.entry != 0 {
+					if i.trigger != 0 {
 						c.entry(i)
 					}
 				case *types.Closure:
@@ -284,7 +284,7 @@ var (
 					i.fr.ip += 1
 					i.fp++
 					i.fr = f
-					if i.entry != 0 {
+					if i.trigger != 0 {
 						c.entry(i)
 					}
 				case *HostFunction:
@@ -503,7 +503,7 @@ var (
 						f.release = true
 						i.sp = base + params + locals
 					inlineTail2:
-						if i.entry != 0 {
+						if i.trigger != 0 {
 							c.entry(i)
 						}
 					}
@@ -578,7 +578,7 @@ var (
 						f.release = true
 						i.sp = base + params + locals
 					inlineTail3:
-						if i.entry != 0 {
+						if i.trigger != 0 {
 							c.entry(i)
 						}
 					}
@@ -791,7 +791,7 @@ var (
 							i.fr.ip++
 							i.fp++
 							i.fr = f
-							if i.entry != 0 {
+							if i.trigger != 0 {
 								c.entry(i)
 							}
 						}
@@ -55444,7 +55444,7 @@ var (
 							i.fr.ip += 4
 							i.fp++
 							i.fr = f
-							if i.entry != 0 {
+							if i.trigger != 0 {
 								c.entry(i)
 							}
 							return
@@ -55475,7 +55475,7 @@ var (
 						f.returns = returns
 						f.release = false
 						i.sp = base + params + locals
-						if i.entry != 0 {
+						if i.trigger != 0 {
 							c.entry(i)
 						}
 					}
@@ -55522,7 +55522,7 @@ var (
 							i.fr.ip += 4
 							i.fp++
 							i.fr = f
-							if i.entry != 0 {
+							if i.trigger != 0 {
 								c.entry(i)
 							}
 							return
@@ -55553,7 +55553,7 @@ var (
 						f.returns = returns
 						f.release = false
 						i.sp = base + params + locals
-						if i.entry != 0 {
+						if i.trigger != 0 {
 							c.entry(i)
 						}
 					}
@@ -55750,7 +55750,7 @@ var (
 						i.fr.ip += 4
 						i.fp++
 						i.fr = f
-						if i.entry != 0 {
+						if i.trigger != 0 {
 							c.entry(i)
 						}
 					}
@@ -55796,7 +55796,7 @@ var (
 						i.fr.ip += 4
 						i.fp++
 						i.fr = f
-						if i.entry != 0 {
+						if i.trigger != 0 {
 							c.entry(i)
 						}
 					}

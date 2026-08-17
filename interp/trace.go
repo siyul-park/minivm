@@ -300,7 +300,7 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	// without the entry hook, but out starts as a shallow copy, so entries still
 	// aliases the live counters; dropping both the slice and the trigger keeps a
 	// recorded call from ever writing them.
-	out.entry = 0
+	out.trigger = 0
 	out.entries = nil
 
 	out.constants = i.constants

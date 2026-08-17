@@ -43,7 +43,7 @@ type counters struct {
 // watchdog counts native entries, give-up exits, and bridge cycles for one
 // installed anchor. Unlike counters, it is always live regardless of
 // i.profiler: a give-up exit is one where the entry abandoned the work it was
-// compiled for (see unproductive) rather than completing its job or leaving
+// compiled for (see givesUp) rather than completing its job or leaving
 // through a healthy loop-exit edge, so a high rate of it — not a high exit rate
 // alone — is the signal that the installed entry should be retired (see
 // Interpreter.retire). A bridge cycle (see Interpreter.bridge) is productive
@@ -51,7 +51,7 @@ type counters struct {
 // entries bridging pays the same deopt/re-enter cost, so it is tracked and
 // retired the same way, just through its own counter.
 type watchdog struct {
-	gaveUp  []bool // exit descriptor ID -> unproductive(reason)
+	gaveUp  []bool // exit descriptor ID -> givesUp(reason)
 	entries uint32
 	giveUps uint32
 	bridges uint32
@@ -283,7 +283,7 @@ const loopBudget = 1 << 13
 // judging whether an installed anchor is paying for itself (see watchdog).
 const retireWindow = 1024
 
-// retireGiveUpThreshold is the minimum count of give-up exits (see unproductive)
+// retireGiveUpThreshold is the minimum count of give-up exits (see givesUp)
 // within one retireWindow that marks the anchor as a net loss rather than a
 // healthy kernel's normal loop-exit traffic.
 const retireGiveUpThreshold = retireWindow / 4
@@ -550,14 +550,24 @@ func (m counters) yield() {
 	}
 }
 
-// enter counts one invocation of the installed native entry.
-// unproductive reports whether an exit means the native entry gave up on work it
-// was compiled to do. A guard failure and a cold branch both say the recording
-// predicted the program wrong, and a trace cut says the code knowingly stopped
-// mid-function; each pays full bailout and re-entry for nothing. A loop exit is
-// how a loop normally ends and a terminal op is a deopt the plan intended, so
-// neither counts.
-func unproductive(reason prof.ExitReason) bool {
+// newWatchdog precomputes, for each of entry's exit descriptors, whether taking
+// it means the entry gave up, so the watchdog's hot path only ever indexes a
+// []bool keyed by descriptor ID.
+func newWatchdog(entry native) *watchdog {
+	gaveUp := make([]bool, len(entry.exits))
+	for id, exit := range entry.exits {
+		gaveUp[id] = givesUp(exit.reason)
+	}
+	return &watchdog{gaveUp: gaveUp}
+}
+
+// givesUp reports whether taking this exit means the native entry abandoned the
+// work it was compiled for. A guard failure and a cold branch both say the
+// recording predicted the program wrong, and a trace cut says the code knowingly
+// stopped mid-function; each pays full bailout and re-entry for nothing. A loop
+// exit is how a loop normally ends and a terminal op is a deopt the plan
+// intended, so neither counts.
+func givesUp(reason prof.ExitReason) bool {
 	switch reason {
 	case prof.ExitTraceCut, prof.ExitColdBranch,
 		prof.ExitGuardKind, prof.ExitGuardShape, prof.ExitGuardBounds, prof.ExitGuardValue:
@@ -567,17 +577,7 @@ func unproductive(reason prof.ExitReason) bool {
 	}
 }
 
-// newWatchdog precomputes, for each of entry's exit descriptors, whether taking
-// it means the entry gave up, so the watchdog's hot path only ever indexes a
-// []bool keyed by descriptor ID.
-func newWatchdog(entry native) *watchdog {
-	gaveUp := make([]bool, len(entry.exits))
-	for id, exit := range entry.exits {
-		gaveUp[id] = unproductive(exit.reason)
-	}
-	return &watchdog{gaveUp: gaveUp}
-}
-
+// enter counts one invocation of the installed native entry.
 func (w *watchdog) enter() {
 	w.entries++
 }

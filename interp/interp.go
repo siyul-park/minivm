@@ -80,7 +80,7 @@ type Interpreter struct {
 	gas int64
 
 	threshold int64
-	entry     uint32
+	trigger   uint32
 	tick      int
 	fuel      int64
 	limit     int
@@ -163,9 +163,10 @@ func WithConverter(t reflect.Type, c Converter) func(*option) {
 }
 
 // WithProfiler attaches a profiler that aggregates this interpreter's execution
-// samples and JIT counters. It is opt-in: without one, sampling still drives JIT
-// hotness but no profile is collected. Pass the same Profiler to NewPool so every
-// pooled interpreter shares it.
+// samples and JIT counters. It is opt-in and observational: what compiles is
+// decided by the call and back-edge counters either way, so attaching one only
+// adds the per-tick sampling that fills the profile. Pass the same Profiler to
+// NewPool so every pooled interpreter shares it.
 func WithProfiler(p *prof.Profiler) func(*option) {
 	return func(o *option) {
 		o.profiler = p
@@ -262,6 +263,13 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if threshold == 0 {
 		threshold = 1
 	}
+	// trigger is the same number the hot counters compare against, clamped to
+	// their width. Zero means never, which is what lets the generated hook cost a
+	// single compare when the JIT is disabled.
+	var trigger uint32
+	if threshold > 0 {
+		trigger = uint32(min(threshold, math.MaxUint32))
+	}
 
 	i := &Interpreter{
 		tracer:      tracer,
@@ -272,7 +280,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		profiler:    opt.profiler,
 		samples:     samples,
 		threshold:   threshold,
-		entry:       entryTrigger(threshold),
+		trigger:     trigger,
 		types:       prog.Types,
 		constants:   make([]types.Boxed, len(prog.Constants)),
 		globals:     make([]types.Boxed, len(prog.Globals)),
@@ -808,9 +816,6 @@ func (i *Interpreter) seed() {
 	}
 }
 
-// compile lowers traces already recorded for addr and installs the resulting
-// native entries. Recording belongs to observe and side-exit handling because
-// only those paths hold the exact runtime state for their anchor.
 // dispatch runs the threaded loop until the frame ends, a safepoint stops it, or
 // a panic unwinds it. Its recover delivers a yield, lands a catchable throw/trap
 // on a guest handler (reported via caught so Run re-enters here), or wraps an
@@ -947,6 +952,10 @@ func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
 	}
 }
 
+// compile lowers traces already recorded for root and installs the resulting
+// native entries. Recording belongs to the hot-event hooks and side-exit
+// handling because only those paths hold the exact runtime state for their
+// anchor.
 func (i *Interpreter) compile(root anchor) error {
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	if i.compiler == nil {
@@ -1107,16 +1116,6 @@ func (i *Interpreter) safepoint() error {
 	return nil
 }
 
-// entryTrigger converts a configured threshold into the call count that fires a
-// function's one-shot entry compile. Zero means never: a disabled JIT still runs
-// the generated entry hook, and this is what makes that hook a single compare.
-func entryTrigger(threshold int64) uint32 {
-	if threshold < 0 {
-		return 0
-	}
-	return uint32(min(threshold, math.MaxUint32))
-}
-
 // owns reports whether f is executing its own function's installed dispatch
 // table. It is false for the one-instruction trampoline invoke builds to
 // re-enter the VM from a host callback: that frame borrows the module's addr
@@ -1156,12 +1155,12 @@ func (i *Interpreter) entered() {
 // entered relies on, so there the failure has to come back as a value.
 func (i *Interpreter) enter() error {
 	addr := i.fr.addr
-	if i.entry == 0 || addr < 0 || addr >= len(i.entries) {
+	if i.trigger == 0 || addr < 0 || addr >= len(i.entries) {
 		return nil
 	}
 	hits := i.entries[addr] + 1
 	i.entries[addr] = hits
-	if hits <= entryWarmup || hits >= i.entry {
+	if hits <= entryWarmup || hits >= i.trigger {
 		if err := i.warm(addr, hits); err != nil {
 			return err
 		}
@@ -1202,7 +1201,7 @@ func (i *Interpreter) warm(addr int, hits uint32) error {
 	if hits <= entryWarmup && i.fr.ip == 0 {
 		i.tracer.capture(i, root)
 	}
-	if hits >= i.entry && i.cache == nil && !i.tried[root] && i.settled(addr, hits) {
+	if hits >= i.trigger && i.cache == nil && !i.tried[root] && i.settled(addr, hits) {
 		i.tried[root] = true
 		if err := i.compile(root); err != nil {
 			return err
@@ -1221,7 +1220,7 @@ func (i *Interpreter) warm(addr int, hits uint32) error {
 // The wait is bounded, because a header the function never actually reaches
 // would otherwise hold its entry back forever.
 func (i *Interpreter) settled(addr int, hits uint32) bool {
-	if hits >= i.entry+entryWarmup {
+	if hits >= i.trigger+entryWarmup {
 		return true
 	}
 	for _, header := range i.tracer.headers(i, addr) {
@@ -1285,7 +1284,7 @@ func (i *Interpreter) backedge(f *frame) error {
 	// whole-function plan is always attempted first. Compiling the header first
 	// would install a native loop that stops running this hook, and the function
 	// it belongs to would never accumulate the events its own entry needs.
-	if f.addr >= 0 && f.addr < len(i.entries) && i.entries[f.addr] < i.entry {
+	if f.addr >= 0 && f.addr < len(i.entries) && i.entries[f.addr] < i.trigger {
 		return nil
 	}
 	err := i.trace(f)
@@ -1784,8 +1783,8 @@ func (i *Interpreter) retire(a anchor, clearNatives bool) {
 }
 
 // rethread rebuilds addr's dispatch table for the given back-edge mode: true
-// installs the exact unconditional back-edge handler (see enableBackedges),
-// false reverts to the plain zero-overhead handler (see cool).
+// installs the counting back-edge handlers every function starts with, false
+// reverts to the plain zero-overhead ones (see cool).
 //
 // The rethreaded handlers are copied into the table already installed rather
 // than replacing it. Compile emits one handler per code byte, so both tables

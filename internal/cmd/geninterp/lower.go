@@ -1454,10 +1454,10 @@ func frame(callee target, targetSlots int, releaseTarget bool, advance int, coro
 //
 // The gate reads the interpreter rather than the threader, because i is already
 // in hand while c costs a closure load before its field. Threader construction
-// therefore always sets the field, and Interpreter.entry alone decides: a
+// therefore always sets the field, and Interpreter.trigger alone decides: a
 // disabled JIT and a trace recording both leave it zero.
 func entered() jen.Code {
-	return jen.If(jen.Id("i").Dot("entry").Op("!=").Lit(0)).Block(
+	return jen.If(jen.Id("i").Dot("trigger").Op("!=").Lit(0)).Block(
 		jen.Id("c").Dot("entry").Call(jen.Id("i")),
 	)
 }
