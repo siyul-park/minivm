@@ -44,7 +44,7 @@ type Interpreter struct {
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
 	backedges   []bool
-	entries     []uint32
+	entries     []uint64
 	cold        []bool
 	misses      []uint8
 	coros       []bool
@@ -80,7 +80,7 @@ type Interpreter struct {
 	gas int64
 
 	threshold int64
-	trigger   uint32
+	trigger   uint64
 	tick      int
 	fuel      int64
 	limit     int
@@ -263,12 +263,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if threshold == 0 {
 		threshold = 1
 	}
-	// trigger is the same number the hot counters compare against, clamped to
-	// their width. Zero means never, which is what lets the generated hook cost a
-	// single compare when the JIT is disabled.
-	var trigger uint32
+	var trigger uint64
 	if threshold > 0 {
-		trigger = uint32(min(threshold, math.MaxUint32))
+		trigger = uint64(threshold)
 	}
 
 	i := &Interpreter{
@@ -288,7 +285,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		instrs:      make([][]byte, len(prog.Constants)+1),
 		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
 		backedges:   make([]bool, len(prog.Constants)+1),
-		entries:     make([]uint32, len(prog.Constants)+1),
+		entries:     make([]uint64, len(prog.Constants)+1),
 		cold:        make([]bool, len(prog.Constants)+1),
 		misses:      make([]uint8, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
@@ -423,9 +420,10 @@ func (i *Interpreter) Run(ctx context.Context) error {
 	}
 	// The top frame is built by New and Reset, not by a threaded call handler, so
 	// this is the module's only entry hook. It runs once per Run: a caught throw
-	// loops below without re-entering.
+	// loops below without re-entering. The host-callback trampoline replaces the
+	// frame's code table, so it is the only frame that must skip this hook.
 	if i.owns(i.fr) {
-		if err := i.enter(); err != nil {
+		if err := i.hit(); err != nil {
 			i.ctx = nil
 			i.done = nil
 			return err
@@ -1116,12 +1114,6 @@ func (i *Interpreter) safepoint() error {
 	return nil
 }
 
-// owns reports whether f is executing its own function's installed dispatch
-// table. It is false for the one-instruction trampoline invoke builds to
-// re-enter the VM from a host callback: that frame borrows the module's addr
-// without running the module, so counting it would record and compile the
-// module from a state it never actually reaches. The CALL that trampoline
-// dispatches still counts its real callee.
 func (i *Interpreter) owns(f *frame) bool {
 	if f.addr < 0 || f.addr >= len(i.code) {
 		return false
@@ -1130,70 +1122,47 @@ func (i *Interpreter) owns(f *frame) bool {
 	return len(f.code) > 0 && len(code) > 0 && &f.code[0] == &code[0]
 }
 
-// entered counts one hot event for the function the interpreter is currently
-// running. A call into it is one event, and so is a warmed arrival at one of its
-// back edges: both are how a function earns compilation, so both answer to the
-// same configured threshold, and a module body entered once still becomes hot by
-// looping. Every frame-establishing threaded handler ends with it - CALL,
-// RETURN_CALL, and RESUME - so a function accumulates one count per entry
-// however it was reached and from however many call sites.
-//
-// Paths that deliberately do not count: deopt rebuilds frames for calls that
-// already happened natively, and the native call wrappers run code that is hot
-// by definition. A bridged CALL runs a real threaded handler and does count.
-//
-// This is the generated hook's form, and it follows that convention: a threaded
-// handler reports failure by panicking, and dispatch's recover annotates it.
+// entered records one call into the current function. Threaded handlers report
+// failures by panicking so dispatch can annotate them at the interpreter boundary.
 func (i *Interpreter) entered() {
-	if err := i.enter(); err != nil {
+	if err := i.hit(); err != nil {
 		panic(err)
 	}
 }
 
-// enter raises one hot event and returns what it cost. Run uses it for the
-// module's own entry, which happens before dispatch installs the recover that
-// entered relies on, so there the failure has to come back as a value.
-func (i *Interpreter) enter() error {
+// hit records one hot event.
+func (i *Interpreter) hit() error {
 	addr := i.fr.addr
 	if i.trigger == 0 || addr < 0 || addr >= len(i.entries) {
 		return nil
 	}
-	hits := i.entries[addr] + 1
-	i.entries[addr] = hits
+	hits := i.entries[addr]
+	if hits < math.MaxUint64 {
+		hits++
+		i.entries[addr] = hits
+	}
 	if hits <= entryWarmup || hits >= i.trigger {
 		if err := i.warm(addr, hits); err != nil {
 			return err
 		}
 	}
 	if i.cache != nil {
-		return i.claim(addr)
+		request, ok := i.cache.claim(addr, i.threshold)
+		if ok {
+			return i.shared(request.root, request.trigger)
+		}
 	}
 	return nil
 }
 
-// claim offers one hot event to the shared cache, which aggregates events across
-// pool members so exactly one of them compiles a given function. The offer is
-// made on every event rather than at this member's own crossing, because no
-// single member need reach the threshold for the pool to have reached it.
-func (i *Interpreter) claim(addr int) error {
-	request, ok := i.cache.claim(addr, i.threshold)
-	if !ok {
-		return nil
-	}
-	return i.shared(request.root, request.trigger)
-}
-
-// warm is the hot counter's slow path. The early events publish a trace and the
-// crossing event compiles, in that order and never in the same call, because the
-// compile is one-shot per root and would find nothing recorded if it ran first.
-// Capturing from the first few events also records a recursive function at its
-// shallowest, which is the only depth its trace can be recorded from.
+// warm handles entry tracing and compilation once an event reaches the warmup
+// window or threshold. Entry capture records the shallowest runtime state.
 //
 // Only an event raised at the entry itself may capture. A back edge is a hot
 // event for the same function but stands mid-body, and recording the entry root
 // from there replays the entry instructions against loop-carried locals - a
 // state the function never reaches on entry, whose trace then plans nothing.
-func (i *Interpreter) warm(addr int, hits uint32) error {
+func (i *Interpreter) warm(addr int, hits uint64) error {
 	if i.isCold(addr) {
 		return nil
 	}
@@ -1219,7 +1188,7 @@ func (i *Interpreter) warm(addr int, hits uint32) error {
 //
 // The wait is bounded, because a header the function never actually reaches
 // would otherwise hold its entry back forever.
-func (i *Interpreter) settled(addr int, hits uint32) bool {
+func (i *Interpreter) settled(addr int, hits uint64) bool {
 	if hits >= i.trigger+entryWarmup {
 		return true
 	}
@@ -1277,7 +1246,7 @@ func (i *Interpreter) backedge(f *frame) error {
 	if i.isCold(f.addr) {
 		return nil
 	}
-	if err := i.enter(); err != nil {
+	if err := i.hit(); err != nil {
 		return err
 	}
 	// The loop root waits for the same hot count as the entry root, so the
@@ -1292,17 +1261,7 @@ func (i *Interpreter) backedge(f *frame) error {
 	return err
 }
 
-// yielded handles a native loop that has spent its back-edge budget. deopt has
-// left i.fr at the header, and a loop that burns a whole budget is hot by
-// definition, so the yield reports that header exactly as a threaded back edge
-// would.
-//
-// Reporting here is what keeps a loop inside an already-native function
-// compilable. Once a whole-function entry installs, its loops run inside it and
-// their threaded back edges never execute again, so this is their only remaining
-// way to earn a native entry of their own - and a loop entry, with its hoisting
-// and native back-edge, is worth far more than the enclosing entry's copy of the
-// same blocks.
+// yielded reports a native loop yield through the same back-edge path as the threaded loop.
 func (i *Interpreter) yielded() error {
 	if err := i.backedge(i.fr); err != nil {
 		return err
@@ -2445,7 +2404,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		i.backedges = append(i.backedges, make([]bool, n-len(i.backedges))...)
 	}
 	if addr >= len(i.entries) {
-		i.entries = append(i.entries, make([]uint32, n-len(i.entries))...)
+		i.entries = append(i.entries, make([]uint64, n-len(i.entries))...)
 	}
 	if addr >= len(i.cold) {
 		i.cold = append(i.cold, make([]bool, n-len(i.cold))...)

@@ -5661,6 +5661,18 @@ func TestWithTick(t *testing.T) {
 }
 
 func TestWithThreshold(t *testing.T) {
+	t.Run("entry counter saturates", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		i := New(prog, WithThreshold(1))
+		defer i.Close()
+
+		i.entries[0] = math.MaxUint64
+		i.trigger = math.MaxUint64
+		i.tried[anchor{addr: 0}] = true
+		require.NoError(t, i.hit())
+		require.Equal(t, uint64(math.MaxUint64), i.entries[0])
+	})
+
 	t.Run("disabled", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
 		i := New(prog, WithThreshold(-1))
@@ -6004,7 +6016,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			i.Reset()
 		}
-		require.Equal(t, uint32(8), i.entries[1], "CALL and RESUME each enter the coroutine once per run")
+		require.Equal(t, uint64(8), i.entries[1], "CALL and RESUME each enter the coroutine once per run")
 	})
 
 	// A function only ever reached from a host callback is entered through the
@@ -6029,7 +6041,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, int32(n)+1, got)
 		}
-		require.Equal(t, uint32(4), i.entries[ref.Ref()], "the invoke trampoline never counted its callee")
+		require.Equal(t, uint64(4), i.entries[ref.Ref()], "the invoke trampoline never counted its callee")
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {

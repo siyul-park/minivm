@@ -117,9 +117,31 @@ var (
 		instr.BR_IF: func(c *threader) func(i *Interpreter) {
 			offset := instr.ParseI16(c.code, c.ip+1)
 			c.ip += 3
-			hot := c.backedge != nil && offset+3 <= 0
-			hits := 0
-			skew := 0
+			if c.backedge != nil && offset+3 <= 0 {
+				hits := 0
+				skew := 0
+				return func(i *Interpreter) {
+					if i.sp == 0 {
+						panic(ErrStackUnderflow)
+					}
+					i.sp -= 1
+					if i.stack[i.sp].I32() != 0 {
+						f := i.fr
+						f.ip += offset + 3
+						hits++
+						if hits < loopWarmup {
+							return
+						}
+						hits = skew
+						skew = (skew + 1) % loopWarmup
+						if err := c.backedge(i, f); err != nil {
+							panic(err)
+						}
+						return
+					}
+					i.fr.ip += 3
+				}
+			}
 			return func(i *Interpreter) {
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
@@ -128,18 +150,6 @@ var (
 				if i.stack[i.sp].I32() != 0 {
 					f := i.fr
 					f.ip += offset + 3
-					if !hot {
-						return
-					}
-					hits++
-					if hits < loopWarmup {
-						return
-					}
-					hits = skew
-					skew = (skew + 1) % loopWarmup
-					if err := c.backedge(i, f); err != nil {
-						panic(err)
-					}
 					return
 				}
 				i.fr.ip += 3
@@ -5430,9 +5440,34 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+3)
 				c.ip += 1
-				hot := c.backedge != nil && offset+5 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+5 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp == 0 {
+							panic(ErrStackUnderflow)
+						}
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						value := i.stack[i.sp-1]
+						if value.Ref() == 0 {
+							f := i.fr
+							f.ip += offset + 5
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 5
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
@@ -5444,18 +5479,6 @@ var (
 					if value.Ref() == 0 {
 						f := i.fr
 						f.ip += offset + 5
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 5
@@ -5512,9 +5535,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5525,18 +5572,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -5554,9 +5589,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5567,18 +5626,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -5596,9 +5643,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5609,18 +5680,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -5638,9 +5697,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5651,18 +5734,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -5680,9 +5751,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5693,18 +5788,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -5722,9 +5805,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+3:]).Operand(0))), types.KindF32).F32()
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5735,18 +5842,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -5764,9 +5859,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5777,18 +5896,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -5806,9 +5913,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5819,18 +5950,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -5848,9 +5967,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5861,18 +6004,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -5890,9 +6021,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5903,18 +6058,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -5932,9 +6075,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5945,18 +6112,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -5974,9 +6129,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+3:]).Operand(0)).F64()
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -5987,18 +6166,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -6019,9 +6186,38 @@ var (
 					goto l12
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6037,18 +6233,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6069,9 +6253,38 @@ var (
 					goto l13
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6087,18 +6300,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6119,9 +6320,38 @@ var (
 					goto l14
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6137,18 +6367,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6169,9 +6387,38 @@ var (
 					goto l15
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6187,18 +6434,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6219,9 +6454,38 @@ var (
 					goto l16
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6237,18 +6501,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6269,9 +6521,38 @@ var (
 					goto l17
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6287,18 +6568,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6319,9 +6588,38 @@ var (
 					goto l18
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6337,18 +6635,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6369,9 +6655,38 @@ var (
 					goto l19
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6387,18 +6702,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6419,9 +6722,38 @@ var (
 					goto l20
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6437,18 +6769,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6469,9 +6789,38 @@ var (
 					goto l21
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6487,18 +6836,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6519,9 +6856,38 @@ var (
 					goto l22
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6537,18 +6903,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6569,9 +6923,38 @@ var (
 					goto l23
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6587,18 +6970,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6619,9 +6990,38 @@ var (
 					goto l24
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6637,18 +7037,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6669,9 +7057,38 @@ var (
 					goto l25
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6687,18 +7104,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6719,9 +7124,38 @@ var (
 					goto l26
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6737,18 +7171,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6769,9 +7191,38 @@ var (
 					goto l27
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6787,18 +7238,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6819,9 +7258,38 @@ var (
 					goto l28
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6837,18 +7305,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6869,9 +7325,38 @@ var (
 					goto l29
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6887,18 +7372,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6919,9 +7392,38 @@ var (
 					goto l30
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6937,18 +7439,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -6969,9 +7459,38 @@ var (
 					goto l31
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -6987,18 +7506,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7019,9 +7526,38 @@ var (
 					goto l32
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7037,18 +7573,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7069,9 +7593,38 @@ var (
 					goto l33
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7087,18 +7640,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7119,9 +7660,38 @@ var (
 					goto l34
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7137,18 +7707,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7169,9 +7727,38 @@ var (
 					goto l35
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7187,18 +7774,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7219,9 +7794,38 @@ var (
 					goto l36
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7237,18 +7841,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7269,9 +7861,38 @@ var (
 					goto l37
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7287,18 +7908,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7319,9 +7928,38 @@ var (
 					goto l38
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7337,18 +7975,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7369,9 +7995,38 @@ var (
 					goto l39
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7387,18 +8042,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7419,9 +8062,38 @@ var (
 					goto l40
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7437,18 +8109,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7469,9 +8129,38 @@ var (
 					goto l41
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7487,18 +8176,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7519,9 +8196,38 @@ var (
 					goto l42
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7537,18 +8243,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7569,9 +8263,38 @@ var (
 					goto l43
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+10 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+10 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 10
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 10
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7587,18 +8310,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 10
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 10
@@ -7619,9 +8330,39 @@ var (
 					goto l44
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7638,18 +8379,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7670,9 +8399,39 @@ var (
 					goto l45
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7689,18 +8448,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7721,9 +8468,39 @@ var (
 					goto l46
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7740,18 +8517,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7772,9 +8537,39 @@ var (
 					goto l47
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7791,18 +8586,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7823,9 +8606,39 @@ var (
 					goto l48
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7842,18 +8655,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7874,9 +8675,39 @@ var (
 					goto l49
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7893,18 +8724,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7925,9 +8744,39 @@ var (
 					goto l50
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7944,18 +8793,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -7976,9 +8813,39 @@ var (
 					goto l51
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -7995,18 +8862,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8027,9 +8882,39 @@ var (
 					goto l52
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8046,18 +8931,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8078,9 +8951,39 @@ var (
 					goto l53
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8097,18 +9000,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8129,9 +9020,39 @@ var (
 					goto l54
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8148,18 +9069,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8180,9 +9089,39 @@ var (
 					goto l55
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8199,18 +9138,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8231,9 +9158,39 @@ var (
 					goto l56
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8250,18 +9207,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8282,9 +9227,39 @@ var (
 					goto l57
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8301,18 +9276,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8333,9 +9296,39 @@ var (
 					goto l58
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8352,18 +9345,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8384,9 +9365,39 @@ var (
 					goto l59
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8403,18 +9414,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8435,9 +9434,39 @@ var (
 					goto l60
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8454,18 +9483,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8486,9 +9503,39 @@ var (
 					goto l61
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8505,18 +9552,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8537,9 +9572,39 @@ var (
 					goto l62
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8556,18 +9621,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8588,9 +9641,39 @@ var (
 					goto l63
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8607,18 +9690,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8639,9 +9710,39 @@ var (
 					goto l64
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8658,18 +9759,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8690,9 +9779,39 @@ var (
 					goto l65
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8709,18 +9828,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8741,9 +9848,39 @@ var (
 					goto l66
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8760,18 +9897,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8792,9 +9917,39 @@ var (
 					goto l67
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8811,18 +9966,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8843,9 +9986,39 @@ var (
 					goto l68
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8862,18 +10035,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8894,9 +10055,39 @@ var (
 					goto l69
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8913,18 +10104,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8945,9 +10124,39 @@ var (
 					goto l70
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -8964,18 +10173,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -8996,9 +10193,39 @@ var (
 					goto l71
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9015,18 +10242,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9047,9 +10262,39 @@ var (
 					goto l72
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9066,18 +10311,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9098,9 +10331,39 @@ var (
 					goto l73
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9117,18 +10380,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9149,9 +10400,39 @@ var (
 					goto l74
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9168,18 +10449,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9200,9 +10469,39 @@ var (
 					goto l75
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9219,18 +10518,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9251,9 +10538,38 @@ var (
 					goto l76
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9269,18 +10585,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9301,9 +10605,38 @@ var (
 					goto l77
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9319,18 +10652,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9351,9 +10672,38 @@ var (
 					goto l78
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9369,18 +10719,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9401,9 +10739,38 @@ var (
 					goto l79
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9419,18 +10786,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9451,9 +10806,38 @@ var (
 					goto l80
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9469,18 +10853,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9501,9 +10873,38 @@ var (
 					goto l81
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9519,18 +10920,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9551,9 +10940,38 @@ var (
 					goto l82
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9569,18 +10987,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9601,9 +11007,38 @@ var (
 					goto l83
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9619,18 +11054,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9651,9 +11074,38 @@ var (
 					goto l84
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9669,18 +11121,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9701,9 +11141,38 @@ var (
 					goto l85
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9719,18 +11188,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9751,9 +11208,38 @@ var (
 					goto l86
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9769,18 +11255,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9801,9 +11275,38 @@ var (
 					goto l87
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9819,18 +11322,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9851,9 +11342,38 @@ var (
 					goto l88
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9869,18 +11389,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9901,9 +11409,38 @@ var (
 					goto l89
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9919,18 +11456,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -9951,9 +11476,38 @@ var (
 					goto l90
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -9969,18 +11523,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10001,9 +11543,38 @@ var (
 					goto l91
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10019,18 +11590,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10051,9 +11610,38 @@ var (
 					goto l92
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10069,18 +11657,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10101,9 +11677,38 @@ var (
 					goto l93
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10119,18 +11724,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10151,9 +11744,38 @@ var (
 					goto l94
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10169,18 +11791,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10201,9 +11811,38 @@ var (
 					goto l95
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10219,18 +11858,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10251,9 +11878,38 @@ var (
 					goto l96
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10269,18 +11925,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10301,9 +11945,38 @@ var (
 					goto l97
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10319,18 +11992,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10351,9 +12012,38 @@ var (
 					goto l98
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10369,18 +12059,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10401,9 +12079,38 @@ var (
 					goto l99
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10419,18 +12126,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10451,9 +12146,38 @@ var (
 					goto l100
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10469,18 +12193,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10501,9 +12213,38 @@ var (
 					goto l101
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10519,18 +12260,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10551,9 +12280,38 @@ var (
 					goto l102
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10569,18 +12327,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10601,9 +12347,38 @@ var (
 					goto l103
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10619,18 +12394,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10651,9 +12414,38 @@ var (
 					goto l104
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10669,18 +12461,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10701,9 +12481,38 @@ var (
 					goto l105
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10719,18 +12528,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10751,9 +12548,38 @@ var (
 					goto l106
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10769,18 +12595,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10801,9 +12615,38 @@ var (
 					goto l107
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10819,18 +12662,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -10848,9 +12679,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10861,18 +12716,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -10890,9 +12733,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10903,18 +12770,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -10932,9 +12787,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10945,18 +12824,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -10974,9 +12841,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -10987,18 +12878,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11016,9 +12895,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11029,18 +12932,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11058,9 +12949,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11071,18 +12986,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11100,9 +13003,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11113,18 +13040,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11142,9 +13057,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11155,18 +13094,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11184,9 +13111,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11197,18 +13148,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11226,9 +13165,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+12 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+12 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 12
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 12
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11239,18 +13202,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 12
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 12
@@ -11268,9 +13219,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11281,18 +13256,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11310,9 +13273,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11323,18 +13310,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11352,9 +13327,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11365,18 +13364,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11394,9 +13381,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11407,18 +13418,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11436,9 +13435,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11449,18 +13472,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11478,9 +13489,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11491,18 +13526,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11520,9 +13543,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11533,18 +13580,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11562,9 +13597,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11575,18 +13634,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11604,9 +13651,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11617,18 +13688,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11646,9 +13705,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+3:]).Operand(0))
 				c.ip += 3
-				hot := c.backedge != nil && offset+16 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+16 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 16
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 16
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11659,18 +13742,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 16
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 16
@@ -11687,9 +13758,37 @@ var (
 					goto l128
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11704,18 +13803,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -11732,9 +13819,37 @@ var (
 					goto l129
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11749,18 +13864,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -11777,9 +13880,37 @@ var (
 					goto l130
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11794,18 +13925,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -11822,9 +13941,37 @@ var (
 					goto l131
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11839,18 +13986,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -11867,9 +14002,37 @@ var (
 					goto l132
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11884,18 +14047,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -11912,9 +14063,37 @@ var (
 					goto l133
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -11929,18 +14108,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -12401,9 +14568,37 @@ var (
 					goto l149
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -12418,18 +14613,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -12446,9 +14629,37 @@ var (
 					goto l150
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -12463,18 +14674,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -12491,9 +14690,37 @@ var (
 					goto l151
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -12508,18 +14735,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -12536,9 +14751,37 @@ var (
 					goto l152
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -12553,18 +14796,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -12581,9 +14812,37 @@ var (
 					goto l153
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -12598,18 +14857,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -12626,9 +14873,37 @@ var (
 					goto l154
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -12643,18 +14918,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -13115,9 +15378,37 @@ var (
 					goto l170
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -13132,18 +15423,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -13160,9 +15439,37 @@ var (
 					goto l171
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -13177,18 +15484,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -16149,9 +18444,37 @@ var (
 					goto l252
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -16166,18 +18489,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -16194,9 +18505,37 @@ var (
 					goto l253
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -16211,18 +18550,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -16239,9 +18566,37 @@ var (
 					goto l254
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -16256,18 +18611,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -16284,9 +18627,37 @@ var (
 					goto l255
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -16301,18 +18672,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -22297,9 +24656,31 @@ var (
 					goto l416
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						if r0.Ref() == 0 {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -22308,18 +24689,6 @@ var (
 					if r0.Ref() == 0 {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23047,9 +25416,37 @@ var (
 					goto l442
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23064,18 +25461,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23092,9 +25477,37 @@ var (
 					goto l443
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23109,18 +25522,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23137,9 +25538,37 @@ var (
 					goto l444
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23154,18 +25583,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23182,9 +25599,37 @@ var (
 					goto l445
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23199,18 +25644,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23227,9 +25660,37 @@ var (
 					goto l446
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23244,18 +25705,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23272,9 +25721,37 @@ var (
 					goto l447
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23289,18 +25766,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23317,9 +25782,37 @@ var (
 					goto l448
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23334,18 +25827,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23362,9 +25843,37 @@ var (
 					goto l449
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23379,18 +25888,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23407,9 +25904,37 @@ var (
 					goto l450
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23424,18 +25949,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -23452,9 +25965,37 @@ var (
 					goto l451
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -23469,18 +26010,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -24215,9 +26744,37 @@ var (
 					goto l477
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -24232,18 +26789,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -24260,9 +26805,37 @@ var (
 					goto l478
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -24277,18 +26850,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -24305,9 +26866,37 @@ var (
 					goto l479
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -24322,18 +26911,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -24350,9 +26927,37 @@ var (
 					goto l480
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.globals) {
 						panic(ErrSegmentationFault)
@@ -24367,18 +26972,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -28683,9 +31276,34 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -28697,18 +31315,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -28726,9 +31332,34 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -28740,18 +31371,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -28769,9 +31388,34 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -28783,18 +31427,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -28812,9 +31444,34 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -28826,18 +31483,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -28855,9 +31500,34 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -28869,18 +31539,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -28898,9 +31556,34 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -28912,18 +31595,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -29133,9 +31804,34 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29147,18 +31843,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -29176,9 +31860,34 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29190,18 +31899,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -29219,9 +31916,34 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29233,18 +31955,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -29262,9 +31972,34 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29276,18 +32011,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -29305,9 +32028,34 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29319,18 +32067,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -29348,9 +32084,34 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29362,18 +32123,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -29394,9 +32143,40 @@ var (
 					goto l24
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29414,18 +32194,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -29446,9 +32214,40 @@ var (
 					goto l25
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29466,18 +32265,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -29498,9 +32285,40 @@ var (
 					goto l26
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29518,18 +32336,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -29550,9 +32356,40 @@ var (
 					goto l27
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29570,18 +32407,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -29602,9 +32427,40 @@ var (
 					goto l28
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29622,18 +32478,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -29654,9 +32498,40 @@ var (
 					goto l29
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29674,18 +32549,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -29952,9 +32815,40 @@ var (
 					goto l36
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -29972,18 +32866,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30004,9 +32886,40 @@ var (
 					goto l37
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30024,18 +32937,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30056,9 +32957,40 @@ var (
 					goto l38
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30076,18 +33008,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30108,9 +33028,40 @@ var (
 					goto l39
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30128,18 +33079,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30160,9 +33099,40 @@ var (
 					goto l40
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30180,18 +33150,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30212,9 +33170,40 @@ var (
 					goto l41
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30232,18 +33221,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30510,9 +33487,40 @@ var (
 					goto l48
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30530,18 +33538,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30562,9 +33558,40 @@ var (
 					goto l49
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30582,18 +33609,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30614,9 +33629,40 @@ var (
 					goto l50
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30634,18 +33680,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30666,9 +33700,40 @@ var (
 					goto l51
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30686,18 +33751,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30718,9 +33771,40 @@ var (
 					goto l52
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30738,18 +33822,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -30770,9 +33842,40 @@ var (
 					goto l53
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -30790,18 +33893,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31267,9 +34358,40 @@ var (
 					goto l65
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31287,18 +34409,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31319,9 +34429,40 @@ var (
 					goto l66
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31339,18 +34480,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31371,9 +34500,40 @@ var (
 					goto l67
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31391,18 +34551,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31423,9 +34571,40 @@ var (
 					goto l68
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31443,18 +34622,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31475,9 +34642,40 @@ var (
 					goto l69
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31495,18 +34693,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31527,9 +34713,40 @@ var (
 					goto l70
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31547,18 +34764,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31579,9 +34784,40 @@ var (
 					goto l71
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31599,18 +34835,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31631,9 +34855,40 @@ var (
 					goto l72
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31651,18 +34906,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31683,9 +34926,40 @@ var (
 					goto l73
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31703,18 +34977,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -31735,9 +34997,40 @@ var (
 					goto l74
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -31755,18 +35048,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -32282,9 +35563,40 @@ var (
 					goto l86
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32302,18 +35614,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -32334,9 +35634,40 @@ var (
 					goto l87
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32354,18 +35685,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -32386,9 +35705,40 @@ var (
 					goto l88
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32406,18 +35756,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -32438,9 +35776,40 @@ var (
 					goto l89
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32458,18 +35827,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -32836,9 +36193,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32850,18 +36232,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -32879,9 +36249,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32893,18 +36288,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -32922,9 +36305,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32936,18 +36344,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -32965,9 +36361,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -32979,18 +36400,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33008,9 +36417,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33022,18 +36456,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33051,9 +36473,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33065,18 +36512,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33094,9 +36529,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33108,18 +36568,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33137,9 +36585,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33151,18 +36624,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33180,9 +36641,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33194,18 +36680,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33223,9 +36697,34 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33237,18 +36736,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -33266,9 +36753,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33280,18 +36792,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33309,9 +36809,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33323,18 +36848,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33352,9 +36865,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33366,18 +36904,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33395,9 +36921,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33409,18 +36960,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33438,9 +36977,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33452,18 +37016,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33481,9 +37033,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33495,18 +37072,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33920,9 +37485,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33934,18 +37524,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -33963,9 +37541,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -33977,18 +37580,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -34006,9 +37597,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34020,18 +37636,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -34049,9 +37653,34 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34063,18 +37692,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -34091,9 +37708,38 @@ var (
 					goto l132
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34109,18 +37755,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34137,9 +37771,38 @@ var (
 					goto l133
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34155,18 +37818,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34183,9 +37834,38 @@ var (
 					goto l134
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34201,18 +37881,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34229,9 +37897,38 @@ var (
 					goto l135
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34247,18 +37944,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34275,9 +37960,38 @@ var (
 					goto l136
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34293,18 +38007,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34321,9 +38023,38 @@ var (
 					goto l137
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34339,18 +38070,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34826,9 +38545,38 @@ var (
 					goto l153
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34844,18 +38592,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34872,9 +38608,38 @@ var (
 					goto l154
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34890,18 +38655,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34918,9 +38671,38 @@ var (
 					goto l155
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34936,18 +38718,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -34964,9 +38734,38 @@ var (
 					goto l156
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -34982,18 +38781,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35010,9 +38797,38 @@ var (
 					goto l157
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35028,18 +38844,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35056,9 +38860,38 @@ var (
 					goto l158
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35074,18 +38907,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35561,9 +39382,38 @@ var (
 					goto l174
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35579,18 +39429,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35607,9 +39445,38 @@ var (
 					goto l175
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35625,18 +39492,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35653,9 +39508,38 @@ var (
 					goto l176
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35671,18 +39555,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35699,9 +39571,38 @@ var (
 					goto l177
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35717,18 +39618,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35745,9 +39634,38 @@ var (
 					goto l178
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35763,18 +39681,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -35791,9 +39697,38 @@ var (
 					goto l179
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -35809,18 +39744,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -38941,9 +42864,32 @@ var (
 					goto l260
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						if r0.Ref() == 0 {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -38953,18 +42899,6 @@ var (
 					if r0.Ref() == 0 {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39717,9 +43651,38 @@ var (
 					goto l286
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -39735,18 +43698,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39763,9 +43714,38 @@ var (
 					goto l287
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -39781,18 +43761,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39809,9 +43777,38 @@ var (
 					goto l288
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -39827,18 +43824,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39855,9 +43840,38 @@ var (
 					goto l289
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -39873,18 +43887,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39901,9 +43903,38 @@ var (
 					goto l290
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -39919,18 +43950,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39947,9 +43966,38 @@ var (
 					goto l291
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -39965,18 +44013,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -39993,9 +44029,38 @@ var (
 					goto l292
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -40011,18 +44076,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -40039,9 +44092,38 @@ var (
 					goto l293
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -40057,18 +44139,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -40085,9 +44155,38 @@ var (
 					goto l294
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -40103,18 +44202,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -40131,9 +44218,38 @@ var (
 					goto l295
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -40149,18 +44265,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -40920,9 +45024,38 @@ var (
 					goto l321
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -40938,18 +45071,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -40966,9 +45087,38 @@ var (
 					goto l322
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -40984,18 +45134,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -41012,9 +45150,38 @@ var (
 					goto l323
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -41030,18 +45197,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -41058,9 +45213,38 @@ var (
 					goto l324
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.fr.bp+i0 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i2 := i.fr.bp + i0
+						r0 := i.stack[i2]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
@@ -41076,18 +45260,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -52764,9 +56936,33 @@ var (
 					goto l150
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -52777,18 +56973,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -52805,9 +56989,33 @@ var (
 					goto l151
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -52818,18 +57026,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -52846,9 +57042,33 @@ var (
 					goto l152
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -52859,18 +57079,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -52887,9 +57095,33 @@ var (
 					goto l153
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -52900,18 +57132,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -52928,9 +57148,33 @@ var (
 					goto l154
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -52941,18 +57185,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -52969,9 +57201,33 @@ var (
 					goto l155
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -52982,18 +57238,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53010,9 +57254,33 @@ var (
 					goto l156
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -53023,18 +57291,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53051,9 +57307,33 @@ var (
 					goto l157
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -53064,18 +57344,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53092,9 +57360,33 @@ var (
 					goto l158
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -53105,18 +57397,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53133,9 +57413,33 @@ var (
 					goto l159
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -53146,18 +57450,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53174,9 +57466,33 @@ var (
 					goto l160
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -53187,18 +57503,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53215,9 +57519,33 @@ var (
 					goto l161
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -53228,18 +57556,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53256,9 +57572,33 @@ var (
 					goto l162
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53269,18 +57609,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53297,9 +57625,33 @@ var (
 					goto l163
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53310,18 +57662,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53338,9 +57678,33 @@ var (
 					goto l164
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53351,18 +57715,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53379,9 +57731,33 @@ var (
 					goto l165
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53392,18 +57768,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53420,9 +57784,33 @@ var (
 					goto l166
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53433,18 +57821,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53461,9 +57837,33 @@ var (
 					goto l167
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53474,18 +57874,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53502,9 +57890,33 @@ var (
 					goto l168
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53515,18 +57927,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53543,9 +57943,33 @@ var (
 					goto l169
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53556,18 +57980,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53584,9 +57996,33 @@ var (
 					goto l170
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53597,18 +58033,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53625,9 +58049,33 @@ var (
 					goto l171
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -53638,18 +58086,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53666,9 +58102,33 @@ var (
 					goto l172
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53679,18 +58139,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53707,9 +58155,33 @@ var (
 					goto l173
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53720,18 +58192,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53748,9 +58208,33 @@ var (
 					goto l174
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53761,18 +58245,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53789,9 +58261,33 @@ var (
 					goto l175
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53802,18 +58298,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53830,9 +58314,33 @@ var (
 					goto l176
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53843,18 +58351,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53871,9 +58367,33 @@ var (
 					goto l177
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53884,18 +58404,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53912,9 +58420,33 @@ var (
 					goto l178
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53925,18 +58457,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53953,9 +58473,33 @@ var (
 					goto l179
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -53966,18 +58510,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -53994,9 +58526,33 @@ var (
 					goto l180
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -54007,18 +58563,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -54035,9 +58579,33 @@ var (
 					goto l181
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -54048,18 +58616,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -55367,25 +59923,31 @@ var (
 					goto l212
 				}
 				c.ip += 3
-				hot := c.backedge != nil && offset+7 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+7 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if r0.Ref() == 0 {
+							f := i.fr
+							f.ip += offset + 7
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 7
+					}
+				}
 				return func(i *Interpreter) {
 					if r0.Ref() == 0 {
 						f := i.fr
 						f.ip += offset + 7
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 7
@@ -57738,9 +62300,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -57751,18 +62337,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -57780,9 +62354,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -57793,18 +62391,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -57822,9 +62408,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -57835,18 +62445,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -57864,9 +62462,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -57877,18 +62499,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -57906,9 +62516,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -57919,18 +62553,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -57948,9 +62570,33 @@ var (
 				}
 				v1 := types.Box(uint64(uint32(instr.Instruction(c.code[start+2:]).Operand(0))), types.KindF32).F32()
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -57961,18 +62607,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -57990,9 +62624,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58003,18 +62661,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -58032,9 +62678,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58045,18 +62715,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -58074,9 +62732,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58087,18 +62769,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -58116,9 +62786,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58129,18 +62823,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -58158,9 +62840,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58171,18 +62877,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -58200,9 +62894,33 @@ var (
 				}
 				v1 := types.Boxed(instr.Instruction(c.code[start+2:]).Operand(0)).F64()
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58213,18 +62931,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -58245,9 +62951,38 @@ var (
 					goto l12
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58263,18 +62998,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58295,9 +63018,38 @@ var (
 					goto l13
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58313,18 +63065,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58345,9 +63085,38 @@ var (
 					goto l14
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58363,18 +63132,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58395,9 +63152,38 @@ var (
 					goto l15
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58413,18 +63199,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58445,9 +63219,38 @@ var (
 					goto l16
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58463,18 +63266,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58495,9 +63286,38 @@ var (
 					goto l17
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58513,18 +63333,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58545,9 +63353,38 @@ var (
 					goto l18
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58563,18 +63400,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58595,9 +63420,38 @@ var (
 					goto l19
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58613,18 +63467,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58645,9 +63487,38 @@ var (
 					goto l20
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58663,18 +63534,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58695,9 +63554,38 @@ var (
 					goto l21
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58713,18 +63601,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58745,9 +63621,38 @@ var (
 					goto l22
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58763,18 +63668,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58795,9 +63688,38 @@ var (
 					goto l23
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58813,18 +63735,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58845,9 +63755,38 @@ var (
 					goto l24
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58863,18 +63802,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58895,9 +63822,38 @@ var (
 					goto l25
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58913,18 +63869,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58945,9 +63889,38 @@ var (
 					goto l26
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -58963,18 +63936,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -58995,9 +63956,38 @@ var (
 					goto l27
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59013,18 +64003,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59045,9 +64023,38 @@ var (
 					goto l28
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59063,18 +64070,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59095,9 +64090,38 @@ var (
 					goto l29
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59113,18 +64137,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59145,9 +64157,38 @@ var (
 					goto l30
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59163,18 +64204,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59195,9 +64224,38 @@ var (
 					goto l31
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59213,18 +64271,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59245,9 +64291,38 @@ var (
 					goto l32
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59263,18 +64338,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59295,9 +64358,38 @@ var (
 					goto l33
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59313,18 +64405,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59345,9 +64425,38 @@ var (
 					goto l34
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59363,18 +64472,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59395,9 +64492,38 @@ var (
 					goto l35
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59413,18 +64539,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59445,9 +64559,38 @@ var (
 					goto l36
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59463,18 +64606,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59495,9 +64626,38 @@ var (
 					goto l37
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59513,18 +64673,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59545,9 +64693,38 @@ var (
 					goto l38
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59563,18 +64740,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59595,9 +64760,38 @@ var (
 					goto l39
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59613,18 +64807,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59645,9 +64827,38 @@ var (
 					goto l40
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59663,18 +64874,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59695,9 +64894,38 @@ var (
 					goto l41
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59713,18 +64941,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59745,9 +64961,38 @@ var (
 					goto l42
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59763,18 +65008,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59795,9 +65028,38 @@ var (
 					goto l43
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.globals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59813,18 +65075,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -59845,9 +65095,39 @@ var (
 					goto l44
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59864,18 +65144,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -59896,9 +65164,39 @@ var (
 					goto l45
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59915,18 +65213,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -59947,9 +65233,39 @@ var (
 					goto l46
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -59966,18 +65282,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -59998,9 +65302,39 @@ var (
 					goto l47
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60017,18 +65351,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60049,9 +65371,39 @@ var (
 					goto l48
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60068,18 +65420,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60100,9 +65440,39 @@ var (
 					goto l49
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60119,18 +65489,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60151,9 +65509,39 @@ var (
 					goto l50
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60170,18 +65558,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60202,9 +65578,39 @@ var (
 					goto l51
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60221,18 +65627,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60253,9 +65647,39 @@ var (
 					goto l52
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60272,18 +65696,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60304,9 +65716,39 @@ var (
 					goto l53
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60323,18 +65765,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60355,9 +65785,39 @@ var (
 					goto l54
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60374,18 +65834,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60406,9 +65854,39 @@ var (
 					goto l55
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60425,18 +65903,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60457,9 +65923,39 @@ var (
 					goto l56
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60476,18 +65972,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60508,9 +65992,39 @@ var (
 					goto l57
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60527,18 +66041,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60559,9 +66061,39 @@ var (
 					goto l58
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60578,18 +66110,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60610,9 +66130,39 @@ var (
 					goto l59
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60629,18 +66179,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60661,9 +66199,39 @@ var (
 					goto l60
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60680,18 +66248,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60712,9 +66268,39 @@ var (
 					goto l61
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60731,18 +66317,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60763,9 +66337,39 @@ var (
 					goto l62
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60782,18 +66386,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60814,9 +66406,39 @@ var (
 					goto l63
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60833,18 +66455,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60865,9 +66475,39 @@ var (
 					goto l64
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60884,18 +66524,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60916,9 +66544,39 @@ var (
 					goto l65
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60935,18 +66593,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -60967,9 +66613,39 @@ var (
 					goto l66
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -60986,18 +66662,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61018,9 +66682,39 @@ var (
 					goto l67
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61037,18 +66731,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61069,9 +66751,39 @@ var (
 					goto l68
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61088,18 +66800,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61120,9 +66820,39 @@ var (
 					goto l69
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61139,18 +66869,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61171,9 +66889,39 @@ var (
 					goto l70
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61190,18 +66938,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61222,9 +66958,39 @@ var (
 					goto l71
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61241,18 +67007,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61273,9 +67027,39 @@ var (
 					goto l72
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61292,18 +67076,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61324,9 +67096,39 @@ var (
 					goto l73
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61343,18 +67145,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61375,9 +67165,39 @@ var (
 					goto l74
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61394,18 +67214,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61426,9 +67234,39 @@ var (
 					goto l75
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.fr.bp+i1 >= i.sp {
+							panic(ErrSegmentationFault)
+						}
+						i3 := i.fr.bp + i1
+						r1 := i.stack[i3]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61445,18 +67283,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61477,9 +67303,38 @@ var (
 					goto l76
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61495,18 +67350,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61527,9 +67370,38 @@ var (
 					goto l77
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61545,18 +67417,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61577,9 +67437,38 @@ var (
 					goto l78
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61595,18 +67484,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61627,9 +67504,38 @@ var (
 					goto l79
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61645,18 +67551,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61677,9 +67571,38 @@ var (
 					goto l80
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61695,18 +67618,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61727,9 +67638,38 @@ var (
 					goto l81
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61745,18 +67685,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61777,9 +67705,38 @@ var (
 					goto l82
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61795,18 +67752,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61827,9 +67772,38 @@ var (
 					goto l83
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61845,18 +67819,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61877,9 +67839,38 @@ var (
 					goto l84
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61895,18 +67886,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61927,9 +67906,38 @@ var (
 					goto l85
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61945,18 +67953,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -61977,9 +67973,38 @@ var (
 					goto l86
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -61995,18 +68020,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62027,9 +68040,38 @@ var (
 					goto l87
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62045,18 +68087,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62077,9 +68107,38 @@ var (
 					goto l88
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62095,18 +68154,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62127,9 +68174,38 @@ var (
 					goto l89
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62145,18 +68221,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62177,9 +68241,38 @@ var (
 					goto l90
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62195,18 +68288,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62227,9 +68308,38 @@ var (
 					goto l91
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62245,18 +68355,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62277,9 +68375,38 @@ var (
 					goto l92
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62295,18 +68422,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62327,9 +68442,38 @@ var (
 					goto l93
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.F64()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62345,18 +68489,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62377,9 +68509,38 @@ var (
 					goto l94
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62395,18 +68556,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62427,9 +68576,38 @@ var (
 					goto l95
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62445,18 +68623,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62477,9 +68643,38 @@ var (
 					goto l96
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62495,18 +68690,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62527,9 +68710,38 @@ var (
 					goto l97
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62545,18 +68757,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62577,9 +68777,38 @@ var (
 					goto l98
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62595,18 +68824,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62627,9 +68844,38 @@ var (
 					goto l99
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62645,18 +68891,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62677,9 +68911,38 @@ var (
 					goto l100
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62695,18 +68958,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62727,9 +68978,38 @@ var (
 					goto l101
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62745,18 +69025,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62777,9 +69045,38 @@ var (
 					goto l102
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62795,18 +69092,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62827,9 +69112,38 @@ var (
 					goto l103
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := r1.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62845,18 +69159,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62877,9 +69179,38 @@ var (
 					goto l104
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62895,18 +69226,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62927,9 +69246,38 @@ var (
 					goto l105
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62945,18 +69293,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -62977,9 +69313,38 @@ var (
 					goto l106
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -62995,18 +69360,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -63027,9 +69380,38 @@ var (
 					goto l107
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i1 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r1 := i.fr.upvals[i1]
+						v1 := i.borrowI64(r1)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63045,18 +69427,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -63074,9 +69444,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63087,18 +69481,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63116,9 +69498,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63129,18 +69535,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63158,9 +69552,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63171,18 +69589,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63200,9 +69606,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) < uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63213,18 +69643,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63242,9 +69660,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63255,18 +69697,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63284,9 +69714,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) > uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63297,18 +69751,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63326,9 +69768,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63339,18 +69805,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63368,9 +69822,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) <= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63381,18 +69859,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63410,9 +69876,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63423,18 +69913,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63452,9 +69930,33 @@ var (
 				}
 				v1 := int32(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+11 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+11 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						v2 := types.BoxI1(uint32(v0) >= uint32(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 11
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 11
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63465,18 +69967,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 11
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 11
@@ -63494,9 +69984,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 > v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63507,18 +70021,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63536,9 +70038,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) > uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63549,18 +70075,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63578,9 +70092,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 <= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63591,18 +70129,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63620,9 +70146,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) <= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63633,18 +70183,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63662,9 +70200,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 >= v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63675,18 +70237,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63704,9 +70254,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) >= uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63717,18 +70291,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63746,9 +70308,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 == v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63759,18 +70345,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63788,9 +70362,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 != v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63801,18 +70399,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63830,9 +70416,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(v0 < v1)
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63843,18 +70453,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63872,9 +70470,33 @@ var (
 				}
 				v1 := int64(instr.Instruction(c.code[start+2:]).Operand(0))
 				c.ip += 2
-				hot := c.backedge != nil && offset+15 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+15 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						v2 := types.BoxI1(uint64(v0) < uint64(v1))
+						if v2.Bool() {
+							f := i.fr
+							f.ip += offset + 15
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 15
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63885,18 +70507,6 @@ var (
 					if v2.Bool() {
 						f := i.fr
 						f.ip += offset + 15
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 15
@@ -63913,9 +70523,37 @@ var (
 					goto l128
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63930,18 +70568,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -63958,9 +70584,37 @@ var (
 					goto l129
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -63975,18 +70629,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64003,9 +70645,37 @@ var (
 					goto l130
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64020,18 +70690,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64048,9 +70706,37 @@ var (
 					goto l131
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64065,18 +70751,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64093,9 +70767,37 @@ var (
 					goto l132
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64110,18 +70812,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64138,9 +70828,37 @@ var (
 					goto l133
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64155,18 +70873,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64627,9 +71333,37 @@ var (
 					goto l149
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64644,18 +71378,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64672,9 +71394,37 @@ var (
 					goto l150
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64689,18 +71439,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64717,9 +71455,37 @@ var (
 					goto l151
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64734,18 +71500,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64762,9 +71516,37 @@ var (
 					goto l152
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64779,18 +71561,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64807,9 +71577,37 @@ var (
 					goto l153
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64824,18 +71622,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -64852,9 +71638,37 @@ var (
 					goto l154
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -64869,18 +71683,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -65341,9 +72143,37 @@ var (
 					goto l170
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -65358,18 +72188,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -65386,9 +72204,37 @@ var (
 					goto l171
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -65403,18 +72249,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -68375,9 +75209,37 @@ var (
 					goto l252
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -68392,18 +75254,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -68420,9 +75270,37 @@ var (
 					goto l253
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -68437,18 +75315,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -68465,9 +75331,37 @@ var (
 					goto l254
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -68482,18 +75376,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -68510,9 +75392,37 @@ var (
 					goto l255
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.F64()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -68527,18 +75437,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -74523,9 +81421,31 @@ var (
 					goto l416
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						if r0.Ref() == 0 {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -74534,18 +81454,6 @@ var (
 					if r0.Ref() == 0 {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75273,9 +82181,37 @@ var (
 					goto l442
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75290,18 +82226,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75318,9 +82242,37 @@ var (
 					goto l443
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75335,18 +82287,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75363,9 +82303,37 @@ var (
 					goto l444
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75380,18 +82348,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75408,9 +82364,37 @@ var (
 					goto l445
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75425,18 +82409,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75453,9 +82425,37 @@ var (
 					goto l446
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75470,18 +82470,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75498,9 +82486,37 @@ var (
 					goto l447
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75515,18 +82531,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75543,9 +82547,37 @@ var (
 					goto l448
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75560,18 +82592,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75588,9 +82608,37 @@ var (
 					goto l449
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75605,18 +82653,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75633,9 +82669,37 @@ var (
 					goto l450
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75650,18 +82714,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -75678,9 +82730,37 @@ var (
 					goto l451
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := r0.I32()
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -75695,18 +82775,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -76441,9 +83509,37 @@ var (
 					goto l477
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -76458,18 +83554,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -76486,9 +83570,37 @@ var (
 					goto l478
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -76503,18 +83615,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -76531,9 +83631,37 @@ var (
 					goto l479
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -76548,18 +83676,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -76576,9 +83692,37 @@ var (
 					goto l480
 				}
 				c.ip += 2
-				hot := c.backedge != nil && offset+6 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+6 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						v0 := i.borrowI64(r0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 6
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 6
+					}
+				}
 				return func(i *Interpreter) {
 					if i0 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
@@ -76593,18 +83737,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 6
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 6
@@ -80712,9 +87844,30 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+3)
 				c.ip += 1
-				hot := c.backedge != nil && offset+5 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+5 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if types.BoxedNull.Ref() == 0 {
+							f := i.fr
+							f.ip += offset + 5
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 5
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
@@ -80722,18 +87875,6 @@ var (
 					if types.BoxedNull.Ref() == 0 {
 						f := i.fr
 						f.ip += offset + 5
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 5
@@ -80779,9 +87920,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -80791,18 +87955,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -80816,9 +87968,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -80828,18 +88003,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -80853,9 +88016,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -80865,18 +88051,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -80890,9 +88064,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -80902,18 +88099,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -80927,9 +88112,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -80939,18 +88147,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -80964,9 +88160,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -80976,18 +88195,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -81001,9 +88208,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -81013,18 +88243,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -81038,9 +88256,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -81050,18 +88291,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -81075,9 +88304,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -81087,18 +88339,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -81112,9 +88352,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -81124,18 +88387,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -81549,25 +88800,31 @@ var (
 				offset := instr.ParseI16(c.code, start+6)
 				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
-				hot := c.backedge != nil && offset+8 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+8 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if v0 != 0 {
+							f := i.fr
+							f.ip += offset + 8
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 8
+					}
+				}
 				return func(i *Interpreter) {
 					if v0 != 0 {
 						f := i.fr
 						f.ip += offset + 8
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 8
@@ -81988,9 +89245,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-1].I32() == 0)
+						i.sp -= 1
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82000,18 +89280,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82028,9 +89296,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].I32() == i.stack[i.sp-1].I32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82040,18 +89331,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82068,9 +89347,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].I32() != i.stack[i.sp-1].I32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82080,18 +89382,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82108,9 +89398,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].I32() < i.stack[i.sp-1].I32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82120,18 +89433,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82148,9 +89449,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) < uint32(i.stack[i.sp-1].I32()))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82160,18 +89484,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82188,9 +89500,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].I32() > i.stack[i.sp-1].I32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82200,18 +89535,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82228,9 +89551,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) > uint32(i.stack[i.sp-1].I32()))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82240,18 +89586,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82268,9 +89602,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].I32() <= i.stack[i.sp-1].I32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82280,18 +89637,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82308,9 +89653,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) <= uint32(i.stack[i.sp-1].I32()))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82320,18 +89688,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82348,9 +89704,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].I32() >= i.stack[i.sp-1].I32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82360,18 +89739,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82388,9 +89755,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) >= uint32(i.stack[i.sp-1].I32()))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -82400,18 +89790,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -82429,9 +89807,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82441,18 +89842,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82466,9 +89855,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82478,18 +89890,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82503,9 +89903,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82515,18 +89938,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82540,9 +89951,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82552,18 +89986,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82577,9 +89999,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82589,18 +90034,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82614,9 +90047,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82626,18 +90082,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82651,9 +90095,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82663,18 +90130,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82688,9 +90143,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82700,18 +90178,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82725,9 +90191,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82737,18 +90226,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -82762,9 +90239,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -82774,18 +90274,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -83602,9 +91090,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == 0)
+						i.sp -= 1
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -83614,18 +91125,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83642,9 +91141,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) == i.unboxI64(i.stack[i.sp-1]))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83654,18 +91176,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83682,9 +91192,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) != i.unboxI64(i.stack[i.sp-1]))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83694,18 +91227,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83722,9 +91243,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) < i.unboxI64(i.stack[i.sp-1]))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83734,18 +91278,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83762,9 +91294,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) < uint64(i.unboxI64(i.stack[i.sp-1])))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83774,18 +91329,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83802,9 +91345,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) > i.unboxI64(i.stack[i.sp-1]))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83814,18 +91380,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83842,9 +91396,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) > uint64(i.unboxI64(i.stack[i.sp-1])))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83854,18 +91431,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83882,9 +91447,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) <= i.unboxI64(i.stack[i.sp-1]))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83894,18 +91482,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83922,9 +91498,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) <= uint64(i.unboxI64(i.stack[i.sp-1])))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83934,18 +91533,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -83962,9 +91549,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) >= i.unboxI64(i.stack[i.sp-1]))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -83974,18 +91584,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84002,9 +91600,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) >= uint64(i.unboxI64(i.stack[i.sp-1])))
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84014,18 +91635,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84043,9 +91652,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84055,18 +91687,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -84080,9 +91700,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84092,18 +91735,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -84117,9 +91748,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84129,18 +91783,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -84154,9 +91796,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84166,18 +91831,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -84191,9 +91844,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84203,18 +91879,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -84228,9 +91892,32 @@ var (
 				offset := instr.ParseI16(c.code, start+7)
 				v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
 				c.ip += 5
-				hot := c.backedge != nil && offset+9 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+9 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 9
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 9
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84240,18 +91927,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 9
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 9
@@ -84718,9 +92393,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F32() == i.stack[i.sp-1].F32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84730,18 +92428,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84758,9 +92444,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F32() != i.stack[i.sp-1].F32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84770,18 +92479,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84798,9 +92495,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F32() < i.stack[i.sp-1].F32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84810,18 +92530,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84838,9 +92546,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F32() > i.stack[i.sp-1].F32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84850,18 +92581,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84878,9 +92597,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F32() <= i.stack[i.sp-1].F32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84890,18 +92632,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84918,9 +92648,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F32() >= i.stack[i.sp-1].F32())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -84930,18 +92683,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -84959,9 +92700,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -84971,18 +92735,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -84996,9 +92748,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -85008,18 +92783,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -85033,9 +92796,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -85045,18 +92831,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -85070,9 +92844,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -85082,18 +92879,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -85107,9 +92892,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -85119,18 +92927,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -85144,9 +92940,32 @@ var (
 				offset := instr.ParseI16(c.code, start+11)
 				v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
 				c.ip += 9
-				hot := c.backedge != nil && offset+13 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+13 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+						i.sp -= 1
+						if v1.Bool() {
+							f := i.fr
+							f.ip += offset + 13
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 13
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -85156,18 +92975,6 @@ var (
 					if v1.Bool() {
 						f := i.fr
 						f.ip += offset + 13
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 13
@@ -85634,9 +93441,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F64() == i.stack[i.sp-1].F64())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -85646,18 +93476,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -85674,9 +93492,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F64() != i.stack[i.sp-1].F64())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -85686,18 +93527,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -85714,9 +93543,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F64() < i.stack[i.sp-1].F64())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -85726,18 +93578,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -85754,9 +93594,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F64() > i.stack[i.sp-1].F64())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -85766,18 +93629,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -85794,9 +93645,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F64() <= i.stack[i.sp-1].F64())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -85806,18 +93680,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
@@ -85834,9 +93696,32 @@ var (
 			{
 				offset := instr.ParseI16(c.code, start+2)
 				c.ip += 1
-				hot := c.backedge != nil && offset+4 <= 0
-				hits := 0
-				skew := 0
+				if c.backedge != nil && offset+4 <= 0 {
+					hits := 0
+					skew := 0
+					return func(i *Interpreter) {
+						if i.sp < 2 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-2].F64() >= i.stack[i.sp-1].F64())
+						i.sp -= 2
+						if v0.Bool() {
+							f := i.fr
+							f.ip += offset + 4
+							hits++
+							if hits < loopWarmup {
+								return
+							}
+							hits = skew
+							skew = (skew + 1) % loopWarmup
+							if err := c.backedge(i, f); err != nil {
+								panic(err)
+							}
+							return
+						}
+						i.fr.ip += 4
+					}
+				}
 				return func(i *Interpreter) {
 					if i.sp < 2 {
 						panic(ErrStackUnderflow)
@@ -85846,18 +93731,6 @@ var (
 					if v0.Bool() {
 						f := i.fr
 						f.ip += offset + 4
-						if !hot {
-							return
-						}
-						hits++
-						if hits < loopWarmup {
-							return
-						}
-						hits = skew
-						skew = (skew + 1) % loopWarmup
-						if err := c.backedge(i, f); err != nil {
-							panic(err)
-						}
 						return
 					}
 					i.fr.ip += 4
