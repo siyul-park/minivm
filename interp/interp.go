@@ -35,7 +35,6 @@ type Interpreter struct {
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
 	tried    map[anchor]bool
-	loopHits map[anchor]uint8
 	journal  []uint64
 
 	types       []types.Type
@@ -45,6 +44,7 @@ type Interpreter struct {
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
 	backedges   []bool
+	entries     []uint32
 	cold        []bool
 	misses      []uint8
 	coros       []bool
@@ -80,7 +80,7 @@ type Interpreter struct {
 	gas int64
 
 	threshold int64
-	eager     bool
+	entry     uint32
 	tick      int
 	fuel      int64
 	limit     int
@@ -120,7 +120,21 @@ type option struct {
 }
 
 const heapRunway = 64
+
+// loopWarmup is how many times one back edge runs between reports to the
+// interpreter. It is a fixed interval, not a threshold: each report is one hot
+// event for the enclosing function, and the configured threshold is what counts
+// those. Reporting every iteration would make a loop cross any threshold before
+// its body had run enough to be worth compiling. The generated back-edge
+// handlers compare against it directly.
 const loopWarmup = 8
+
+// entryWarmup is how many hot events capture an entry trace before the entry
+// compile fires. The compile is one-shot per root, so a trace has to already be
+// published when it runs; capturing from the first few events records the
+// shallowest states the function ever has. tracer.attemptLimit bounds the cost
+// independently.
+const entryWarmup = 8
 
 // coolLimit is the number of consecutive unproductive observations - every
 // compilation root already tried and nothing installed - before a function
@@ -204,7 +218,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		stack:     1024,
 		heap:      128,
 		tick:      128,
-		threshold: 4096,
+		threshold: 64,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -241,11 +255,12 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		fuel = int64(min(ticks, 1<<63-1))
 	}
 
-	var threshold int64 = int64(opt.threshold)
+	// threshold counts hot events - one per call into a function, one per
+	// warmed back edge - not instructions, so it is used as given. It is NOT
+	// divided by tick: nothing about tiering up runs on the tick loop any more.
+	threshold := int64(opt.threshold)
 	if threshold == 0 {
 		threshold = 1
-	} else if threshold > 0 {
-		threshold = (threshold-1)/int64(opt.tick) + 1
 	}
 
 	i := &Interpreter{
@@ -257,7 +272,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		profiler:    opt.profiler,
 		samples:     samples,
 		threshold:   threshold,
-		eager:       opt.threshold == 0,
+		entry:       entryTrigger(threshold),
 		types:       prog.Types,
 		constants:   make([]types.Boxed, len(prog.Constants)),
 		globals:     make([]types.Boxed, len(prog.Globals)),
@@ -265,6 +280,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		instrs:      make([][]byte, len(prog.Constants)+1),
 		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
 		backedges:   make([]bool, len(prog.Constants)+1),
+		entries:     make([]uint32, len(prog.Constants)+1),
 		cold:        make([]bool, len(prog.Constants)+1),
 		misses:      make([]uint8, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
@@ -273,7 +289,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		stubs:       make([]func(*Interpreter), len(prog.Constants)+1),
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:       map[anchor]bool{},
-		loopHits:    map[anchor]uint8{},
 		dynamic:     map[int]bool{},
 		journal:     make([]uint64, journalHead+journalStride*opt.frame),
 		frames:      make([]frame, opt.frame),
@@ -366,7 +381,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	// the boundary contract for SetGlobal and Reset.
 	i.seed()
 
-	i.backedges[0] = nativeBackend && i.eager
+	i.backedges[0] = nativeBackend && i.threshold >= 0
 	c := i.threader(i.backedges[0])
 	i.code[0] = c.Compile(prog.Code, i.module.Slots(), i.module.Declared(), types.Kinds(i.module.Captures), i.module.Captures)
 
@@ -397,6 +412,16 @@ func (i *Interpreter) Run(ctx context.Context) error {
 	i.done = nil
 	if ctx != nil {
 		i.done = ctx.Done()
+	}
+	// The top frame is built by New and Reset, not by a threaded call handler, so
+	// this is the module's only entry hook. It runs once per Run: a caught throw
+	// loops below without re-entering.
+	if i.owns(i.fr) {
+		if err := i.enter(); err != nil {
+			i.ctx = nil
+			i.done = nil
+			return err
+		}
 	}
 	for {
 		// dispatch's recover absorbs every panic, so nothing escapes it and ctx is
@@ -808,7 +833,13 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 
 	f := i.fr
 	code := f.code
-	if i.threshold < 0 && i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
+	// Tiering up is driven by the entry and back-edge hooks compiled into the
+	// handlers, not by this loop, so a program with nothing else to coordinate
+	// runs with no per-instruction accounting at all whether or not the JIT is
+	// enabled. The countdown below survives only for what genuinely needs an
+	// instruction-grained cadence: cancellation, fuel, the user hook, the user
+	// profiler, and a pool's shared-module handshake.
+	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
 		for f.ip < len(code) {
 			code[f.ip](i)
 			f = i.fr
@@ -818,16 +849,13 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 	}
 
 	tick := i.tick
-	quiet := i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil
 
 	for f.ip < len(code) {
 		tick--
 		if tick == 0 {
 			tick = i.tick
-			if !quiet || i.stub(f.addr) == nil {
-				if err := i.safepoint(); err != nil {
-					return false, err
-				}
+			if err := i.safepoint(); err != nil {
+				return false, err
 			}
 		}
 
@@ -888,7 +916,10 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		*i.fr = saved
 	}()
 
-	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
+	// The trampoline runs one CALL and nothing else, so it needs no program
+	// context - but it must still count the callee it dispatches, or a function
+	// only ever reached from a host callback never becomes hot.
+	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{entry: (*Interpreter).entered})}
 	i.fr.ip = 0
 	if err = i.Run(ctx); err != nil {
 		return nil, err
@@ -1058,75 +1089,148 @@ func (i *Interpreter) safepoint() error {
 		}
 	}
 
-	// A cold function has given up - every compilation root tried - and skips
-	// observe's sampling, entry/loop capture, and compile trigger, paying only
-	// the indexed read here. An installed entry is NOT such a function: its
-	// loop headers are separate roots that compile on their own, and a loop
-	// that becomes hot after its entry installed still has to reach them.
-	// observe's own gates keep the already-tried roots cheap, and checkCool
-	// turns the function cold once nothing is left to try. A user profiler
-	// still needs per-tick samples either way.
-	if !i.isCold(f.addr) {
-		if err := i.observe(f); err != nil {
-			return err
-		}
-	} else if i.profiler != nil {
+	// Sampling here serves the user's profiler and nothing else: which
+	// functions are worth compiling is decided by the entry and back-edge
+	// hooks, which observe real calls and real iterations rather than whichever
+	// instruction a countdown stopped on.
+	if i.profiler != nil {
 		i.sample(f)
 	}
 
-	// Pooled recompilation is driven by exit thresholds, not sampling, so
-	// cache.claim/sync run every tick regardless of warmth: they adopt modules a
-	// peer published and rearm after a hot side exit. Both are ~1 atomic when idle.
+	// Adopting a module a peer published is a matter of elapsed time, not of
+	// this member's own hotness, so sync stays on the tick. Claiming the right
+	// to compile does not: it aggregates hot events across members and is
+	// raised from the same hooks a solo interpreter compiles from (see entered).
 	if i.cache != nil {
-		if request, ok := i.cache.claim(f.addr, i.threshold); ok {
-			if err := i.shared(request.root, request.trigger); err != nil {
-				return err
-			}
-		}
 		i.sync()
 	}
 	return nil
 }
 
-// observe samples the current tick for a not-yet-warm function: it feeds the
-// profile collector, captures the entry trace on the first hot entry tick, and
-// captures a hot loop header sampled mid-function. A solo interpreter also fires
-// its one-shot entry compile here once the sample count crosses the threshold.
-//
-// The entry capture deliberately runs on every entry tick instead of behind the
-// threshold gate the loop capture and the compile share. That compile is
-// one-shot per root, so a trace must already be published when it fires;
-// deferring the capture to the same tick leaves a deeply recursive function with
-// only deep, unrecordable states to record from, and it then never installs.
-// tree.attempts caps the untaken cost at attemptLimit clones per anchor.
-//
-// The caller guarantees the entry fallback is still nil, so the gates that the
-// threaded safepoint used to repeat on that lookup are already satisfied.
-func (i *Interpreter) observe(f *frame) error {
-	samples := i.sample(f)
-	if f.ip == 0 {
-		i.tracer.capture(i, anchor{addr: f.addr})
+// entryTrigger converts a configured threshold into the call count that fires a
+// function's one-shot entry compile. Zero means never: a disabled JIT still runs
+// the generated entry hook, and this is what makes that hook a single compare.
+func entryTrigger(threshold int64) uint32 {
+	if threshold < 0 {
+		return 0
 	}
-	if i.threshold >= 0 && f.ip > 0 && (i.eager || samples >= uint64(i.threshold)) {
-		for _, header := range i.tracer.headers(i, f.addr) {
-			if header != f.ip {
-				continue
-			}
-			if err := i.trace(f); err != nil {
-				return err
-			}
-			break
+	return uint32(min(threshold, math.MaxUint32))
+}
+
+// owns reports whether f is executing its own function's installed dispatch
+// table. It is false for the one-instruction trampoline invoke builds to
+// re-enter the VM from a host callback: that frame borrows the module's addr
+// without running the module, so counting it would record and compile the
+// module from a state it never actually reaches. The CALL that trampoline
+// dispatches still counts its real callee.
+func (i *Interpreter) owns(f *frame) bool {
+	if f.addr < 0 || f.addr >= len(i.code) {
+		return false
+	}
+	code := i.code[f.addr]
+	return len(f.code) > 0 && len(code) > 0 && &f.code[0] == &code[0]
+}
+
+// entered counts one hot event for the function the interpreter is currently
+// running. A call into it is one event, and so is a warmed arrival at one of its
+// back edges: both are how a function earns compilation, so both answer to the
+// same configured threshold, and a module body entered once still becomes hot by
+// looping. Every frame-establishing threaded handler ends with it - CALL,
+// RETURN_CALL, and RESUME - so a function accumulates one count per entry
+// however it was reached and from however many call sites.
+//
+// Paths that deliberately do not count: deopt rebuilds frames for calls that
+// already happened natively, and the native call wrappers run code that is hot
+// by definition. A bridged CALL runs a real threaded handler and does count.
+//
+// This is the generated hook's form, and it follows that convention: a threaded
+// handler reports failure by panicking, and dispatch's recover annotates it.
+func (i *Interpreter) entered() {
+	if err := i.enter(); err != nil {
+		panic(err)
+	}
+}
+
+// enter raises one hot event and returns what it cost. Run uses it for the
+// module's own entry, which happens before dispatch installs the recover that
+// entered relies on, so there the failure has to come back as a value.
+func (i *Interpreter) enter() error {
+	addr := i.fr.addr
+	if i.entry == 0 || addr < 0 || addr >= len(i.entries) {
+		return nil
+	}
+	hits := i.entries[addr] + 1
+	i.entries[addr] = hits
+	if hits <= entryWarmup || hits >= i.entry {
+		if err := i.warm(addr, hits); err != nil {
+			return err
 		}
 	}
-	root := anchor{addr: f.addr}
-	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[root] {
+	if i.cache != nil {
+		return i.claim(addr)
+	}
+	return nil
+}
+
+// claim offers one hot event to the shared cache, which aggregates events across
+// pool members so exactly one of them compiles a given function. The offer is
+// made on every event rather than at this member's own crossing, because no
+// single member need reach the threshold for the pool to have reached it.
+func (i *Interpreter) claim(addr int) error {
+	request, ok := i.cache.claim(addr, i.threshold)
+	if !ok {
+		return nil
+	}
+	return i.shared(request.root, request.trigger)
+}
+
+// warm is the hot counter's slow path. The early events publish a trace and the
+// crossing event compiles, in that order and never in the same call, because the
+// compile is one-shot per root and would find nothing recorded if it ran first.
+// Capturing from the first few events also records a recursive function at its
+// shallowest, which is the only depth its trace can be recorded from.
+//
+// Only an event raised at the entry itself may capture. A back edge is a hot
+// event for the same function but stands mid-body, and recording the entry root
+// from there replays the entry instructions against loop-carried locals - a
+// state the function never reaches on entry, whose trace then plans nothing.
+func (i *Interpreter) warm(addr int, hits uint32) error {
+	if i.isCold(addr) {
+		return nil
+	}
+	root := anchor{addr: addr}
+	if hits <= entryWarmup && i.fr.ip == 0 {
+		i.tracer.capture(i, root)
+	}
+	if hits >= i.entry && i.cache == nil && !i.tried[root] && i.settled(addr, hits) {
 		i.tried[root] = true
 		if err := i.compile(root); err != nil {
 			return err
 		}
 	}
-	i.checkCool(f.addr, root)
+	i.checkCool(addr, root)
 	return nil
+}
+
+// settled reports whether addr's entry root is ready to be compiled. A loop
+// header is the better root of the two - it carries the hoisting and the native
+// back-edge that the enclosing entry's copy of the same blocks does not - and an
+// installed entry runs its loops inside itself, so their back edges stop
+// reporting and they can never earn one. Headers therefore go first.
+//
+// The wait is bounded, because a header the function never actually reaches
+// would otherwise hold its entry back forever.
+func (i *Interpreter) settled(addr int, hits uint32) bool {
+	if hits >= i.entry+entryWarmup {
+		return true
+	}
+	for _, header := range i.tracer.headers(i, addr) {
+		// A header at ip 0 is this very root, not a separate one to wait for.
+		if header != 0 && !i.tried[anchor{addr: addr, ip: header}] {
+			return false
+		}
+	}
+	return true
 }
 
 // checkCool counts one unproductive observation when addr's entry root and
@@ -1161,31 +1265,56 @@ func (i *Interpreter) checkCool(addr int, root anchor) {
 	}
 }
 
-// backedge receives the exact target of an unconditional backward
-// branch. Eager functions install it immediately; sampled functions install it
-// once when periodic profiling reaches the threshold, so cold BR handlers stay
-// unchanged and no header scan is needed here.
+// backedge receives the exact target of a warmed backward branch, which is the
+// loop header itself - no header scan is needed here. The arrival is also a hot
+// event for the enclosing function, so a loop makes its own function's entry
+// eligible without any instruction sampling. It drives cooling too: once every
+// root of this function has been attempted, repeated arrivals are what
+// eventually retire its instrumentation.
 func (i *Interpreter) backedge(f *frame) error {
 	if f.ip <= 0 {
 		return nil
 	}
-	return i.trace(f)
+	if i.isCold(f.addr) {
+		return nil
+	}
+	if err := i.enter(); err != nil {
+		return err
+	}
+	// The loop root waits for the same hot count as the entry root, so the
+	// whole-function plan is always attempted first. Compiling the header first
+	// would install a native loop that stops running this hook, and the function
+	// it belongs to would never accumulate the events its own entry needs.
+	if f.addr >= 0 && f.addr < len(i.entries) && i.entries[f.addr] < i.entry {
+		return nil
+	}
+	err := i.trace(f)
+	i.checkCool(f.addr, anchor{addr: f.addr})
+	return err
+}
+
+// yielded handles a native loop that has spent its back-edge budget. deopt has
+// left i.fr at the header, and a loop that burns a whole budget is hot by
+// definition, so the yield reports that header exactly as a threaded back edge
+// would.
+//
+// Reporting here is what keeps a loop inside an already-native function
+// compilable. Once a whole-function entry installs, its loops run inside it and
+// their threaded back edges never execute again, so this is their only remaining
+// way to earn a native entry of their own - and a loop entry, with its hoisting
+// and native back-edge, is worth far more than the enclosing entry's copy of the
+// same blocks.
+func (i *Interpreter) yielded() error {
+	if err := i.backedge(i.fr); err != nil {
+		return err
+	}
+	return i.safepoint()
 }
 
 func (i *Interpreter) trace(f *frame) error {
 	root := anchor{addr: f.addr, ip: f.ip}
 	if i.exits[root] != nil || i.tried[root] {
 		return nil
-	}
-	if i.eager {
-		if i.samples.Samples(f.addr) == 0 {
-			i.sample(f)
-		}
-		hits := i.loopHits[root] + 1
-		i.loopHits[root] = hits
-		if hits < loopWarmup {
-			return nil
-		}
 	}
 	i.tried[root] = true
 	result := i.tracer.capture(i, root)
@@ -1196,7 +1325,21 @@ func (i *Interpreter) trace(f *frame) error {
 		i.cache.request(request{root: root, trigger: prof.TriggerHot})
 		return nil
 	}
-	return i.compile(root)
+	if err := i.compile(root); err != nil {
+		return err
+	}
+	// A loop header reached on the iteration that exits records the path out of
+	// the loop rather than the loop, and the walk ends cut at some later header -
+	// a partial. That plans nothing, and keeping it would serve the same
+	// recording to every later arrival, so forget it and let the next arrival
+	// record again; tracer.attemptLimit bounds the retries. A recording that
+	// completed and still planned nothing is a real answer about this header, not
+	// bad luck, and retrying only spends clones to reach the same plan.
+	if root.ip != 0 && i.exits[root] == nil && result.outcome == prof.CaptureOutcomePartial {
+		i.tracer.forget(root)
+		delete(i.tried, root)
+	}
+	return nil
 }
 
 // call wraps a native trace Entry Callable. The CALL handler has already
@@ -1247,8 +1390,9 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 			case trapYield:
 				stats.yield()
 				// A loop back-edge spent its budget. deopt left i.fr at the loop header;
-				// run coordination, then let the threaded Run loop continue from there.
-				if err := i.safepoint(); err != nil {
+				// report it and run coordination, then let the threaded Run loop
+				// continue from there.
+				if err := i.yielded(); err != nil {
 					panic(err)
 				}
 			default:
@@ -1350,7 +1494,7 @@ func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watch
 				panic(ErrFrameOverflow)
 			case trapYield:
 				stats.yield()
-				if err := i.safepoint(); err != nil {
+				if err := i.yielded(); err != nil {
 					panic(err)
 				}
 			default:
@@ -1410,7 +1554,7 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 				panic(ErrFrameOverflow)
 			case trapYield:
 				stats.yield()
-				if err := i.safepoint(); err != nil {
+				if err := i.yielded(); err != nil {
 					panic(err)
 				}
 			case trapFallback:
@@ -1576,33 +1720,20 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
-// sample records one profile hit for the frame's current instruction and
-// returns the updated function count.
-func (i *Interpreter) sample(f *frame) uint64 {
+// sample records one profile hit for the frame's current instruction. It feeds
+// the user's profiler only; tiering up is driven by the entry and back-edge
+// hooks (see entered and backedge).
+func (i *Interpreter) sample(f *frame) {
 	i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-	samples := i.samples.Samples(f.addr)
-	if nativeBackend && !i.eager && i.threshold >= 0 && samples >= uint64(i.threshold) {
-		i.enableBackedges(f.addr)
-	}
-	return samples
-}
-
-// enableBackedges rethreads one hot function with exact unconditional
-// back-edge observation. Cold functions keep the original zero-overhead BR
-// handler until periodic sampling reaches the configured threshold.
-func (i *Interpreter) enableBackedges(addr int) {
-	if addr < 0 || addr >= len(i.backedges) || i.backedges[addr] {
-		return
-	}
-	i.rethread(addr, true)
 }
 
 // cool permanently stops instrumenting addr once every compilation root has
-// been tried and nothing installed: further sampling, entry/loop capture, and
-// exact back-edge observation would only pay dispatch overhead for no benefit
-// (see checkCool). A function already rethreaded onto the exact-backedge
-// table reverts to the zero-overhead BR handler; sync still runs afterward so
-// a peer's later publish can still be adopted (see install).
+// been tried and nothing installed: further entry capture and back-edge
+// observation would only pay dispatch overhead for no benefit (see checkCool).
+// Reverting the function to the zero-overhead BR handler is what actually
+// removes the loop instrumentation, since back-edge hooks are installed by
+// default rather than upgraded into; sync still runs afterward so a peer's
+// later publish can still be adopted (see install).
 func (i *Interpreter) cool(addr int) {
 	if addr < 0 || addr >= len(i.cold) || i.cold[addr] {
 		return
@@ -2315,6 +2446,9 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.backedges) {
 		i.backedges = append(i.backedges, make([]bool, n-len(i.backedges))...)
 	}
+	if addr >= len(i.entries) {
+		i.entries = append(i.entries, make([]uint32, n-len(i.entries))...)
+	}
 	if addr >= len(i.cold) {
 		i.cold = append(i.cold, make([]bool, n-len(i.cold))...)
 	}
@@ -2330,7 +2464,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	i.backedges[addr] = nativeBackend && i.eager
+	i.backedges[addr] = nativeBackend && i.threshold >= 0
 	c := i.threader(i.backedges[addr])
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
@@ -2389,6 +2523,7 @@ func (i *Interpreter) threader(backedge bool) *threader {
 		globals:     i.globalDecls(),
 		globalTypes: i.globalTypes,
 		exact:       i.tick == 1,
+		entry:       (*Interpreter).entered,
 	}
 	if backedge {
 		c.backedge = (*Interpreter).backedge
@@ -2709,10 +2844,8 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.tried, a)
 		}
 	}
-	for a := range i.loopHits {
-		if a.addr == addr {
-			delete(i.loopHits, a)
-		}
+	if addr >= 0 && addr < len(i.entries) {
+		i.entries[addr] = 0
 	}
 	if i.tracer != nil {
 		i.tracer.remove(addr)

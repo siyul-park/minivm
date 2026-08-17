@@ -22,7 +22,7 @@ For trace compiler internals, see `docs/jit-internals.md`.
 
 minivm profiles execution by sampling on interpreter ticks. It does not record every instruction by default.
 
-Profiles are used for runtime observability, REPL output, hotness decisions, and runtime counters.
+Profiles are used for runtime observability, REPL output, and runtime counters. They no longer decide hotness: compilation is triggered by counters compiled into the call and back-edge handlers, so a program with no profiler attached pays nothing for tiering up. See Hotness Thresholds.
 
 ## Sampling Model
 
@@ -42,7 +42,7 @@ Each sample records:
 | instruction pointer | byte offset in that function's bytecode |
 | opcode | raw opcode byte at the sampled IP |
 
-The same tick also drives context polling, fuel accounting, hooks, profiling, and threshold checks.
+The same tick also drives context polling, fuel accounting, hooks, profiling, and a pool's shared-module handshake. A run with none of those attached skips the tick loop entirely.
 
 Lower tick values produce denser samples but add more overhead.
 
@@ -159,41 +159,63 @@ row once and retains destination counter objects.
 
 ## Hotness Thresholds
 
-Compilation is driven by profile samples.
+Compilation is driven by hot events, not by profile samples. One hot event is
+one call into a function, or one report from one of its back edges. Both are
+counted per function by handlers the threader compiles in, so hotness is
+observed at exact anchors in exact runtime state rather than at whichever
+instruction a countdown happened to stop on.
 
 A function becomes hot when:
 
 ```text
-Samples(fn) >= threshold rounded to tick cadence
+HotEvents(fn) >= threshold
 ```
 
 Default threshold:
 
 ```text
-4096 executed instructions
+64 hot events
 ```
-
-With the default tick of `128`, this is about `32` samples.
 
 | Setting | Effect |
 |---|---|
-| `WithThreshold(0)` | make entries eligible on the first sample and unconditional-backedge loop roots after eight exact hits |
-| `WithThreshold(n > 0)` | compile after the rounded sample threshold |
+| `WithThreshold(0)` | compile a function's entry on its first hot event, and its loop roots as soon as a back edge reports |
+| `WithThreshold(n > 0)` | compile after `n` hot events |
 | `WithThreshold(n < 0)` | disable compilation |
 
-Threshold-zero mode installs exact unconditional-backedge observation immediately and waits eight exact hits before capturing a loop root. For positive thresholds, cold functions keep the ordinary branch handler; the periodic sampler rethreads a function once when it becomes hot, after which unconditional backedges report their already-known target without a header scan. This prevents deterministic tick phases from missing a hot loop without adding pre-hot loop overhead.
+The threshold is used as given. It is not divided by the tick, because nothing
+about tiering up runs on the tick loop.
 
-Pool members use the same rounded threshold. With a shared cache, trigger counts are aggregated so only one member compiles at a time, while a per-function queue retains distinct exact loop roots and prioritizes newer side-exit work.
+Each call site counts its callee, so a function accumulates one event per entry
+however it was reached and from however many sites. `RESUME` counts a resumed
+coroutine and the `invoke` trampoline counts a callee reached from a host
+callback, so no entry path is exempt.
+
+Back edges keep a counter per branch site. The site reports every eight
+iterations, and each report is one hot event, so a module body entered once
+still becomes hot by looping. Each report restarts the count at a rotating
+offset: a fixed interval would report at the same iteration of every trip, and a
+loop whose trip count divides the interval would only ever be observed on the
+iteration that exits it. A loop root is only compiled once its function has
+crossed the threshold, so the whole-function plan is always attempted first.
+
+Backward `BR`, `BR_IF`, and `BR_TABLE` all report. Direction is settled when the
+site is threaded, so a forward branch pays one predicted test on the arm it
+takes and nothing on the arm it does not.
+
+Pool members use the same threshold. With a shared cache, hot events are
+aggregated across members so only one member compiles at a time, while a
+per-function queue retains distinct exact loop roots and prioritizes newer
+side-exit work.
 
 ## Cooling
 
-Sampling, trace capture, and exact back-edge observation are only worth their
-cost while compilation can still succeed. A function whose entry root and every
-loop header have all been attempted is cooled: it is marked cold, and a
-function already rethreaded onto the exact-backedge table reverts to the
-ordinary zero-overhead `BR` handler. A cold function skips `observe` entirely —
-no sampling for hotness, no capture, no compile trigger — while an attached
-profiler still receives its per-tick samples.
+Trace capture and back-edge reporting are only worth their cost while
+compilation can still succeed. A function whose entry root and every loop header
+have all been attempted is cooled: it is marked cold and reverts to the
+zero-overhead branch handlers. A cold function stops capturing and stops
+triggering compiles, while an attached profiler still receives its per-tick
+samples.
 
 Whether a root installed anything does not matter here. Every root has been
 tried either way, so nothing further can be compiled and the instrumentation

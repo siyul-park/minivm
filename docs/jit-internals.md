@@ -173,7 +173,7 @@ a fresh tracer instead of reusing one bound to another program.
 
 `tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
 
-Non-eager functions initially keep the ordinary generated `BR` handler. When periodic sampling first reaches the rounded threshold, the interpreter rethreads that function once with an exact unconditional-backedge callback, preserving installed native handlers and replacing only their threaded fallbacks. Eager mode enables the callback from construction. Cold loops therefore pay no callback, mutex, or header-scan cost.
+Every function is threaded with back-edge counters from the start, and the callback carries the header directly, so nothing here scans for one. A backward `BR`, `BR_IF`, or `BR_TABLE` case reports its header every `loopWarmup` iterations; forward branches are settled at threading time and never call back. `cool` rethreads a function without the counters once every one of its roots has been attempted, preserving installed native handlers and replacing only their threaded fallbacks. See `docs/profile.md` for what the counts mean and when a root is compiled.
 
 ## Trace Snapshots
 

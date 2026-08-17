@@ -1312,8 +1312,9 @@ func branch(state *state, current step) (value, error) {
 			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		}
 		condition := jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call().Op("!=").Lit(0)
-		body = append(body, jump(condition, 1, width(current.op))...)
-		return value{op: current.op, head: current.op, handler: handler(current.op, compile, body)}, nil
+		compile = append(compile, jen.Id("c").Dot("ip").Op("+=").Lit(width(current.op)))
+		compile = append(compile, branchTail(condition, 1, width(current.op), body)...)
+		return value{op: current.op, head: current.op, handler: threaderFunc(compile...)}, nil
 	}
 	if len(state.stack) == 0 {
 		return value{}, fmt.Errorf("%s needs one pending condition", instr.TypeOf(current.op).Mnemonic)
@@ -1337,11 +1338,8 @@ func branch(state *state, current step) (value, error) {
 	compile := append([]jen.Code(nil), consumer.compile...)
 	body := append([]jen.Code(nil), consumer.check...)
 	body = append(body, consumer.body...)
-	body = append(body, jump(condition, 0, state.width)...)
-	compile = append(compile,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.head)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-	)
+	compile = append(compile, jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.head)))
+	compile = append(compile, branchTail(condition, 0, state.width, body)...)
 	state.stack = nil
 	return value{op: current.op, head: consumer.head, compile: compile}, nil
 }
@@ -1439,8 +1437,29 @@ func frame(callee target, targetSlots int, releaseTarget bool, advance int, coro
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 		jen.Id("i").Dot("fp").Op("++"),
 		jen.Id("i").Dot("fr").Op("=").Id("f"),
+		entered(),
 	)
 	return body
+}
+
+// entered emits the callee-entry hook. It must follow the i.fr assignment on
+// every frame-establishing path, because Interpreter.entered counts the callee
+// i.fr names. Unlike a back edge, an entry cannot keep its counter in closure
+// state: the handler belongs to the call site, and a function reached from many
+// sites has to accumulate one count.
+//
+// The hook is reached through a threader field rather than named directly. The
+// dispatch tables are package variables, so a direct reference would make their
+// initializer depend on Compile through the compile pipeline.
+//
+// The gate reads the interpreter rather than the threader, because i is already
+// in hand while c costs a closure load before its field. Threader construction
+// therefore always sets the field, and Interpreter.entry alone decides: a
+// disabled JIT and a trace recording both leave it zero.
+func entered() jen.Code {
+	return jen.If(jen.Id("i").Dot("entry").Op("!=").Lit(0)).Block(
+		jen.Id("c").Dot("entry").Call(jen.Id("i")),
+	)
 }
 
 func reuse(callee target, typ, locals jen.Code, advance int) []jen.Code {
@@ -1501,6 +1520,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 			jen.Id("f").Dot("release").Op("=").Add(jen.Lit(releaseTarget)),
 			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
 			jen.Id(label).Op(":").Add(jen.Null()),
+			entered(),
 		}
 		return body
 	}
@@ -1526,6 +1546,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 			jen.Id("i").Dot("fp").Op("++"),
 			jen.Id("i").Dot("fr").Op("=").Id("f"),
+			entered(),
 			jen.Return(),
 		),
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
@@ -1548,6 +1569,7 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 		jen.Id("f").Dot("returns").Op("=").Id("returns"),
 		jen.Id("f").Dot("release").Op("=").False(),
 		jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
+		entered(),
 	)
 	return body
 }
@@ -1818,11 +1840,18 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		}
 	}
 
+	first := consumer
+	if len(inputs) > 0 {
+		first = inputs[0].op
+	}
+
 	result := temp(len(inputs))
 	body = append(body, jen.Id(result).Op(":=").Add(apply(consumer, operands...)))
 	if conditional {
-		body = append(body, jump(jen.Id(result).Dot("Bool").Call(), missing, advance)...)
-	} else if local != nil {
+		compile = append(compile, jen.Id("c").Dot("ip").Op("+=").Lit(width(first)))
+		return append(compile, branchTail(jen.Id(result).Dot("Bool").Call(), missing, advance, body)...), nil
+	}
+	if local != nil {
 		body = append(body,
 			jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Add(local),
 			jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
@@ -1850,10 +1879,6 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	}
 
-	first := consumer
-	if len(inputs) > 0 {
-		first = inputs[0].op
-	}
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(first)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
@@ -1862,16 +1887,40 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 }
 
 func jump(condition jen.Code, consume, advance int) []jen.Code {
-	if consume == 0 {
-		return []jen.Code{
-			jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
-		}
+	var code []jen.Code
+	if consume > 0 {
+		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
 	}
-	return []jen.Code{
-		jen.Id("i").Dot("sp").Op("-=").Lit(consume),
-		jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+	taken := []jen.Code{
+		jen.Id("f").Op(":=").Id("i").Dot("fr"),
+		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
+		jen.If(jen.Op("!").Id("hot")).Block(jen.Return()),
+	}
+	taken = append(taken, count()...)
+	taken = append(taken, jen.Return())
+	return append(code,
+		jen.If(condition).Block(taken...),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+	)
+}
+
+// branchTail emits the closing statements every conditional-branch handler ends
+// with. Both offset and advance are fixed once the site is threaded, so whether
+// the taken arm is a loop back edge is settled there and the handler captures
+// the answer instead of deriving it. A forward branch - nearly all of them -
+// therefore pays one predicted test, and only on the arm it takes.
+//
+// One closure carries both directions rather than the threader picking between
+// two, because BR_IF terminates around twenty fusion patterns: a per-direction
+// closure duplicates every one of their bodies and grows the generated table by
+// roughly a fifth, which costs more in instruction cache than the test saves.
+func branchTail(condition jen.Code, consume, advance int, body []jen.Code) []jen.Code {
+	code := append(append([]jen.Code(nil), body...), jump(condition, consume, advance)...)
+	return []jen.Code{
+		jen.Id("hot").Op(":=").Id("c").Dot("backedge").Op("!=").Nil().Op("&&").Id("offset").Op("+").Lit(advance).Op("<=").Lit(0),
+		jen.Id("hits").Op(":=").Lit(0),
+		jen.Id("skew").Op(":=").Lit(0),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(code...)),
 	}
 }
 
@@ -2895,38 +2944,89 @@ func arraySlice() jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
+// count emits the tail shared by every backward-branch handler: bump this site's
+// own iteration counter and report the header to the interpreter every
+// loopWarmup iterations. The counter is closure state belonging to one branch
+// site, so an iteration costs one increment and one compare with no lookup, and
+// every header is reported on its own iteration count instead of on whichever
+// instruction a sampling tick happened to stop at. The interval is fixed rather
+// than derived from the configured threshold, because each report is one hot
+// event and the threshold counts those.
+//
+// Each report restarts the count at a rotating skew instead of at zero. A fixed
+// interval reports at the same iteration of every trip, so a loop whose trip
+// count divides the interval - any short power-of-two loop - is only ever
+// observed on the iteration that exits it, and the tracer then records the path
+// out of the loop no matter how many times it retries. Rotating the phase costs
+// nothing per iteration, because the per-iteration test is still against the
+// constant.
+//
+// Emit it only after f already points at the branching frame with its new ip
+// applied, because backedge reads f.ip as the header.
+func count() []jen.Code {
+	return []jen.Code{
+		jen.Id("hits").Op("++"),
+		jen.If(jen.Id("hits").Op("<").Id("loopWarmup")).Block(jen.Return()),
+		jen.Id("hits").Op("=").Id("skew"),
+		jen.Id("skew").Op("=").Parens(jen.Id("skew").Op("+").Lit(1)).Op("%").Id("loopWarmup"),
+		jen.If(jen.Id("err").Op(":=").Id("c").Dot("backedge").Call(jen.Id("i"), jen.Id("f")), jen.Id("err").Op("!=").Nil()).Block(
+			jen.Panic(jen.Id("err")),
+		),
+	}
+}
+
 func br() jen.Code {
 	apply := []jen.Code{
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
 		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(3),
 	}
 	observe := append([]jen.Code(nil), apply...)
-	observe = append(observe,
-		jen.If(jen.Id("err").Op(":=").Id("c").Dot("backedge").Call(jen.Id("i"), jen.Id("f")), jen.Id("err").Op("!=").Nil()).Block(
-			jen.Panic(jen.Id("err")),
-		),
-	)
+	observe = append(observe, count()...)
 	return threaderFunc(
 		jen.Id("offset").Op(":=").Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
 		jen.If(jen.Id("c").Dot("backedge").Op("==").Nil().Op("||").Id("offset").Op(">").Lit(-3)).Block(
 			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(apply...)),
 		),
+		jen.Id("hits").Op(":=").Lit(0),
+		jen.Id("skew").Op(":=").Lit(0),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(observe...)),
 	)
 }
 
+// brTable threads a jump table. Every case offset is known here, so which cases
+// are loop back edges is settled at threading time into one bool per case, and
+// the taken arm decides by indexing it rather than by recomputing a direction.
+// The counters are per case, so two loops sharing one table warm separately.
 func brTable() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("count")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
-		jen.List(jen.Id("offsets")).Op(":=").List(jen.Id("make").Call(jen.Index().Add(jen.Id("int")), jen.Id("count").Op("+").Add(jen.Lit(1)))),
-		jen.For(jen.List(jen.Id("i")).Op(":=").List(jen.Lit(0)), jen.Id("i").Op("<").Add(jen.Id("len").Call(jen.Id("offsets"))), jen.Id("i").Op("++")).Block(jen.List(jen.Id("at")).Op(":=").List(jen.Id("c").Dot("ip").Op("+").Add(jen.Id("i").Op("*").Add(jen.Lit(2))).Op("+").Add(jen.Lit(2))),
-			jen.List(jen.Id("offsets").Index(jen.Id("i"))).Op("=").List(jen.Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("at")))),
-		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Id("count").Op("*").Add(jen.Lit(2)).Op("+").Add(jen.Lit(4))),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
-			jen.Id("i").Dot("sp").Op("--"),
-			jen.List(jen.Id("cond")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call())),
-			jen.If(jen.Id("cond").Op("<").Add(jen.Lit(0)).Op("||").Add(jen.Id("cond").Op(">=").Add(jen.Id("count")))).Block(jen.List(jen.Id("cond")).Op("=").List(jen.Id("count"))),
-			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Id("offsets").Index(jen.Id("cond")).Op("+").Add(jen.Id("count").Op("*").Add(jen.Lit(2))).Op("+").Add(jen.Lit(4))))))
+	body := []jen.Code{
+		jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+		jen.Id("i").Dot("sp").Op("--"),
+		jen.Id("cond").Op(":=").Int().Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call()),
+		jen.If(jen.Id("cond").Op("<").Lit(0).Op("||").Id("cond").Op(">=").Id("count")).Block(jen.Id("cond").Op("=").Id("count")),
+		jen.Id("f").Op(":=").Id("i").Dot("fr"),
+		jen.Id("f").Dot("ip").Op("+=").Id("offsets").Index(jen.Id("cond")).Op("+").Id("advance"),
+		jen.If(jen.Op("!").Id("back").Index(jen.Id("cond"))).Block(jen.Return()),
+		jen.Id("hits").Index(jen.Id("cond")).Op("++"),
+		jen.If(jen.Id("hits").Index(jen.Id("cond")).Op("<").Id("loopWarmup")).Block(jen.Return()),
+		jen.Id("hits").Index(jen.Id("cond")).Op("=").Id("skew").Index(jen.Id("cond")),
+		jen.Id("skew").Index(jen.Id("cond")).Op("=").Parens(jen.Id("skew").Index(jen.Id("cond")).Op("+").Lit(1)).Op("%").Id("loopWarmup"),
+		jen.If(jen.Id("err").Op(":=").Id("c").Dot("backedge").Call(jen.Id("i"), jen.Id("f")), jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
+	}
+	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter"))).Block(
+		jen.Id("count").Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Lit(1))),
+		jen.Id("advance").Op(":=").Id("count").Op("*").Lit(2).Op("+").Lit(4),
+		jen.Id("offsets").Op(":=").Make(jen.Index().Int(), jen.Id("count").Op("+").Lit(1)),
+		jen.Id("back").Op(":=").Make(jen.Index().Bool(), jen.Len(jen.Id("offsets"))),
+		jen.Id("hits").Op(":=").Make(jen.Index().Int(), jen.Len(jen.Id("offsets"))),
+		jen.Id("skew").Op(":=").Make(jen.Index().Int(), jen.Len(jen.Id("offsets"))),
+		jen.For(jen.Id("i").Op(":=").Range().Id("offsets")).Block(
+			jen.Id("offsets").Index(jen.Id("i")).Op("=").Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Id("i").Op("*").Lit(2).Op("+").Lit(2)),
+			jen.Id("back").Index(jen.Id("i")).Op("=").Id("c").Dot("backedge").Op("!=").Nil().Op("&&").Id("offsets").Index(jen.Id("i")).Op("+").Id("advance").Op("<=").Lit(0),
+		),
+		jen.Id("c").Dot("ip").Op("+=").Id("advance"),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+	)
 }
 
 func coroDone() jen.Code {
@@ -4076,7 +4176,8 @@ func resume() jen.Code {
 				jen.List(jen.Id("co").Dot("release")).Op("=").List(jen.Id("false")),
 				jen.Id("i").Dot("fr").Dot("ip").Op("++"),
 				jen.Id("i").Dot("fp").Op("++"),
-				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Id("f")))),
+				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Id("f")),
+				entered())),
 				jen.Case(jen.Id("types").Dot("Iterator")).Block(jen.Block(jen.List(jen.Id("iter")).Op(":=").List(jen.Id("co")),
 					jen.List(jen.Id("in")).Op(":=").List(jen.Id("in")),
 					jen.If(jen.Id("iter").Dot("Done").Call()).Block(jen.Id("panic").Call(jen.Id("ErrCoroutineDone"))),

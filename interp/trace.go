@@ -296,6 +296,12 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.hook = nil
 	out.speculative = true
 	out.threshold = -1
+	// A recording walk must not tier up. The exact tables it steps are threaded
+	// without the entry hook, but out starts as a shallow copy, so entries still
+	// aliases the live counters; dropping both the slice and the trigger keeps a
+	// recorded call from ever writing them.
+	out.entry = 0
+	out.entries = nil
 
 	out.constants = i.constants
 	out.globals = slices.Clone(i.globals)
@@ -305,7 +311,6 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.exits = map[anchor]func(*Interpreter){}
 	out.stubs = make([]func(*Interpreter), len(out.code))
 	out.tried = map[anchor]bool{}
-	out.loopHits = map[anchor]uint8{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)
 	out.handlers = slices.Clone(i.handlers)
@@ -495,6 +500,7 @@ func (t *tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 			globals:     globals,
 			globalTypes: i.globalTypes,
 			exact:       true,
+			entry:       (*Interpreter).entered,
 		}
 		t.exact[addr] = tc.Compile(code, locals, declared, captures, captureTypes)
 	}
@@ -650,6 +656,17 @@ func (t *tracer) publish(a anchor, tree *tree, tr *trace, next status, reason pr
 		tree.root = tr
 	}
 	return result
+}
+
+// forget drops one anchor's recorded trace so a later arrival records it again.
+// The attempt count is deliberately kept, because that count is what bounds how
+// many times one anchor may be re-recorded.
+func (t *tracer) forget(a anchor) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if tree := t.trees[a]; tree != nil {
+		tree.root = nil
+	}
 }
 
 func (t *tracer) remove(addr int) {
