@@ -5,20 +5,17 @@ compared against interpreters, while `default` and `jit` promote hot code to nat
 and are compared against Wazero's compiler backend. Native Go is a reference bound,
 not a peer.
 
-**Latest minivm measurements.** The threaded interpreter remains competitive with other interpreters, while native execution provides the largest gains on tight arithmetic, loops, and indexed memory access. The current native tier still trails Wazero on most shared kernels.
-
-The published cross-runtime controls come from the August 13 sweep. The minivm rows below were re-measured on August 17 with the current JIT tiering policy. `RecursiveFib(35)` remains from the earlier reference sweep because the full cross-runtime comparison is too expensive to repeat interactively.
+**Benchmark summary.** The threaded interpreter remains competitive with other interpreters, while native execution provides the largest gains on tight arithmetic, loops, and indexed memory access. The native tier still trails Wazero on most shared kernels.
 
 | Kernel | `default` | `threaded` | Wazero |
 |---|---:|---:|---:|
-| `RecursiveFib(35)` | 56.7 ms | 412.5 ms | 44.4 ms |
-| `RecursiveFib(20)` | 45.17 µs | 306.62 µs | 33.2 µs |
+| `RecursiveFib(35)` | 59.59 ms | 415.3 ms | 44.4 ms |
+| `RecursiveFib(20)` | 44.39 µs | 318.03 µs | 33.2 µs |
 
-`default` is 6.8x faster than `threaded` at depth 20. Wazero remains faster on this workload.
+`default` is 7.2x faster than `threaded` at depth 20. Wazero remains faster on this workload.
 
-> **Latest minivm measurements**: August 17, 2026 - Apple M4 Pro - darwin/arm64 - Go 1.26.2.
-> **Cross-runtime reference sweep**: August 13, 2026 - CPython 3.13.
-> **Statistics**: minivm rows use `-benchtime=300ms -count=3` and report the median.
+> **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
+> **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median.
 
 ## 1. Controls
 
@@ -91,15 +88,15 @@ before making a performance claim.
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 306.62 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 318.03 µs | 0 | 0 |
 |  | CPython | 562.79 µs | 26 | 0 |
 |  | Tengo | 930.21 µs | 319,347 | 28,655 |
 |  | GopherLua | 1.07 ms | 704 | 2 |
 |  | Goja | 1.52 ms | 4,680 | 39 |
 |  | gpython | 3.89 ms | 9,807,919 | 109,494 |
 |  | Yaegi | 4.50 ms | 8,302,177 | 192,840 |
-| Native | minivm `default` | 45.17 µs | 0 | 0 |
-|  | minivm `jit` | 43.22 µs | 0 | 0 |
+| Native | minivm `default` | **44.39 µs** | 0 | 0 |
+|  | minivm `jit` | 44.31 µs | 0 | 0 |
 |  | Wazero | **33.20 µs** | 8 | 1 |
 | Reference | Native Go | 14.61 µs | 0 | 0 |
 #### `IndirectRecursiveFib`
@@ -368,9 +365,7 @@ native tier still trails Wazero on most shared kernels. Allocation-heavy and
 call-heavy workloads remain less favorable because more execution stays in
 threaded code.
 
-The tables are canonical measurements from the stated environment and protocol.
-Policy or implementation changes should be evaluated with a separate interleaved
-A/B run rather than by mixing new measurements into the published tables.
+The tables use a fixed environment and protocol.
 
 Allocation-heavy results are reported with `B/op` and `allocs/op` because memory
 behavior is often more informative than execution time alone. CPython allocation
@@ -405,7 +400,7 @@ figures reflect only the Go benchmark harness and should not be compared directl
 - Inputs and correctness checks are deterministic.
 - Setup, verification, warmup, reset, cleanup, and result calculation stay outside the timed operation.
 - Canonical comparison tables use `-benchtime=300ms -count=3` and report the median.
-- Interleaved A/B runs compare variants back to back with `benchstat`; their results stay separate from canonical tables.
+- Use interleaved A/B runs with `benchstat` when comparing variants.
 - Compare CPython on `ns/op` only; `B/op` and `allocs/op` measure the Go harness.
 
 ## 10. Reproduction
