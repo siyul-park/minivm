@@ -43,6 +43,11 @@ func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error 
 	return nil
 }
 
+type codecNode struct {
+	Value int32
+	Next  *codecNode
+}
+
 type codecMillis time.Duration
 
 type codecPair struct {
@@ -367,6 +372,21 @@ func TestRegistry_Marshal(t *testing.T) {
 		fn, err := i.Load(bound.Ref())
 		require.NoError(t, err)
 		require.IsType(t, &interp.HostFunction{}, fn)
+	})
+
+	t.Run("recursive type", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := &codecNode{Value: 1, Next: &codecNode{Value: 2}}
+
+		value, err := r.Marshal(i, src)
+		require.NoError(t, err)
+		var dst codecNode
+		require.NoError(t, r.Unmarshal(i, value, &dst))
+		require.Equal(t, int32(1), dst.Value)
+		require.Equal(t, int32(2), dst.Next.Value)
+		require.Nil(t, dst.Next.Next)
 	})
 
 	t.Run("cycle", func(t *testing.T) {

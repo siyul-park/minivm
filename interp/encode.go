@@ -37,16 +37,6 @@ type Encoder struct {
 	seen     map[unsafe.Pointer]bool
 }
 
-// leaf is the compiled conversion of one primitive Go kind, held in a table so
-// a field selects its access once at compile time instead of switching on the
-// kind at every read.
-type leaf struct {
-	vm    types.Type
-	value func(*Encoder, unsafe.Pointer) (types.Value, error)
-	box   func(*Encoder, unsafe.Pointer) (types.Boxed, error)
-	set   func(*Decoder, types.Value, unsafe.Pointer) error
-}
-
 func (f MarshalerFunc) Marshal(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 	return f(e, p)
 }

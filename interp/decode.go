@@ -84,40 +84,26 @@ func unmarshalConverting(t reflect.Type) func(*Decoder, types.Value, unsafe.Poin
 	}
 }
 
-// unmarshalNative stores a VM value into a Go source that already holds one.
-func unmarshalNative(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) error {
+// unmarshalValue stores a VM value into a Go slot that holds one directly,
+// covering both a types.Value-implementing type and an interface slot.
+func unmarshalValue(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) error {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		return assign(d, val, reflect.NewAt(t, p).Elem())
-	}
-}
-
-// unmarshalDynamic stores a VM value into an interface source.
-func unmarshalDynamic(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) error {
-	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		return assign(d, val, reflect.NewAt(t, p).Elem())
-	}
-}
-
-// assign resolves val and assigns it to dst when the VM representation fits.
-func assign(d *Decoder, val types.Value, dst reflect.Value) error {
-	value, err := d.registry.resolve(d.interp, val)
-	if err != nil {
-		return err
-	}
-	if value == nil {
-		dst.SetZero()
+		value, err := d.registry.resolve(d.interp, val)
+		if err != nil {
+			return err
+		}
+		dst := reflect.NewAt(t, p).Elem()
+		rv := reflect.ValueOf(value)
+		if value == nil || !rv.IsValid() {
+			dst.SetZero()
+			return nil
+		}
+		if !rv.Type().AssignableTo(t) {
+			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, value, t)
+		}
+		dst.Set(rv)
 		return nil
 	}
-	rv := reflect.ValueOf(value)
-	if !rv.IsValid() {
-		dst.SetZero()
-		return nil
-	}
-	if !rv.Type().AssignableTo(dst.Type()) {
-		return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, value, dst.Type())
-	}
-	dst.Set(rv)
-	return nil
 }
 
 // unmarshalPointer allocates the pointee and decodes into it, leaving a nil
@@ -355,7 +341,7 @@ func (d *Decoder) key(k types.MapKey, entry types.MapEntry) (types.Value, error)
 
 // unmarshalStruct decodes a VM struct into a Go struct, matching each Go field
 // to the VM field of the same name and falling back to the next unused data
-// source when no name matches.
+// slot when no name matches.
 func unmarshalStruct(fields []field) func(*Decoder, types.Value, unsafe.Pointer) error {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		value, err := d.registry.resolve(d.interp, val)
@@ -387,8 +373,8 @@ func unmarshalStruct(fields []field) func(*Decoder, types.Value, unsafe.Pointer)
 	}
 }
 
-// source locates the source field a Go field reads from: the one sharing its
-// name, or the next unused source that is not a bound function.
+// source locates the field a Go field reads from: the one sharing its name,
+// or the next unused slot that is not a bound function.
 func source(typ *types.StructType, name string, used []bool) (int, bool) {
 	for idx, f := range typ.Fields {
 		if f.Name == name {

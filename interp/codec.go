@@ -37,9 +37,9 @@ type registry struct {
 	entries map[reflect.Type]*conversion
 }
 
-// conversion is the compiled conversion for one Go type. Every function it holds
-// takes an unsafe.Pointer to a live Go value of that type, valid only for the
-// duration of the call.
+// conversion is what one Go type compiles to. Every function it holds takes an
+// unsafe.Pointer to a live Go value of that type, valid only for the duration
+// of the call.
 //
 // value and box differ by position: value produces a standalone VM value, the
 // form Marshal returns and an interface slot stores, while box produces a slot
@@ -60,6 +60,16 @@ type field struct {
 	name       string
 	offset     uintptr
 	conversion *conversion
+}
+
+// leaf is the compiled conversion of one primitive Go kind, held in a table so
+// a field selects its access once at compile time instead of switching on the
+// kind at every read.
+type leaf struct {
+	vm    types.Type
+	value func(*Encoder, unsafe.Pointer) (types.Value, error)
+	box   func(*Encoder, unsafe.Pointer) (types.Boxed, error)
+	set   func(*Decoder, types.Value, unsafe.Pointer) error
 }
 
 // method binds one exported method of the receiver type as a VM function field.
@@ -120,7 +130,6 @@ func WithMarshaler(t reflect.Type, vm types.Type, m Marshaler) func(*registry) {
 		e := r.entry(t)
 		e.vm = vm
 		e.value = m.Marshal
-		e.box = nil
 	}
 }
 
@@ -170,7 +179,7 @@ func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
 	return nil
 }
 
-// conversion returns the compiled conversion for t, compiling and caching it once.
+// conversion returns t's compiled form, building and caching it on first use.
 func (r *Registry) conversion(t reflect.Type) (*conversion, error) {
 	if p, ok := r.conversions.Load(t); ok {
 		return p.(*conversion), nil
@@ -185,8 +194,8 @@ func (r *Registry) conversion(t reflect.Type) (*conversion, error) {
 
 // compile resolves t by the first rule that matches: a registered entry, a type
 // that converts itself, a VM runtime type, then the structural mapping. seen
-// holds the conversion of every type on the current path, so a recursive type reaches
-// its own conversion instead of compiling forever.
+// holds the compiled form of every type on the current path, so a recursive
+// type reaches its own instead of compiling forever.
 func (r *Registry) compile(t reflect.Type, seen map[reflect.Type]*conversion) (*conversion, error) {
 	if p, ok := seen[t]; ok {
 		return p, nil
@@ -253,7 +262,7 @@ func (r *Registry) native(p *conversion) bool {
 	}
 	p.vm = vm
 	p.value = marshalNative(p.typ)
-	p.set = unmarshalNative(p.typ)
+	p.set = unmarshalValue(p.typ)
 	return true
 }
 
@@ -272,7 +281,7 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 	case reflect.Interface:
 		p.vm = types.TypeAny
 		p.value, p.box = marshalDynamic(t)
-		p.set = unmarshalDynamic(t)
+		p.set = unmarshalValue(t)
 		return nil
 
 	case reflect.Pointer:
@@ -340,7 +349,6 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion) (*types.StructType, []field, []method, error) {
 	var slots []types.StructField
 	var fields []field
-	var methods []method
 	names := make(map[string]bool)
 
 	for idx := range t.NumField() {
@@ -357,15 +365,13 @@ func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion) (*t
 		names[f.Name] = true
 	}
 
-	bound, err := r.methods(t, names, seen)
+	methods, err := r.methods(t, names, seen)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	for _, m := range bound {
+	for _, m := range methods {
 		slots = append(slots, types.NewStructField(m.typ, types.FieldWithName(m.name)))
 	}
-	methods = bound
-
 	return types.NewStructType(slots...), fields, methods, nil
 }
 
@@ -419,8 +425,9 @@ func (r *Registry) function(t reflect.Type, skip int, seen map[reflect.Type]*con
 	return &types.FunctionType{Params: params, Returns: returns}, nil
 }
 
-// complete fills the directions a resolution rule left open, so every conversion is
-// callable and an unsupported direction reports itself rather than panicking.
+// complete fills the directions a resolution rule left open, so every compiled
+// form is callable and an unsupported direction reports itself instead of
+// panicking.
 func (r *Registry) complete(p *conversion) {
 	if p.value == nil {
 		p.value = func(*Encoder, unsafe.Pointer) (types.Value, error) {
@@ -437,8 +444,8 @@ func (r *Registry) complete(p *conversion) {
 	}
 }
 
-// resolve follows a boxed value to the value it stands for, so every conversion sees
-// a standalone VM value regardless of how the source stored it.
+// resolve follows a boxed value to the value it stands for, so every compiled
+// conversion sees a standalone VM value however the source stored it.
 func (r *Registry) resolve(i *Interpreter, val types.Value) (types.Value, error) {
 	boxed, ok := val.(types.Boxed)
 	if !ok {
