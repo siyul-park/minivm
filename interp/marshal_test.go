@@ -494,3 +494,105 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 }
+
+type marshalBenchData struct {
+	Count int32
+	Ratio float64
+	Name  string
+	Flag  bool
+}
+
+type marshalBenchMethods struct {
+	Count  int32
+	hidden int32
+}
+
+func (v *marshalBenchMethods) Bump(n int32) int32 {
+	v.Count += n
+	v.hidden++
+	return v.Count
+}
+
+// BenchmarkInterpreter_Marshal records the per-shape cost of the reflection
+// codec. Every iteration resets the interpreter so the heap stays at one
+// conversion's worth; that reset cost is identical across runs, so it does not
+// disturb a before/after comparison.
+func BenchmarkInterpreter_Marshal(b *testing.B) {
+	elems := make([]int32, 64)
+	for idx := range elems {
+		elems[idx] = int32(idx)
+	}
+	entries := make(map[string]int32, 16)
+	for idx := range 16 {
+		entries[string(rune('a'+idx))] = int32(idx)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+	}{
+		{name: "scalar", value: int32(7)},
+		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}},
+		{name: "slice", value: elems},
+		{name: "map", value: entries},
+		{name: "methods", value: &marshalBenchMethods{Count: 7}},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			i := interp.New(program.New(nil))
+			b.Cleanup(func() { require.NoError(b, i.Close()) })
+
+			_, err := i.Marshal(tt.value)
+			require.NoError(b, err)
+			i.Reset()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := i.Marshal(tt.value); err != nil {
+					b.Fatal(err)
+				}
+				i.Reset()
+			}
+		})
+	}
+}
+
+// BenchmarkInterpreter_Unmarshal records the reverse direction over the same
+// shapes. The source value is marshaled once outside the loop, so only decode
+// cost is measured; the destination is reused because Unmarshal overwrites it.
+func BenchmarkInterpreter_Unmarshal(b *testing.B) {
+	elems := make([]int32, 64)
+	for idx := range elems {
+		elems[idx] = int32(idx)
+	}
+	entries := make(map[string]int32, 16)
+	for idx := range 16 {
+		entries[string(rune('a'+idx))] = int32(idx)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+		dst   any
+	}{
+		{name: "scalar", value: int32(7), dst: new(int32)},
+		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}, dst: new(marshalBenchData)},
+		{name: "slice", value: elems, dst: new([]int32)},
+		{name: "map", value: entries, dst: new(map[string]int32)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			i := interp.New(program.New(nil))
+			b.Cleanup(func() { require.NoError(b, i.Close()) })
+
+			value, err := i.Marshal(tt.value)
+			require.NoError(b, err)
+			require.NoError(b, i.Unmarshal(value, tt.dst))
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := i.Unmarshal(value, tt.dst); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

@@ -8697,3 +8697,74 @@ func arraySumUpvalue(size, repeats int32) *program.Program {
 	}
 	return prog
 }
+
+type structGetHostFields struct {
+	Count  int32
+	hidden int32
+}
+
+func (h *structGetHostFields) Bump(n int32) int32 {
+	h.Count += n
+	h.hidden++
+	return h.Count
+}
+
+// BenchmarkInterpreter_StructGetHost measures STRUCT_GET against the value the
+// reflection codec picks for a Go struct that carries a method and an
+// unexported field. Field 0 is a plain i32, so the loop isolates per-access
+// dispatch cost from any boxing or heap traffic. The marshal and reset work
+// outside the inner loop is amortized over repeats field reads per run, the
+// same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
+func BenchmarkInterpreter_StructGetHost(b *testing.B) {
+	const repeats = 10000
+
+	prog := structGetHostLoop(repeats)
+	vm := New(prog, WithThreshold(-1)) // threaded + fused, no JIT
+	b.Cleanup(func() { require.NoError(b, vm.Close()) })
+	ctx := context.Background()
+
+	run := func() types.Boxed {
+		host, err := vm.Marshal(&structGetHostFields{Count: 1})
+		require.NoError(b, err)
+		require.NoError(b, vm.Push(host))
+		require.NoError(b, vm.Run(ctx))
+		got, err := vm.PopBoxed()
+		require.NoError(b, err)
+		vm.Reset()
+		return got
+	}
+
+	want := run()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		require.Equal(b, want, run())
+	}
+}
+
+// structGetHostLoop reads field 0 of a host-backed struct repeats times,
+// accumulating the reads so nothing is optimized away.
+func structGetHostLoop(repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32) // 0=host, 1=counter, 2=sum
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
