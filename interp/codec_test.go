@@ -95,7 +95,7 @@ func TestWithMarshaler(t *testing.T) {
 		reflect.TypeFor[codecMillis](), types.TypeI64,
 		interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 			ms := int64(*(*codecMillis)(p)) / int64(time.Millisecond)
-			return e.Marshal(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
+			return e.Encode(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
 		}))
 
 	t.Run("registered type", func(t *testing.T) {
@@ -137,7 +137,7 @@ func TestWithUnmarshaler(t *testing.T) {
 		reflect.TypeFor[codecMillis](),
 		interp.UnmarshalerFunc(func(d *interp.Decoder, val types.Value, p unsafe.Pointer) error {
 			var ms int64
-			if err := d.Unmarshal(val, reflect.TypeFor[int64](), unsafe.Pointer(&ms)); err != nil {
+			if err := d.Decode(val, reflect.TypeFor[int64](), unsafe.Pointer(&ms)); err != nil {
 				return err
 			}
 			*(*codecMillis)(p) = codecMillis(ms) * codecMillis(time.Millisecond)
@@ -531,10 +531,22 @@ func TestRegistry_Marshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
+
 		node := &struct{ Next any }{}
 		node.Next = node
-
 		_, err := r.Marshal(i, node)
+		require.ErrorIs(t, err, interp.ErrMarshalCycle)
+
+		// A map or slice reaches itself without an intervening pointer, so the
+		// walk has to refuse those containers too rather than recurse forever.
+		entries := map[string]any{}
+		entries["self"] = entries
+		_, err = r.Marshal(i, entries)
+		require.ErrorIs(t, err, interp.ErrMarshalCycle)
+
+		elems := []any{nil}
+		elems[0] = elems
+		_, err = r.Marshal(i, elems)
 		require.ErrorIs(t, err, interp.ErrMarshalCycle)
 	})
 

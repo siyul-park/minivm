@@ -21,11 +21,19 @@ type Marshaler interface {
 // MarshalerFunc adapts a function to Marshaler.
 type MarshalerFunc func(*Encoder, unsafe.Pointer) (types.Value, error)
 
-// ValueMarshaler lets a Go type convert itself. The registry compiles an
+// VMMarshaler lets a Go type convert itself. The registry compiles an
 // implementing type into a Marshaler and resolves it ahead of the structural
 // mapping.
-type ValueMarshaler interface {
+type VMMarshaler interface {
 	MarshalVM(*Encoder) (types.Value, error)
+}
+
+// sliceHeader mirrors the runtime layout of a Go slice, so a compiled conversion
+// reaches the elements without materializing a reflect.Value per access.
+type sliceHeader struct {
+	data unsafe.Pointer
+	len  int
+	cap  int
 }
 
 // Encoder is one marshal conversion in flight. A Marshaler uses it to reach the
@@ -47,7 +55,7 @@ func (e *Encoder) Interp() *Interpreter { return e.interp }
 
 // Marshal converts the Go value of type t at p, resolving t through the same
 // codec that started the conversion.
-func (e *Encoder) Marshal(t reflect.Type, p unsafe.Pointer) (types.Value, error) {
+func (e *Encoder) Encode(t reflect.Type, p unsafe.Pointer) (types.Value, error) {
 	c, err := e.registry.conversion(t)
 	if err != nil {
 		return nil, err
@@ -72,7 +80,7 @@ func (e *Encoder) leave(ptr unsafe.Pointer) { delete(e.seen, ptr) }
 
 // box narrows a standalone value into a slot of typ, publishing a heap ref when
 // the slot holds one.
-func (e *Encoder) box(val types.Value, typ types.Type) (types.Boxed, error) {
+func (e *Encoder) boxAs(val types.Value, typ types.Type) (types.Boxed, error) {
 	switch typ.Kind() {
 	case types.KindI1:
 		n, ok := asInt(val)
@@ -117,7 +125,7 @@ func (e *Encoder) box(val types.Value, typ types.Type) (types.Boxed, error) {
 		}
 		return types.BoxF64(f), nil
 	case types.KindRef:
-		if err := matches(val, typ); err != nil {
+		if err := verify(val, typ); err != nil {
 			return 0, err
 		}
 		return e.ref(val)
@@ -130,7 +138,7 @@ func (e *Encoder) box(val types.Value, typ types.Type) (types.Boxed, error) {
 // element reaches (*Interpreter).mapKey in the same form an opcode would hand
 // it over. It is the error-returning counterpart of (*Interpreter).box, which
 // panics on heap exhaustion where conversion must report it.
-func (e *Encoder) boxed(val types.Value) (types.Boxed, error) {
+func (e *Encoder) box(val types.Value) (types.Boxed, error) {
 	switch v := val.(type) {
 	case types.Boxed:
 		return v, nil
@@ -262,7 +270,7 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
 			}
-			boxed, err := enc.box(value, typ.Returns[idx])
+			boxed, err := enc.boxAs(value, typ.Returns[idx])
 			if err != nil {
 				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
@@ -282,7 +290,7 @@ func boxing(p *conversion) func(*Encoder, unsafe.Pointer) (types.Boxed, error) {
 		if err != nil {
 			return 0, err
 		}
-		return e.box(val, vm)
+		return e.boxAs(val, vm)
 	}
 }
 
@@ -290,7 +298,7 @@ func boxing(p *conversion) func(*Encoder, unsafe.Pointer) (types.Boxed, error) {
 // set, so a value receiver is reached without copying the value out of its slot.
 func marshalConverting(t reflect.Type) func(*Encoder, unsafe.Pointer) (types.Value, error) {
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
-		return reflect.NewAt(t, p).Interface().(ValueMarshaler).MarshalVM(e)
+		return reflect.NewAt(t, p).Interface().(VMMarshaler).MarshalVM(e)
 	}
 }
 
@@ -319,7 +327,7 @@ func marshalDynamic(t reflect.Type) (
 		elem := rv.Elem()
 		holder := reflect.New(elem.Type())
 		holder.Elem().Set(elem)
-		return e.Marshal(elem.Type(), holder.UnsafePointer())
+		return e.Encode(elem.Type(), holder.UnsafePointer())
 	}
 	return value, func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 		val, err := value(e, p)
@@ -415,15 +423,9 @@ func hostError(v reflect.Value) error {
 	return v.Interface().(error)
 }
 
-// matches reports whether a standalone value may occupy a ref slot of typ.
-func matches(val types.Value, typ types.Type) error {
+// verify reports whether a standalone value may occupy a ref slot of typ.
+func verify(val types.Value, typ types.Type) error {
 	if typ.Equals(types.TypeAny) {
-		return nil
-	}
-	if typ.Equals(types.TypeString) {
-		if _, ok := val.(types.String); !ok {
-			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, typ)
-		}
 		return nil
 	}
 	if val == nil {
@@ -433,14 +435,6 @@ func matches(val types.Value, typ types.Type) error {
 		return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, typ)
 	}
 	return nil
-}
-
-// sliceHeader mirrors the runtime layout of a Go slice, so a compiled conversion
-// reaches the elements without materializing a reflect.Value per access.
-type sliceHeader struct {
-	data unsafe.Pointer
-	len  int
-	cap  int
 }
 
 // span reports the base pointer and length of the Go array or slice at p.
@@ -457,7 +451,8 @@ func span(t reflect.Type) func(unsafe.Pointer) (unsafe.Pointer, int) {
 
 // marshalArray converts a Go array or slice. An element kind the VM stores
 // unboxed selects a typed array at compile time; anything else boxes into the
-// generic representation.
+// generic representation, where an element can reach the container again and
+// the walk has to refuse the cycle.
 func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) func(*Encoder, unsafe.Pointer) (types.Value, error) {
 	bounds, stride := span(t), t.Elem().Size()
 	switch elem.kind {
@@ -492,6 +487,12 @@ func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) func(*E
 	}
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		base, n := bounds(p)
+		if base != nil {
+			if !e.enter(base) {
+				return nil, fmt.Errorf("%w: %s", ErrMarshalCycle, t)
+			}
+			defer e.leave(base)
+		}
 		elems := make([]types.Boxed, n)
 		for idx := range elems {
 			boxed, err := elem.box(e, unsafe.Add(base, uintptr(idx)*stride))
@@ -526,6 +527,12 @@ func typedArray[T int8 | int32 | int64 | float32 | float64 | bool](
 func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) func(*Encoder, unsafe.Pointer) (types.Value, error) {
 	write := mapWriter(mt, key)
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+		if target := *(*unsafe.Pointer)(p); target != nil {
+			if !e.enter(target) {
+				return nil, fmt.Errorf("%w: %s", ErrMarshalCycle, t)
+			}
+			defer e.leave(target)
+		}
 		rv := reflect.NewAt(t, p).Elem()
 		out := types.NewMapForType(mt, rv.Len())
 		entryKey, entryValue := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
@@ -585,7 +592,7 @@ func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, u
 		if err != nil {
 			return err
 		}
-		boxed, err := e.boxed(val)
+		boxed, err := e.box(val)
 		if err != nil {
 			return err
 		}

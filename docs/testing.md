@@ -71,7 +71,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `prof` | 22 | 22 | 0 | 0 |
 | `program` | 25 | 25 | 0 | 0 |
 | `transform` | 10 | 10 | 0 | 0 |
-| `types` | 172 | 172 | 0 | 0 |
+| `types` | 173 | 173 | 0 | 0 |
 
 ### Symbol Matrix
 
@@ -552,6 +552,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/map.go` | `TestMapIterator_String` | ✅ |
 | `types/map.go` | `TestMapIterator_Type` | ✅ |
 | `types/map.go` | `TestMapKey_String` | ✅ |
+| `types/map.go` | `TestMapKey_Value` | ✅ |
 | `types/map.go` | `TestMapType_Cast` | ✅ |
 | `types/map.go` | `TestMapType_Equals` | ✅ |
 | `types/map.go` | `TestMapType_Kind` | ✅ |

@@ -83,8 +83,8 @@ var (
 	typeContext = reflect.TypeFor[context.Context]()
 	typeValue   = reflect.TypeFor[types.Value]()
 
-	typeValueMarshaler   = reflect.TypeFor[ValueMarshaler]()
-	typeValueUnmarshaler = reflect.TypeFor[ValueUnmarshaler]()
+	typeVMMarshaler   = reflect.TypeFor[VMMarshaler]()
+	typeVMUnmarshaler = reflect.TypeFor[VMUnmarshaler]()
 
 	// natives are the VM runtime types a Go value may hold directly. They
 	// bypass structural compilation and pass through as themselves.
@@ -98,19 +98,6 @@ var (
 		reflect.TypeFor[types.String](): types.TypeString,
 	}
 )
-
-// NewRegistry builds the built-in codec. Defaults for standard-library types
-// install first, so an option naming the same Go type replaces one.
-func NewRegistry(opts ...func(*registry)) *Registry {
-	r := &registry{entries: make(map[reflect.Type]*conversion)}
-	for _, opt := range defaults() {
-		opt(r)
-	}
-	for _, opt := range opts {
-		opt(r)
-	}
-	return &Registry{entries: r.entries}
-}
 
 // WithMarshaler registers m as the conversion of Go type t into a VM value. vm
 // is the VM type m produces; enclosing struct, array, and map layouts compile
@@ -129,15 +116,18 @@ func WithUnmarshaler(t reflect.Type, u Unmarshaler) func(*registry) {
 	return func(r *registry) { r.entry(t).set = u.Unmarshal }
 }
 
-func (r *registry) entry(t reflect.Type) *conversion {
-	e, ok := r.entries[t]
-	if !ok {
-		e = &conversion{typ: t, vm: types.TypeAny}
-		r.entries[t] = e
+// NewRegistry builds the built-in codec. Defaults for standard-library types
+// install first, so an option naming the same Go type replaces one.
+func NewRegistry(opts ...func(*registry)) *Registry {
+	r := &registry{entries: make(map[reflect.Type]*conversion)}
+	for _, opt := range defaults() {
+		opt(r)
 	}
-	return e
+	for _, opt := range opts {
+		opt(r)
+	}
+	return &Registry{entries: r.entries}
 }
-
 func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -174,6 +164,15 @@ func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
 		return fmt.Errorf("unmarshal %T into %s: %w", val, elem, err)
 	}
 	return nil
+}
+
+func (r *registry) entry(t reflect.Type) *conversion {
+	e, ok := r.entries[t]
+	if !ok {
+		e = &conversion{typ: t, vm: types.TypeAny}
+		r.entries[t] = e
+	}
+	return e
 }
 
 // conversion returns t's compiled form, building and caching it on first use.
@@ -234,8 +233,8 @@ func (r *Registry) registered(p *conversion) bool {
 // MarshalVM is reached without copying the value out of its slot.
 func (r *Registry) converting(p *conversion) bool {
 	ptr := reflect.PointerTo(p.typ)
-	marshals := ptr.Implements(typeValueMarshaler)
-	unmarshals := ptr.Implements(typeValueUnmarshaler)
+	marshals := ptr.Implements(typeVMMarshaler)
+	unmarshals := ptr.Implements(typeVMUnmarshaler)
 	if !marshals && !unmarshals {
 		return false
 	}
@@ -699,7 +698,7 @@ func defaults() []func(*registry) {
 			})),
 		WithUnmarshaler(reflect.TypeFor[complex64](), UnmarshalerFunc(
 			func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-				c, err := d.complex(val)
+				c, err := d.complexOf(val)
 				if err != nil {
 					return err
 				}
@@ -716,7 +715,7 @@ func defaults() []func(*registry) {
 			})),
 		WithUnmarshaler(reflect.TypeFor[complex128](), UnmarshalerFunc(
 			func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-				c, err := d.complex(val)
+				c, err := d.complexOf(val)
 				if err != nil {
 					return err
 				}
@@ -726,8 +725,8 @@ func defaults() []func(*registry) {
 	}
 }
 
-// complex reads the {Real, Imag} struct both complex registrations produce.
-func (d *Decoder) complex(val types.Value) (complex128, error) {
+// complexOf reads the {Real, Imag} struct both complex registrations produce.
+func (d *Decoder) complexOf(val types.Value) (complex128, error) {
 	value, err := d.registry.resolve(d.interp, val)
 	if err != nil {
 		return 0, err

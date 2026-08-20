@@ -57,7 +57,7 @@ func TestEncoder_Marshal(t *testing.T) {
 			reflect.TypeFor[encodeCelsius](), types.TypeI32,
 			interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				n := int32(*(*encodeCelsius)(p))
-				return e.Marshal(reflect.TypeFor[int32](), unsafe.Pointer(&n))
+				return e.Encode(reflect.TypeFor[int32](), unsafe.Pointer(&n))
 			})),
 		interp.WithMarshaler(
 			reflect.TypeFor[int32](), types.TypeI32,

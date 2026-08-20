@@ -21,10 +21,10 @@ type Unmarshaler interface {
 // UnmarshalerFunc adapts a function to Unmarshaler.
 type UnmarshalerFunc func(*Decoder, types.Value, unsafe.Pointer) error
 
-// ValueUnmarshaler lets a Go type decode itself. The registry compiles an
+// VMUnmarshaler lets a Go type decode itself. The registry compiles an
 // implementing type into an Unmarshaler and resolves it ahead of the structural
 // mapping.
-type ValueUnmarshaler interface {
+type VMUnmarshaler interface {
 	UnmarshalVM(*Decoder, types.Value) error
 }
 
@@ -44,7 +44,7 @@ func (d *Decoder) Interp() *Interpreter { return d.interp }
 
 // Unmarshal writes val into the Go value of type t at p, resolving t through
 // the same codec that started the conversion.
-func (d *Decoder) Unmarshal(val types.Value, t reflect.Type, p unsafe.Pointer) error {
+func (d *Decoder) Decode(val types.Value, t reflect.Type, p unsafe.Pointer) error {
 	c, err := d.registry.conversion(t)
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error)
 // unmarshalConverting calls the type's own UnmarshalVM.
 func unmarshalConverting(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) error {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		return reflect.NewAt(t, p).Interface().(ValueUnmarshaler).UnmarshalVM(d, val)
+		return reflect.NewAt(t, p).Interface().(VMUnmarshaler).UnmarshalVM(d, val)
 	}
 }
 
@@ -171,7 +171,7 @@ func unmarshalFunc(t reflect.Type, typ *types.FunctionType) func(*Decoder, types
 				if err != nil {
 					return fail(fmt.Errorf("function param %d: %w", idx, err))
 				}
-				boxed, err := enc.box(value, typ.Params[idx])
+				boxed, err := enc.boxAs(value, typ.Params[idx])
 				if err != nil {
 					return fail(fmt.Errorf("function param %d: %w", idx, err))
 				}
@@ -323,22 +323,10 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 	return err
 }
 
-// key recovers the VM value a generic map entry is keyed by.
+// key recovers the VM value a generic map entry is keyed by, resolving the
+// reference an entry holds so a decoded key is a value like any other.
 func (d *Decoder) key(k types.MapKey, entry types.MapEntry) (types.Value, error) {
-	switch k.Kind {
-	case types.KindI32:
-		return types.I32(int32(k.Bits)), nil
-	case types.KindI64:
-		return types.I64(int64(k.Bits)), nil
-	case types.KindF32:
-		return types.F32(math.Float32frombits(uint32(k.Bits))), nil
-	case types.KindF64:
-		return types.F64(math.Float64frombits(k.Bits)), nil
-	case types.KindText:
-		return types.String(k.Text), nil
-	default:
-		return d.registry.resolve(d.interp, entry.Key)
-	}
+	return d.registry.resolve(d.interp, k.Value(entry))
 }
 
 // unmarshalStruct decodes a VM struct into a Go struct, matching each Go field
@@ -356,7 +344,7 @@ func unmarshalStruct(fields []field) func(*Decoder, types.Value, unsafe.Pointer)
 		}
 		used := make([]bool, len(src.Typ.Fields))
 		for _, f := range fields {
-			at, ok := source(src.Typ, f.name, used)
+			at, ok := fieldIndex(src.Typ, f.name, used)
 			if !ok {
 				continue
 			}
@@ -375,9 +363,9 @@ func unmarshalStruct(fields []field) func(*Decoder, types.Value, unsafe.Pointer)
 	}
 }
 
-// source locates the field a Go field reads from: the one sharing its name,
+// fieldIndex locates the field a Go field reads from: the one sharing its name,
 // or the next unused slot that is not a bound function.
-func source(typ *types.StructType, name string, used []bool) (int, bool) {
+func fieldIndex(typ *types.StructType, name string, used []bool) (int, bool) {
 	for idx, f := range typ.Fields {
 		if f.Name == name {
 			return idx, true

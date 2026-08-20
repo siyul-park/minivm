@@ -226,7 +226,7 @@ The built-in codec compiles and caches one conversion per Go type. Compilation i
 | `time.Duration` | `I64` | normal scalar path |
 | `complex64` | `*Struct{Real, Imag F32}` | heap-allocated |
 | `complex128` | `*Struct{Real, Imag F64}` | heap-allocated |
-| `ValueMarshaler` | custom | `MarshalVM` decides representation |
+| `VMMarshaler` | custom | `MarshalVM` decides representation |
 | recursive `*T` field | `any` ref | a true cycle returns `ErrMarshalCycle` |
 
 Nil pointers marshal to `types.Null`. Pointer cycles return `ErrMarshalCycle`. Shared non-cycle pointers are allowed.
@@ -393,7 +393,7 @@ codec rather than replacing it, and every registered conversion receives the
 `*Encoder` or `*Decoder` that started the call, so it converts its own
 dependencies through the active codec.
 
-For a type you own, implement `ValueMarshaler` and `ValueUnmarshaler`. The
+For a type you own, implement `VMMarshaler` and `VMUnmarshaler`. The
 registry compiles an implementing type into an ordinary entry, so it resolves
 by the same rule as a registration.
 
@@ -422,7 +422,7 @@ r := interp.NewRegistry(
     interp.WithMarshaler(reflect.TypeFor[time.Duration](), types.TypeI64,
         interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
             ms := int64(*(*time.Duration)(p) / time.Millisecond)
-            return e.Marshal(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
+            return e.Encode(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
         })),
 )
 vm := interp.New(prog, interp.WithCodec(r))
@@ -450,7 +450,7 @@ It defaults to `NewRegistry()`.
 The built-in registry resolves a Go type by the first rule that matches:
 
 1. a type registered with `WithMarshaler` or `WithUnmarshaler`
-2. a type implementing `ValueMarshaler` or `ValueUnmarshaler`
+2. a type implementing `VMMarshaler` or `VMUnmarshaler`
 3. a VM runtime type such as `types.I32`, `types.Boxed`, or `types.String`, and
    any type implementing `types.Value`
 4. the structural reflection mapping

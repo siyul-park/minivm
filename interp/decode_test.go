@@ -62,7 +62,7 @@ func TestDecoder_Unmarshal(t *testing.T) {
 			reflect.TypeFor[decodeCelsius](),
 			interp.UnmarshalerFunc(func(d *interp.Decoder, val types.Value, p unsafe.Pointer) error {
 				var n int32
-				if err := d.Unmarshal(val, reflect.TypeFor[int32](), unsafe.Pointer(&n)); err != nil {
+				if err := d.Decode(val, reflect.TypeFor[int32](), unsafe.Pointer(&n)); err != nil {
 					return err
 				}
 				*(*decodeCelsius)(p) = decodeCelsius(n)

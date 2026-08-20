@@ -335,7 +335,7 @@ func (it *MapIterator) Next() bool {
 	case mapIteratorGeneric:
 		key := it.iter.Key().Interface().(MapKey)
 		entry := it.iter.Value().Interface().(MapEntry)
-		it.current = key.value(entry)
+		it.current = key.Value(entry)
 	default:
 		it.current = BoxedNull
 		it.done = true
@@ -403,7 +403,9 @@ func (t *MapType) Equals(other Type) bool {
 	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
 }
 
-func (k MapKey) value(entry MapEntry) Value {
+// Value reports the key this entry is indexed by, from the entry's own key
+// when it holds one and from the index otherwise.
+func (k MapKey) Value(entry MapEntry) Value {
 	if entry.Key != 0 {
 		return entry.Key
 	}
