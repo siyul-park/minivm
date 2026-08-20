@@ -284,7 +284,9 @@ Rules:
 - use a concrete Go destination type to recover Go-native values
 - bytecode can recover dynamic type with `REF_TEST` and `REF_CAST`
 
-Maps with `interface{}` keys heap-box primitive keys during marshal, so equal primitive keys are not deduplicated by value. Prefer concrete key types, or build the map inside the VM.
+A map declared with a primitive or `string` key type becomes a `*TypedMap[K]` indexed by value, so a guest lookup with an equal key finds the entry.
+
+Any other key type — `interface{}`, a named interface, a struct, an array, a pointer — produces a generic `*Map`. There a scalar key is still indexed by value, but every other key is indexed by heap reference, matching how `MAP_GET` and `MAP_SET` index one. A `string` key in such a map is therefore reachable only through the same reference, not by equal content. Prefer a concrete key type, or build the map inside the VM.
 
 ## Structs and Methods
 

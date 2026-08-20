@@ -411,6 +411,63 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Zero(t, src.Count)
 	})
 
+	t.Run("map keys stay reachable from guest lookups", func(t *testing.T) {
+		// A marshaled entry must be indexed the way MAP_GET indexes the same
+		// key, or guest code cannot reach it.
+		for _, tt := range []struct {
+			name  string
+			value any
+			key   instr.Instruction
+			want  types.Value
+		}{
+			{
+				name:  "concrete primitive key",
+				value: map[int32]int32{1: 7},
+				key:   instr.New(instr.I32_CONST, 1),
+				want:  types.I32(7),
+			},
+			{
+				name:  "primitive key in a dynamic map",
+				value: map[any]int32{int32(1): 7},
+				key:   instr.New(instr.I32_CONST, 1),
+				want:  types.I32(7),
+			},
+			{
+				name:  "string key",
+				value: map[string]int32{"a": 7},
+				key:   instr.New(instr.CONST_GET, 0),
+				want:  types.I32(7),
+			},
+			{
+				// A generic map indexes every non-scalar key by heap
+				// reference, so an equal string does not find the entry.
+				name:  "string key in a dynamic map is reference-indexed",
+				value: map[any]int32{"a": 7},
+				key:   instr.New(instr.CONST_GET, 0),
+				want:  types.I32(0),
+			},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				prog := program.New(
+					[]instr.Instruction{tt.key, instr.New(instr.MAP_GET)},
+					program.WithConstants(types.String("a")),
+				)
+				i := interp.New(prog)
+				r := interp.NewRegistry()
+				defer i.Close()
+
+				value, err := r.Marshal(i, tt.value)
+				require.NoError(t, err)
+				require.NoError(t, i.Push(value))
+				require.NoError(t, i.Run(context.Background()))
+
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, got)
+			})
+		}
+	})
+
 	t.Run("recursive type", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
