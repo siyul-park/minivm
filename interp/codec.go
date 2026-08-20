@@ -62,16 +62,6 @@ type field struct {
 	conversion *conversion
 }
 
-// leaf is the compiled conversion of one primitive Go kind, held in a table so
-// a field selects its access once at compile time instead of switching on the
-// kind at every read.
-type leaf struct {
-	vm    types.Type
-	value func(*Encoder, unsafe.Pointer) (types.Value, error)
-	box   func(*Encoder, unsafe.Pointer) (types.Boxed, error)
-	set   func(*Decoder, types.Value, unsafe.Pointer) error
-}
-
 // method binds one exported method of the receiver type as a VM function field.
 type method struct {
 	name  string
@@ -461,10 +451,11 @@ func (r *Registry) resolve(i *Interpreter, val types.Value) (types.Value, error)
 	return out, nil
 }
 
-// leaves maps each primitive Go kind to its VM type and the three conversions
-// a conversion needs. Selecting an entry once at compile time is what keeps field
-// access free of a per-read kind switch.
-var leaves = [...]leaf{
+// leaves holds the conversion of every primitive Go kind, indexed by that kind.
+// Only the vm, value, box, and set fields are filled; compile copies them onto
+// the conversion it is building. Selecting an entry once at compile time is
+// what keeps field access free of a per-read kind switch.
+var leaves = [...]conversion{
 	reflect.Bool: {
 		vm:    types.TypeI1,
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I1(*(*bool)(p)), nil },
