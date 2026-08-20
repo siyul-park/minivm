@@ -334,6 +334,8 @@ func (d *Decoder) key(k types.MapKey, entry types.MapEntry) (types.Value, error)
 		return types.F32(math.Float32frombits(uint32(k.Bits))), nil
 	case types.KindF64:
 		return types.F64(math.Float64frombits(k.Bits)), nil
+	case types.KindText:
+		return types.String(k.Text), nil
 	default:
 		return d.registry.resolve(d.interp, entry.Key)
 	}

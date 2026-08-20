@@ -125,6 +125,23 @@ func (e *Encoder) box(val types.Value, typ types.Type) (types.Boxed, error) {
 	}
 }
 
+// boxed holds val the way the VM holds a value on its stack, so a key or an
+// element reaches (*Interpreter).mapKey in the same form an opcode would hand
+// it over. It is the error-returning counterpart of (*Interpreter).box, which
+// panics on heap exhaustion where conversion must report it.
+func (e *Encoder) boxed(val types.Value) (types.Boxed, error) {
+	switch v := val.(type) {
+	case types.Boxed:
+		return v, nil
+	case types.I64:
+		return e.boxI64(int64(v))
+	}
+	if _, _, scalar := bitsOf(val); scalar {
+		return e.interp.box(val), nil
+	}
+	return e.ref(val)
+}
+
 // ref publishes val as a heap reference, reusing one it already carries.
 func (e *Encoder) ref(val types.Value) (types.Boxed, error) {
 	if val == nil || types.IsNull(val) {
@@ -149,6 +166,15 @@ func (e *Encoder) alloc(val types.Value) (types.Boxed, error) {
 		return 0, err
 	}
 	return types.BoxRef(addr), nil
+}
+
+// boxI64 stores a 64-bit integer inline when it fits the boxed payload, and on
+// the heap when it does not.
+func (e *Encoder) boxI64(n int64) (types.Boxed, error) {
+	if types.IsBoxable(n) {
+		return types.BoxI64(n), nil
+	}
+	return e.alloc(types.I64(n))
 }
 
 // wrap exposes a bound Go function to the VM. Scratch is allocated inside the
@@ -388,13 +414,6 @@ func matches(val types.Value, typ types.Type) error {
 	return nil
 }
 
-// negZero32 and negZero64 are the bit patterns of -0.0. A map key folds them
-// onto +0.0 so the two spellings of zero index one entry.
-const (
-	negZero32 = uint32(1) << 31
-	negZero64 = uint64(1) << 63
-)
-
 // sliceHeader mirrors the runtime layout of a Go slice, so a compiled conversion
 // reaches the elements without materializing a reflect.Value per access.
 type sliceHeader struct {
@@ -545,53 +564,17 @@ func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, u
 		if err != nil {
 			return err
 		}
-		k, entry, err := e.mapKey(val)
+		boxed, err := e.boxed(val)
 		if err != nil {
 			return err
 		}
-		entry.Value = value
-		if old, replaced := m.(*types.Map).Set(k, entry); replaced {
+		k, entryKey := e.interp.mapKey(boxed)
+		if old, replaced := m.(*types.Map).Set(k, types.MapEntry{Key: entryKey, Value: value}); replaced {
+			e.interp.releaseBox(old.Key)
 			e.interp.releaseBox(old.Value)
 		}
 		return nil
 	}
-}
-
-// mapKey indexes one entry of a generic map. It must build the key the
-// MAP_GET and MAP_SET handlers build for the same value: a scalar keys by
-// value, and anything else keys by heap reference. An entry keyed any other
-// way is written where guest code cannot look it up.
-//
-// i1 and i8 take the reference path because the handlers reject those kinds as
-// map keys outright, so no key spelling makes such an entry reachable.
-func (e *Encoder) mapKey(val types.Value) (types.MapKey, types.MapEntry, error) {
-	switch v := val.(type) {
-	case types.I32:
-		return types.MapKey{Kind: types.KindI32, Bits: uint64(uint32(v))},
-			types.MapEntry{Key: types.BoxI32(int32(v))}, nil
-	case types.I64:
-		return types.MapKey{Kind: types.KindI64, Bits: uint64(v)}, types.MapEntry{}, nil
-	case types.F32:
-		bits := math.Float32bits(float32(v))
-		if bits == negZero32 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF32, Bits: uint64(bits)},
-			types.MapEntry{Key: types.BoxF32(math.Float32frombits(bits))}, nil
-	case types.F64:
-		bits := math.Float64bits(float64(v))
-		if bits == negZero64 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF64, Bits: bits},
-			types.MapEntry{Key: types.BoxF64(math.Float64frombits(bits))}, nil
-	}
-	boxed, err := e.ref(val)
-	if err != nil {
-		return types.MapKey{}, types.MapEntry{}, err
-	}
-	return types.MapKey{Kind: types.KindRef, Bits: uint64(boxed.Ref())},
-		types.MapEntry{Key: boxed}, nil
 }
 
 func typedMap[K comparable](key *conversion, conv func(*Encoder, types.Boxed) K) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
@@ -603,13 +586,4 @@ func typedMap[K comparable](key *conversion, conv func(*Encoder, types.Boxed) K)
 		m.(*types.TypedMap[K]).Set(conv(e, boxed), value)
 		return nil
 	}
-}
-
-// boxI64 stores a 64-bit integer inline when it fits the boxed payload, and on
-// the heap when it does not.
-func (e *Encoder) boxI64(n int64) (types.Boxed, error) {
-	if types.IsBoxable(n) {
-		return types.BoxI64(n), nil
-	}
-	return e.alloc(types.I64(n))
 }

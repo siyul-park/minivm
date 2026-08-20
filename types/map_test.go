@@ -471,6 +471,7 @@ func TestMapKey_String(t *testing.T) {
 		{types.MapKey{Kind: types.KindF32, Bits: uint64(math.Float32bits(1))}, "1"},
 		{types.MapKey{Kind: types.KindF64, Bits: math.Float64bits(1)}, "1"},
 		{types.MapKey{Kind: types.KindRef, Bits: 1}, "1"},
+		{types.MapKey{Kind: types.KindText, Text: "a"}, "\"a\""},
 		{types.MapKey{Kind: types.Kind(255)}, "<invalid>"},
 	}
 	for _, tt := range tests {

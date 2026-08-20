@@ -144,7 +144,7 @@ Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple go
 - Heap indices are stable and must not move.
 - Values that contain refs must implement `types.Traceable`.
 - Large `i64` values may spill to the heap while preserving bytecode semantics.
-- Strings carry no identity invariant: every comparison and every `string`-keyed map compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
+- Strings carry no identity invariant: every comparison and every map keyed by a string compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
 
 See `memory-model.md` and `value-representation.md` for the detailed rules.
 

@@ -2042,6 +2042,57 @@ func (i *Interpreter) zero(kind types.Kind) types.Boxed {
 	}
 }
 
+// negZeroF32 and negZeroF64 are the bit patterns of -0.0. A map key folds them
+// onto +0.0 so both spellings of zero index one entry.
+const (
+	negZeroF32 = uint32(1) << 31
+	negZeroF64 = uint64(1) << 63
+)
+
+// mapKey indexes one entry of a generic map. It is the single owner of the
+// rule every map opcode and the codec must agree on, because a key written
+// under one spelling and looked up under another is unreachable.
+//
+// A scalar keys by value, i1 and i8 through their i32 representation. A string
+// keys by content, so equal strings index one entry however each was
+// published, as strings compare by content everywhere else. Every other
+// reference keys by heap address.
+//
+// The second result is the key a new entry stores: zero when the MapKey alone
+// reconstructs it, and otherwise a reference the entry takes ownership of. A
+// caller that only looks up releases it instead.
+func (i *Interpreter) mapKey(key types.Boxed) (types.MapKey, types.Boxed) {
+	switch key.Kind() {
+	case types.KindI1, types.KindI8, types.KindI32:
+		bits := uint64(uint32(key.I32()))
+		return types.MapKey{Kind: types.KindI32, Bits: bits}, types.BoxI32(int32(bits))
+	case types.KindI64:
+		return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
+	case types.KindF32:
+		bits := math.Float32bits(key.F32())
+		if bits == negZeroF32 {
+			bits = 0
+		}
+		return types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}, types.BoxF32(math.Float32frombits(bits))
+	case types.KindF64:
+		bits := math.Float64bits(key.F64())
+		if bits == negZeroF64 {
+			bits = 0
+		}
+		return types.MapKey{Kind: types.KindF64, Bits: bits}, types.BoxF64(math.Float64frombits(bits))
+	case types.KindRef:
+		switch value := i.heap[key.Ref()].(type) {
+		case types.I64:
+			return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
+		case types.String:
+			return types.MapKey{Kind: types.KindText, Text: string(value)}, key
+		}
+		return types.MapKey{Kind: types.KindRef, Bits: uint64(key.Ref())}, key
+	default:
+		panic(ErrTypeMismatch)
+	}
+}
+
 func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()

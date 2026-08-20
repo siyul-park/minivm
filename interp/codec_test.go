@@ -439,12 +439,16 @@ func TestRegistry_Marshal(t *testing.T) {
 				want:  types.I32(7),
 			},
 			{
-				// A generic map indexes every non-scalar key by heap
-				// reference, so an equal string does not find the entry.
-				name:  "string key in a dynamic map is reference-indexed",
+				name:  "string key in a dynamic map",
 				value: map[any]int32{"a": 7},
 				key:   instr.New(instr.CONST_GET, 0),
-				want:  types.I32(0),
+				want:  types.I32(7),
+			},
+			{
+				name:  "bool key in a dynamic map",
+				value: map[any]int32{true: 7},
+				key:   instr.New(instr.I32_CONST, 1),
+				want:  types.I32(7),
 			},
 		} {
 			t.Run(tt.name, func(t *testing.T) {

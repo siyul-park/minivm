@@ -1709,6 +1709,25 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		name: "const.get i32.const map.new const.get const.get string.concat map.get keys a dynamic map by string content",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny, types.TypeI32)),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		name: "i32.const i32.eqz i32.const map.new i32.const i32.eqz map.get keys a dynamic map by boolean value",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ),
+			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ), instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny, types.TypeI32))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
 		name: "i32.const map.new_default map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 4), instr.New(instr.MAP_NEW_DEFAULT, 0),

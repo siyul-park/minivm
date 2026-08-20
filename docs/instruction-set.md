@@ -311,7 +311,7 @@ Every string comparison, `string.eq` and `string.ne` included, compares content.
 
 ### Maps
 
-Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`. A map whose declared key type is `string` keys by content. Every other ref key uses heap ref identity. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
+Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`, with `i1` and `i8` keying through their `i32` representation. Strings key by content, whether the declared key type is `string` or the key merely happens to be one. Every other ref key uses heap ref identity. `(*Interpreter).mapKey` owns this rule for every map opcode and for `Marshal`, so a key written under one spelling is always found under an equal one. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
 
 ### Structured Errors
 
