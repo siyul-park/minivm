@@ -1109,10 +1109,8 @@ func structIndex(state *state, current step) (value, error) {
 		}
 		structBody = append(structBody, tail(jen.Id("result"))...)
 		// The declared *types.StructType only proves what to specialize for,
-		// never the runtime value's concrete representation: the same local,
-		// global, or upvalue slot the unfused STRUCT_GET handler would read
-		// off a *HostObject can reach a fused STRUCT_GET too, so a miss on
-		// the specialized *types.Struct assertion falls back to
+		// never the runtime value's concrete representation, so a miss on the
+		// specialized *types.Struct assertion falls back to
 		// (*Interpreter).structField, the same generic reader the unfused
 		// handler calls unconditionally, instead of trapping a case it
 		// accepts.
@@ -4416,12 +4414,6 @@ func structSet() jen.Code {
 						jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 						jen.List(jen.Id("s").Dot("Data").Index(jen.Id("idx"))).Op("=").List(jen.Id("uint64").Call(jen.Id("val")))),
 					jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
-				jen.Case(jen.Op("*").Add(jen.Id("HostObject"))).Block(jen.List(jen.Id("kind"), jen.Id("ok")).Op(":=").List(jen.Id("s").Dot("writeKind").Call(jen.Id("idx"))),
-					jen.If(jen.Op("!").Add(jen.Id("ok"))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
-					jen.Switch(jen.Id("kind")).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindI8"), jen.Id("types").Dot("KindI1"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Id("s").Dot("SetField").Call(jen.Id("idx"), jen.Id("val"))),
-						jen.Case(jen.Id("types").Dot("KindI64")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("idx"), jen.Id("uint64").Call(jen.Id("i").Dot("unboxI64").Call(jen.Id("val"))))),
-						jen.Case(jen.Id("types").Dot("KindRef")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("idx"), jen.Id("uint64").Call(jen.Id("val")))),
-						jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
 			jen.Id("i").Dot("release").Call(jen.Id("addr")),
 			jen.List(jen.Id("i").Dot("sp")).Op("-=").List(jen.Lit(3)),

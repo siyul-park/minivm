@@ -2,9 +2,11 @@ package interp_test
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	interp "github.com/siyul-park/minivm/interp"
@@ -28,11 +30,11 @@ func (*marshalHostFields) Context(ctx context.Context) int32 {
 	return 0
 }
 
-func (v marshalCustom) MarshalVM(*interp.Interpreter) (types.Value, error) {
+func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
 	return types.I32(v), nil
 }
 
-func (v *marshalCustom) UnmarshalVM(_ *interp.Interpreter, value types.Value) error {
+func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
 	n, ok := value.(types.I32)
 	if !ok {
 		return interp.ErrTypeMismatch
@@ -41,12 +43,141 @@ func (v *marshalCustom) UnmarshalVM(_ *interp.Interpreter, value types.Value) er
 	return nil
 }
 
-func TestInterpreter_Marshal(t *testing.T) {
-	t.Run("scalar value", func(t *testing.T) {
+type codecMillis time.Duration
+
+type codecPair struct {
+	Delay codecMillis
+	Count int32
+}
+
+func TestNewRegistry(t *testing.T) {
+	t.Run("standard library defaults", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
-		v, err := i.Marshal(int32(7))
+		value, err := r.Marshal(i, time.Unix(1, 2))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(time.Unix(1, 2).UnixNano()), value)
+	})
+
+	t.Run("registration replaces a default", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[time.Time](), types.TypeI64,
+			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				return types.I64((*(*time.Time)(p)).Unix()), nil
+			})))
+		defer i.Close()
+
+		value, err := r.Marshal(i, time.Unix(1, 2))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1), value)
+	})
+}
+
+func TestWithMarshaler(t *testing.T) {
+	millis := interp.WithMarshaler(
+		reflect.TypeFor[codecMillis](), types.TypeI64,
+		interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+			ms := int64(*(*codecMillis)(p)) / int64(time.Millisecond)
+			return e.Marshal(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
+		}))
+
+	t.Run("registered type", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(millis)
+		defer i.Close()
+
+		value, err := r.Marshal(i, codecMillis(2*time.Second))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(2000), value)
+	})
+
+	t.Run("declared type drives the enclosing layout", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(millis)
+		defer i.Close()
+
+		value, err := r.Marshal(i, codecPair{Delay: codecMillis(3 * time.Second), Count: 4})
+		require.NoError(t, err)
+		st, ok := value.(*types.Struct)
+		require.True(t, ok)
+		require.Equal(t, types.TypeI64, st.Typ.Fields[st.Typ.FieldIndex("Delay")].Type)
+		require.Equal(t, types.I64(3000), types.Unbox(st.Field(st.Typ.FieldIndex("Delay"))))
+	})
+
+	t.Run("value marshaler applies without registration", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		value, err := r.Marshal(i, marshalCustom(9))
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), value)
+	})
+}
+
+func TestWithUnmarshaler(t *testing.T) {
+	millis := interp.WithUnmarshaler(
+		reflect.TypeFor[codecMillis](),
+		interp.UnmarshalerFunc(func(d *interp.Decoder, val types.Value, p unsafe.Pointer) error {
+			var ms int64
+			if err := d.Unmarshal(val, reflect.TypeFor[int64](), unsafe.Pointer(&ms)); err != nil {
+				return err
+			}
+			*(*codecMillis)(p) = codecMillis(ms) * codecMillis(time.Millisecond)
+			return nil
+		}))
+
+	t.Run("registered type", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(millis)
+		defer i.Close()
+
+		var dst codecMillis
+		require.NoError(t, r.Unmarshal(i, types.I64(2000), &dst))
+		require.Equal(t, codecMillis(2*time.Second), dst)
+	})
+
+	t.Run("nested in a struct", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(millis)
+		defer i.Close()
+		src := types.NewStruct(
+			types.NewStructType(
+				types.NewStructField(types.TypeI64, types.FieldWithName("Delay")),
+				types.NewStructField(types.TypeI32, types.FieldWithName("Count")),
+			),
+			types.BoxI64(3000), types.BoxI32(4),
+		)
+
+		var dst codecPair
+		require.NoError(t, r.Unmarshal(i, src, &dst))
+		require.Equal(t, codecPair{Delay: codecMillis(3 * time.Second), Count: 4}, dst)
+	})
+
+	t.Run("unregistered direction is unsupported", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[codecMillis](), types.TypeI64,
+			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				return types.I64(*(*codecMillis)(p)), nil
+			})))
+		defer i.Close()
+
+		var dst codecMillis
+		require.ErrorIs(t, r.Unmarshal(i, types.I64(1), &dst), interp.ErrUnsupportedMarshalType)
+	})
+}
+
+func TestRegistry_Marshal(t *testing.T) {
+	t.Run("scalar value", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		v, err := r.Marshal(i, int32(7))
 		require.NoError(t, err)
 		require.Equal(t, types.I32(7), v)
 	})
@@ -54,7 +185,8 @@ func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("function receives active context", func(t *testing.T) {
 		var got context.Context
 		setup := interp.New(program.New(nil))
-		fn, err := setup.Marshal(func(ctx context.Context) int32 {
+		r := interp.NewRegistry()
+		fn, err := r.Marshal(setup, func(ctx context.Context) int32 {
 			got = ctx
 			return 7
 		})
@@ -74,10 +206,11 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 	t.Run("host method receives active context", func(t *testing.T) {
 		setup := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer setup.Close()
-		value, err := setup.Marshal(marshalHostFields{})
+		value, err := r.Marshal(setup, marshalHostFields{})
 		require.NoError(t, err)
-		host := value.(*interp.HostObject)
+		host := value.(*types.Struct)
 		method := host.Field(host.Typ.FieldIndex("Context"))
 		fn, err := setup.Load(method.Ref())
 		require.NoError(t, err)
@@ -94,7 +227,8 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
 		setup := interp.New(program.New(nil))
-		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
+		r := interp.NewRegistry()
+		v, err := r.Marshal(setup, func(a, b int32) int32 { return a + b })
 		require.NoError(t, err)
 		require.NoError(t, setup.Close())
 
@@ -153,22 +287,24 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 	t.Run("named scalar and pointers", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
 		type count int32
 		n := count(7)
-		value, err := i.Marshal(&n)
+		value, err := r.Marshal(i, &n)
 		require.NoError(t, err)
 		require.Equal(t, types.I32(7), value)
 
 		var nilCount *count
-		value, err = i.Marshal(nilCount)
+		value, err = r.Marshal(i, nilCount)
 		require.NoError(t, err)
 		require.Equal(t, types.Ref(0), value)
 	})
 
 	t.Run("nested collections", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		src := struct {
 			Name   string
@@ -182,7 +318,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			Lookup: map[string]int64{"x": 6},
 		}
 
-		value, err := i.Marshal(src)
+		value, err := r.Marshal(i, src)
 		require.NoError(t, err)
 		var dst struct {
 			Name   string
@@ -190,79 +326,92 @@ func TestInterpreter_Marshal(t *testing.T) {
 			Fixed  [2]uint16
 			Lookup map[string]int64
 		}
-		require.NoError(t, i.Unmarshal(value, &dst))
+		require.NoError(t, r.Unmarshal(i, value, &dst))
 		require.Equal(t, src, dst)
 	})
 
 	t.Run("custom value marshaler", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
-		value, err := i.Marshal(marshalCustom(9))
+		value, err := r.Marshal(i, marshalCustom(9))
 		require.NoError(t, err)
 		require.Equal(t, types.I32(9), value)
 	})
 
 	t.Run("builtin converter", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		src := time.Unix(1, 2)
 
-		value, err := i.Marshal(src)
+		value, err := r.Marshal(i, src)
 		require.NoError(t, err)
 		require.Equal(t, types.I64(src.UnixNano()), value)
 	})
 
-	t.Run("host object", func(t *testing.T) {
+	t.Run("struct with methods", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
-		value, err := i.Marshal(marshalHostFields{Count: 7})
+		value, err := r.Marshal(i, marshalHostFields{Count: 7})
 		require.NoError(t, err)
-		host, ok := value.(*interp.HostObject)
+		host, ok := value.(*types.Struct)
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(7), host.Field(host.Typ.FieldIndex("Count")))
+
+		bound := host.Field(host.Typ.FieldIndex("Context"))
+		require.Equal(t, types.KindRef, bound.Kind())
+		fn, err := i.Load(bound.Ref())
+		require.NoError(t, err)
+		require.IsType(t, &interp.HostFunction{}, fn)
 	})
 
 	t.Run("cycle", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		node := &struct{ Next any }{}
 		node.Next = node
 
-		_, err := i.Marshal(node)
+		_, err := r.Marshal(i, node)
 		require.ErrorIs(t, err, interp.ErrMarshalCycle)
 	})
 
 	t.Run("unsupported type", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
-		_, err := i.Marshal(make(chan int))
+		_, err := r.Marshal(i, make(chan int))
 		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
 	})
 
 }
 
-func TestInterpreter_Unmarshal(t *testing.T) {
+func TestRegistry_Unmarshal(t *testing.T) {
 	t.Run("scalar", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
 		var dst int32
-		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
+		require.NoError(t, r.Unmarshal(i, types.I32(7), &dst))
 		require.Equal(t, int32(7), dst)
 	})
 
 	t.Run("VM function", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
 
 		var add func(int32, int32) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &add))
+		require.NoError(t, r.Unmarshal(i, fn, &add))
 		got, err := add(2, 3)
 		require.NoError(t, err)
 		require.Equal(t, int32(5), got)
@@ -270,13 +419,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM function with context", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
 
 		var add func(context.Context, int32, int32) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &add))
+		require.NoError(t, r.Unmarshal(i, fn, &add))
 		got, err := add(context.Background(), 2, 3)
 		require.NoError(t, err)
 		require.Equal(t, int32(5), got)
@@ -289,6 +439,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 			return nil
 		}))
 		defer i.Close()
+		r := interp.NewRegistry()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
 		).MustBuild()
@@ -297,7 +448,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		defer func() { require.NoError(t, i.Release(addr)) }()
 
 		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 		value, err := call(ctx)
 		require.NoError(t, err)
@@ -307,13 +458,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM function canceled context", func(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithTick(1))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
 		).MustBuild()
 
 		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
+		require.NoError(t, r.Unmarshal(i, fn, &call))
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := call(ctx)
@@ -327,6 +479,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 			return nil
 		}))
 		defer i.Close()
+		r := interp.NewRegistry()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
 		).MustBuild()
@@ -335,7 +488,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		defer func() { require.NoError(t, i.Release(addr)) }()
 
 		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 		value, err := call(nil)
 		require.NoError(t, err)
 		require.Equal(t, int32(7), value)
@@ -344,13 +497,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM function non-first context", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
 
 		var call func(int32, context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
+		require.NoError(t, r.Unmarshal(i, fn, &call))
 		got, err := call(7, nil)
 		require.NoError(t, err)
 		require.Equal(t, int32(7), got)
@@ -358,6 +512,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("VM closure with context", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
@@ -369,7 +524,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		defer func() { require.NoError(t, i.Release(closureAddr)) }()
 
 		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(closureAddr), &call))
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(closureAddr), &call))
 		got, err := call(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, int32(7), got)
@@ -382,6 +537,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 			return nil
 		}))
 		defer i.Close()
+		r := interp.NewRegistry()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
 		).MustBuild()
@@ -390,7 +546,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		defer func() { require.NoError(t, i.Release(addr)) }()
 
 		var call func() (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 		value, err := call()
 		require.NoError(t, err)
 		require.Equal(t, int32(7), value)
@@ -399,6 +555,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("function ref", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
@@ -407,20 +564,21 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.NoError(t, err)
 
 		var call func() int32
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 		require.Equal(t, int32(7), call())
 		require.NoError(t, i.Release(addr))
 	})
 
 	t.Run("runtime error", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN),
 		).MustBuild()
 
 		var call func() (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
+		require.NoError(t, r.Unmarshal(i, fn, &call))
 		got, err := call()
 		require.Zero(t, got)
 		require.ErrorIs(t, err, interp.ErrDivideByZero)
@@ -432,167 +590,72 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 	t.Run("signature mismatch", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).MustBuild()
 
 		var call func() int64
-		require.ErrorIs(t, i.Unmarshal(fn, &call), interp.ErrTypeMismatch)
+		require.ErrorIs(t, r.Unmarshal(i, fn, &call), interp.ErrTypeMismatch)
 	})
 	t.Run("custom value unmarshaler", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		var dst marshalCustom
 
-		require.NoError(t, i.Unmarshal(types.I32(11), &dst))
+		require.NoError(t, r.Unmarshal(i, types.I32(11), &dst))
 		require.Equal(t, marshalCustom(11), dst)
 	})
 
 	t.Run("builtin converter", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		var dst time.Time
 
-		require.NoError(t, i.Unmarshal(types.I64(123), &dst))
+		require.NoError(t, r.Unmarshal(i, types.I64(123), &dst))
 		require.Equal(t, time.Unix(0, 123), dst)
 	})
 
-	t.Run("host object receiver", func(t *testing.T) {
+	t.Run("struct with methods round-trips exported fields", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
-		value, err := i.Marshal(marshalHostFields{Count: 7})
+		value, err := r.Marshal(i, marshalHostFields{Count: 7})
 		require.NoError(t, err)
 		var dst marshalHostFields
 
-		require.NoError(t, i.Unmarshal(value, &dst))
+		require.NoError(t, r.Unmarshal(i, value, &dst))
 		require.Equal(t, marshalHostFields{Count: 7}, dst)
 	})
 
 	t.Run("invalid target", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 
-		require.ErrorIs(t, i.Unmarshal(types.I32(1), nil), interp.ErrInvalidUnmarshalTarget)
-		require.ErrorIs(t, i.Unmarshal(types.I32(1), int32(0)), interp.ErrInvalidUnmarshalTarget)
+		require.ErrorIs(t, r.Unmarshal(i, types.I32(1), nil), interp.ErrInvalidUnmarshalTarget)
+		require.ErrorIs(t, r.Unmarshal(i, types.I32(1), int32(0)), interp.ErrInvalidUnmarshalTarget)
 		var dst *int32
-		require.ErrorIs(t, i.Unmarshal(types.I32(1), dst), interp.ErrInvalidUnmarshalTarget)
+		require.ErrorIs(t, r.Unmarshal(i, types.I32(1), dst), interp.ErrInvalidUnmarshalTarget)
 	})
 
 	t.Run("overflow", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		var dst int8
 
-		require.ErrorIs(t, i.Unmarshal(types.I64(256), &dst), interp.ErrValueOverflow)
+		require.ErrorIs(t, r.Unmarshal(i, types.I64(256), &dst), interp.ErrValueOverflow)
 	})
 
 	t.Run("type mismatch", func(t *testing.T) {
 		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
 		defer i.Close()
 		var dst int32
 
-		require.ErrorIs(t, i.Unmarshal(types.String("x"), &dst), interp.ErrTypeMismatch)
+		require.ErrorIs(t, r.Unmarshal(i, types.String("x"), &dst), interp.ErrTypeMismatch)
 	})
 
-}
-
-type marshalBenchData struct {
-	Count int32
-	Ratio float64
-	Name  string
-	Flag  bool
-}
-
-type marshalBenchMethods struct {
-	Count  int32
-	hidden int32
-}
-
-func (v *marshalBenchMethods) Bump(n int32) int32 {
-	v.Count += n
-	v.hidden++
-	return v.Count
-}
-
-// BenchmarkInterpreter_Marshal records the per-shape cost of the reflection
-// codec. Every iteration resets the interpreter so the heap stays at one
-// conversion's worth; that reset cost is identical across runs, so it does not
-// disturb a before/after comparison.
-func BenchmarkInterpreter_Marshal(b *testing.B) {
-	elems := make([]int32, 64)
-	for idx := range elems {
-		elems[idx] = int32(idx)
-	}
-	entries := make(map[string]int32, 16)
-	for idx := range 16 {
-		entries[string(rune('a'+idx))] = int32(idx)
-	}
-
-	for _, tt := range []struct {
-		name  string
-		value any
-	}{
-		{name: "scalar", value: int32(7)},
-		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}},
-		{name: "slice", value: elems},
-		{name: "map", value: entries},
-		{name: "methods", value: &marshalBenchMethods{Count: 7}},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			i := interp.New(program.New(nil))
-			b.Cleanup(func() { require.NoError(b, i.Close()) })
-
-			_, err := i.Marshal(tt.value)
-			require.NoError(b, err)
-			i.Reset()
-
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := i.Marshal(tt.value); err != nil {
-					b.Fatal(err)
-				}
-				i.Reset()
-			}
-		})
-	}
-}
-
-// BenchmarkInterpreter_Unmarshal records the reverse direction over the same
-// shapes. The source value is marshaled once outside the loop, so only decode
-// cost is measured; the destination is reused because Unmarshal overwrites it.
-func BenchmarkInterpreter_Unmarshal(b *testing.B) {
-	elems := make([]int32, 64)
-	for idx := range elems {
-		elems[idx] = int32(idx)
-	}
-	entries := make(map[string]int32, 16)
-	for idx := range 16 {
-		entries[string(rune('a'+idx))] = int32(idx)
-	}
-
-	for _, tt := range []struct {
-		name  string
-		value any
-		dst   any
-	}{
-		{name: "scalar", value: int32(7), dst: new(int32)},
-		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}, dst: new(marshalBenchData)},
-		{name: "slice", value: elems, dst: new([]int32)},
-		{name: "map", value: entries, dst: new(map[string]int32)},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			i := interp.New(program.New(nil))
-			b.Cleanup(func() { require.NoError(b, i.Close()) })
-
-			value, err := i.Marshal(tt.value)
-			require.NoError(b, err)
-			require.NoError(b, i.Unmarshal(value, tt.dst))
-
-			b.ReportAllocs()
-			for b.Loop() {
-				if err := i.Unmarshal(value, tt.dst); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
 }

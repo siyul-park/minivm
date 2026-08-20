@@ -4440,21 +4440,6 @@ var (
 					default:
 						panic(ErrTypeMismatch)
 					}
-				case *HostObject:
-					kind, ok := s.writeKind(idx)
-					if !ok {
-						panic(ErrSegmentationFault)
-					}
-					switch kind {
-					case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-						s.SetField(idx, val)
-					case types.KindI64:
-						s.SetRaw(idx, uint64(i.unboxI64(val)))
-					case types.KindRef:
-						s.SetRaw(idx, uint64(val))
-					default:
-						panic(ErrTypeMismatch)
-					}
 				default:
 					panic(ErrTypeMismatch)
 				}
