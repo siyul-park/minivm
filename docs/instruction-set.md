@@ -351,10 +351,10 @@ generator can name, threading picks one specialized handler per Kind from the
 container's *declared* type, while every execution still validates the ref
 kind, the heap value's concrete type, the field index against the *runtime*
 struct's field count, and the runtime field's actual Kind before boxing it.
-On a specialized-type miss (the heap value is the generic `*types.Array` or
-`*HostObject` representation instead), both fusions fall back to the same
-unfused arm the standalone `array.get`/`struct.get` handler runs, instead of
-trapping a case the unfused handler accepts.
+On a specialized-type miss (the heap value is the generic `*types.Array`
+representation instead), both fusions fall back to the same unfused arm the
+standalone `array.get`/`struct.get` handler runs, instead of trapping a case
+the unfused handler accepts.
 
 ## Maintenance Notes
 

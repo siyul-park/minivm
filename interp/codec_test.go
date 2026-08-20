@@ -23,6 +23,11 @@ type marshalHostFields struct {
 	Count int32
 }
 
+func (v *marshalHostFields) Bump(n int32) int32 {
+	v.Count += n
+	return v.Count
+}
+
 func (*marshalHostFields) Context(ctx context.Context) int32 {
 	if ctx.Value(marshalContextKey(0)) == "value" {
 		return 7
@@ -209,7 +214,7 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, ctx, got)
 	})
 
-	t.Run("host method receives active context", func(t *testing.T) {
+	t.Run("bound method receives active context", func(t *testing.T) {
 		setup := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer setup.Close()
@@ -345,7 +350,7 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, types.I32(9), value)
 	})
 
-	t.Run("builtin converter", func(t *testing.T) {
+	t.Run("standard library default", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
@@ -372,6 +377,38 @@ func TestRegistry_Marshal(t *testing.T) {
 		fn, err := i.Load(bound.Ref())
 		require.NoError(t, err)
 		require.IsType(t, &interp.HostFunction{}, fn)
+	})
+
+	t.Run("methods bind to the caller's pointer", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := &marshalHostFields{}
+
+		value, err := r.Marshal(i, src)
+		require.NoError(t, err)
+		st := value.(*types.Struct)
+		bound, err := i.Load(st.Field(st.Typ.FieldIndex("Bump")).Ref())
+		require.NoError(t, err)
+		_, err = bound.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxI32(2)})
+		require.NoError(t, err)
+		require.Equal(t, int32(2), src.Count)
+	})
+
+	t.Run("a marshaled value binds methods to its own copy", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := marshalHostFields{}
+
+		value, err := r.Marshal(i, src)
+		require.NoError(t, err)
+		st := value.(*types.Struct)
+		bound, err := i.Load(st.Field(st.Typ.FieldIndex("Bump")).Ref())
+		require.NoError(t, err)
+		_, err = bound.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxI32(2)})
+		require.NoError(t, err)
+		require.Zero(t, src.Count)
 	})
 
 	t.Run("recursive type", func(t *testing.T) {
@@ -627,7 +664,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, marshalCustom(11), dst)
 	})
 
-	t.Run("builtin converter", func(t *testing.T) {
+	t.Run("standard library default", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
