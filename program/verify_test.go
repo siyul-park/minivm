@@ -244,7 +244,7 @@ func TestVerify(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.GLOBAL_SET, 0),
-		}, program.WithGlobals(types.TypeRef))
+		}, program.WithGlobals(types.TypeAny))
 		require.NoError(t, program.Verify(prog))
 	})
 

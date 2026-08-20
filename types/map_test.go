@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewTypedMap(t *testing.T) {
-	typ := types.NewMapType(types.TypeI32, types.TypeRef)
+	typ := types.NewMapType(types.TypeI32, types.TypeAny)
 	m := types.NewTypedMap[int32](typ, 4)
 	require.Same(t, typ, m.Typ)
 	require.Equal(t, types.BoxedNull, m.Zero)
@@ -17,7 +17,7 @@ func TestNewTypedMap(t *testing.T) {
 }
 
 func TestNewMap(t *testing.T) {
-	typ := types.NewMapType(types.TypeRef, types.TypeI32)
+	typ := types.NewMapType(types.TypeAny, types.TypeI32)
 	m := types.NewMap(typ)
 	require.Same(t, typ, m.Typ)
 	require.Equal(t, types.BoxI32(0), m.Zero)
@@ -25,7 +25,7 @@ func TestNewMap(t *testing.T) {
 }
 
 func TestNewMapWithCapacity(t *testing.T) {
-	typ := types.NewMapType(types.TypeI32, types.TypeRef)
+	typ := types.NewMapType(types.TypeI32, types.TypeAny)
 	m := types.NewMapWithCapacity(typ, 8)
 	require.Same(t, typ, m.Typ)
 	require.Equal(t, types.BoxedNull, m.Zero)
@@ -42,7 +42,7 @@ func TestNewMapForType(t *testing.T) {
 		{typ: types.NewMapType(types.TypeI64, types.TypeI32), want: (*types.TypedMap[int64])(nil)},
 		{typ: types.NewMapType(types.TypeF32, types.TypeI32), want: (*types.TypedMap[float32])(nil)},
 		{typ: types.NewMapType(types.TypeF64, types.TypeI32), want: (*types.TypedMap[float64])(nil)},
-		{typ: types.NewMapType(types.TypeRef, types.TypeI32), want: (*types.Map)(nil)},
+		{typ: types.NewMapType(types.TypeAny, types.TypeI32), want: (*types.Map)(nil)},
 		{typ: types.NewMapType(types.TypeString, types.TypeI32), want: (*types.TypedMap[string])(nil)},
 		{typ: types.NewMapType(structType, types.TypeI32), want: (*types.Map)(nil)},
 	}
@@ -381,7 +381,7 @@ func TestMap_Refs(t *testing.T) {
 	})
 
 	t.Run("ref key and value", func(t *testing.T) {
-		typ := types.NewMapType(types.TypeRef, types.TypeRef)
+		typ := types.NewMapType(types.TypeAny, types.TypeAny)
 		m := types.NewMap(typ)
 		m.Set(types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{
 			Key:   types.BoxRef(1),
@@ -402,7 +402,7 @@ func TestMap_Refs(t *testing.T) {
 }
 
 func TestMapIterator_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeRef, types.TypeI32))).Kind())
+	require.Equal(t, types.KindRef, types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeAny, types.TypeI32))).Kind())
 }
 
 func TestMapIterator_Type(t *testing.T) {
@@ -411,7 +411,7 @@ func TestMapIterator_Type(t *testing.T) {
 }
 
 func TestMapIterator_String(t *testing.T) {
-	require.Equal(t, "map.iterator", types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeRef, types.TypeI32))).String())
+	require.Equal(t, "map.iterator", types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeAny, types.TypeI32))).String())
 }
 
 func TestMapIterator_Next(t *testing.T) {
@@ -538,7 +538,7 @@ func BenchmarkMap_Refs(b *testing.B) {
 	})
 
 	b.Run("child refs", func(b *testing.B) {
-		m := types.NewMap(types.NewMapType(types.TypeRef, types.TypeRef))
+		m := types.NewMap(types.NewMapType(types.TypeAny, types.TypeAny))
 		m.Set(types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{Key: types.BoxRef(1), Value: types.BoxRef(2)})
 		require.Equal(b, []types.Ref{1, 2}, m.Refs(nil))
 

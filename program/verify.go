@@ -685,7 +685,7 @@ func accepts(got, want types.Kind) bool {
 }
 
 func acceptsType(got slot, want types.Type) bool {
-	if want == types.TypeRef {
+	if want == types.TypeAny {
 		return true
 	}
 	if got.typ != nil {

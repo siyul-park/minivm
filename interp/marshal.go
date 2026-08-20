@@ -98,8 +98,8 @@ var (
 		reflect.TypeOf(types.I64(0)):     types.TypeI64,
 		reflect.TypeOf(types.F32(0)):     types.TypeF32,
 		reflect.TypeOf(types.F64(0)):     types.TypeF64,
-		reflect.TypeOf(types.Ref(0)):     types.TypeRef,
-		reflect.TypeOf(types.Boxed(0)):   types.TypeRef,
+		reflect.TypeOf(types.Ref(0)):     types.TypeAny,
+		reflect.TypeOf(types.Boxed(0)):   types.TypeAny,
 		reflect.TypeOf(types.String("")): types.TypeString,
 	}
 
@@ -192,7 +192,7 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*conversion
 		return &conversion{vm: vmType, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 	}
 	if seen[t] {
-		return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalCycle, unmarshal: (*unmarshalState).unmarshalCycle}, nil
+		return &conversion{vm: types.TypeAny, typ: t, marshal: (*marshalState).marshalCycle, unmarshal: (*unmarshalState).unmarshalCycle}, nil
 	}
 	seen[t] = true
 	defer delete(seen, t)
@@ -228,7 +228,7 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*conversion
 			}, nil
 		}
 		if seen[elem] {
-			return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+			return &conversion{vm: types.TypeAny, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 		}
 		elemPlan, err := m.compile(elem, seen)
 		if err != nil {
@@ -270,7 +270,7 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*conversion
 		}
 	}
 	if t.Implements(typeValue) {
-		return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+		return &conversion{vm: types.TypeAny, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 	}
 	switch t.Kind() {
 	case reflect.Bool:
@@ -292,7 +292,7 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*conversion
 	case reflect.String:
 		return &conversion{vm: types.TypeString, typ: t, marshal: (*marshalState).marshalString, unmarshal: (*unmarshalState).unmarshalString}, nil
 	case reflect.Interface:
-		return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalAny, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+		return &conversion{vm: types.TypeAny, typ: t, marshal: (*marshalState).marshalAny, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 	case reflect.Func:
 		fnType, err := m.compileFunctionType(t, 0, seen)
 		if err != nil {
@@ -504,7 +504,7 @@ func (m *codec) customPlan(t reflect.Type) (*conversion, bool) {
 	if !marshalable && !unmarshalable {
 		return nil, false
 	}
-	plan := &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	plan := &conversion{vm: types.TypeAny, typ: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
 	if marshalable {
 		plan.marshal = m.marshalCustom(t)
 	}
@@ -528,7 +528,7 @@ func (m *codec) converterPlan(t reflect.Type) (*conversion, bool) {
 	}
 	vmType := c.VMType
 	if vmType == nil {
-		vmType = types.TypeRef
+		vmType = types.TypeAny
 	}
 	plan := &conversion{vm: vmType, typ: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
 	if c.Marshal != nil {
@@ -768,7 +768,7 @@ func (s *marshalState) boxed(val types.Value, typ types.Type) (types.Boxed, erro
 			}
 			return s.boxRef(val), nil
 		}
-		if !typ.Equals(types.TypeRef) {
+		if !typ.Equals(types.TypeAny) {
 			valTyp := types.Type(nil)
 			if val != nil {
 				valTyp = val.Type()
@@ -1695,7 +1695,7 @@ func (m *codec) typeOf(k reflect.Kind) types.Type {
 	case reflect.String:
 		return types.TypeString
 	case reflect.Interface:
-		return types.TypeRef
+		return types.TypeAny
 	default:
 		return nil
 	}

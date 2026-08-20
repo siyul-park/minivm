@@ -112,7 +112,7 @@ func (v Boxed) Type() Type {
 	case KindF64:
 		return TypeF64
 	case KindRef:
-		return TypeRef
+		return TypeAny
 	default:
 		return nil
 	}

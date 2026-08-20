@@ -22,7 +22,7 @@ type poolTrackedValue struct {
 }
 
 func (*poolTrackedValue) Kind() types.Kind { return types.KindRef }
-func (*poolTrackedValue) Type() types.Type { return types.TypeRef }
+func (*poolTrackedValue) Type() types.Type { return types.TypeAny }
 func (*poolTrackedValue) String() string   { return "tracked" }
 
 func (v *poolTrackedValue) Close() error {

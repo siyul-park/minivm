@@ -4,7 +4,7 @@ How minivm represents runtime values as one stack word.
 
 ## When to Read
 
-Use this document when changing `types.Boxed`, kind encoding, scalar boxing, dynamic `ref`, marshaling, verifier kind rules, or JIT value passing.
+Use this document when changing `types.Boxed`, kind encoding, scalar boxing, dynamic `any`, marshaling, verifier kind rules, or JIT value passing.
 
 For reference ownership and heap lifecycle, see `docs/memory-model.md`.
 
@@ -190,7 +190,7 @@ User-defined heap types do not add new `Kind` values. They use `KindRef` like ot
 | `types.I64` | `KindI64` | `TypeI64` | scalar or heap cell |
 | `types.F32` | `KindF32` | `TypeF32` | scalar |
 | `types.F64` | `KindF64` | `TypeF64` | scalar |
-| `types.Ref` | `KindRef` | `TypeRef` | heap index wrapper |
+| `types.Ref` | `KindRef` | `TypeAny` | heap index wrapper |
 | `types.String` | `KindRef` | `TypeString` | heap value |
 | arrays, structs, maps, functions, closures, host values | `KindRef` | type-specific | heap values |
 
@@ -234,25 +234,27 @@ Typed container rules:
 
 ## Dynamic Values
 
-`ref` (`types.TypeRef`) is the VM dynamic value type.
+`any` (`types.TypeAny`) is the VM dynamic value type.
 
-There is no separate boxed-any representation. A `Boxed` value is already a self-describing tagged union, so a `ref`-typed slot stores the full `Boxed` value verbatim.
+`ref` and `any` name different things and must not be conflated. `KindRef` is a *representation* — a pointer — shared by `TypeString`, arrays, structs, maps, functions, iterators, and `TypeAny` alike. `any` is a *type*: the top of the type lattice, the one that accepts every other type. So `TypeAny.Kind()` is `KindRef`, but a `KindRef` value is very often not `any`.
 
-A `ref` slot can hold inline primitives and heap refs.
+There is no separate boxed-any representation. A `Boxed` value is already a self-describing tagged union, so an `any`-typed slot stores the full `Boxed` value verbatim.
+
+An `any` slot can hold inline primitives and heap refs.
 
 Rules:
 
-- `refType.Cast` accepts every type
+- `anyType.Cast` accepts every type
 - `REF_TEST` and `REF_CAST` recover runtime type
 - primitive operands use `Boxed.Type()`
 - `KindRef` operands use the heap object's `Type()`
 - reference counting is based on the actual runtime `Kind`, not the declared slot type
 
-Storing a primitive into a `ref` slot does not retain. Overwriting a `ref` slot releases only when the displaced runtime value is actually `KindRef`.
+Storing a primitive into an `any` slot does not retain. Overwriting an `any` slot releases only when the displaced runtime value is actually `KindRef`.
 
-Only generic arrays and maps can hold dynamic `ref` elements. Specialized containers pack raw bits and do not store kind tags.
+Only generic arrays and maps can hold dynamic `any` elements. Specialized containers pack raw bits and do not store kind tags.
 
-Go `interface{}` maps to VM `ref` through the marshaler.
+Go `interface{}` maps to VM `any` through the marshaler.
 
 ## Unbox to Value
 

@@ -44,7 +44,7 @@ type trackedValue struct {
 }
 
 func (v *trackedValue) Kind() types.Kind { return types.KindRef }
-func (v *trackedValue) Type() types.Type { return types.TypeRef }
+func (v *trackedValue) Type() types.Type { return types.TypeAny }
 func (v *trackedValue) String() string   { return "tracked" }
 
 func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
@@ -1252,9 +1252,9 @@ var runTests = []struct {
 		name: "i32.const array.new_default returns null refs",
 		program: program.New(
 			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
-			program.WithTypes(types.NewArrayType(types.TypeRef)),
+			program.WithTypes(types.NewArrayType(types.TypeAny)),
 		),
-		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeRef), types.BoxedNull, types.BoxedNull)},
+		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeAny), types.BoxedNull, types.BoxedNull)},
 	},
 	{
 		name: "i32.const i32.const i32.const array.new array.len returns i32",
@@ -1353,7 +1353,7 @@ var runTests = []struct {
 			instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
 		},
-			program.WithTypes(types.NewArrayType(types.TypeRef)),
+			program.WithTypes(types.NewArrayType(types.TypeAny)),
 			program.WithLocals(types.TypeI32Array),
 		),
 		values: []types.Value{types.Null},
@@ -1546,7 +1546,7 @@ var runTests = []struct {
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
 		},
-			program.WithTypes(types.NewArrayType(types.TypeRef)),
+			program.WithTypes(types.NewArrayType(types.TypeAny)),
 			program.WithGlobals(types.TypeI32Array),
 		),
 		values: []types.Value{types.Null},
@@ -1630,7 +1630,7 @@ var runTests = []struct {
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
 		},
-			program.WithTypes(types.NewArrayType(types.TypeRef)),
+			program.WithTypes(types.NewArrayType(types.TypeAny)),
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 				Captures(types.TypeI32Array).
 				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
@@ -1974,7 +1974,7 @@ func TestInterpreter_Run(t *testing.T) {
 		// discarded with the frame instead of handed back. A teardown that keeps
 		// it leaks one slot per call and exhausts a bounded heap.
 		callee := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeRef},
+			Params:  []types.Type{types.TypeAny},
 			Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).MustBuild()
 
@@ -2666,7 +2666,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.GLOBAL_TEE, 0), // duplicates ownership: stack + global
 			instr.New(instr.DROP),          // drop stack copy; global still owns
-		}, program.WithGlobals(types.TypeRef))
+		}, program.WithGlobals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -2801,7 +2801,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.REF_IS_NULL),
-		}, program.WithGlobals(types.TypeRef))
+		}, program.WithGlobals(types.TypeAny))
 		i := New(prog, WithStack(1), WithThreshold(-1))
 		defer i.Close()
 
@@ -2943,7 +2943,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_ADD), // fuses without any prior GLOBAL_SET/SetGlobal
 			instr.New(instr.GLOBAL_GET, 1),
 			instr.New(instr.GLOBAL_GET, 2),
-		}, program.WithGlobals(types.TypeI32, types.TypeF64, types.TypeRef))
+		}, program.WithGlobals(types.TypeI32, types.TypeF64, types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -2975,7 +2975,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.GLOBAL_TEE, 0),
 			instr.New(instr.DROP),
-		}, program.WithGlobals(types.TypeRef))
+		}, program.WithGlobals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -3059,7 +3059,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("host call releases a ref param the callee does not return (fused)", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeRef}, Returns: []types.Type{types.TypeI32}},
+		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
 			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
@@ -3075,7 +3075,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("host call releases a ref param the callee does not return (generic, exact)", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeRef}, Returns: []types.Type{types.TypeI32}},
+		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
 			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
@@ -3115,7 +3115,7 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 
 	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeRef}},
+		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
 			func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{i.stack[i.sp-1]}, nil
 			})
@@ -3148,7 +3148,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("UPVAL_GET retains a ref capture (generic path)", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).
-			Captures(types.TypeRef).Emit(
+			Captures(types.TypeAny).Emit(
 			instr.New(instr.UPVAL_GET, 0), instr.New(instr.DROP),
 			instr.New(instr.RETURN),
 		).MustBuild()
@@ -3174,7 +3174,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("UPVAL_SET releases a ref capture when overwritten (generic path)", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			Captures(types.TypeRef).Emit(
+			Captures(types.TypeAny).Emit(
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
 			instr.New(instr.UPVAL_SET, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN),
@@ -3339,7 +3339,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.LOCAL_SET, 0),
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.DROP),
-			}, program.WithLocals(types.TypeRef)),
+			}, program.WithLocals(types.TypeAny)),
 		},
 		{
 			name: "function constant drop preserves ownership",
@@ -4026,7 +4026,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 	})
 
 	t.Run("accepts dynamic ref value", func(t *testing.T) {
-		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		prog := program.New(nil, program.WithGlobals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -4061,7 +4061,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 	})
 
 	t.Run("preserves same reference", func(t *testing.T) {
-		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		prog := program.New(nil, program.WithGlobals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -4075,7 +4075,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 	})
 
 	t.Run("rejects invalid reference", func(t *testing.T) {
-		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		prog := program.New(nil, program.WithGlobals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -4115,7 +4115,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 	})
 
 	t.Run("preserves same reference", func(t *testing.T) {
-		prog := program.New(nil, program.WithLocals(types.TypeRef))
+		prog := program.New(nil, program.WithLocals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -4129,7 +4129,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 	})
 
 	t.Run("rejects invalid reference", func(t *testing.T) {
-		prog := program.New(nil, program.WithLocals(types.TypeRef))
+		prog := program.New(nil, program.WithLocals(types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -4606,7 +4606,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	})
 
 	t.Run("restores declared-kind zero globals", func(t *testing.T) {
-		prog := program.New(nil, program.WithGlobals(types.TypeI32, types.TypeRef))
+		prog := program.New(nil, program.WithGlobals(types.TypeI32, types.TypeAny))
 		i := New(prog)
 		defer i.Close()
 
@@ -4654,7 +4654,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	})
 
 	t.Run("preserves arrays detached by pop", func(t *testing.T) {
-		typ := types.NewArrayType(types.TypeRef)
+		typ := types.NewArrayType(types.TypeAny)
 		prog := program.New(
 			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
@@ -4678,7 +4678,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	})
 
 	t.Run("preserves arrays reclaimed before reset", func(t *testing.T) {
-		typ := types.NewArrayType(types.TypeRef)
+		typ := types.NewArrayType(types.TypeAny)
 		prog := program.New(
 			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
@@ -4979,7 +4979,7 @@ func TestWithProfiler(t *testing.T) {
 			instr.New(instr.DROP),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 			Captures(types.TypeI32).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).MustBuild()),
-			program.WithLocals(types.TypeRef))
+			program.WithLocals(types.TypeAny))
 		require.NoError(t, program.Verify(prog))
 
 		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(prof.New()))
@@ -5475,8 +5475,8 @@ func TestWithHeapLimit(t *testing.T) {
 		const midAddr = 2
 
 		leaf := &trackedValue{}
-		mid := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(leafAddr))
-		root := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(midAddr), types.BoxRef(midAddr))
+		mid := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(leafAddr))
+		root := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(midAddr), types.BoxRef(midAddr))
 		prog := program.New(nil, program.WithConstants(leaf, mid, root))
 		i := New(prog, WithHeap(4), WithHeapLimit(4))
 		defer i.Close()
@@ -6802,7 +6802,7 @@ func TestWithThreshold(t *testing.T) {
 		// test exercises: a live ref value carried across BR_IF in a trace
 		// the static frontend cannot compile.
 		b := types.NewFunctionBuilder(nil).
-			Params(types.TypeI32, types.TypeRef).
+			Params(types.TypeI32, types.TypeAny).
 			Returns(types.TypeF64)
 		neg := b.Label()
 		b.Emit(instr.New(instr.LOCAL_GET, 1)).
@@ -7056,7 +7056,7 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			Params(types.TypeRef).
+			Params(types.TypeAny).
 			Returns(types.TypeI32)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.ARRAY_LEN)).
@@ -7102,7 +7102,7 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			Params(types.TypeRef).
+			Params(types.TypeAny).
 			Returns(types.TypeI32)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
@@ -7151,7 +7151,7 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			Params(types.TypeRef).
+			Params(types.TypeAny).
 			Returns(types.TypeI32)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.STRING_LEN)).
@@ -8239,7 +8239,7 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 			name: "Heap",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 8), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			}, program.WithTypes(types.NewArrayType(types.TypeRef))),
+			}, program.WithTypes(types.NewArrayType(types.TypeAny))),
 			opts: []func(*option){WithThreshold(-1)},
 		},
 		{
@@ -8472,21 +8472,21 @@ func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
 
 // structSumTree builds a small binary-tree kernel shaped like
 // benchmarks/memory_test.go's structTreeWalk, except sumFn's tree parameter
-// is declared as the concrete node struct type instead of types.TypeRef, so
+// is declared as the concrete node struct type instead of types.TypeAny, so
 // every struct.get on it is a LOCAL_GET whose declared type is a concrete
 // *types.StructType -- the shape interp/threaded.go's generated STRUCT_GET
 // local-container fusion specializes.
 func structSumTree(depth, repeats int32) *program.Program {
 	nodeType := types.NewStructType(
 		types.NewStructField(types.TypeI32, types.FieldWithName("value")),
-		types.NewStructField(types.TypeRef, types.FieldWithName("left")),
-		types.NewStructField(types.TypeRef, types.FieldWithName("right")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
 	)
 
 	// build locals: 0=d (param), 1=n
-	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 		Params(types.TypeI32).
-		Locals(types.TypeRef)
+		Locals(types.TypeAny)
 	buildDone := buildBuilder.Label()
 	buildFn := buildBuilder.
 		Emit(
@@ -8540,7 +8540,7 @@ func structSumTree(depth, repeats int32) *program.Program {
 	buildIdx := b.Const(buildFn)
 	sumIdx := b.Const(sumFn)
 	b.Type(nodeType)
-	b.Locals(types.TypeRef, types.TypeI32, types.TypeI32) // 0=tree, 1=counter, 2=checksum
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32) // 0=tree, 1=counter, 2=checksum
 	loop := b.Label()
 	done := b.Label()
 	b.Emit(instr.I32_CONST, uint64(uint32(depth))).

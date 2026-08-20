@@ -242,7 +242,7 @@ func recursiveFib(n int32) *program.Program {
 
 func indirectRecursiveFib(n int32) *program.Program {
 	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeI32, types.TypeRef)
+		Params(types.TypeI32, types.TypeAny)
 	base := b.Label()
 	fn := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
 		BrIf(base).
@@ -291,7 +291,7 @@ func closureCounter(count int) *program.Program {
 			code = append(code, instr.New(instr.DROP))
 		}
 	}
-	return program.New(code, program.WithConstants(fn), program.WithLocals(types.TypeRef))
+	return program.New(code, program.WithConstants(fn), program.WithLocals(types.TypeAny))
 }
 
 // nqueens builds the eight-queens backtracking-count kernel. solve is
@@ -303,7 +303,7 @@ func nqueens(n int32) *program.Program {
 
 	// solve params: 0=row,1=n,2=cols,3=diag1,4=diag2; locals: 5=count,6=col,7=d1,8=d2
 	fb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeI32, types.TypeI32, types.TypeRef, types.TypeRef, types.TypeRef).
+		Params(types.TypeI32, types.TypeI32, types.TypeAny, types.TypeAny, types.TypeAny).
 		Locals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
 	base := fb.Label()
 	colLoop := fb.Label()
@@ -357,7 +357,7 @@ func nqueens(n int32) *program.Program {
 	solveIdx := b.Const(solveFn)
 
 	// main locals: 0=cols,1=diag1,2=diag2
-	b.Locals(types.TypeRef, types.TypeRef, types.TypeRef)
+	b.Locals(types.TypeAny, types.TypeAny, types.TypeAny)
 	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
 	b.Emit(instr.I32_CONST, uint64(uint32(2*n-1))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 1)
 	b.Emit(instr.I32_CONST, uint64(uint32(2*n-1))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 2)
@@ -392,8 +392,8 @@ func fannkuch(n int32) *program.Program {
 	// perm is not read again after the copy, so the copy consuming its one
 	// retained LOCAL_GET instance via ARRAY_SLICE needs no DUP.
 	cfBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeRef).
-		Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
+		Params(types.TypeAny).
+		Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
 	outer := cfBuilder.Label()
 	outerDone := cfBuilder.Label()
 	inner := cfBuilder.Label()
@@ -442,7 +442,7 @@ func fannkuch(n int32) *program.Program {
 	// permute params: 0=a,1=k,2=permcount,3=checksum,4=maxflips
 	// locals: 5=flips,6=i,7=tmp; returns (permcount,checksum,maxflips)
 	pBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32, types.TypeI32, types.TypeI32}}).
-		Params(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32).
+		Params(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32).
 		Locals(types.TypeI32, types.TypeI32, types.TypeI32)
 	base := pBuilder.Label()
 	loop := pBuilder.Label()
@@ -517,7 +517,7 @@ func fannkuch(n int32) *program.Program {
 	b.Const(permuteFn)
 
 	// main locals: 0=a,1=i,2=maxflips,3=checksum
-	b.Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32)
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32)
 	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
 	fillLoop := b.Label()
 	fillDone := b.Label()

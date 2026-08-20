@@ -49,5 +49,5 @@ func TestIsNull(t *testing.T) {
 
 func TestKinds(t *testing.T) {
 	require.Nil(t, types.Kinds(nil))
-	require.Equal(t, []types.Kind{types.KindI32, types.KindRef, types.KindF64}, types.Kinds([]types.Type{types.TypeI32, types.TypeRef, types.TypeF64}))
+	require.Equal(t, []types.Kind{types.KindI32, types.KindRef, types.KindF64}, types.Kinds([]types.Type{types.TypeI32, types.TypeAny, types.TypeF64}))
 }

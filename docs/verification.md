@@ -189,8 +189,8 @@ Some effects cannot always be checked statically.
 
 Examples:
 
-- `CALL` through a dynamic `ref`
-- `RETURN_CALL` through a dynamic `ref`
+- `CALL` through a dynamic `any`
+- `RETURN_CALL` through a dynamic `any`
 - stack-counted `MAP_NEW`
 - `CLOSURE_NEW`
 - future dynamic operations

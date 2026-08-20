@@ -26,7 +26,12 @@ type i32Type struct{}
 type i64Type struct{}
 type f32Type struct{}
 type f64Type struct{}
-type refType struct{}
+
+// anyType is the top of the type lattice: Cast accepts every type, so an any
+// slot holds any value. Its Kind is KindRef because that is the representation,
+// not the type — TypeString, arrays, structs, maps, functions, and iterators
+// report KindRef too, and none of them is any.
+type anyType struct{}
 
 var (
 	Null  = Ref(0)
@@ -41,7 +46,7 @@ var (
 	TypeI64 = i64Type{}
 	TypeF32 = f32Type{}
 	TypeF64 = f64Type{}
-	TypeRef = refType{}
+	TypeAny = anyType{}
 )
 
 var _ Value = I1(false)
@@ -58,7 +63,7 @@ var _ Type = i32Type{}
 var _ Type = i64Type{}
 var _ Type = f32Type{}
 var _ Type = f64Type{}
-var _ Type = refType{}
+var _ Type = anyType{}
 
 func Bool(b bool) I32 {
 	if b {
@@ -147,7 +152,7 @@ func (r Ref) Kind() Kind {
 }
 
 func (r Ref) Type() Type {
-	return TypeRef
+	return TypeAny
 }
 
 func (r Ref) String() string {
@@ -250,18 +255,18 @@ func (f64Type) Equals(other Type) bool {
 	return other == TypeF64
 }
 
-func (refType) Kind() Kind {
+func (anyType) Kind() Kind {
 	return KindRef
 }
 
-func (refType) String() string {
-	return "ref"
+func (anyType) String() string {
+	return "any"
 }
 
-func (refType) Cast(_ Type) bool {
+func (anyType) Cast(_ Type) bool {
 	return true
 }
 
-func (refType) Equals(other Type) bool {
-	return other == TypeRef
+func (anyType) Equals(other Type) bool {
+	return other == TypeAny
 }

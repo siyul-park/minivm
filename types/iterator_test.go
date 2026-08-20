@@ -26,7 +26,7 @@ func TestIteratorType_Cast(t *testing.T) {
 	require.True(t, typ.Cast(typ))
 	require.True(t, typ.Cast(types.NewIteratorType(types.TypeI32)))
 	require.False(t, typ.Cast(types.NewIteratorType(types.TypeI64)))
-	require.False(t, typ.Cast(types.TypeRef))
+	require.False(t, typ.Cast(types.TypeAny))
 }
 
 func TestIteratorType_Equals(t *testing.T) {
@@ -35,5 +35,5 @@ func TestIteratorType_Equals(t *testing.T) {
 	require.True(t, typ.Equals(typ))
 	require.True(t, typ.Equals(types.NewIteratorType(types.TypeI32)))
 	require.False(t, typ.Equals(types.NewIteratorType(types.TypeI64)))
-	require.False(t, typ.Equals(types.TypeRef))
+	require.False(t, typ.Equals(types.TypeAny))
 }

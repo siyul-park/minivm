@@ -138,12 +138,12 @@ func TestRef_Kind(t *testing.T) {
 
 func TestRef_Type(t *testing.T) {
 	typ := types.Ref(0).Type()
-	require.Equal(t, types.TypeRef, typ)
+	require.Equal(t, types.TypeAny, typ)
 	require.Equal(t, types.KindRef, typ.Kind())
-	require.Equal(t, "ref", typ.String())
+	require.Equal(t, "any", typ.String())
 	require.True(t, typ.Cast(types.TypeI32))
-	require.True(t, typ.Cast(types.TypeRef))
-	require.True(t, typ.Equals(types.TypeRef))
+	require.True(t, typ.Cast(types.TypeAny))
+	require.True(t, typ.Equals(types.TypeAny))
 	require.False(t, typ.Equals(types.TypeI32))
 }
 

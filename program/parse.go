@@ -377,10 +377,10 @@ func parseLiteral(s string) (types.Value, error) {
 			return nil, fmt.Errorf("invalid i8 literal %q", valueStr)
 		}
 		return types.I8(v), nil
-	case "ref":
+	case "any":
 		v, err := strconv.ParseInt(valueStr, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid ref literal %q", valueStr)
+			return nil, fmt.Errorf("invalid any literal %q", valueStr)
 		}
 		return types.Ref(v), nil
 	default:

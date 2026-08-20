@@ -295,7 +295,7 @@ Branch offsets are relative to the end of the branch instruction. `RETURN_CALL` 
 
 ### References
 
-A `ref` slot is the VM dynamic value type. It can hold an inline primitive or a heap reference. Use `REF_TEST` and `REF_CAST` to recover dynamic runtime types.
+An `any` slot is the VM dynamic value type. It can hold an inline primitive or a heap reference. Use `REF_TEST` and `REF_CAST` to recover dynamic runtime types.
 `REF_SET` mutates scalar cells created by `REF_NEW`; non-scalar targets trap.
 Coroutine tail calls preserve the current coroutine. On completion, `CORO_VALUE` exposes the last declared return; earlier returns are discarded.
 

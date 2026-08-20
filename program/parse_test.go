@@ -65,7 +65,7 @@ func TestParse(t *testing.T) {
 		p0 := program.New(
 			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
 			program.WithLocals(types.TypeI32),
-			program.WithGlobals(types.TypeRef),
+			program.WithGlobals(types.TypeAny),
 			program.WithConstants(
 				types.NewFunctionBuilder(&types.FunctionType{
 					Params:  []types.Type{types.TypeI32},
@@ -92,7 +92,7 @@ func TestParse(t *testing.T) {
 		p0 := program.New(
 			[]instr.Instruction{instr.New(instr.NOP)},
 			program.WithLocals(types.TypeI32),
-			program.WithGlobals(types.TypeRef),
+			program.WithGlobals(types.TypeAny),
 			program.WithConstants(types.I32(42)),
 			program.WithTypes(types.TypeI64),
 			program.WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 10, Depth: 0}),

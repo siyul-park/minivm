@@ -320,7 +320,7 @@ func TestBoxed_Type(t *testing.T) {
 		},
 		{
 			val: types.BoxRef(0),
-			typ: types.TypeRef,
+			typ: types.TypeAny,
 		},
 		{
 			val: types.Box(0, types.Kind(255)),

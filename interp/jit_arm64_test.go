@@ -446,7 +446,7 @@ func TestCompiler_Compile(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.ARRAY_LEN),
 			}, program.WithConstants(types.TypedArray[int32]{1}, types.TypedArray[float64]{2}),
-				program.WithGlobals(types.TypeRef))
+				program.WithGlobals(types.TypeAny))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			{
@@ -485,7 +485,7 @@ func TestCompiler_Compile(t *testing.T) {
 		t.Run("guard bounds", func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeRef, types.TypeI32))
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			{
@@ -657,7 +657,7 @@ func TestCompiler_Compile(t *testing.T) {
 		t.Run("array get value guard", func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeRef, types.TypeI32))
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			value := i.constants[0]
@@ -690,7 +690,7 @@ func TestCompiler_Compile(t *testing.T) {
 			value := types.NewStruct(typ, types.BoxI32(1), types.BoxF64(2))
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.STRUCT_GET),
-			}, program.WithConstants(value), program.WithGlobals(types.TypeRef, types.TypeI32))
+			}, program.WithConstants(value), program.WithGlobals(types.TypeAny, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			{
@@ -1151,7 +1151,7 @@ func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
 
 	// A(n, selfA, selfB): if n <= 0 return 0; return 1 + selfB(n-1, selfA, selfB)
 	aBuilder := types.NewFunctionBuilder(nil).
-		Params(types.TypeI32, types.TypeRef, types.TypeRef).
+		Params(types.TypeI32, types.TypeAny, types.TypeAny).
 		Returns(types.TypeI32)
 	baseA := aBuilder.Label()
 	aFn := aBuilder.
@@ -1171,7 +1171,7 @@ func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
 	// calls back into A - the self call that reaches selfCall with B's frame
 	// live. Local 5 stays live across that call so the frame cannot be elided.
 	bBuilder := types.NewFunctionBuilder(nil).
-		Params(types.TypeI32, types.TypeRef, types.TypeRef).
+		Params(types.TypeI32, types.TypeAny, types.TypeAny).
 		Locals(types.TypeI32, types.TypeI32, types.TypeI32).
 		Returns(types.TypeI32)
 	baseB := bBuilder.Label()
@@ -1288,7 +1288,7 @@ func TestARM64_CalleeLocals(t *testing.T) {
 	t.Run("self-recursion through selfCall", func(t *testing.T) {
 		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 			Params(types.TypeI32).
-			Locals(types.TypeRef)
+			Locals(types.TypeAny)
 		base := b.Label()
 		body := append(append([]instr.Instruction{}, probe...),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
@@ -1320,7 +1320,7 @@ func TestARM64_CalleeLocals(t *testing.T) {
 		build := func(other uint64) *types.Function {
 			b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 				Params(types.TypeI32).
-				Locals(types.TypeRef)
+				Locals(types.TypeAny)
 			base := b.Label()
 			body := append(append([]instr.Instruction{}, probe...),
 				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
@@ -1358,7 +1358,7 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 	}
 
 	b := types.NewFunctionBuilder(nil).
-		Params(types.TypeI32, types.TypeRef).
+		Params(types.TypeI32, types.TypeAny).
 		Returns(types.TypeI32)
 	base := b.Label()
 	fib := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
@@ -1435,7 +1435,7 @@ func TestARM64_SelfCallFrameLocals(t *testing.T) {
 
 	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 		Params(types.TypeI32).
-		Locals(types.TypeRef)
+		Locals(types.TypeAny)
 	base := b.Label()
 	fn := b.
 		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
@@ -1621,9 +1621,9 @@ func TestARM64_RefReturn(t *testing.T) {
 		// build(v): n = STRUCT_NEW_DEFAULT; n.val = v; return n. Local 1 is the
 		// only holder of n at RETURN, so its refcount equals the frame's pending
 		// count and guardFrame's rc <= pending check is exactly straddled.
-		buildFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+		buildFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 			Params(types.TypeI32).
-			Locals(types.TypeRef).
+			Locals(types.TypeAny).
 			Emit(
 				instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
 				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
@@ -1660,7 +1660,7 @@ func TestARM64_RefReturn(t *testing.T) {
 	t.Run("self-recursive ref return through selfCall", func(t *testing.T) {
 		nodeType := types.NewStructType(
 			types.NewStructField(types.TypeI32, types.FieldWithName("val")),
-			types.NewStructField(types.TypeRef, types.FieldWithName("next")),
+			types.NewStructField(types.TypeAny, types.FieldWithName("next")),
 		)
 		// chain(d): n = STRUCT_NEW_DEFAULT; n.val = d; if d > 0, n.next =
 		// chain(d-1); return n. Every level's RETURN hands back a node whose
@@ -1668,9 +1668,9 @@ func TestARM64_RefReturn(t *testing.T) {
 		// call inside the body (CONST_GET 0; CALL, where 0 is this function's
 		// own constant index) must lower through selfCall - which rejected any
 		// ref-returning target before checkReturns admitted KindRef.
-		chainBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+		chainBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 			Params(types.TypeI32).
-			Locals(types.TypeRef)
+			Locals(types.TypeAny)
 		done := chainBuilder.Label()
 		chainFn := chainBuilder.
 			Emit(
@@ -2210,7 +2210,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		// retainDeferred that copy's retain before the threaded resume (ARRAY_LEN) reads
 		// and then releases it. Without retainDeferred the copy is flushed unretained and
 		// the interpreter frees the array one reference early.
-		store := types.NewFunctionBuilder(nil).Params(types.NewArrayType(types.TypeRef), types.TypeI32).Returns(types.TypeI32)
+		store := types.NewFunctionBuilder(nil).Params(types.NewArrayType(types.TypeAny), types.TypeI32).Returns(types.TypeI32)
 		store.Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.REF_NULL), instr.New(instr.ARRAY_SET),
@@ -2221,9 +2221,9 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.NoError(t, err)
 
 		b := program.NewBuilder()
-		refArrTyp := b.Type(types.NewArrayType(types.TypeRef))
+		refArrTyp := b.Type(types.NewArrayType(types.TypeAny))
 		b.Const(fn)
-		b.Locals(types.NewArrayType(types.TypeRef), types.TypeI32, types.TypeI32)
+		b.Locals(types.NewArrayType(types.TypeAny), types.TypeI32, types.TypeI32)
 		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(refArrTyp)).Emit(instr.LOCAL_SET, 0)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
@@ -2243,7 +2243,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 	})
 
 	t.Run("ref array store owns a deferred element before transfer", func(t *testing.T) {
-		refArray := types.NewArrayType(types.TypeRef)
+		refArray := types.NewArrayType(types.TypeAny)
 		store := types.NewFunctionBuilder(nil).
 			Params(refArray, types.TypeI32Array).
 			Returns(types.TypeI32)
@@ -2337,7 +2337,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		// LOCAL_GET of arr defers, and the tail call commits its frame; the tail
 		// dispatch must own every deferred ref before the committing flush (which
 		// now rejects any deferred it still sees).
-		fill := types.NewFunctionBuilder(nil).Params(types.TypeI32Array, types.TypeI32, types.TypeRef).Returns(types.TypeI32)
+		fill := types.NewFunctionBuilder(nil).Params(types.TypeI32Array, types.TypeI32, types.TypeAny).Returns(types.TypeI32)
 		base := fill.Label()
 		fill.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)).
 			BrIf(base).
@@ -2937,7 +2937,7 @@ func TestARM64_StructSetLoop(t *testing.T) {
 		b := program.NewBuilder()
 		narrowTyp := b.Type(narrow)
 		wideTyp := b.Type(wide)
-		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32)
 		outer := b.Label()
 		odd := b.Label()
 		enter := b.Label()
@@ -3223,7 +3223,7 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 		const size = int32(24)
 		b := program.NewBuilder()
 		mapTyp := b.Type(types.NewMapType(types.TypeI32, types.TypeI32))
-		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
 		b.Emit(instr.I32_CONST, 4).Emit(instr.MAP_NEW_DEFAULT, uint64(mapTyp)).Emit(instr.LOCAL_SET, 0)
@@ -3273,10 +3273,10 @@ func TestARM64_RefContainerStore(t *testing.T) {
 		// step.
 		build := func(t *testing.T, depth int32) *program.Program {
 			t.Helper()
-			arrTyp := types.NewArrayType(types.TypeRef)
-			buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+			arrTyp := types.NewArrayType(types.TypeAny)
+			buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 				Params(types.TypeI32).
-				Locals(types.TypeRef)
+				Locals(types.TypeAny)
 			buildDone := buildBuilder.Label()
 			buildFn := buildBuilder.
 				Emit(
@@ -3305,7 +3305,7 @@ func TestARM64_RefContainerStore(t *testing.T) {
 				MustBuild()
 
 			checkBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				Params(types.TypeRef)
+				Params(types.TypeAny)
 			nullCase := checkBuilder.Label()
 			checkFn := checkBuilder.
 				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
@@ -3369,12 +3369,12 @@ func TestARM64_RefContainerStore(t *testing.T) {
 			t.Helper()
 			nodeType := types.NewStructType(
 				types.NewStructField(types.TypeI32, types.FieldWithName("value")),
-				types.NewStructField(types.TypeRef, types.FieldWithName("left")),
-				types.NewStructField(types.TypeRef, types.FieldWithName("right")),
+				types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+				types.NewStructField(types.TypeAny, types.FieldWithName("right")),
 			)
-			buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+			buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 				Params(types.TypeI32).
-				Locals(types.TypeRef)
+				Locals(types.TypeAny)
 			buildDone := buildBuilder.Label()
 			buildFn := buildBuilder.
 				Emit(
@@ -3405,7 +3405,7 @@ func TestARM64_RefContainerStore(t *testing.T) {
 				MustBuild()
 
 			checkBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				Params(types.TypeRef)
+				Params(types.TypeAny)
 			nullCase := checkBuilder.Label()
 			checkFn := checkBuilder.
 				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
@@ -3664,7 +3664,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 		arrTyp := b.Type(types.TypeI32Array)
 		structIdx := b.Type(structTyp)
 		fnIdx := b.Const(fn)
-		b.Locals(types.TypeI32Array, structTyp, types.TypeRef, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeI32Array, structTyp, types.TypeAny, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
@@ -3714,7 +3714,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 
 		b := program.NewBuilder()
 		typIdx := b.Type(structTyp)
-		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -3745,7 +3745,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 
 		b := program.NewBuilder()
 		typIdx := b.Type(mapTyp)
-		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -3786,7 +3786,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 		const size = int32(16)
 		b := program.NewBuilder()
 		charTyp := b.Type(types.TypeI32Array)
-		b.Locals(types.TypeI32Array, types.TypeRef, types.TypeI32Array, types.TypeRef, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeI32Array, types.TypeAny, types.TypeI32Array, types.TypeAny, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
@@ -3914,7 +3914,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 	t.Run("error family: error.new and error.code", func(t *testing.T) {
 		const size = int32(16)
 		b := program.NewBuilder()
-		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)

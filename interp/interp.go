@@ -2445,7 +2445,7 @@ func (i *Interpreter) globalKinds() []types.Kind {
 		if kind == types.KindRef && i.alive(val.Ref()) {
 			kind = i.heap[val.Ref()].Kind()
 		}
-		if i.globalTypes[idx] == types.TypeRef && kind != types.KindRef {
+		if i.globalTypes[idx] == types.TypeAny && kind != types.KindRef {
 			kind = instr.KindAny
 		}
 		kinds[idx] = kind
@@ -2459,7 +2459,7 @@ func (i *Interpreter) globalKinds() []types.Kind {
 func (i *Interpreter) globalDecls() []types.Kind {
 	kinds := make([]types.Kind, len(i.globalTypes))
 	for idx, typ := range i.globalTypes {
-		if typ == types.TypeRef {
+		if typ == types.TypeAny {
 			kinds[idx] = instr.KindAny
 		} else {
 			kinds[idx] = typ.Kind()

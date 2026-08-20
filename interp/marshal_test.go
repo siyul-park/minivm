@@ -346,7 +346,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeRef}, Returns: []types.Type{types.TypeI32},
+			Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
 
 		var call func(int32, context.Context) (int32, error)

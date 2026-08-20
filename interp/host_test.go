@@ -33,7 +33,7 @@ func (rejectingHostCodec) Unmarshal(*interp.Interpreter, types.Value, any) error
 }
 
 func (v *hostTrackedValue) Kind() types.Kind { return types.KindRef }
-func (v *hostTrackedValue) Type() types.Type { return types.TypeRef }
+func (v *hostTrackedValue) Type() types.Type { return types.TypeAny }
 func (v *hostTrackedValue) String() string   { return "tracked" }
 
 func (v *hostTrackedValue) Refs(dst []types.Ref) []types.Ref {
@@ -387,7 +387,7 @@ func TestNewHostObject(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.GLOBAL_GET, 1),
 			instr.New(instr.STRUCT_SET),
-		}, program.WithGlobals(types.TypeRef, types.TypeRef))
+		}, program.WithGlobals(types.TypeAny, types.TypeAny))
 		i := interp.New(prog)
 		defer i.Close()
 		child := &hostTrackedValue{}

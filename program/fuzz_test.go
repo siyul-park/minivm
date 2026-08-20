@@ -13,7 +13,7 @@ import (
 func FuzzParseProgram(f *testing.F) {
 	f.Add(program.New([]instr.Instruction{instr.New(instr.NOP)}).String())
 	f.Add(program.New(
-		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.DROP)}, program.WithConstants(types.String("value")), program.WithLocals(types.TypeI32), program.WithGlobals(types.TypeRef), program.WithTypes(types.NewArrayType(types.TypeI32)),
+		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.DROP)}, program.WithConstants(types.String("value")), program.WithLocals(types.TypeI32), program.WithGlobals(types.TypeAny), program.WithTypes(types.NewArrayType(types.TypeI32)),
 	).String())
 	f.Add("invalid")
 

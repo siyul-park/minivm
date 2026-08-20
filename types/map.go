@@ -123,7 +123,7 @@ func NewMapWithCapacity(typ *MapType, capacity int) *Map {
 }
 
 func NewMapIterator(ref Ref, val Value) *MapIterator {
-	it := &MapIterator{typ: NewIteratorType(TypeRef), ref: ref, done: true, current: BoxedNull}
+	it := &MapIterator{typ: NewIteratorType(TypeAny), ref: ref, done: true, current: BoxedNull}
 	switch m := val.(type) {
 	case *TypedMap[int8]:
 		it.typ = NewIteratorType(m.Typ.Key)

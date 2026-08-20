@@ -73,7 +73,7 @@ func ParseFunction(lines []string) (*Function, error) {
 }
 
 // Parse parses a type string produced by Type.String().
-// Supported: "i32", "i64", "f32", "f64", "ref", "[]<elem>",
+// Supported: "i32", "i64", "f32", "f64", "any", "[]<elem>",
 // "iterator[elem]", "map[key]elem", "func(params) returns", "struct {fields}".
 func Parse(s string) (Type, error) {
 	s = strings.TrimSpace(s)
@@ -90,8 +90,8 @@ func Parse(s string) (Type, error) {
 		return TypeF32, nil
 	case "f64":
 		return TypeF64, nil
-	case "ref":
-		return TypeRef, nil
+	case "any":
+		return TypeAny, nil
 	case "string":
 		return TypeString, nil
 	case "error":

@@ -555,7 +555,7 @@ func TestCarried(t *testing.T) {
 
 	t.Run("selects read-written inline scalars", func(t *testing.T) {
 		fn := &types.Function{Locals: []types.Type{
-			types.TypeI32, types.TypeF64, types.TypeI64, types.TypeRef, types.TypeI32,
+			types.TypeI32, types.TypeF64, types.TypeI64, types.TypeAny, types.TypeI32,
 		}}
 		blocks := loop([]step{
 			{op: instr.LOCAL_GET, args: [2]uint64{0}},
@@ -685,7 +685,7 @@ func TestHoistable(t *testing.T) {
 
 	t.Run("an unsupported candidate cannot displace a primitive candidate", func(t *testing.T) {
 		ref := itab((*types.Array)(nil))
-		fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeRef, types.TypeI32}}
+		fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeAny, types.TypeI32}}
 		steps := []step{
 			{op: instr.LOCAL_GET, args: [2]uint64{1}},
 			{op: instr.LOCAL_GET, args: [2]uint64{2}},

@@ -14,7 +14,7 @@ func TestFieldWithName(t *testing.T) {
 
 func TestNewStruct(t *testing.T) {
 	t.Run("initial fields", func(t *testing.T) {
-		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef))
+		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny))
 		s := types.NewStruct(typ, types.BoxI32(1), types.BoxRef(2))
 		require.Same(t, typ, s.Typ)
 		require.Equal(t, types.BoxI32(1), s.Field(0))
@@ -49,7 +49,7 @@ func TestStruct_Reset(t *testing.T) {
 	})
 
 	t.Run("reference", func(t *testing.T) {
-		typ := types.NewStructType(types.NewStructField(types.TypeRef))
+		typ := types.NewStructType(types.NewStructField(types.TypeAny))
 		s := types.NewStruct(typ, types.BoxRef(42))
 
 		s.Reset(typ)
@@ -72,7 +72,7 @@ func TestStruct_Field(t *testing.T) {
 }
 
 func TestStruct_SetField(t *testing.T) {
-	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64), types.NewStructField(types.TypeF32), types.NewStructField(types.TypeF64), types.NewStructField(types.TypeRef)))
+	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64), types.NewStructField(types.TypeF32), types.NewStructField(types.TypeF64), types.NewStructField(types.TypeAny)))
 
 	s.SetField(0, types.BoxI32(1))
 	s.SetField(1, types.BoxI64(2))
@@ -121,8 +121,8 @@ func TestStruct_String(t *testing.T) {
 	})
 
 	t.Run("fields", func(t *testing.T) {
-		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef)), types.BoxI32(1), types.BoxRef(2))
-		require.Equal(t, "struct {i32; ref}{1, 2}", s.String())
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)), types.BoxI32(1), types.BoxRef(2))
+		require.Equal(t, "struct {i32; any}{1, 2}", s.String())
 	})
 }
 
@@ -140,14 +140,14 @@ func TestStruct_Refs(t *testing.T) {
 	})
 
 	t.Run("reference fields", func(t *testing.T) {
-		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeRef), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef)), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeAny), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
 
 		require.Equal(t, []types.Ref{9, 1, 3}, s.Refs([]types.Ref{9}))
 	})
 }
 
 func TestNewStructType(t *testing.T) {
-	fields := []types.StructField{types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef)}
+	fields := []types.StructField{types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)}
 	typ := types.NewStructType(fields...)
 	require.Equal(t, fields, typ.Fields)
 }
@@ -175,7 +175,7 @@ func TestStructType_Kind(t *testing.T) {
 }
 
 func TestStructType_String(t *testing.T) {
-	require.Equal(t, "struct {i32; ref}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef)).String())
+	require.Equal(t, "struct {i32; any}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)).String())
 }
 
 func TestStructType_Cast(t *testing.T) {
@@ -188,10 +188,10 @@ func TestStructType_Cast(t *testing.T) {
 }
 
 func TestStructType_Equals(t *testing.T) {
-	typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef))
+	typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny))
 
 	require.True(t, typ.Equals(typ))
-	require.True(t, typ.Equals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeRef))))
+	require.True(t, typ.Equals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny))))
 	require.False(t, typ.Equals(types.NewStructType(types.NewStructField(types.TypeI32))))
 	require.False(t, typ.Equals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64))))
 	require.False(t, typ.Equals(types.TypeI32))
@@ -218,7 +218,7 @@ func BenchmarkStruct_Refs(b *testing.B) {
 	})
 
 	b.Run("child refs", func(b *testing.B) {
-		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeRef)), types.BoxRef(1))
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeAny)), types.BoxRef(1))
 		require.Equal(b, []types.Ref{1}, s.Refs(nil))
 
 		refs := make([]types.Ref, 0, 1)

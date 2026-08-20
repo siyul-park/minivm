@@ -16,7 +16,7 @@ type coroutineCycle struct {
 }
 
 func (*coroutineCycle) Kind() types.Kind { return types.KindRef }
-func (*coroutineCycle) Type() types.Type { return types.TypeRef }
+func (*coroutineCycle) Type() types.Type { return types.TypeAny }
 func (*coroutineCycle) String() string   { return "cycle" }
 
 func (c *coroutineCycle) Refs(dst []types.Ref) []types.Ref {
@@ -26,9 +26,9 @@ func (c *coroutineCycle) Refs(dst []types.Ref) []types.Ref {
 func TestCoroutineReferences(t *testing.T) {
 	t.Run("keeps closure captures live without duplicate collector edges", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeRef},
+			Params:  []types.Type{types.TypeAny},
 			Returns: []types.Type{types.TypeI32},
-		}).Captures(types.TypeRef).Emit(
+		}).Captures(types.TypeAny).Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.UPVAL_GET, 0),
 			instr.New(instr.I32_CONST, 30),
@@ -187,7 +187,7 @@ func TestCoroutineReferences(t *testing.T) {
 
 	t.Run("releases discarded completion values", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(nil).
-			Returns(types.TypeRef, types.TypeRef).
+			Returns(types.TypeAny, types.TypeAny).
 			Emit(
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.YIELD),

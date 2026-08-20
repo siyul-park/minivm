@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewArray(t *testing.T) {
-	typ := types.NewArrayType(types.TypeRef)
+	typ := types.NewArrayType(types.TypeAny)
 	elems := []types.Boxed{types.BoxRef(1), types.BoxRef(2)}
 	array := types.NewArray(typ, elems...)
 
@@ -68,17 +68,17 @@ func TestTypedArray_String(t *testing.T) {
 }
 
 func TestArray_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeRef)).Kind())
+	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeAny)).Kind())
 }
 
 func TestArray_Type(t *testing.T) {
-	typ := types.NewArrayType(types.TypeRef)
+	typ := types.NewArrayType(types.TypeAny)
 	require.Equal(t, typ, types.NewArray(typ).Type())
 }
 
 func TestArray_String(t *testing.T) {
-	a := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
-	require.Equal(t, "[]ref{1, 2, 3}", a.String())
+	a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+	require.Equal(t, "[]any{1, 2, 3}", a.String())
 }
 
 func TestArray_Refs(t *testing.T) {
@@ -95,7 +95,7 @@ func TestArray_Refs(t *testing.T) {
 	})
 
 	t.Run("reference elements", func(t *testing.T) {
-		a := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
+		a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
 
 		require.Equal(t, []types.Ref{9, 1, 3}, a.Refs([]types.Ref{9}))
 	})
@@ -142,7 +142,7 @@ func BenchmarkArray_Refs(b *testing.B) {
 	})
 
 	b.Run("child refs", func(b *testing.B) {
-		a := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(1), types.BoxRef(2))
+		a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(1), types.BoxRef(2))
 		require.Equal(b, []types.Ref{1, 2}, a.Refs(nil))
 
 		refs := make([]types.Ref, 0, 2)

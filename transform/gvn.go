@@ -164,7 +164,7 @@ func (p *GVNPass) kindType(k instr.Kind) types.Type {
 	case instr.KindF64:
 		return types.TypeF64
 	case instr.KindRef:
-		return types.TypeRef
+		return types.TypeAny
 	default:
 		return nil
 	}

@@ -469,10 +469,10 @@ def run():
 
 func allocationGraph(depth int32) *program.Program {
 	b := program.NewBuilder()
-	array := b.Type(types.NewArrayType(types.TypeRef))
+	array := b.Type(types.NewArrayType(types.TypeAny))
 	loop := b.Label()
 	done := b.Label()
-	b.Locals(types.TypeRef, types.TypeI32)
+	b.Locals(types.TypeAny, types.TypeI32)
 	b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(array)).Emit(instr.LOCAL_SET, 0)
 	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 1)
 	b.Bind(loop)
@@ -490,12 +490,12 @@ func allocationGraph(depth int32) *program.Program {
 }
 
 func permutationFlips(size, depth int32) *program.Program {
-	arrayType := types.NewArrayType(types.TypeRef)
+	arrayType := types.NewArrayType(types.TypeAny)
 
 	// locals: 0=depth (param), 1=arr, 2=i, 3=lo, 4=hi, 5=t
 	fb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 		Params(types.TypeI32).
-		Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
+		Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
 	base := fb.Label()
 	fillLoop := fb.Label()
 	fillDone := fb.Label()
@@ -564,14 +564,14 @@ func permutationFlips(size, depth int32) *program.Program {
 func structTreeWalk(depth int32) *program.Program {
 	nodeType := types.NewStructType(
 		types.NewStructField(types.TypeI64, types.FieldWithName("value")),
-		types.NewStructField(types.TypeRef, types.FieldWithName("left")),
-		types.NewStructField(types.TypeRef, types.FieldWithName("right")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
 	)
 
 	// build locals: 0=d (param), 1=n
-	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 		Params(types.TypeI32).
-		Locals(types.TypeRef)
+		Locals(types.TypeAny)
 	buildDone := buildBuilder.Label()
 	buildFn := buildBuilder.
 		Emit(
@@ -604,7 +604,7 @@ func structTreeWalk(depth int32) *program.Program {
 
 	// check locals: 0=node (param)
 	checkBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeRef)
+		Params(types.TypeAny)
 	nullCase := checkBuilder.Label()
 	checkFn := checkBuilder.
 		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
@@ -645,15 +645,15 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 	b := program.NewBuilder()
 	nodeType := b.Type(types.NewStructType(
 		types.NewStructField(types.TypeI32, types.FieldWithName("item")),
-		types.NewStructField(types.TypeRef, types.FieldWithName("left")),
-		types.NewStructField(types.TypeRef, types.FieldWithName("right")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
 	))
 
 	bottomUpTreeIdx := 0
 	// bottom_up_tree params: 0=item,1=depth; locals: 2=n
-	buBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+	buBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 		Params(types.TypeI32, types.TypeI32).
-		Locals(types.TypeRef)
+		Locals(types.TypeAny)
 	buDone := buBuilder.Label()
 	bottomUpTreeFn := buBuilder.
 		Emit(
@@ -686,7 +686,7 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 	itemCheckIdx := bottomUpTreeIdx + 1
 	// item_check params: 0=t
 	icBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeRef)
+		Params(types.TypeAny)
 	nullCase := icBuilder.Label()
 	leafCase := icBuilder.Label()
 	itemCheckFn := icBuilder.
@@ -720,8 +720,8 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 	// main locals: 0=stretchTree,1=checksum,2=longLivedTree,3=depth,
 	// 4=iterations,5=shift,6=acc,7=i,8=t1,9=t2
 	b.Locals(
-		types.TypeRef, types.TypeI32, types.TypeRef, types.TypeI32, types.TypeI32,
-		types.TypeI32, types.TypeI32, types.TypeI32, types.TypeRef, types.TypeRef,
+		types.TypeAny, types.TypeI32, types.TypeAny, types.TypeI32, types.TypeI32,
+		types.TypeI32, types.TypeI32, types.TypeI32, types.TypeAny, types.TypeAny,
 	)
 
 	// stretch_tree = bottom_up_tree(0, max_depth+1); checksum = item_check(stretch_tree)
@@ -812,9 +812,9 @@ func sortStress(n, rounds int32) *program.Program {
 	arrayType := b.Type(types.TypeI32Array)
 
 	// make_list params: 0=n,1=seed; locals: 2=xs,3=s(i64),4=i
-	mlBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+	mlBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 		Params(types.TypeI32, types.TypeI32).
-		Locals(types.TypeRef, types.TypeI64, types.TypeI32)
+		Locals(types.TypeAny, types.TypeI64, types.TypeI32)
 	mlLoop := mlBuilder.Label()
 	mlDone := mlBuilder.Label()
 	makeListFn := mlBuilder.
@@ -846,7 +846,7 @@ func sortStress(n, rounds int32) *program.Program {
 
 	// insertion_sort params: 0=arr,1=n; locals: 2=i,3=key,4=j
 	isBuilder := types.NewFunctionBuilder(&types.FunctionType{}).
-		Params(types.TypeRef, types.TypeI32).
+		Params(types.TypeAny, types.TypeI32).
 		Locals(types.TypeI32, types.TypeI32, types.TypeI32)
 	outer := isBuilder.Label()
 	outerDone := isBuilder.Label()
@@ -893,7 +893,7 @@ func sortStress(n, rounds int32) *program.Program {
 	insertionSortIdx := b.Const(insertionSortFn)
 
 	// main locals: 0=xs,1=checksum,2=r,3=i
-	b.Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32)
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32)
 	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 
@@ -949,9 +949,9 @@ func stringBuild(n int32) *program.Program {
 	charType := b.Type(types.TypeI32Array)
 
 	// digits params: 0=n; locals: 1=count,2=v,3=arr,4=idx,5=d
-	dBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeRef}}).
+	dBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
 		Params(types.TypeI32).
-		Locals(types.TypeI32, types.TypeI32, types.TypeRef, types.TypeI32, types.TypeI32)
+		Locals(types.TypeI32, types.TypeI32, types.TypeAny, types.TypeI32, types.TypeI32)
 	zeroCase := dBuilder.Label()
 	countLoop := dBuilder.Label()
 	countDone := dBuilder.Label()
@@ -1006,7 +1006,7 @@ func stringBuild(n int32) *program.Program {
 	spaceIdx := b.Const(types.String(" "))
 
 	// main locals: 0=big,1=tokenChecksum,2=i,3=tok,4=codePoints,5=tokLen,6=j
-	b.Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeRef, types.TypeRef, types.TypeI32, types.TypeI32)
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeAny, types.TypeAny, types.TypeI32, types.TypeI32)
 	b.ConstGet(types.String("")).Emit(instr.LOCAL_SET, 0)
 	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
