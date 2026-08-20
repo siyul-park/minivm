@@ -15,7 +15,7 @@ For reference ownership and heap lifecycle, see `docs/memory-model.md`.
 | boxed layout and helpers | `types/boxed.go` |
 | kind definitions | `instr/kind.go` |
 | runtime type descriptors | `types/type.go` |
-| marshal/unmarshal conversion | `interp/marshal.go` |
+| marshal/unmarshal conversion | `interp/codec.go`, `interp/encode.go`, `interp/decode.go` |
 | JIT value passing | `interp/jit_arm64.go` |
 
 ## Summary
@@ -211,7 +211,7 @@ Rules:
 - avoid allocation until the first child ref is found
 - keep the append-only contract
 
-Arrays, structs, maps, closures, host objects, and iterators that hold refs must report them.
+Arrays, structs, maps, closures, and iterators that hold refs must report them.
 
 ## Strings, Arrays, Maps, and Iterators
 

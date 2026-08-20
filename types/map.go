@@ -20,9 +20,13 @@ type Map struct {
 	entries map[MapKey]MapEntry
 }
 
+// MapKey indexes one entry of a generic Map. A scalar key is held in Bits, a
+// string key in Text under KindText so equal strings index one entry however
+// each was published, and any other reference key in Bits as its heap address.
 type MapKey struct {
 	Kind Kind
 	Bits uint64
+	Text string
 }
 
 type MapEntry struct {
@@ -53,6 +57,11 @@ type MapIterator struct {
 	kind    mapIteratorKind
 	done    bool
 }
+
+// KindText marks a MapKey indexed by string content rather than by heap
+// reference. It discriminates map keys only and is never an operand kind, so
+// an empty string key stays distinct from a null reference key.
+const KindText Kind = 0xFE
 
 type mapIteratorKind byte
 
@@ -326,7 +335,7 @@ func (it *MapIterator) Next() bool {
 	case mapIteratorGeneric:
 		key := it.iter.Key().Interface().(MapKey)
 		entry := it.iter.Value().Interface().(MapEntry)
-		it.current = key.value(entry)
+		it.current = key.Value(entry)
 	default:
 		it.current = BoxedNull
 		it.done = true
@@ -366,6 +375,8 @@ func (k MapKey) String() string {
 		return F64(math.Float64frombits(k.Bits)).String()
 	case KindRef:
 		return BoxRef(int(k.Bits)).String()
+	case KindText:
+		return String(k.Text).String()
 	default:
 		return "<invalid>"
 	}
@@ -392,7 +403,9 @@ func (t *MapType) Equals(other Type) bool {
 	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
 }
 
-func (k MapKey) value(entry MapEntry) Value {
+// Value reports the key this entry is indexed by, from the entry's own key
+// when it holds one and from the index otherwise.
+func (k MapKey) Value(entry MapEntry) Value {
 	if entry.Key != 0 {
 		return entry.Key
 	}
@@ -407,6 +420,8 @@ func (k MapKey) value(entry MapEntry) Value {
 		return F64(math.Float64frombits(k.Bits))
 	case KindRef:
 		return Ref(int32(k.Bits))
+	case KindText:
+		return String(k.Text)
 	default:
 		return BoxedNull
 	}

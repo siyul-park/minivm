@@ -311,7 +311,7 @@ Every string comparison, `string.eq` and `string.ne` included, compares content.
 
 ### Maps
 
-Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`. A map whose declared key type is `string` keys by content. Every other ref key uses heap ref identity. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
+Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`, with `i1` and `i8` keying through their `i32` representation. Strings key by content, whether the declared key type is `string` or the key merely happens to be one. Every other ref key uses heap ref identity. `(*Interpreter).mapKey` owns this rule for every map opcode and for `Marshal`, so a key written under one spelling is always found under an equal one. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
 
 ### Structured Errors
 
@@ -351,10 +351,10 @@ generator can name, threading picks one specialized handler per Kind from the
 container's *declared* type, while every execution still validates the ref
 kind, the heap value's concrete type, the field index against the *runtime*
 struct's field count, and the runtime field's actual Kind before boxing it.
-On a specialized-type miss (the heap value is the generic `*types.Array` or
-`*HostObject` representation instead), both fusions fall back to the same
-unfused arm the standalone `array.get`/`struct.get` handler runs, instead of
-trapping a case the unfused handler accepts.
+On a specialized-type miss (the heap value is the generic `*types.Array`
+representation instead), both fusions fall back to the same unfused arm the
+standalone `array.get`/`struct.get` handler runs, instead of trapping a case
+the unfused handler accepts.
 
 ## Maintenance Notes
 

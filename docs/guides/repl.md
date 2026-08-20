@@ -48,7 +48,7 @@ Enter one assembly instruction per line. The REPL executes the accumulated progr
 
 `.load` replaces state rather than merging it. Merging would require renumbering constant and type indexes embedded in instructions.
 
-`.save` refuses programs with host-only constants such as `*interp.HostFunction` or `*interp.HostObject`, because those values have no textual representation.
+`.save` refuses programs holding an `*interp.HostFunction` constant, because that value has no textual representation.
 
 ## Debugging
 

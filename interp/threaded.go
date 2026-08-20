@@ -4440,21 +4440,6 @@ var (
 					default:
 						panic(ErrTypeMismatch)
 					}
-				case *HostObject:
-					kind, ok := s.writeKind(idx)
-					if !ok {
-						panic(ErrSegmentationFault)
-					}
-					switch kind {
-					case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-						s.SetField(idx, val)
-					case types.KindI64:
-						s.SetRaw(idx, uint64(i.unboxI64(val)))
-					case types.KindRef:
-						s.SetRaw(idx, uint64(val))
-					default:
-						panic(ErrTypeMismatch)
-					}
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4530,66 +4515,14 @@ var (
 							i.releaseBox(old)
 						}
 					case *types.Map:
-						var k types.MapKey
-						entry := types.MapEntry{Value: value}
-						keyRef := 0
-						drop := false
-						switch key.Kind() {
-						case types.KindI32:
-							bits := uint64(uint32(key.I32()))
-							k = types.MapKey{
-								Bits: bits,
-								Kind: types.KindI32,
-							}
-							entry.Key = types.BoxI32(int32(bits))
-						case types.KindI64:
-							k = types.MapKey{
-								Bits: uint64(i.unboxI64(key)),
-								Kind: types.KindI64,
-							}
-						case types.KindF32:
-							bits := math.Float32bits(key.F32())
-							if bits == 1<<31 {
-								bits = 0
-							}
-							k = types.MapKey{
-								Bits: uint64(bits),
-								Kind: types.KindF32,
-							}
-							entry.Key = types.BoxF32(math.Float32frombits(bits))
-						case types.KindF64:
-							bits := math.Float64bits(key.F64())
-							if bits == 1<<63 {
-								bits = 0
-							}
-							k = types.MapKey{
-								Bits: bits,
-								Kind: types.KindF64,
-							}
-							entry.Key = types.BoxF64(math.Float64frombits(bits))
-						case types.KindRef:
-							keyRef = key.Ref()
-							if _, ok := i.heap[keyRef].(types.I64); ok {
-								k = types.MapKey{
-									Bits: uint64(i.unboxI64(key)),
-									Kind: types.KindI64,
-								}
-							} else {
-								k = types.MapKey{
-									Bits: uint64(keyRef),
-									Kind: types.KindRef,
-								}
-								entry.Key = key
-								drop = true
-							}
-						default:
-							panic(ErrTypeMismatch)
+						k, entryKey := i.mapKey(key)
+						entry := types.MapEntry{
+							Key:   entryKey,
+							Value: value,
 						}
 						old, ok := m.Set(k, entry)
 						if ok {
-							if drop {
-								i.release(keyRef)
-							}
+							i.releaseBox(old.Key)
 							i.releaseBox(old.Value)
 						}
 					default:
@@ -4734,59 +4667,9 @@ var (
 						result = m.Zero
 					}
 				case *types.Map:
-					var k types.MapKey
-					keyRef := 0
-					drop := false
-					switch key.Kind() {
-					case types.KindI32:
-						k = types.MapKey{
-							Bits: uint64(uint32(key.I32())),
-							Kind: types.KindI32,
-						}
-					case types.KindI64:
-						k = types.MapKey{
-							Bits: uint64(i.unboxI64(key)),
-							Kind: types.KindI64,
-						}
-					case types.KindF32:
-						bits := math.Float32bits(key.F32())
-						if bits == 1<<31 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: uint64(bits),
-							Kind: types.KindF32,
-						}
-					case types.KindF64:
-						bits := math.Float64bits(key.F64())
-						if bits == 1<<63 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: bits,
-							Kind: types.KindF64,
-						}
-					case types.KindRef:
-						keyRef = key.Ref()
-						if _, ok := i.heap[keyRef].(types.I64); ok {
-							k = types.MapKey{
-								Bits: uint64(i.unboxI64(key)),
-								Kind: types.KindI64,
-							}
-						} else {
-							k = types.MapKey{
-								Bits: uint64(keyRef),
-								Kind: types.KindRef,
-							}
-							drop = true
-						}
-					default:
-						panic(ErrTypeMismatch)
-					}
+					k, entryKey := i.mapKey(key)
 					entry, ok := m.Get(k)
-					if drop {
-						i.release(keyRef)
-					}
+					i.releaseBox(entryKey)
 					if ok {
 						result = entry.Value
 					} else {
@@ -4853,59 +4736,9 @@ var (
 						result = m.Zero
 					}
 				case *types.Map:
-					var k types.MapKey
-					keyRef := 0
-					drop := false
-					switch key.Kind() {
-					case types.KindI32:
-						k = types.MapKey{
-							Bits: uint64(uint32(key.I32())),
-							Kind: types.KindI32,
-						}
-					case types.KindI64:
-						k = types.MapKey{
-							Bits: uint64(i.unboxI64(key)),
-							Kind: types.KindI64,
-						}
-					case types.KindF32:
-						bits := math.Float32bits(key.F32())
-						if bits == 1<<31 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: uint64(bits),
-							Kind: types.KindF32,
-						}
-					case types.KindF64:
-						bits := math.Float64bits(key.F64())
-						if bits == 1<<63 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: bits,
-							Kind: types.KindF64,
-						}
-					case types.KindRef:
-						keyRef = key.Ref()
-						if _, ok := i.heap[keyRef].(types.I64); ok {
-							k = types.MapKey{
-								Bits: uint64(i.unboxI64(key)),
-								Kind: types.KindI64,
-							}
-						} else {
-							k = types.MapKey{
-								Bits: uint64(keyRef),
-								Kind: types.KindRef,
-							}
-							drop = true
-						}
-					default:
-						panic(ErrTypeMismatch)
-					}
+					k, entryKey := i.mapKey(key)
 					entry, ok := m.Get(k)
-					if drop {
-						i.release(keyRef)
-					}
+					i.releaseBox(entryKey)
 					found = ok
 					if ok {
 						result = entry.Value
@@ -4972,66 +4805,14 @@ var (
 						i.releaseBox(old)
 					}
 				case *types.Map:
-					var k types.MapKey
-					entry := types.MapEntry{Value: value}
-					keyRef := 0
-					drop := false
-					switch key.Kind() {
-					case types.KindI32:
-						bits := uint64(uint32(key.I32()))
-						k = types.MapKey{
-							Bits: bits,
-							Kind: types.KindI32,
-						}
-						entry.Key = types.BoxI32(int32(bits))
-					case types.KindI64:
-						k = types.MapKey{
-							Bits: uint64(i.unboxI64(key)),
-							Kind: types.KindI64,
-						}
-					case types.KindF32:
-						bits := math.Float32bits(key.F32())
-						if bits == 1<<31 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: uint64(bits),
-							Kind: types.KindF32,
-						}
-						entry.Key = types.BoxF32(math.Float32frombits(bits))
-					case types.KindF64:
-						bits := math.Float64bits(key.F64())
-						if bits == 1<<63 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: bits,
-							Kind: types.KindF64,
-						}
-						entry.Key = types.BoxF64(math.Float64frombits(bits))
-					case types.KindRef:
-						keyRef = key.Ref()
-						if _, ok := i.heap[keyRef].(types.I64); ok {
-							k = types.MapKey{
-								Bits: uint64(i.unboxI64(key)),
-								Kind: types.KindI64,
-							}
-						} else {
-							k = types.MapKey{
-								Bits: uint64(keyRef),
-								Kind: types.KindRef,
-							}
-							entry.Key = key
-							drop = true
-						}
-					default:
-						panic(ErrTypeMismatch)
+					k, entryKey := i.mapKey(key)
+					entry := types.MapEntry{
+						Key:   entryKey,
+						Value: value,
 					}
 					old, ok := m.Set(k, entry)
 					if ok {
-						if drop {
-							i.release(keyRef)
-						}
+						i.releaseBox(old.Key)
 						i.releaseBox(old.Value)
 					}
 				default:
@@ -5091,63 +4872,13 @@ var (
 						i.releaseBox(old)
 					}
 				case *types.Map:
-					var k types.MapKey
-					keyRef := 0
-					drop := false
-					switch key.Kind() {
-					case types.KindI32:
-						k = types.MapKey{
-							Bits: uint64(uint32(key.I32())),
-							Kind: types.KindI32,
-						}
-					case types.KindI64:
-						k = types.MapKey{
-							Bits: uint64(i.unboxI64(key)),
-							Kind: types.KindI64,
-						}
-					case types.KindF32:
-						bits := math.Float32bits(key.F32())
-						if bits == 1<<31 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: uint64(bits),
-							Kind: types.KindF32,
-						}
-					case types.KindF64:
-						bits := math.Float64bits(key.F64())
-						if bits == 1<<63 {
-							bits = 0
-						}
-						k = types.MapKey{
-							Bits: bits,
-							Kind: types.KindF64,
-						}
-					case types.KindRef:
-						keyRef = key.Ref()
-						if _, ok := i.heap[keyRef].(types.I64); ok {
-							k = types.MapKey{
-								Bits: uint64(i.unboxI64(key)),
-								Kind: types.KindI64,
-							}
-						} else {
-							k = types.MapKey{
-								Bits: uint64(keyRef),
-								Kind: types.KindRef,
-							}
-							drop = true
-						}
-					default:
-						panic(ErrTypeMismatch)
-					}
+					k, entryKey := i.mapKey(key)
 					old, ok := m.Delete(k)
 					if ok {
 						i.releaseBox(old.Key)
 						i.releaseBox(old.Value)
 					}
-					if drop {
-						i.release(keyRef)
-					}
+					i.releaseBox(entryKey)
 				default:
 					panic(ErrTypeMismatch)
 				}

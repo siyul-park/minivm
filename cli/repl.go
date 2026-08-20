@@ -311,9 +311,9 @@ func (r *REPL) clear() {
 }
 
 // save writes the current program to path in Program.String() format,
-// which program.Parse can read back. Host values (HostFunction,
-// HostObject) have no textual form, so a program containing them cannot
-// round-trip; reject the save before producing an unreadable file.
+// which program.Parse can read back. A *interp.HostFunction has no textual
+// form, so a program holding one cannot round-trip; reject the save before
+// producing an unreadable file.
 func (r *REPL) save(path string) error {
 	if path == "" {
 		return fmt.Errorf("usage: .save <file>")
@@ -324,9 +324,6 @@ func (r *REPL) save(path string) error {
 	for i, c := range r.constants {
 		if _, ok := c.(*interp.HostFunction); ok {
 			return fmt.Errorf("cannot save: constant %d is a host function (no textual form)", i)
-		}
-		if _, ok := c.(*interp.HostObject); ok {
-			return fmt.Errorf("cannot save: constant %d is a host object (no textual form)", i)
 		}
 	}
 

@@ -24,7 +24,6 @@ type Interpreter struct {
 	tracer      *tracer
 	hook        func(*Interpreter) error
 	codec       Codec
-	planner     *codec
 	speculative bool
 
 	compiler *compiler
@@ -103,13 +102,12 @@ type frame struct {
 }
 
 type option struct {
-	hook       func(*Interpreter) error
-	codec      Codec
-	converters map[reflect.Type]Converter
-	cache      *cache
-	tracer     *tracer
-	profiler   *prof.Profiler
-	threshold  int
+	hook      func(*Interpreter) error
+	codec     Codec
+	cache     *cache
+	tracer    *tracer
+	profiler  *prof.Profiler
+	threshold int
 
 	frame   int
 	stack   int
@@ -145,21 +143,12 @@ func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
 }
 
+// WithCodec installs the codec Marshal, Unmarshal, and every host conversion
+// run through. It defaults to NewRegistry(), so per-type registration is the
+// normal way to customize conversion and replacing the codec is the escape
+// hatch for a wholly different one.
 func WithCodec(c Codec) func(*option) {
 	return func(o *option) { o.codec = c }
-}
-
-// WithConverter registers VM conversion for an external Go type t that cannot
-// implement ValueMarshaler / ValueUnmarshaler. It layers onto the built-in
-// reflection codec and applies wherever t appears, including nested values. It
-// has no effect when WithCodec supplies a custom Codec.
-func WithConverter(t reflect.Type, c Converter) func(*option) {
-	return func(o *option) {
-		if o.converters == nil {
-			o.converters = make(map[reflect.Type]Converter)
-		}
-		o.converters[t] = c
-	}
 }
 
 // WithProfiler attaches a profiler that aggregates this interpreter's execution
@@ -244,10 +233,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tracer.bind(prog)
 	}
 	samples := prof.NewCollector()
-	planner := &codec{converters: opt.converters}
-	activeCodec := Codec(planner)
-	if opt.codec != nil {
-		activeCodec = opt.codec
+	activeCodec := opt.codec
+	if activeCodec == nil {
+		activeCodec = NewRegistry()
 	}
 
 	var fuel int64 = -1
@@ -272,7 +260,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tracer:      tracer,
 		hook:        opt.hook,
 		codec:       activeCodec,
-		planner:     planner,
 		cache:       opt.cache,
 		profiler:    opt.profiler,
 		samples:     samples,
@@ -2055,6 +2042,57 @@ func (i *Interpreter) zero(kind types.Kind) types.Boxed {
 	}
 }
 
+// negZeroF32 and negZeroF64 are the bit patterns of -0.0. A map key folds them
+// onto +0.0 so both spellings of zero index one entry.
+const (
+	negZeroF32 = uint32(1) << 31
+	negZeroF64 = uint64(1) << 63
+)
+
+// mapKey indexes one entry of a generic map. It is the single owner of the
+// rule every map opcode and the codec must agree on, because a key written
+// under one spelling and looked up under another is unreachable.
+//
+// A scalar keys by value, i1 and i8 through their i32 representation. A string
+// keys by content, so equal strings index one entry however each was
+// published, as strings compare by content everywhere else. Every other
+// reference keys by heap address.
+//
+// The second result is the key a new entry stores: zero when the MapKey alone
+// reconstructs it, and otherwise a reference the entry takes ownership of. A
+// caller that only looks up releases it instead.
+func (i *Interpreter) mapKey(key types.Boxed) (types.MapKey, types.Boxed) {
+	switch key.Kind() {
+	case types.KindI1, types.KindI8, types.KindI32:
+		bits := uint64(uint32(key.I32()))
+		return types.MapKey{Kind: types.KindI32, Bits: bits}, types.BoxI32(int32(bits))
+	case types.KindI64:
+		return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
+	case types.KindF32:
+		bits := math.Float32bits(key.F32())
+		if bits == negZeroF32 {
+			bits = 0
+		}
+		return types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}, types.BoxF32(math.Float32frombits(bits))
+	case types.KindF64:
+		bits := math.Float64bits(key.F64())
+		if bits == negZeroF64 {
+			bits = 0
+		}
+		return types.MapKey{Kind: types.KindF64, Bits: bits}, types.BoxF64(math.Float64frombits(bits))
+	case types.KindRef:
+		switch value := i.heap[key.Ref()].(type) {
+		case types.I64:
+			return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
+		case types.String:
+			return types.MapKey{Kind: types.KindText, Text: string(value)}, key
+		}
+		return types.MapKey{Kind: types.KindRef, Bits: uint64(key.Ref())}, key
+	default:
+		panic(ErrTypeMismatch)
+	}
+}
+
 func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
@@ -2217,65 +2255,39 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 	}
 }
 
-// structField reads the field at index at off the struct or host object
-// bound to heap address addr, covering *types.Struct and *HostObject alike.
-// It is the generic counterpart to the specialized reads struct.get fusion
-// emits for a declared *types.StructType slot: a fused handler falls back
-// to structField exactly when the runtime value turns out to be a
-// *HostObject instead, and the unfused STRUCT_GET handler calls it
-// unconditionally for either representation. A *types.Struct KindRef field
-// and a *HostObject KindRef field are both retained, except a *HostObject
-// field already reported as owned by read, which must not be retained
-// again. structField does not release addr itself, for the same reason
-// arrayGet does not.
+// structField reads the field at index at off the struct bound to heap address
+// addr. It is the generic counterpart to the specialized reads struct.get
+// fusion emits for a declared *types.StructType slot: the unfused STRUCT_GET
+// handler calls it unconditionally, and a fused handler falls back to it when
+// the runtime value does not match the slot it specialized for. A KindRef
+// field is retained. structField does not release addr itself, for the same
+// reason arrayGet does not.
 func (i *Interpreter) structField(addr, at int) types.Boxed {
-	switch value := i.heap[addr].(type) {
-	case *types.Struct:
-		if at < 0 || at >= len(value.Typ.Fields) {
-			panic(ErrSegmentationFault)
-		}
-		kind := value.Typ.Fields[at].Kind
-		data := value.Data[at]
-		switch kind {
-		case types.KindI1:
-			return types.BoxI1(data != 0)
-		case types.KindI8:
-			return types.BoxI8(int8(uint32(data)))
-		case types.KindI32:
-			return types.BoxI32(int32(uint32(data)))
-		case types.KindI64:
-			return i.boxI64(int64(data))
-		case types.KindF32:
-			return types.BoxF32(math.Float32frombits(uint32(data)))
-		case types.KindF64:
-			return types.BoxF64(math.Float64frombits(data))
-		case types.KindRef:
-			result := types.Boxed(data)
-			i.retainBox(result)
-			return result
-		default:
-			panic(ErrTypeMismatch)
-		}
-	case *HostObject:
-		kind, ok := value.kind(at)
-		if !ok {
-			panic(ErrSegmentationFault)
-		}
-		switch kind {
-		case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-			result, _, _ := value.read(at)
-			return result
-		case types.KindI64:
-			return i.boxI64(int64(value.Raw(at)))
-		case types.KindRef:
-			result, owned, _ := value.read(at)
-			if !owned {
-				i.retainBox(result)
-			}
-			return result
-		default:
-			panic(ErrTypeMismatch)
-		}
+	value, ok := i.heap[addr].(*types.Struct)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	if at < 0 || at >= len(value.Typ.Fields) {
+		panic(ErrSegmentationFault)
+	}
+	data := value.Data[at]
+	switch value.Typ.Fields[at].Kind {
+	case types.KindI1:
+		return types.BoxI1(data != 0)
+	case types.KindI8:
+		return types.BoxI8(int8(uint32(data)))
+	case types.KindI32:
+		return types.BoxI32(int32(uint32(data)))
+	case types.KindI64:
+		return i.boxI64(int64(data))
+	case types.KindF32:
+		return types.BoxF32(math.Float32frombits(uint32(data)))
+	case types.KindF64:
+		return types.BoxF64(math.Float64frombits(data))
+	case types.KindRef:
+		result := types.Boxed(data)
+		i.retainBox(result)
+		return result
 	default:
 		panic(ErrTypeMismatch)
 	}

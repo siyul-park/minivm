@@ -65,7 +65,6 @@ const (
 	CaptureReasonNestedTerminal
 	CaptureReasonStepTrap
 	CaptureReasonOpLimit
-	CaptureReasonHostObject
 )
 
 const (

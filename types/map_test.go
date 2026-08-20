@@ -461,6 +461,27 @@ func TestMapIterator_Refs(t *testing.T) {
 	require.Equal(t, []types.Ref{5, 7, 9}, it.Refs([]types.Ref{5}))
 }
 
+func TestMapKey_Value(t *testing.T) {
+	tests := []struct {
+		key   types.MapKey
+		entry types.MapEntry
+		want  types.Value
+	}{
+		{types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{}, types.I32(1)},
+		{types.MapKey{Kind: types.KindI64, Bits: 1}, types.MapEntry{}, types.I64(1)},
+		{types.MapKey{Kind: types.KindF32, Bits: uint64(math.Float32bits(1))}, types.MapEntry{}, types.F32(1)},
+		{types.MapKey{Kind: types.KindF64, Bits: math.Float64bits(1)}, types.MapEntry{}, types.F64(1)},
+		{types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{}, types.Ref(1)},
+		{types.MapKey{Kind: types.KindText, Text: "a"}, types.MapEntry{}, types.String("a")},
+		{types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(2)}, types.BoxI32(2)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key.String(), func(t *testing.T) {
+			require.Equal(t, tt.want, tt.key.Value(tt.entry))
+		})
+	}
+}
+
 func TestMapKey_String(t *testing.T) {
 	tests := []struct {
 		key types.MapKey
@@ -471,6 +492,7 @@ func TestMapKey_String(t *testing.T) {
 		{types.MapKey{Kind: types.KindF32, Bits: uint64(math.Float32bits(1))}, "1"},
 		{types.MapKey{Kind: types.KindF64, Bits: math.Float64bits(1)}, "1"},
 		{types.MapKey{Kind: types.KindRef, Bits: 1}, "1"},
+		{types.MapKey{Kind: types.KindText, Text: "a"}, "\"a\""},
 		{types.MapKey{Kind: types.Kind(255)}, "<invalid>"},
 	}
 	for _, tt := range tests {

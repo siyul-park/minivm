@@ -23,21 +23,6 @@ type upperCodec byte
 
 type contextKey byte
 
-type optionCustom int32
-
-func (v optionCustom) MarshalVM(*Interpreter) (types.Value, error) {
-	return types.I32(v), nil
-}
-
-func (v *optionCustom) UnmarshalVM(_ *Interpreter, value types.Value) error {
-	n, ok := value.(types.I32)
-	if !ok {
-		return ErrTypeMismatch
-	}
-	*v = optionCustom(n)
-	return nil
-}
-
 type trackedValue struct {
 	refs   []types.Ref
 	closed int
@@ -1721,6 +1706,25 @@ var runTests = []struct {
 			instr.New(instr.CONST_GET, 2), instr.New(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
 			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		name: "const.get i32.const map.new const.get const.get string.concat map.get keys a dynamic map by string content",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
+			instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny, types.TypeI32)),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		name: "i32.const i32.eqz i32.const map.new i32.const i32.eqz map.get keys a dynamic map by boolean value",
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ),
+			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ), instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny, types.TypeI32))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
@@ -3919,6 +3923,26 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 }
 
+func TestInterpreter_Marshal(t *testing.T) {
+	// Marshal forwards to the installed codec, so the conversion contract is
+	// owned by TestRegistry_Marshal and only the delegation is checked here.
+	i := New(program.New(nil), WithCodec(upperCodec(0)))
+	defer i.Close()
+
+	got, err := i.Marshal("go")
+	require.NoError(t, err)
+	require.Equal(t, types.String("GO"), got)
+}
+
+func TestInterpreter_Unmarshal(t *testing.T) {
+	i := New(program.New(nil), WithCodec(upperCodec(0)))
+	defer i.Close()
+
+	var dst string
+	require.NoError(t, i.Unmarshal(types.String("GO"), &dst))
+	require.Equal(t, "go", dst)
+}
+
 func TestInterpreter_Context(t *testing.T) {
 	var got context.Context
 	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
@@ -4797,54 +4821,6 @@ func TestWithCodec(t *testing.T) {
 	var dst string
 	require.NoError(t, i.Unmarshal(v, &dst))
 	require.Equal(t, "go", dst)
-}
-
-func TestWithConverter(t *testing.T) {
-	t.Run("external type", func(t *testing.T) {
-		conv := Converter{
-			VMType: types.TypeI64,
-			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
-				return types.I64(v.(time.Duration)), nil
-			},
-			Unmarshal: func(_ *Interpreter, v types.Value, dst any) error {
-				*(dst.(*time.Duration)) = time.Duration(v.(types.I64))
-				return nil
-			},
-		}
-		i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Duration(0)), conv))
-		defer i.Close()
-
-		v, err := i.Marshal(5 * time.Second)
-		require.NoError(t, err)
-		require.Equal(t, types.I64(5*time.Second), v)
-
-		var dst time.Duration
-		require.NoError(t, i.Unmarshal(v, &dst))
-		require.Equal(t, 5*time.Second, dst)
-	})
-
-	t.Run("value interfaces take priority", func(t *testing.T) {
-		conv := Converter{
-			VMType: types.TypeI64,
-			Marshal: func(*Interpreter, any) (types.Value, error) {
-				return types.I64(99), nil
-			},
-			Unmarshal: func(_ *Interpreter, _ types.Value, dst any) error {
-				*dst.(*optionCustom) = 99
-				return nil
-			},
-		}
-		i := New(program.New(nil), WithConverter(reflect.TypeOf(optionCustom(0)), conv))
-		defer i.Close()
-
-		v, err := i.Marshal(optionCustom(5))
-		require.NoError(t, err)
-		require.Equal(t, types.I32(5), v)
-
-		var dst optionCustom
-		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
-		require.Equal(t, optionCustom(7), dst)
-	})
 }
 
 func TestWithProfiler(t *testing.T) {
@@ -8696,4 +8672,177 @@ func arraySumUpvalue(size, repeats int32) *program.Program {
 		panic(err)
 	}
 	return prog
+}
+
+type structGetHostFields struct {
+	Count  int32
+	hidden int32
+}
+
+func (h *structGetHostFields) Bump(n int32) int32 {
+	h.Count += n
+	h.hidden++
+	return h.Count
+}
+
+// BenchmarkInterpreter_StructGetHost measures STRUCT_GET against the value the
+// reflection codec picks for a Go struct that carries a method and an
+// unexported field. Field 0 is a plain i32, so the loop isolates per-access
+// dispatch cost from any boxing or heap traffic. The marshal and reset work
+// outside the inner loop is amortized over repeats field reads per run, the
+// same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
+func BenchmarkInterpreter_StructGetHost(b *testing.B) {
+	const repeats = 10000
+
+	prog := structGetHostLoop(repeats)
+	vm := New(prog, WithThreshold(-1)) // threaded + fused, no JIT
+	b.Cleanup(func() { require.NoError(b, vm.Close()) })
+	ctx := context.Background()
+
+	run := func() types.Boxed {
+		host, err := vm.Marshal(&structGetHostFields{Count: 1})
+		require.NoError(b, err)
+		require.NoError(b, vm.Push(host))
+		require.NoError(b, vm.Run(ctx))
+		got, err := vm.PopBoxed()
+		require.NoError(b, err)
+		vm.Reset()
+		return got
+	}
+
+	want := run()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		require.Equal(b, want, run())
+	}
+}
+
+// structGetHostLoop reads field 0 of a host-backed struct repeats times,
+// accumulating the reads so nothing is optimized away.
+func structGetHostLoop(repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32) // 0=host, 1=counter, 2=sum
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+type marshalBenchData struct {
+	Count int32
+	Ratio float64
+	Name  string
+	Flag  bool
+}
+
+type marshalBenchMethods struct {
+	Count  int32
+	hidden int32
+}
+
+func (v *marshalBenchMethods) Bump(n int32) int32 {
+	v.Count += n
+	v.hidden++
+	return v.Count
+}
+
+// BenchmarkInterpreter_Marshal records the per-shape cost of the reflection
+// codec. Every iteration resets the interpreter so the heap stays at one
+// conversion's worth; that reset cost is identical across runs, so it does not
+// disturb a before/after comparison.
+func BenchmarkInterpreter_Marshal(b *testing.B) {
+	elems := make([]int32, 64)
+	for idx := range elems {
+		elems[idx] = int32(idx)
+	}
+	entries := make(map[string]int32, 16)
+	for idx := range 16 {
+		entries[string(rune('a'+idx))] = int32(idx)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+	}{
+		{name: "scalar", value: int32(7)},
+		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}},
+		{name: "slice", value: elems},
+		{name: "map", value: entries},
+		{name: "methods", value: &marshalBenchMethods{Count: 7}},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			i := New(program.New(nil))
+			b.Cleanup(func() { require.NoError(b, i.Close()) })
+
+			_, err := i.Marshal(tt.value)
+			require.NoError(b, err)
+			i.Reset()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := i.Marshal(tt.value); err != nil {
+					b.Fatal(err)
+				}
+				i.Reset()
+			}
+		})
+	}
+}
+
+// BenchmarkInterpreter_Unmarshal records the reverse direction over the same
+// shapes. The source value is marshaled once outside the loop, so only decode
+// cost is measured; the destination is reused because Unmarshal overwrites it.
+func BenchmarkInterpreter_Unmarshal(b *testing.B) {
+	elems := make([]int32, 64)
+	for idx := range elems {
+		elems[idx] = int32(idx)
+	}
+	entries := make(map[string]int32, 16)
+	for idx := range 16 {
+		entries[string(rune('a'+idx))] = int32(idx)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+		dst   any
+	}{
+		{name: "scalar", value: int32(7), dst: new(int32)},
+		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}, dst: new(marshalBenchData)},
+		{name: "slice", value: elems, dst: new([]int32)},
+		{name: "map", value: entries, dst: new(map[string]int32)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			i := New(program.New(nil))
+			b.Cleanup(func() { require.NoError(b, i.Close()) })
+
+			value, err := i.Marshal(tt.value)
+			require.NoError(b, err)
+			require.NoError(b, i.Unmarshal(value, tt.dst))
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := i.Unmarshal(value, tt.dst); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

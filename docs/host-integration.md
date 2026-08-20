@@ -14,8 +14,8 @@ The Go host and the VM run in the same process, but they use different value rep
 
 | Layer | Main APIs | Best for |
 |---|---|---|
-| Direct | `types.Boxed`, `types.Value`, `HostFunction`, `HostObject`, `Alloc`, `Load`, `Retain`, `Release` | hot paths and explicit heap control |
-| Reflection | `Marshal`, `Unmarshal`, `Codec`, `WithCodec`, `WithConverter` | setup data, tests, structs, maps, slices, and functions |
+| Direct | `types.Boxed`, `types.Value`, `HostFunction`, `Alloc`, `Load`, `Retain`, `Release` | hot paths and explicit heap control |
+| Reflection | `Marshal`, `Unmarshal`, `Registry`, `WithCodec`, `WithMarshaler`, `WithUnmarshaler` | setup data, tests, structs, maps, slices, and functions |
 
 Both layers can be used with the same interpreter.
 
@@ -191,7 +191,7 @@ Use it for setup data, configuration, tests, ordinary structs, maps, slices, and
 v, err := vm.Marshal(myGoValue)
 ```
 
-The built-in codec builds and caches one conversion plan per Go type.
+The built-in codec compiles and caches one conversion per Go type. Compilation is where reflection runs; the compiled conversion reads and writes Go memory through stored offsets and strides.
 
 ### Type Mapping
 
@@ -215,10 +215,9 @@ The built-in codec builds and caches one conversion plan per Go type.
 | other `[]T` | `*Array` ref | generic fallback |
 | `map[K]V` with a primitive or `string` key | `*TypedMap[K]` ref | key type drives the concrete map; content-keyed |
 | other `map[K]V` | `*Map` ref | heap ref identity keys |
-| data-only struct | `*Struct` ref | exported fields only |
-| struct with methods or unexported fields | `*HostObject` ref | preserves methods or hidden state |
+| struct | `*Struct` ref | exported fields, then exported methods of `*T` |
 | defined scalar with methods | underlying scalar | keeps primitive fast path |
-| `*T` | `T`, `*HostObject`, or `Null` | nil pointer becomes `Null` |
+| `*T` | `T` or `Null` | nil pointer becomes `Null` |
 | `func(...)` | `*HostFunction` ref | final `error` return is host-only |
 | `interface{}` / `any` | `ref` | dynamic value |
 | `types.Value` | passthrough | returned as-is |
@@ -227,7 +226,8 @@ The built-in codec builds and caches one conversion plan per Go type.
 | `time.Duration` | `I64` | normal scalar path |
 | `complex64` | `*Struct{Real, Imag F32}` | heap-allocated |
 | `complex128` | `*Struct{Real, Imag F64}` | heap-allocated |
-| `ValueMarshaler` | custom | `MarshalVM` decides representation |
+| `VMMarshaler` | custom | `MarshalVM` decides representation |
+| recursive `*T` field | `any` ref | a true cycle returns `ErrMarshalCycle` |
 
 Nil pointers marshal to `types.Null`. Pointer cycles return `ErrMarshalCycle`. Shared non-cycle pointers are allowed.
 
@@ -284,40 +284,50 @@ Rules:
 - use a concrete Go destination type to recover Go-native values
 - bytecode can recover dynamic type with `REF_TEST` and `REF_CAST`
 
-Maps with `interface{}` keys heap-box primitive keys during marshal, so equal primitive keys are not deduplicated by value. Prefer concrete key types, or build the map inside the VM.
+A map declared with a primitive or `string` key type becomes a `*TypedMap[K]` indexed by value. Any other key type — `interface{}`, a named interface, a struct, an array, a pointer — produces a generic `*Map`.
 
-## Host Objects
+Either way a marshaled entry is indexed exactly as `MAP_GET` and `MAP_SET` index it, because conversion and the opcodes share `(*Interpreter).mapKey`: scalars by value, strings by content, every other reference by heap address. A guest lookup with an equal key finds the entry.
 
-`*HostObject` exposes selected Go fields and methods through the same indexed-field protocol used by `*Struct`.
+A struct, array, or pointer key is therefore reachable only through the same reference, since the VM has no content equality for those. Prefer a scalar or string key, or build the map inside the VM.
 
-`STRUCT_GET` and `STRUCT_SET` first handle native VM structs, then fall back to host objects.
+## Structs and Methods
 
-`Marshal` creates `*HostObject` when a struct has methods, a struct has unexported fields, or a pointer to a defined scalar has methods. `NewHostObject` constructs one explicitly. Non-pointer defined scalars with methods marshal as their underlying scalar. Use a pointer when VM code needs method access or pointer-receiver mutation.
-
-Host object fields are ordered as exported data fields first, then methods. Fields that cannot map to VM primitives or `types.Value` are skipped. Defined scalar host objects reserve field `0` as `Value`.
-
-A `HostObject` owns an addressable copy of the Go value. A pointer input is
-dereferenced and copied; field writes and pointer-receiver methods mutate the
-owned copy, never the original value. With the built-in codec active, unmarshal
-the host object into a new Go value to recover that state.
+A Go struct marshals to a native `*types.Struct`: exported data fields become
+real slots in declaration order, followed by one slot per exported method of
+the pointer receiver, each holding a bound `*HostFunction`. Fields with no VM
+representation are skipped, and a method whose name a field already took is
+dropped. A pointer to a defined scalar with methods reserves field `0` as
+`Value`.
 
 ```go
-host, err := interp.NewHostObject(vm, receiver)
+type Counter struct {
+    Name  string
+    count int
+}
+
+func (c *Counter) Bump() int32 { c.count++; return int32(c.count) }
+
+// vm.Marshal(&Counter{Name: "a"}) yields *types.Struct{Name, Bump}
 ```
 
-`NewHostObject` validates the reflection layout, compiles VM fields, and binds
-exported methods on the owned pointer. A nil interpreter, nil receiver, or nil
-receiver pointer returns `ErrTypeMismatch`; an unsupported receiver returns
-`ErrUnsupportedMarshalType`.
+Because the result is a native struct, `STRUCT_GET` and `STRUCT_SET` read and
+write it directly and the fused and JIT paths apply, with no separate host
+representation to fall back from.
 
-`HostObject.Typ` and `HostObject.Receiver` are public for inspection. They are
-constructor-established invariants and must not be replaced after construction.
-The indexed field methods safely reject a value whose public fields no longer
-match its compiled private layout.
+Unexported state stays reachable without being visible: each bound method
+closes over the Go receiver, so a method that reads or mutates a private field
+behaves exactly as it does in Go. When the marshaled value is a pointer,
+methods bind to the caller's pointer and Go-side state stays live and
+observable in Go; when it is a value, they bind to the copy the conversion
+allocates.
 
-Explicit construction always uses the interpreter's built-in reflection
-planner, including `WithConverter` registrations, even when `WithCodec` selects
-a custom codec for `Marshal` and `Unmarshal`.
+VM writes to a data slot change the VM struct only. They do not reach the Go
+value, and a bound method does not observe them. `Unmarshal` recovers exported
+fields; unexported state is not recoverable from the VM value.
+
+Binding allocates one heap reference per method. If the heap is exhausted part
+way through, the references already bound are released and `Marshal` returns
+`ErrHeapExhausted`.
 
 ## Unmarshal
 
@@ -345,7 +355,7 @@ Unsigned integers use the same VM types as signed integers. Values above the sig
 
 ## Value Lifetime
 
-Marshaled references live on the VM heap. This includes strings, arrays, maps, structs, host objects, and host functions.
+Marshaled references live on the VM heap. This includes strings, arrays, maps, structs, and host functions.
 
 They remain alive while reachable from the stack, constants, globals, closures, heap objects, or retained host references. Dynamic values do not survive `vm.Close()` or `vm.Reset()`; reset finalizes their external resources and invalidates every dynamic heap address.
 
@@ -378,13 +388,54 @@ prog := program.New(instrs, program.WithConstants(marshaledValue))
 
 ## Custom Conversion
 
-Use custom conversion when the default reflection mapping is not the desired VM representation.
+Conversion is customized per Go type. A registration layers onto the built-in
+codec rather than replacing it, and every registered conversion receives the
+`*Encoder` or `*Decoder` that started the call, so it converts its own
+dependencies through the active codec.
 
-For a type you own, implement `ValueMarshaler` and/or `ValueUnmarshaler`.
+For a type you own, implement `VMMarshaler` and `VMUnmarshaler`. The
+registry compiles an implementing type into an ordinary entry, so it resolves
+by the same rule as a registration.
 
-For a type you do not own, register a converter with `WithConverter`.
+```go
+func (c Celsius) MarshalVM(e *interp.Encoder) (types.Value, error) {
+    return types.I32(c), nil
+}
 
-Use `WithCodec` to replace both directions of `Marshal` and `Unmarshal`:
+func (c *Celsius) UnmarshalVM(d *interp.Decoder, v types.Value) error {
+    n, ok := v.(types.I32)
+    if !ok {
+        return interp.ErrTypeMismatch
+    }
+    *c = Celsius(n)
+    return nil
+}
+```
+
+For a type you do not own, register a `Marshaler` or `Unmarshaler` on a
+`Registry` and install it. A marshaler receives an `unsafe.Pointer` to a live
+value of the registered type, valid only for the duration of the call, and must
+not retain it.
+
+```go
+r := interp.NewRegistry(
+    interp.WithMarshaler(reflect.TypeFor[time.Duration](), types.TypeI64,
+        interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+            ms := int64(*(*time.Duration)(p) / time.Millisecond)
+            return e.Encode(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
+        })),
+)
+vm := interp.New(prog, interp.WithCodec(r))
+```
+
+`WithMarshaler` declares the VM type the marshaler produces, because enclosing
+struct, array, and map layouts compile from it. `WithUnmarshaler` needs no VM
+type: the source value carries its own.
+
+Registration happens during `NewRegistry`, so a `Registry` never changes
+afterwards and may be shared by pooled interpreters.
+
+Use `WithCodec` to replace conversion entirely:
 
 ```go
 type Codec interface {
@@ -393,23 +444,21 @@ type Codec interface {
 }
 ```
 
-The built-in codec resolves an ordinary Go type in this order:
+`WithCodec` governs `Marshal` and `Unmarshal` alike; there is no second codec.
+It defaults to `NewRegistry()`.
 
-1. exact built-in runtime types such as `types.I32`, `types.Boxed`, and `types.String`
-2. `ValueMarshaler` or `ValueUnmarshaler`
-3. a `Converter`, with user registrations overriding built-in converters
-4. the standard reflection mapping, including general `types.Value` passthrough
+The built-in registry resolves a Go type by the first rule that matches:
 
-A directional value interface takes precedence for the whole type; if the
-other direction is absent, that direction returns
-`ErrUnsupportedMarshalType` instead of falling through to a converter.
-Converters apply wherever the registered type appears, including nested fields,
-slices, maps, and explicit host objects. A nil `Converter.Marshal` or
-`Converter.Unmarshal` leaves that direction unsupported.
+1. a type registered with `WithMarshaler` or `WithUnmarshaler`
+2. a type implementing `VMMarshaler` or `VMUnmarshaler`
+3. a VM runtime type such as `types.I32`, `types.Boxed`, or `types.String`, and
+   any type implementing `types.Value`
+4. the structural reflection mapping
 
-`WithConverter` does not affect normal `Marshal` or `Unmarshal` when
-`WithCodec` installs a custom codec. It still configures the built-in planner
-used by `NewHostObject`.
+`time.Time`, `complex64`, and `complex128` are ordinary rule-1 entries
+installed before user options, so registering one of those types replaces it.
+A type providing only one direction leaves the other returning
+`ErrUnsupportedMarshalType`.
 
 ## Errors
 

@@ -65,13 +65,13 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 44 | 44 | 0 | 0 |
-| `interp` | 58 | 58 | 0 | 0 |
+| `interp` | 59 | 59 | 0 | 0 |
 | `optimize` | 4 | 4 | 0 | 0 |
 | `pass` | 9 | 9 | 0 | 0 |
 | `prof` | 22 | 22 | 0 | 0 |
 | `program` | 25 | 25 | 0 | 0 |
 | `transform` | 10 | 10 | 0 | 0 |
-| `types` | 172 | 172 | 0 | 0 |
+| `types` | 173 | 173 | 0 | 0 |
 
 ### Symbol Matrix
 
@@ -337,22 +337,24 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `instr/parse.go` | `TestReadU8` | ✅ |
 | `instr/type.go` | `TestTypeOf` | ✅ |
 | `instr/type.go` | `TestValid` | ✅ |
+| `interp/codec.go` | `TestNewRegistry` | ✅ |
+| `interp/codec.go` | `TestRegistry_Marshal` | ✅ |
+| `interp/codec.go` | `TestRegistry_Unmarshal` | ✅ |
+| `interp/codec.go` | `TestWithMarshaler` | ✅ |
+| `interp/codec.go` | `TestWithUnmarshaler` | ✅ |
+| `interp/decode.go` | `TestDecoder_Interp` | ✅ |
+| `interp/decode.go` | `TestDecoder_Unmarshal` | ✅ |
+| `interp/decode.go` | `TestUnmarshalerFunc_Unmarshal` | ✅ |
+| `interp/encode.go` | `TestEncoder_Interp` | ✅ |
+| `interp/encode.go` | `TestEncoder_Marshal` | ✅ |
+| `interp/encode.go` | `TestMarshalerFunc_Marshal` | ✅ |
 | `interp/error.go` | `TestErrorCode` | ✅ |
 | `interp/error.go` | `TestRuntimeError_Error` | ✅ |
 | `interp/error.go` | `TestRuntimeError_Unwrap` | ✅ |
 | `interp/host.go` | `TestHostFunction_Kind` | ✅ |
 | `interp/host.go` | `TestHostFunction_String` | ✅ |
 | `interp/host.go` | `TestHostFunction_Type` | ✅ |
-| `interp/host.go` | `TestHostObject_Field` | ✅ |
-| `interp/host.go` | `TestHostObject_Kind` | ✅ |
-| `interp/host.go` | `TestHostObject_Raw` | ✅ |
-| `interp/host.go` | `TestHostObject_Refs` | ✅ |
-| `interp/host.go` | `TestHostObject_SetField` | ✅ |
-| `interp/host.go` | `TestHostObject_SetRaw` | ✅ |
-| `interp/host.go` | `TestHostObject_String` | ✅ |
-| `interp/host.go` | `TestHostObject_Type` | ✅ |
 | `interp/host.go` | `TestNewHostFunction` | ✅ |
-| `interp/host.go` | `TestNewHostObject` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Alloc` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Close` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Const` | ✅ |
@@ -381,7 +383,6 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/interp.go` | `TestInterpreter_Unmarshal` | ✅ |
 | `interp/interp.go` | `TestNew` | ✅ |
 | `interp/interp.go` | `TestWithCodec` | ✅ |
-| `interp/interp.go` | `TestWithConverter` | ✅ |
 | `interp/interp.go` | `TestWithFrame` | ✅ |
 | `interp/interp.go` | `TestWithFuel` | ✅ |
 | `interp/interp.go` | `TestWithHeap` | ✅ |
@@ -551,6 +552,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/map.go` | `TestMapIterator_String` | ✅ |
 | `types/map.go` | `TestMapIterator_Type` | ✅ |
 | `types/map.go` | `TestMapKey_String` | ✅ |
+| `types/map.go` | `TestMapKey_Value` | ✅ |
 | `types/map.go` | `TestMapType_Cast` | ✅ |
 | `types/map.go` | `TestMapType_Equals` | ✅ |
 | `types/map.go` | `TestMapType_Kind` | ✅ |
