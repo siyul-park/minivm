@@ -48,6 +48,10 @@ func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error 
 	return nil
 }
 
+type codecAlias struct{ Target types.Ref }
+
+type codecStrings struct{ A, B, C string }
+
 type codecNode struct {
 	Value int32
 	Next  *codecNode
@@ -411,64 +415,100 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Zero(t, src.Count)
 	})
 
-	t.Run("map keys stay reachable from guest lookups", func(t *testing.T) {
-		// A marshaled entry must be indexed the way MAP_GET indexes the same
-		// key, or guest code cannot reach it.
+	// A marshaled entry must be indexed the way MAP_GET indexes the same key,
+	// or guest code cannot reach it.
+	for _, tt := range []struct {
+		name  string
+		value any
+		key   instr.Instruction
+		want  types.Value
+	}{
+		{
+			name:  "concrete primitive key",
+			value: map[int32]int32{1: 7},
+			key:   instr.New(instr.I32_CONST, 1),
+			want:  types.I32(7),
+		},
+		{
+			name:  "primitive key in a dynamic map",
+			value: map[any]int32{int32(1): 7},
+			key:   instr.New(instr.I32_CONST, 1),
+			want:  types.I32(7),
+		},
+		{
+			name:  "string key",
+			value: map[string]int32{"a": 7},
+			key:   instr.New(instr.CONST_GET, 0),
+			want:  types.I32(7),
+		},
+		{
+			name:  "string key in a dynamic map",
+			value: map[any]int32{"a": 7},
+			key:   instr.New(instr.CONST_GET, 0),
+			want:  types.I32(7),
+		},
+		{
+			name:  "bool key in a dynamic map",
+			value: map[any]int32{true: 7},
+			key:   instr.New(instr.I32_CONST, 1),
+			want:  types.I32(7),
+		},
+	} {
+		t.Run("map key reachable from a guest lookup: "+tt.name, func(t *testing.T) {
+			prog := program.New(
+				[]instr.Instruction{tt.key, instr.New(instr.MAP_GET)},
+				program.WithConstants(types.String("a")),
+			)
+			i := interp.New(prog)
+			r := interp.NewRegistry()
+			defer i.Close()
+
+			value, err := r.Marshal(i, tt.value)
+			require.NoError(t, err)
+			require.NoError(t, i.Push(value))
+			require.NoError(t, i.Run(context.Background()))
+
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	t.Run("a marshaled alias keeps its target alive", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		addr, err := i.Alloc(types.String("payload"))
+		require.NoError(t, err)
+
+		value, err := r.Marshal(i, codecAlias{Target: types.Ref(addr)})
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		got, err := i.Load(value.(*types.Struct).Field(0).Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("payload"), got)
+	})
+
+	t.Run("a failed conversion releases what it published", func(t *testing.T) {
 		for _, tt := range []struct {
 			name  string
 			value any
-			key   instr.Instruction
-			want  types.Value
 		}{
-			{
-				name:  "concrete primitive key",
-				value: map[int32]int32{1: 7},
-				key:   instr.New(instr.I32_CONST, 1),
-				want:  types.I32(7),
-			},
-			{
-				name:  "primitive key in a dynamic map",
-				value: map[any]int32{int32(1): 7},
-				key:   instr.New(instr.I32_CONST, 1),
-				want:  types.I32(7),
-			},
-			{
-				name:  "string key",
-				value: map[string]int32{"a": 7},
-				key:   instr.New(instr.CONST_GET, 0),
-				want:  types.I32(7),
-			},
-			{
-				name:  "string key in a dynamic map",
-				value: map[any]int32{"a": 7},
-				key:   instr.New(instr.CONST_GET, 0),
-				want:  types.I32(7),
-			},
-			{
-				name:  "bool key in a dynamic map",
-				value: map[any]int32{true: 7},
-				key:   instr.New(instr.I32_CONST, 1),
-				want:  types.I32(7),
-			},
+			{name: "struct", value: codecStrings{A: "aaa", B: "bbb", C: "ccc"}},
+			{name: "slice", value: []string{"aaa", "bbb", "ccc"}},
+			{name: "map", value: map[string]string{"a": "aaa", "b": "bbb", "c": "ccc"}},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
-				prog := program.New(
-					[]instr.Instruction{tt.key, instr.New(instr.MAP_GET)},
-					program.WithConstants(types.String("a")),
-				)
-				i := interp.New(prog)
-				r := interp.NewRegistry()
-				defer i.Close()
+			i := interp.New(program.New(nil), interp.WithHeapLimit(3))
+			r := interp.NewRegistry()
 
-				value, err := r.Marshal(i, tt.value)
-				require.NoError(t, err)
-				require.NoError(t, i.Push(value))
-				require.NoError(t, i.Run(context.Background()))
+			_, err := r.Marshal(i, tt.value)
+			require.ErrorIs(t, err, interp.ErrHeapExhausted, tt.name)
 
-				got, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, tt.want, got)
-			})
+			addr, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, tt.name)
+			require.NoError(t, i.Release(addr), tt.name)
+			require.NoError(t, i.Close(), tt.name)
 		}
 	})
 

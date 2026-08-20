@@ -143,14 +143,21 @@ func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	if !rv.IsValid() {
 		return types.Null, nil
 	}
-	p, err := r.conversion(rv.Type())
+	c, err := r.conversion(rv.Type())
 	if err != nil {
 		return nil, err
 	}
 	holder := reflect.New(rv.Type())
 	holder.Elem().Set(rv)
 	defer runtime.KeepAlive(holder)
-	return p.value(&Encoder{interp: i, registry: r}, holder.UnsafePointer())
+
+	e := &Encoder{interp: i, registry: r}
+	val, err := c.value(e, holder.UnsafePointer())
+	if err != nil {
+		e.discard()
+		return nil, err
+	}
+	return val, nil
 }
 
 func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
@@ -159,11 +166,11 @@ func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
 		return fmt.Errorf("%w: destination must be non-nil pointer", ErrInvalidUnmarshalTarget)
 	}
 	elem := rv.Type().Elem()
-	p, err := r.conversion(elem)
+	c, err := r.conversion(elem)
 	if err != nil {
 		return err
 	}
-	if err := p.set(&Decoder{interp: i, registry: r}, val, rv.UnsafePointer()); err != nil {
+	if err := c.set(&Decoder{interp: i, registry: r}, val, rv.UnsafePointer()); err != nil {
 		return fmt.Errorf("unmarshal %T into %s: %w", val, elem, err)
 	}
 	return nil

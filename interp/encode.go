@@ -35,6 +35,7 @@ type Encoder struct {
 	interp   *Interpreter
 	registry *Registry
 	seen     map[unsafe.Pointer]bool
+	owned    []int
 }
 
 func (f MarshalerFunc) Marshal(e *Encoder, p unsafe.Pointer) (types.Value, error) {
@@ -154,7 +155,7 @@ func (e *Encoder) ref(val types.Value) (types.Boxed, error) {
 		}
 		return e.alloc(types.Unbox(v))
 	case types.Ref:
-		return types.BoxRef(int(v)), nil
+		return e.retain(int(v))
 	default:
 		return e.alloc(val)
 	}
@@ -165,7 +166,28 @@ func (e *Encoder) alloc(val types.Value) (types.Boxed, error) {
 	if err != nil {
 		return 0, err
 	}
+	e.owned = append(e.owned, addr)
 	return types.BoxRef(addr), nil
+}
+
+// retain takes ownership of a heap value the Go side only named, so a marshaled
+// alias keeps its target alive for as long as the value holding it.
+func (e *Encoder) retain(addr int) (types.Boxed, error) {
+	if _, err := e.interp.Retain(addr); err != nil {
+		return 0, err
+	}
+	e.owned = append(e.owned, addr)
+	return types.BoxRef(addr), nil
+}
+
+// discard releases every reference the conversion published. A conversion that
+// fails partway has no result to own them, so Marshal calls it to leave the
+// heap as it found it rather than stranding what it already allocated.
+func (e *Encoder) discard() {
+	for _, addr := range e.owned {
+		e.interp.release(addr)
+	}
+	e.owned = nil
 }
 
 // boxI64 stores a 64-bit integer inline when it fits the boxed payload, and on
@@ -237,10 +259,12 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 			}
 			value, err := c.value(enc, holder.UnsafePointer())
 			if err != nil {
+				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
 			}
 			boxed, err := enc.box(value, typ.Returns[idx])
 			if err != nil {
+				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
 			}
 			returns[idx] = boxed
@@ -369,14 +393,11 @@ func marshalStruct(t reflect.Type, vm *types.StructType, fields []field, methods
 		recv := reflect.NewAt(t, p)
 		for idx, m := range methods {
 			slot := len(fields) + idx
-			addr, err := e.interp.Alloc(e.wrap(recv.Method(m.index), m.typ))
+			bound, err := e.alloc(e.wrap(recv.Method(m.index), m.typ))
 			if err != nil {
-				for prior := range idx {
-					e.interp.release(out.Field(len(fields) + prior).Ref())
-				}
 				return nil, fmt.Errorf("bind method %s: %w", m.name, err)
 			}
-			out.SetField(slot, types.BoxRef(addr))
+			out.SetField(slot, bound)
 		}
 		return out, nil
 	}
