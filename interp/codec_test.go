@@ -2,6 +2,7 @@ package interp_test
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"sync"
 	"testing"
@@ -63,6 +64,8 @@ type codecPair struct {
 	Delay codecMillis
 	Count int32
 }
+
+type codecWide int32
 
 type codecShared struct{ A, B int32 }
 
@@ -459,6 +462,12 @@ func TestRegistry_Marshal(t *testing.T) {
 			key:   instr.New(instr.I32_CONST, 1),
 			want:  types.I32(7),
 		},
+		{
+			name:  "i64 key past the boxed payload",
+			value: map[int64]int32{1 << 50: 7},
+			key:   instr.New(instr.I64_CONST, 1<<50),
+			want:  types.I32(7),
+		},
 	} {
 		t.Run("map key reachable from a guest lookup: "+tt.name, func(t *testing.T) {
 			prog := program.New(
@@ -479,6 +488,85 @@ func TestRegistry_Marshal(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+
+	t.Run("a scalar key is stored without a heap reference", func(t *testing.T) {
+		// One heap slot is the permanent null, so this interpreter can allocate
+		// nothing: a key routed through a slot would exhaust the heap here.
+		i := interp.New(program.New(nil), interp.WithHeapLimit(1))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		value, err := r.Marshal(i, map[int64]int32{1 << 50: 7})
+		require.NoError(t, err)
+
+		got, ok := value.(*types.TypedMap[int64]).Get(1 << 50)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(7), got)
+	})
+
+	t.Run("every scalar key kind keeps its Go value", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		bools, err := r.Marshal(i, map[bool]int32{true: 1})
+		require.NoError(t, err)
+		gotBool, ok := bools.(*types.TypedMap[bool]).Get(true)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(1), gotBool)
+
+		bytes, err := r.Marshal(i, map[int8]int32{-3: 2})
+		require.NoError(t, err)
+		gotByte, ok := bytes.(*types.TypedMap[int8]).Get(-3)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(2), gotByte)
+
+		words, err := r.Marshal(i, map[int32]int32{math.MinInt32: 3})
+		require.NoError(t, err)
+		gotWord, ok := words.(*types.TypedMap[int32]).Get(math.MinInt32)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(3), gotWord)
+
+		longs, err := r.Marshal(i, map[int64]int32{math.MinInt64: 4})
+		require.NoError(t, err)
+		gotLong, ok := longs.(*types.TypedMap[int64]).Get(math.MinInt64)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(4), gotLong)
+
+		floats, err := r.Marshal(i, map[float32]int32{-1.5: 5})
+		require.NoError(t, err)
+		gotFloat, ok := floats.(*types.TypedMap[float32]).Get(-1.5)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(5), gotFloat)
+
+		doubles, err := r.Marshal(i, map[float64]int32{-1.5: 6})
+		require.NoError(t, err)
+		gotDouble, ok := doubles.(*types.TypedMap[float64]).Get(-1.5)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(6), gotDouble)
+	})
+
+	t.Run("a map key wider than its declared type overflows", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[codecWide](), types.TypeI32,
+			interp.MarshalerFunc(func(*interp.Encoder, unsafe.Pointer) (types.Value, error) {
+				return types.I64(math.MaxInt32 + 1), nil
+			})))
+		defer i.Close()
+
+		_, err := r.Marshal(i, map[codecWide]int32{0: 7})
+		require.ErrorIs(t, err, interp.ErrValueOverflow)
+	})
+
+	t.Run("a nil pointer key has no scalar value", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		_, err := r.Marshal(i, map[*int32]int32{nil: 7})
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
+	})
 
 	t.Run("a marshaled alias keeps its target alive", func(t *testing.T) {
 		i := interp.New(program.New(nil))

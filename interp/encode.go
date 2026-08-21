@@ -556,17 +556,35 @@ func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) func(*
 func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
 	switch mt.KeyKind {
 	case types.KindI1:
-		return typedMap(key, func(_ *Encoder, b types.Boxed) bool { return b.Bool() })
+		return typedMap(key, func(val types.Value) (bool, error) {
+			n, err := keyInt(val, mt.Key)
+			return n != 0, err
+		})
 	case types.KindI8:
-		return typedMap(key, func(_ *Encoder, b types.Boxed) int8 { return b.I8() })
+		return typedMap(key, func(val types.Value) (int8, error) {
+			n, err := keyInt(val, mt.Key)
+			return int8(n), err
+		})
 	case types.KindI32:
-		return typedMap(key, func(_ *Encoder, b types.Boxed) int32 { return b.I32() })
+		return typedMap(key, func(val types.Value) (int32, error) {
+			n, err := keyInt(val, mt.Key)
+			if err != nil {
+				return 0, err
+			}
+			if n < math.MinInt32 || n > math.MaxInt32 {
+				return 0, fmt.Errorf("%w: %d overflows i32", ErrValueOverflow, n)
+			}
+			return int32(n), nil
+		})
 	case types.KindI64:
-		return typedMap(key, func(e *Encoder, b types.Boxed) int64 { return e.interp.unboxI64(b) })
+		return typedMap(key, func(val types.Value) (int64, error) { return keyInt(val, mt.Key) })
 	case types.KindF32:
-		return typedMap(key, func(_ *Encoder, b types.Boxed) float32 { return b.F32() })
+		return typedMap(key, func(val types.Value) (float32, error) {
+			f, err := keyFloat(val, mt.Key)
+			return float32(f), err
+		})
 	case types.KindF64:
-		return typedMap(key, func(_ *Encoder, b types.Boxed) float64 { return b.F64() })
+		return typedMap(key, func(val types.Value) (float64, error) { return keyFloat(val, mt.Key) })
 	}
 	if mt.Key.Equals(types.TypeString) {
 		return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
@@ -605,13 +623,39 @@ func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, u
 	}
 }
 
-func typedMap[K comparable](key *conversion, conv func(*Encoder, types.Boxed) K) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
+// typedMap stores one entry of a map that holds its keys as Go values. The key
+// is read as a standalone value and narrowed straight to K: routing it through a
+// slot first would allocate a heap reference for an i64 too large to box and then
+// drop it, since such a map never stores a key as a reference.
+func typedMap[K comparable](key *conversion, narrow func(types.Value) (K, error)) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
 	return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
-		boxed, err := key.box(e, p)
+		val, err := key.value(e, p)
 		if err != nil {
 			return err
 		}
-		m.(*types.TypedMap[K]).Set(conv(e, boxed), value)
+		k, err := narrow(val)
+		if err != nil {
+			return err
+		}
+		m.(*types.TypedMap[K]).Set(k, value)
 		return nil
 	}
+}
+
+// keyInt and keyFloat read a map key as the VM scalar its declared key type
+// fixed, naming that type when the compiled conversion produced another.
+func keyInt(val types.Value, typ types.Type) (int64, error) {
+	n, ok := asInt(val)
+	if !ok {
+		return 0, fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, typ)
+	}
+	return n, nil
+}
+
+func keyFloat(val types.Value, typ types.Type) (float64, error) {
+	f, ok := asFloat(val)
+	if !ok {
+		return 0, fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, typ)
+	}
+	return f, nil
 }
