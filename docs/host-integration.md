@@ -206,19 +206,13 @@ The built-in codec compiles and caches one conversion per Go type. Compilation i
 | `float32` | `F32` | |
 | `float64` | `F64` | |
 | `string` | `String` ref | heap-allocated by the interpreter; equal contents need not share a ref |
-| `[]bool` | `I1Array` | one byte per element |
-| `[]int8`, `[]uint8`, `[]byte` | `I8Array` | raw bits preserved |
-| `[]int16`, `[]int32`, `[]uint16`, `[]uint32` | `I32Array` | raw bits preserved for unsigned values |
-| `[]int`, `[]int64`, `[]uint`, `[]uint64`, `[]uintptr` | `I64Array` | raw bits preserved for unsigned values |
-| `[]float32` | `F32Array` | |
-| `[]float64` | `F64Array` | |
-| other `[]T` | `*Array` ref | generic fallback |
-| `map[K]V` with a primitive or `string` key | `*TypedMap[K]` ref | key type drives the concrete map; content-keyed |
-| other `map[K]V` | `*Map` ref | heap ref identity keys |
+| `[N]T`, by value | typed array, or `*Array` ref | `I1Array` for `bool`, `I8Array` for 8-bit, `I32Array` for 16/32-bit, `I64Array` for 64-bit and `int`, `F32Array` and `F64Array` for floats, `*Array` otherwise; raw bits preserved for unsigned values |
+| `[]T` | `*HostArray` ref | live view of the Go slice |
+| `map[K]V` | `*HostMap` ref | live view of the Go map; a `map[any]V` key normalizes |
 | struct, by value, all fields exported | `*Struct` ref | exported fields, in declaration order |
 | struct with an unexported field | `*HostStruct` ref | live view of the Go struct |
 | defined scalar or string with methods | underlying scalar or `string` | keeps primitive fast path |
-| `*T` | `T` or `Null` | nil pointer becomes `Null`; a struct behind it is a `*HostStruct` view |
+| `*T` | `T` or `Null` | nil pointer becomes `Null`; a struct, array, slice, or map behind it is a live view |
 | `func(...)` | `*HostFunction` ref | final `error` return is host-only |
 | `interface{}` / `any` | `ref` | dynamic value |
 | `types.Value` | passthrough | returned as-is |
@@ -281,36 +275,65 @@ Rules:
 - nil interface values become `Null`
 - interface-typed fields, slice elements, and map values become `ref`
 - primitive values inside interface-typed slots are heap-boxed because the slot stores `ref`
-- `Unmarshal` into `interface{}` returns VM-native `types.Value` values
+- `Unmarshal` into `interface{}` returns VM-native `types.Value` values, except a dynamic map key, which decodes to the Go type its VM kind normalizes to
 - use a concrete Go destination type to recover Go-native values
 - bytecode can recover dynamic type with `REF_TEST` and `REF_CAST`
 
-A map declared with a primitive or `string` key type becomes a `*TypedMap[K]` indexed by value. A pointer key follows the type it points at, so `map[*int32]V` is a `*TypedMap[int32]` keyed by the pointed-to value, and a nil pointer key fails with `ErrTypeMismatch` because it has no such value. Any other key type — `interface{}`, a named interface, a struct, an array, a pointer to one of those — produces a generic `*Map`.
+A Go map is a live `*HostMap`, and the VM map type it reports — along with the copy `ARRAY_SLICE`-style opcodes rebuild — follows its Go key type. A primitive or `string` key gives a `*TypedMap[K]` indexed by value. A pointer key follows the type it points at, so `map[*int32]V` is a `*TypedMap[int32]` keyed by the pointed-to value, and a nil pointer key fails with `ErrTypeMismatch` because it has no such value. Any other key type — `interface{}`, a named interface, a struct, an array, a pointer to one of those — gives a generic `*Map`.
 
-Either way a marshaled entry is indexed exactly as `MAP_GET` and `MAP_SET` index it: a typed map stores the key as its Go value, a generic map goes through `(*Interpreter).mapKey`, and both agree — scalars by value, strings by content, every other reference by heap address. A guest lookup with an equal key finds the entry.
+Either way an entry is indexed exactly as `MAP_GET` and `MAP_SET` index it: a typed map stores the key as its Go value, a generic map goes through `(*Interpreter).mapKey`, and both agree — scalars by value, strings by content, every other reference by heap address. A guest lookup with an equal key finds the entry.
 
 A struct or array key, or a pointer to one, is therefore reachable only through the same reference, since the VM has no content equality for those. Prefer a scalar or string key, or build the map inside the VM.
 
-## Structs and Methods
+## Host Views
 
-The form a Go struct takes follows one rule: **use the VM type system whenever a
+The form a Go value takes follows one rule: **use the VM type system whenever a
 copy reproduces the whole value, and a live view only when it cannot.**
 
 | Marshaled | Result | Why |
 |---|---|---|
-| a value, all fields exported | `*types.Struct` | the VM struct holds every field; nothing is left behind |
-| a value with methods, all fields exported | `*types.Struct` | a method that mutates a copy is Go value semantics, not a loss |
-| a pointer | `*interp.HostStruct` | the caller asked for a reference; a copy would drop the aliasing |
-| a value with an unexported field | `*interp.HostStruct` | unexported state has no slot, so no copy is faithful |
+| a struct value, all fields exported | `*types.Struct` | the VM struct holds every field; nothing is left behind |
+| a struct value with methods, all fields exported | `*types.Struct` | a method that mutates a copy is Go value semantics, not a loss |
+| a struct value with an unexported field | `*interp.HostStruct` | unexported state has no slot, so no copy is faithful |
+| an array value | typed array, or `*types.Array` | a Go array is a value; the copy carries all of it |
+| a slice | `*interp.HostArray` | a Go slice is a reference; a copy drops every write |
+| a map | `*interp.HostMap` | a Go map is a reference; a copy drops every write |
+| a pointer to any of them | the matching view | the caller asked for a reference; a copy would drop the aliasing |
+| a scalar or string, with or without methods | the primitive | nothing is lost but pointer-receiver mutation, which the VM has no place to put |
 
-A native `*types.Struct` keeps the fast path: fused `STRUCT_GET` and native JIT
-lowering apply, and `Unmarshal` rebuilds an equal Go value from it.
+A native VM value keeps the fast path: fusion and native JIT lowering apply, and
+`Unmarshal` rebuilds an equal Go value from it.
 
-A `*interp.HostStruct` is a live view of the Go struct that reports the same VM
-struct type a copy would have reported, so guest code reads and writes it with
-`STRUCT_GET` and `STRUCT_SET` exactly as it reads a native struct — and those
-reads and writes address the Go memory in place. `Unmarshal` recovers the whole
-Go value from a view, unexported state included.
+A view reports the same VM type a copy would have reported, so guest code reaches
+it with the ordinary opcodes — `STRUCT_GET`, `ARRAY_GET`, `MAP_GET` and the rest
+— and those reads and writes address the Go memory in place. `Unmarshal` recovers
+the whole Go value from a view, unexported state included.
+
+An opcode splits by what it produces:
+
+- **Changes the value.** `STRUCT_SET`, `ARRAY_SET`, `ARRAY_FILL`, `ARRAY_APPEND`,
+  `ARRAY_DELETE`, `ARRAY_COPY`, `MAP_SET`, `MAP_DELETE`, and `MAP_CLEAR` write
+  through to Go memory. `ARRAY_APPEND` and `ARRAY_DELETE` write the resulting
+  slice back through the view, so the Go side sees the growth even when `append`
+  reallocates; a Go array has a fixed length and refuses both.
+- **Produces a new value.** `ARRAY_SLICE`, `MAP_KEYS`, and `MAP_ITER` first
+  rebuild the view as the VM value a copy would have produced and work from that,
+  so the result is VM-owned and the view keeps addressing Go memory.
+
+A view addresses the Go *variable* rather than the data behind it, so a slice or
+map the Go side replaced is the one the next access reaches.
+
+### Dynamic Map Keys
+
+A `map[any]V` is a view like any other map. A VM key carries no Go type of its
+own, so it decodes to the one type the VM's own key normalization names for its
+kind: `i1`, `i8`, and `i32` all to `int32`, `i64` to `int64`, `f32` and `f64` to
+their Go counterparts, and a string to `string`. Every other reference keys by
+identity. An entry the Go side stored under one of those types is reachable; one
+stored under another — `true`, `int`, `uint8` — reads as the element zero, the
+same way Go's own dynamic keys miss on a type mismatch.
+
+### Structs and Methods
 
 ```go
 type Counter struct {
@@ -481,7 +504,7 @@ A type providing only one direction leaves the other returning
 | `RuntimeError` | guest execution failed; unwraps to the cause and carries frames |
 | `types.Error` | guest exception value with code, message, payload, and optional wrapped Go cause |
 | `ErrHeapExhausted` | heap allocation exceeded `WithHeapLimit` |
-| `ErrMarshalCycle` | a map, slice, or non-struct pointer chain reaches itself |
+| `ErrMarshalCycle` | a copying walk reaches itself: a pointer chain through a type no view stands for, or a self-referential container an opcode rebuilds |
 | `ErrUnsupportedMarshalType` | Go type or conversion direction is unsupported |
 | `ErrInvalidUnmarshalTarget` | destination is not a non-nil pointer |
 | `ErrValueOverflow` | numeric value does not fit destination type |

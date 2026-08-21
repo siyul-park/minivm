@@ -429,6 +429,22 @@ func marshalHostStruct(t reflect.Type, vm *types.StructType, fields []field) fun
 	}
 }
 
+func marshalHostArray(t reflect.Type, vm *types.ArrayType, elem *conversion, copy func(*Encoder, unsafe.Pointer) (types.Value, error)) func(*Encoder, unsafe.Pointer) (types.Value, error) {
+	bounds, stride := span(t), t.Elem().Size()
+	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+		return &HostArray{
+			typ: vm, elem: elem, copy: copy, registry: e.registry,
+			bounds: bounds, stride: stride, rtyp: t, ptr: p,
+		}, nil
+	}
+}
+
+func marshalHostMap(t reflect.Type, vm *types.MapType, index func(*Decoder, types.Value, unsafe.Pointer) error, elem *conversion, copy func(*Encoder, unsafe.Pointer) (types.Value, error)) func(*Encoder, unsafe.Pointer) (types.Value, error) {
+	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+		return &HostMap{typ: vm, index: index, elem: elem, copy: copy, registry: e.registry, rtyp: t, ptr: p}, nil
+	}
+}
+
 // hostError reports the error a Go call returned in its trailing result, or nil
 // when that result is a nil error.
 func hostError(v reflect.Value) error {

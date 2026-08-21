@@ -3710,6 +3710,8 @@ var (
 					n = int32(len(arr))
 				case *types.Array:
 					n = int32(len(arr.Elems))
+				case *HostArray:
+					n = int32(arr.Len())
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -3871,6 +3873,10 @@ var (
 					}
 					if size <= 0 {
 						i.releaseBox(val)
+					}
+				case *HostArray:
+					if err := arr.Fill(i, idx, size, val); err != nil {
+						panic(err)
 					}
 				default:
 					panic(ErrTypeMismatch)
@@ -4060,6 +4066,12 @@ var (
 						i.releaseBox(v)
 					}
 					copy(dst.Elems[dstOffset:dstOffset+size], src.Elems[srcOffset:srcOffset+size])
+				case *HostArray:
+					for k := 0; k < size; k++ {
+						if err := dst.SetElement(i, dstOffset+k, i.arrayGet(srcAddr, srcOffset+k)); err != nil {
+							panic(err)
+						}
+					}
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4119,6 +4131,10 @@ var (
 				case *types.Array:
 					for k := 0; k < n; k++ {
 						arr.Elems = append(arr.Elems, i.stack[base+k])
+					}
+				case *HostArray:
+					if err := arr.Append(i, i.stack[base:base+n]); err != nil {
+						panic(err)
 					}
 				default:
 					panic(ErrTypeMismatch)
@@ -4226,6 +4242,12 @@ var (
 					copy(arr.Elems[idx:], arr.Elems[idx+1:])
 					arr.Elems[len(arr.Elems)-1] = types.BoxedNull
 					arr.Elems = arr.Elems[:len(arr.Elems)-1]
+				case *HostArray:
+					removed, err := arr.Delete(i, idx)
+					if err != nil {
+						panic(err)
+					}
+					val = removed
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4249,7 +4271,15 @@ var (
 				}
 				addr := ref.Ref()
 				var out types.Value
-				switch arr := i.heap[addr].(type) {
+				source := i.heap[addr]
+				if view, ok := source.(*HostArray); ok {
+					value, err := view.Array(i)
+					if err != nil {
+						panic(err)
+					}
+					source = value
+				}
+				switch arr := source.(type) {
 				case types.TypedArray[bool]:
 					if start < 0 || end > len(arr) || start > end {
 						panic(ErrIndexOutOfRange)
@@ -4599,6 +4629,8 @@ var (
 					n = m.Len()
 				case *types.Map:
 					n = m.Len()
+				case *HostMap:
+					n = m.Len()
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4620,6 +4652,7 @@ var (
 				}
 				addr := ref.Ref()
 				var result types.Boxed
+				var owned bool
 				switch m := i.heap[addr].(type) {
 				case *types.TypedMap[int8]:
 					value, ok := m.Get(key.I8())
@@ -4679,10 +4712,19 @@ var (
 					} else {
 						result = m.Zero
 					}
+				case *HostMap:
+					value, present, err := m.Get(i, key)
+					if err != nil {
+						panic(err)
+					}
+					result, owned = value, true
+					_ = present
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.retainBox(result)
+				if !owned {
+					i.retainBox(result)
+				}
 				i.release(addr)
 				i.sp--
 				i.stack[i.sp-1] = result
@@ -4702,6 +4744,7 @@ var (
 				}
 				addr := ref.Ref()
 				var result types.Boxed
+				var owned bool
 				var found bool
 				switch m := i.heap[addr].(type) {
 				case *types.TypedMap[int8]:
@@ -4749,10 +4792,19 @@ var (
 					} else {
 						result = m.Zero
 					}
+				case *HostMap:
+					value, present, err := m.Get(i, key)
+					if err != nil {
+						panic(err)
+					}
+					result, owned = value, true
+					found = present
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.retainBox(result)
+				if !owned {
+					i.retainBox(result)
+				}
 				i.release(addr)
 				i.stack[i.sp-2] = result
 				i.stack[i.sp-1] = types.BoxI1(found)
@@ -4819,6 +4871,10 @@ var (
 						i.releaseBox(old.Key)
 						i.releaseBox(old.Value)
 					}
+				case *HostMap:
+					if err := m.Set(i, key, value); err != nil {
+						panic(err)
+					}
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4883,6 +4939,10 @@ var (
 						i.releaseBox(old.Value)
 					}
 					i.releaseBox(entryKey)
+				case *HostMap:
+					if err := m.Delete(i, key); err != nil {
+						panic(err)
+					}
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4936,6 +4996,8 @@ var (
 						i.releaseBox(entry.Key)
 						i.releaseBox(entry.Value)
 					})
+				case *HostMap:
+					m.Clear()
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4957,7 +5019,15 @@ var (
 				addr := ref.Ref()
 				var keyType types.Type
 				var elems []types.Boxed
-				switch m := i.heap[addr].(type) {
+				source := i.heap[addr]
+				if view, ok := source.(*HostMap); ok {
+					value, err := view.Map(i)
+					if err != nil {
+						panic(err)
+					}
+					source = value
+				}
+				switch m := source.(type) {
 				case *types.TypedMap[int8]:
 					keyType = m.Typ.Key
 					elems = make([]types.Boxed, 0, m.Len())
@@ -5052,12 +5122,20 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				addr := ref.Ref()
-				switch i.heap[addr].(type) {
+				source := i.heap[addr]
+				if view, ok := source.(*HostMap); ok {
+					value, err := view.Map(i)
+					if err != nil {
+						panic(err)
+					}
+					source = value
+				}
+				switch source.(type) {
 				case *types.TypedMap[int8], *types.TypedMap[bool], *types.TypedMap[int32], *types.TypedMap[int64], *types.TypedMap[float32], *types.TypedMap[float64], *types.TypedMap[string], *types.Map:
 				default:
 					panic(ErrTypeMismatch)
 				}
-				iter := types.NewMapIterator(types.Ref(addr), i.heap[addr])
+				iter := types.NewMapIterator(types.Ref(addr), source)
 				iter.Next()
 				if !iter.Done() {
 					current := iter.Current()

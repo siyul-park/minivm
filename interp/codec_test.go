@@ -84,6 +84,13 @@ type codecHeld struct {
 
 func (h *codecHeld) Tag() int32 { return h.tag }
 
+// stringKey publishes text as the heap reference a string key arrives as.
+func stringKey(t *testing.T, i *interp.Interpreter, text string) types.Boxed {
+	addr, err := i.Alloc(types.String(text))
+	require.NoError(t, err)
+	return types.BoxRef(addr)
+}
+
 // codecCounted is fully exported and still carries a pointer method, the case
 // that separates "has methods" from "a copy would lose something".
 type codecCounted struct{ Count int32 }
@@ -511,10 +518,13 @@ func TestRegistry_Marshal(t *testing.T) {
 			want:  types.I32(7),
 		},
 		{
-			name:  "bool key in a dynamic map",
+			// The VM keys i1, i8, and i32 alike, so a dynamic map holds one Go
+			// type for the three of them and a key stored under another reads
+			// as the element zero, the way Go's own dynamic keys miss.
+			name:  "dynamic key outside the canonical Go type",
 			value: map[any]int32{true: 7},
 			key:   instr.New(instr.I32_CONST, 1),
-			want:  types.I32(7),
+			want:  types.I32(0),
 		},
 		{
 			name:  "i64 key past the boxed payload",
@@ -550,57 +560,42 @@ func TestRegistry_Marshal(t *testing.T) {
 		r := interp.NewRegistry()
 		defer i.Close()
 
+		// A view keys straight into the Go map, so no key is ever routed
+		// through a slot; the guest lookup itself is covered by the table above.
 		value, err := r.Marshal(i, map[int64]int32{1 << 50: 7})
 		require.NoError(t, err)
-
-		got, ok := value.(*types.TypedMap[int64]).Get(1 << 50)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(7), got)
+		require.IsType(t, &interp.HostMap{}, value)
 	})
 
-	t.Run("every scalar key kind keeps its Go value", func(t *testing.T) {
+	t.Run("every scalar key kind reaches its entry", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
-		bools, err := r.Marshal(i, map[bool]int32{true: 1})
-		require.NoError(t, err)
-		gotBool, ok := bools.(*types.TypedMap[bool]).Get(true)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(1), gotBool)
+		for _, tt := range []struct {
+			name  string
+			value any
+			key   types.Boxed
+		}{
+			{name: "bool", value: map[bool]int32{true: 7}, key: types.BoxI1(true)},
+			{name: "int8", value: map[int8]int32{-3: 7}, key: types.BoxI8(-3)},
+			{name: "int32", value: map[int32]int32{math.MinInt32: 7}, key: types.BoxI32(math.MinInt32)},
+			{name: "int64", value: map[int64]int32{-9: 7}, key: types.BoxI64(-9)},
+			{name: "float32", value: map[float32]int32{-1.5: 7}, key: types.BoxF32(-1.5)},
+			{name: "float64", value: map[float64]int32{-1.5: 7}, key: types.BoxF64(-1.5)},
+			{name: "string", value: map[string]int32{"a": 7}, key: stringKey(t, i, "a")},
+		} {
+			value, err := r.Marshal(i, tt.value)
+			require.NoError(t, err, tt.name)
 
-		bytes, err := r.Marshal(i, map[int8]int32{-3: 2})
-		require.NoError(t, err)
-		gotByte, ok := bytes.(*types.TypedMap[int8]).Get(-3)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(2), gotByte)
-
-		words, err := r.Marshal(i, map[int32]int32{math.MinInt32: 3})
-		require.NoError(t, err)
-		gotWord, ok := words.(*types.TypedMap[int32]).Get(math.MinInt32)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(3), gotWord)
-
-		longs, err := r.Marshal(i, map[int64]int32{math.MinInt64: 4})
-		require.NoError(t, err)
-		gotLong, ok := longs.(*types.TypedMap[int64]).Get(math.MinInt64)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(4), gotLong)
-
-		floats, err := r.Marshal(i, map[float32]int32{-1.5: 5})
-		require.NoError(t, err)
-		gotFloat, ok := floats.(*types.TypedMap[float32]).Get(-1.5)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(5), gotFloat)
-
-		doubles, err := r.Marshal(i, map[float64]int32{-1.5: 6})
-		require.NoError(t, err)
-		gotDouble, ok := doubles.(*types.TypedMap[float64]).Get(-1.5)
-		require.True(t, ok)
-		require.Equal(t, types.BoxI32(6), gotDouble)
+			got, ok, err := value.(*interp.HostMap).Get(i, tt.key)
+			require.NoError(t, err, tt.name)
+			require.True(t, ok, tt.name)
+			require.Equal(t, types.BoxI32(7), got, tt.name)
+		}
 	})
 
-	t.Run("a map key wider than its declared type overflows", func(t *testing.T) {
+	t.Run("a map key that converts one way only cannot be looked up", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
 			reflect.TypeFor[codecWide](), types.TypeI32,
@@ -609,17 +604,29 @@ func TestRegistry_Marshal(t *testing.T) {
 			})))
 		defer i.Close()
 
-		_, err := r.Marshal(i, map[codecWide]int32{0: 7})
-		require.ErrorIs(t, err, interp.ErrValueOverflow)
+		value, err := r.Marshal(i, map[codecWide]int32{0: 7})
+		require.NoError(t, err)
+
+		// A view converts a key on the way in rather than at marshal time, so a
+		// key type that converts in one direction only cannot be looked up.
+		_, _, err = value.(*interp.HostMap).Get(i, types.BoxI32(0))
+		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
 	})
 
-	t.Run("a nil pointer key has no scalar value", func(t *testing.T) {
+	t.Run("a nil pointer key is a key like any other", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
-		_, err := r.Marshal(i, map[*int32]int32{nil: 7})
-		require.ErrorIs(t, err, interp.ErrTypeMismatch)
+		value, err := r.Marshal(i, map[*int32]int32{nil: 7})
+		require.NoError(t, err)
+
+		// A view keys by the Go pointer itself, so a nil key is a key like any
+		// other rather than one that collides with a zero-valued pointee.
+		got, ok, err := value.(*interp.HostMap).Get(i, types.BoxedNull)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(7), got)
 	})
 
 	t.Run("a host view reads a field holding a VM value", func(t *testing.T) {
@@ -699,9 +706,10 @@ func TestRegistry_Marshal(t *testing.T) {
 			name  string
 			value any
 		}{
+			// A slice and a map are views now: they publish nothing while
+			// converting, so only a copying conversion can strand a reference.
 			{name: "struct", value: codecStrings{A: "aaa", B: "bbb", C: "ccc"}},
-			{name: "slice", value: []string{"aaa", "bbb", "ccc"}},
-			{name: "map", value: map[string]string{"a": "aaa", "b": "bbb", "c": "ccc"}},
+			{name: "array", value: [3]string{"aaa", "bbb", "ccc"}},
 		} {
 			i := interp.New(program.New(nil), interp.WithHeapLimit(3))
 			r := interp.NewRegistry()
@@ -745,16 +753,12 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.NoError(t, err)
 		require.IsType(t, &interp.HostStruct{}, value)
 
-		// A map or slice reaches itself without an intervening pointer, so the
-		// walk has to refuse those containers too rather than recurse forever.
-		entries := map[string]any{}
-		entries["self"] = entries
-		_, err = r.Marshal(i, entries)
-		require.ErrorIs(t, err, interp.ErrMarshalCycle)
-
-		elems := []any{nil}
-		elems[0] = elems
-		_, err = r.Marshal(i, elems)
+		// Every container is a view, so the copying walk that can still reach
+		// itself is a pointer to something no view stands for. That one has to
+		// refuse.
+		var self any
+		self = &self
+		_, err = r.Marshal(i, &self)
 		require.ErrorIs(t, err, interp.ErrMarshalCycle)
 	})
 
