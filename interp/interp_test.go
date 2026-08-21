@@ -2672,6 +2672,75 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("parity/host container writes reach the Go value", func(t *testing.T) {
+		runHost := func(value any, code []instr.Instruction, opts ...func(*option)) types.Value {
+			setup := New(program.New(nil))
+			defer setup.Close()
+			host, err := NewRegistry().Marshal(setup, value)
+			require.NoError(t, err)
+
+			i := New(program.New(code, program.WithConstants(host)), opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			out, err := i.Pop()
+			require.NoError(t, err)
+			return out
+		}
+
+		for _, tt := range []struct {
+			name string
+			run  func(opts ...func(*option)) (types.Value, any)
+			want any
+		}{
+			{
+				name: "array element",
+				run: func(opts ...func(*option)) (types.Value, any) {
+					src := []int32{7}
+					out := runHost(src, []instr.Instruction{
+						instr.New(instr.CONST_GET, 0),
+						instr.New(instr.DUP),
+						instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.ARRAY_SET),
+						instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+					}, opts...)
+					return out, src
+				},
+				want: []int32{99},
+			},
+			{
+				name: "map entry",
+				run: func(opts ...func(*option)) (types.Value, any) {
+					src := map[int32]int32{}
+					out := runHost(src, []instr.Instruction{
+						instr.New(instr.CONST_GET, 0),
+						instr.New(instr.DUP),
+						instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 99), instr.New(instr.MAP_SET),
+						instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
+					}, opts...)
+					return out, src
+				},
+				want: map[int32]int32{1: 99},
+			},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				// The guest wrote into Go memory, so every mode leaves the
+				// write in the Go value rather than in a VM copy of it.
+				value, src := tt.run(WithTick(1), WithThreshold(-1))
+				require.Equal(t, types.I32(99), value)
+				require.Equal(t, tt.want, src)
+
+				value, src = tt.run(WithThreshold(-1))
+				require.Equal(t, types.I32(99), value)
+				require.Equal(t, tt.want, src)
+
+				if runtime.GOARCH == "arm64" {
+					value, src = tt.run(WithThreshold(0))
+					require.Equal(t, types.I32(99), value)
+					require.Equal(t, tt.want, src)
+				}
+			})
+		}
+	})
+
 	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),

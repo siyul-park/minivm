@@ -272,14 +272,51 @@ func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n i
 	return nil
 }
 
+// unmarshalKey decodes a VM key into the Go value a dynamic map is keyed by,
+// which is what lets a lookup reach the entry the other side stored. It mirrors
+// (*Interpreter).mapKey, the normalization every map opcode already agrees on:
+// i1, i8, and i32 share int32, a spilled i64 is still an int64, and a string
+// keys by content. So a Go map[any]V holds one Go type per VM key kind, exactly
+// as a VM map holds one entry per normalized key, and a key stored under any
+// other Go type is unreachable the same way Go's own dynamic keys are. Every
+// other reference keys by identity, as it does in the VM.
+func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
+	value, err := d.registry.resolve(d.interp, val)
+	if err != nil {
+		return err
+	}
+	var key any = value
+	switch v := value.(type) {
+	case types.I1:
+		key = int32(0)
+		if v {
+			key = int32(1)
+		}
+	case types.I8:
+		key = int32(v)
+	case types.I32:
+		key = int32(v)
+	case types.I64:
+		key = int64(v)
+	case types.F32:
+		key = float32(v)
+	case types.F64:
+		key = float64(v)
+	case types.String:
+		key = string(v)
+	}
+	*(*any)(p) = key
+	return nil
+}
+
 // unmarshalMap decodes a VM map into a Go map.
-func unmarshalMap(t reflect.Type, key, elem *conversion) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalMap(t reflect.Type, index func(*Decoder, types.Value, unsafe.Pointer) error, elem *conversion) func(*Decoder, types.Value, unsafe.Pointer) error {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		var out reflect.Value
 		entryKey, entryValue := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
 		reserve := func(n int) { out = reflect.MakeMapWithSize(t, n) }
 		set := func(k, v types.Value) error {
-			if err := key.set(d, k, entryKey.Addr().UnsafePointer()); err != nil {
+			if err := index(d, k, entryKey.Addr().UnsafePointer()); err != nil {
 				return fmt.Errorf("map key: %w", err)
 			}
 			if err := elem.set(d, v, entryValue.Addr().UnsafePointer()); err != nil {

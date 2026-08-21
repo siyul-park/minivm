@@ -194,6 +194,8 @@ User-defined heap types do not add new `Kind` values. They use `KindRef` like ot
 | `types.String` | `KindRef` | `TypeString` | heap value |
 | arrays, structs, maps, functions, closures, host values | `KindRef` | type-specific | heap values |
 | `HostStruct` | `KindRef` | the `*StructType` a copy would have had | live view of a Go struct; owns no refs |
+| `HostArray` | `KindRef` | the `*ArrayType` a copy would have had | live view of a Go slice or array; owns no refs |
+| `HostMap` | `KindRef` | the `*MapType` a copy would have had | live view of a Go map; owns no refs |
 
 If a heap value contains refs, it must implement `Traceable`. If a heap value owns external resources, it may implement `io.Closer`.
 

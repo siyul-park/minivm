@@ -147,6 +147,7 @@ Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple go
 - Strings carry no identity invariant: every comparison and every map keyed by a string compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
 - A host value never owns a VM reference. Reading a field publishes one the caller owns, and writing one copies what the VM value holds into the Go field rather than storing the slot, so a host value implements no `types.Traceable` and reclaims nothing.
 - A struct compiles to one VM struct type whatever form it takes, because a value and a pointer to it must report the same type. The pointer is what selects the live view; the value copies unless unexported fields make a copy unfaithful.
+- A Go slice or map is a reference, so it is always a live view: an opcode that changes it writes through to Go memory, and an opcode that yields a new value rebuilds the view as the VM value a copy would have produced and works from that. A view addresses the Go variable, so a slice `append` reallocated is the one the next access reaches.
 
 See `memory-model.md` and `value-representation.md` for the detailed rules.
 
@@ -201,7 +202,7 @@ See `pass-system.md` for optimizer levels and rewrite rules.
 | Architecture support | Keep ARM64 stable; add other backends only with clear user and benchmark value |
 | Benchmarks | Keep benchmark claims tied to `docs/benchmarks.md` |
 | Program format | Keep `instr` and `program` compact and Go-native |
-| Host integration | Keep `HostFunction`, `HostStruct`, `Marshal`, and `Unmarshal` explicit about ownership |
+| Host integration | Keep `HostFunction`, the host views, `Marshal`, and `Unmarshal` explicit about ownership |
 | Resource policy | Keep context, fuel, hooks, stack, heap, frame limits, and host policy easy to reason about |
 
 ## Maintenance Notes

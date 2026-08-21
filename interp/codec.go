@@ -313,9 +313,17 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 			return err
 		}
 		at := types.NewArrayType(elem.vm)
+		// A Go slice is a reference: its elements live somewhere the caller
+		// still shares, so a copy drops every write. A Go array is a value and
+		// copies faithfully; only a pointer to one asks for a view.
 		p.vm = at
+		p.host = t.Kind() == reflect.Slice
 		p.value = marshalArray(t, at, elem)
-		p.set = unmarshalArray(t, elem)
+		p.view = marshalHostArray(t, at, elem, p.value)
+		if p.host {
+			p.value = p.view
+		}
+		p.set = unmarshalHost(t, unmarshalArray(t, elem))
 		return nil
 
 	case reflect.Map:
@@ -328,9 +336,19 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 			return fmt.Errorf("map value type: %w", err)
 		}
 		mt := types.NewMapType(key.vm, elem.vm)
+		// A Go map is a reference like a slice, so it is always a view. A
+		// dynamic key carries no Go type of its own, so it decodes to the one
+		// unmarshalKey names for its VM key kind; every other key type decodes
+		// as itself.
+		index := key.set
+		if t.Key().Kind() == reflect.Interface && t.Key().NumMethod() == 0 {
+			index = unmarshalKey
+		}
 		p.vm = mt
-		p.value = marshalMap(t, mt, key, elem)
-		p.set = unmarshalMap(t, key, elem)
+		p.host = true
+		p.view = marshalHostMap(t, mt, index, elem, marshalMap(t, mt, key, elem))
+		p.value = p.view
+		p.set = unmarshalHost(t, unmarshalMap(t, index, elem))
 		return nil
 
 	case reflect.Struct:

@@ -2211,6 +2211,14 @@ func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 		result := array.Elems[at]
 		i.retainBox(result)
 		return result
+	case *HostArray:
+		// A view converts on the way out instead of holding VM words, so a
+		// conversion that fails traps the way the threaded contract expects.
+		result, err := array.Element(i, at)
+		if err != nil {
+			panic(err)
+		}
+		return result
 	default:
 		panic(ErrTypeMismatch)
 	}
@@ -2257,6 +2265,10 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 		elem := array.Elems[at]
 		array.Elems[at] = val
 		i.releaseBox(elem)
+	case *HostArray:
+		if err := array.SetElement(i, at, val); err != nil {
+			panic(err)
+		}
 	default:
 		panic(ErrTypeMismatch)
 	}
