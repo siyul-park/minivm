@@ -8776,6 +8776,11 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 	for idx := range 16 {
 		entries[string(rune('a'+idx))] = int32(idx)
 	}
+	// Keys past the boxed payload, the shape a slot round trip allocates for.
+	counters := make(map[int64]int32, 16)
+	for idx := range 16 {
+		counters[1<<50+int64(idx)] = int32(idx)
+	}
 
 	for _, tt := range []struct {
 		name  string
@@ -8785,6 +8790,7 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}},
 		{name: "slice", value: elems},
 		{name: "map", value: entries},
+		{name: "map i64 key", value: counters},
 		{name: "methods", value: &marshalBenchMethods{Count: 7}},
 	} {
 		b.Run(tt.name, func(b *testing.B) {

@@ -284,11 +284,11 @@ Rules:
 - use a concrete Go destination type to recover Go-native values
 - bytecode can recover dynamic type with `REF_TEST` and `REF_CAST`
 
-A map declared with a primitive or `string` key type becomes a `*TypedMap[K]` indexed by value. Any other key type — `interface{}`, a named interface, a struct, an array, a pointer — produces a generic `*Map`.
+A map declared with a primitive or `string` key type becomes a `*TypedMap[K]` indexed by value. A pointer key follows the type it points at, so `map[*int32]V` is a `*TypedMap[int32]` keyed by the pointed-to value, and a nil pointer key fails with `ErrTypeMismatch` because it has no such value. Any other key type — `interface{}`, a named interface, a struct, an array, a pointer to one of those — produces a generic `*Map`.
 
-Either way a marshaled entry is indexed exactly as `MAP_GET` and `MAP_SET` index it, because conversion and the opcodes share `(*Interpreter).mapKey`: scalars by value, strings by content, every other reference by heap address. A guest lookup with an equal key finds the entry.
+Either way a marshaled entry is indexed exactly as `MAP_GET` and `MAP_SET` index it: a typed map stores the key as its Go value, a generic map goes through `(*Interpreter).mapKey`, and both agree — scalars by value, strings by content, every other reference by heap address. A guest lookup with an equal key finds the entry.
 
-A struct, array, or pointer key is therefore reachable only through the same reference, since the VM has no content equality for those. Prefer a scalar or string key, or build the map inside the VM.
+A struct or array key, or a pointer to one, is therefore reachable only through the same reference, since the VM has no content equality for those. Prefer a scalar or string key, or build the map inside the VM.
 
 ## Structs and Methods
 
