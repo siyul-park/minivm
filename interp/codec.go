@@ -46,8 +46,9 @@ type registry struct {
 // of vm, allocating a heap ref when the slot needs one. set is the reverse of
 // both, because a slot resolves to a value before it is written back.
 //
-// host marks a conversion whose value is a live view of the Go value rather than
-// a copy of it, which is what lets a pointer to it stay the caller's pointer.
+// view produces a live view of the Go value instead of a copy, and only a struct
+// has one. host reports that value is that view, so the conversion never copies
+// however it is reached.
 type conversion struct {
 	typ  reflect.Type
 	kind reflect.Kind
@@ -55,6 +56,7 @@ type conversion struct {
 	host bool
 
 	value func(*Encoder, unsafe.Pointer) (types.Value, error)
+	view  func(*Encoder, unsafe.Pointer) (types.Value, error)
 	box   func(*Encoder, unsafe.Pointer) (types.Boxed, error)
 	set   func(*Decoder, types.Value, unsafe.Pointer) error
 }
@@ -332,35 +334,36 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		return nil
 
 	case reflect.Struct:
-		// A copy of this struct would lose state no VM value carries -
-		// unexported fields have no slot, and a pointer receiver's mutation
-		// lands on the copy - so it is exposed as a live view instead.
-		p.host = reflect.PointerTo(t).NumMethod() > 0
-		for idx := 0; idx < t.NumField() && !p.host; idx++ {
-			p.host = t.Field(idx).PkgPath != ""
-		}
-		vm, fields, err := r.layout(t, seen, p.host)
+		vm, fields, err := r.layout(t, seen)
 		if err != nil {
 			return err
 		}
-		p.vm = vm
-		if p.host {
-			p.value = marshalHostStruct(t, vm, fields)
-			p.set = unmarshalHost(t, unmarshalStruct(fields))
-			return nil
+		// Unexported fields have no slot, so no VM struct reproduces the value
+		// and the view is its only faithful form. Everything else copies: a
+		// struct handed over by value carries all of its state into the VM
+		// struct, and a method that mutates that copy is Go value semantics
+		// rather than a loss. Asking for a view is what a pointer means, and
+		// marshalPointer is where that is answered.
+		for idx := 0; idx < t.NumField() && !p.host; idx++ {
+			p.host = t.Field(idx).PkgPath != ""
 		}
+		p.vm = vm
+		p.view = marshalHostStruct(t, vm, fields)
 		p.value = marshalStruct(vm, fields)
-		p.set = unmarshalStruct(fields)
+		if p.host {
+			p.value = p.view
+		}
+		p.set = unmarshalHost(t, unmarshalStruct(fields))
 		return nil
 	}
 	return fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, t)
 }
 
 // layout compiles a Go struct into a VM struct type: exported data fields in
-// declaration order. A field whose type has no VM representation is skipped,
-// and a host layout also skips a field holding a VM value, because a host value
-// never owns a VM reference.
-func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion, host bool) (*types.StructType, []field, error) {
+// declaration order. A field whose type has no VM representation is skipped.
+// One layout serves both forms of the struct, because a value and a pointer to
+// it must report the same VM type.
+func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion) (*types.StructType, []field, error) {
 	var slots []types.StructField
 	var fields []field
 
@@ -368,13 +371,6 @@ func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion, hos
 		f := t.Field(idx)
 		if f.PkgPath != "" {
 			continue
-		}
-		if host {
-			// A host value never owns a VM reference, so a Go field that holds
-			// one stays out of the layout.
-			if _, ok := natives[f.Type]; ok || f.Type.Implements(typeValue) {
-				continue
-			}
 		}
 		child, err := r.compile(f.Type, seen)
 		if err != nil {

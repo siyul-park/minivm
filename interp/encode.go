@@ -340,10 +340,31 @@ func marshalDynamic(t reflect.Type) (
 }
 
 // marshalPointer follows a pointer, refusing one that reaches itself.
+//
+// A pointer to a struct is the caller asking for a reference, so it produces a
+// live view rather than a copy: copying would drop exactly the aliasing that
+// made the caller pass a pointer. A view is shallow, so it cannot reach itself
+// and needs no cycle check.
 func marshalPointer(elem *conversion) (
 	func(*Encoder, unsafe.Pointer) (types.Value, error),
 	func(*Encoder, unsafe.Pointer) (types.Boxed, error),
 ) {
+	if elem.view != nil {
+		value := func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+			target := *(*unsafe.Pointer)(p)
+			if target == nil {
+				return types.Null, nil
+			}
+			return elem.view(e, target)
+		}
+		return value, func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			val, err := value(e, p)
+			if err != nil {
+				return 0, err
+			}
+			return e.ref(val)
+		}
+	}
 	value := func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		target := *(*unsafe.Pointer)(p)
 		if target == nil {

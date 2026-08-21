@@ -84,6 +84,12 @@ type codecHeld struct {
 
 func (h *codecHeld) Tag() int32 { return h.tag }
 
+// codecCounted is fully exported and still carries a pointer method, the case
+// that separates "has methods" from "a copy would lose something".
+type codecCounted struct{ Count int32 }
+
+func (c *codecCounted) Bump() int32 { c.Count++; return c.Count }
+
 type codecFirst struct{ Shared codecShared }
 
 type codecSecond struct{ Shared codecShared }
@@ -393,7 +399,31 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, types.I64(src.UnixNano()), value)
 	})
 
-	t.Run("a struct with methods becomes a live view", func(t *testing.T) {
+	// The form a struct takes follows one rule: use the VM type system whenever
+	// a copy reproduces the whole value, and a live view only when it cannot.
+	for _, tt := range []struct {
+		name  string
+		value any
+		want  types.Value
+	}{
+		{name: "a value copies", value: codecShared{}, want: &types.Struct{}},
+		{name: "a value with methods still copies", value: codecCounted{}, want: &types.Struct{}},
+		{name: "a pointer is a view", value: &codecShared{}, want: &interp.HostStruct{}},
+		{name: "a pointer with methods is a view", value: &codecCounted{}, want: &interp.HostStruct{}},
+		{name: "an unexported field forces a view", value: marshalHostFields{}, want: &interp.HostStruct{}},
+	} {
+		t.Run("struct form: "+tt.name, func(t *testing.T) {
+			i := interp.New(program.New(nil))
+			r := interp.NewRegistry()
+			defer i.Close()
+
+			value, err := r.Marshal(i, tt.value)
+			require.NoError(t, err)
+			require.IsType(t, tt.want, value)
+		})
+	}
+
+	t.Run("a struct with unexported state becomes a live view", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
@@ -592,20 +622,28 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrTypeMismatch)
 	})
 
-	t.Run("a host layout leaves out a field holding a VM value", func(t *testing.T) {
+	t.Run("a host view reads a field holding a VM value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
 		value, err := r.Marshal(i, &codecHeld{Count: 7, Held: types.I32(1)})
 		require.NoError(t, err)
-		typ, ok := value.(*interp.HostStruct).Type().(*types.StructType)
-		require.True(t, ok)
+		host := value.(*interp.HostStruct)
 
-		// A host value never owns a VM reference, so Held has no slot even
-		// though it is exported and would otherwise convert.
-		require.Len(t, typ.Fields, 1)
-		require.Equal(t, "Count", typ.Fields[0].Name)
+		// One layout serves the value and the pointer, so a VM-valued field
+		// keeps its slot. The view hands the reference out to the caller and
+		// keeps none of its own.
+		typ, ok := host.Type().(*types.StructType)
+		require.True(t, ok)
+		require.Len(t, typ.Fields, 2)
+		require.Equal(t, "Held", typ.Fields[1].Name)
+
+		got, err := host.Field(i, 1)
+		require.NoError(t, err)
+		held, err := i.Load(got.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), held)
 	})
 
 	t.Run("a registered marshaler wins over the host rule", func(t *testing.T) {
@@ -698,10 +736,14 @@ func TestRegistry_Marshal(t *testing.T) {
 		r := interp.NewRegistry()
 		defer i.Close()
 
+		// A struct behind a pointer is a view, and a view is shallow, so a
+		// self-referential one converts instead of recursing: the guest walks
+		// it a field at a time, and each step produces the next view.
 		node := &struct{ Next any }{}
 		node.Next = node
-		_, err := r.Marshal(i, node)
-		require.ErrorIs(t, err, interp.ErrMarshalCycle)
+		value, err := r.Marshal(i, node)
+		require.NoError(t, err)
+		require.IsType(t, &interp.HostStruct{}, value)
 
 		// A map or slice reaches itself without an intervening pointer, so the
 		// walk has to refuse those containers too rather than recurse forever.
