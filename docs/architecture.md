@@ -145,6 +145,7 @@ Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple go
 - Values that contain refs must implement `types.Traceable`.
 - Large `i64` values may spill to the heap while preserving bytecode semantics.
 - Strings carry no identity invariant: every comparison and every map keyed by a string compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
+- A host value never owns a VM reference. A Go field holding a `types.Value` stays out of a `HostStruct` layout, and a field write copies what the VM value holds rather than storing the slot, so a host value implements no `types.Traceable` and reclaims nothing.
 
 See `memory-model.md` and `value-representation.md` for the detailed rules.
 
@@ -199,7 +200,7 @@ See `pass-system.md` for optimizer levels and rewrite rules.
 | Architecture support | Keep ARM64 stable; add other backends only with clear user and benchmark value |
 | Benchmarks | Keep benchmark claims tied to `docs/benchmarks.md` |
 | Program format | Keep `instr` and `program` compact and Go-native |
-| Host integration | Keep `HostFunction`, `Marshal`, and `Unmarshal` explicit about ownership |
+| Host integration | Keep `HostFunction`, `HostStruct`, `Marshal`, and `Unmarshal` explicit about ownership |
 | Resource policy | Keep context, fuel, hooks, stack, heap, frame limits, and host policy easy to reason about |
 
 ## Maintenance Notes

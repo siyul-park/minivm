@@ -4334,6 +4334,7 @@ func structSet() jen.Code {
 						jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 						jen.List(jen.Id("s").Dot("Data").Index(jen.Id("idx"))).Op("=").List(jen.Id("uint64").Call(jen.Id("val")))),
 					jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
+				jen.Case(jen.Op("*").Add(jen.Id("HostStruct"))).Block(jen.If(jen.List(jen.Id("err")).Op(":=").List(jen.Id("s").Dot("SetField").Call(jen.Id("i"), jen.Id("idx"), jen.Id("val"))), jen.Id("err").Op("!=").Add(jen.Id("nil"))).Block(jen.Id("panic").Call(jen.Id("err")))),
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
 			jen.Id("i").Dot("release").Call(jen.Id("addr")),
 			jen.List(jen.Id("i").Dot("sp")).Op("-=").List(jen.Lit(3)),

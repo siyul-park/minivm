@@ -21,8 +21,13 @@ type marshalCustom int32
 type marshalContextKey byte
 
 type marshalHostFields struct {
-	Count int32
+	Count  int32
+	hidden int32
 }
+
+func (v *marshalHostFields) mark(n int32) { v.hidden = n }
+
+func (v marshalHostFields) marked() int32 { return v.hidden }
 
 func (v *marshalHostFields) Bump(n int32) int32 {
 	v.Count += n
@@ -68,6 +73,16 @@ type codecPair struct {
 type codecWide int32
 
 type codecShared struct{ A, B int32 }
+
+// codecHeld holds a VM value next to an exported field, so a host layout has to
+// leave the VM-valued field out rather than own the reference it names.
+type codecHeld struct {
+	Count int32
+	Held  types.Value
+	tag   int32
+}
+
+func (h *codecHeld) Tag() int32 { return h.tag }
 
 type codecFirst struct{ Shared codecShared }
 
@@ -227,18 +242,22 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, ctx, got)
 	})
 
-	t.Run("bound method receives active context", func(t *testing.T) {
+	t.Run("a method receives the active context", func(t *testing.T) {
 		setup := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer setup.Close()
-		value, err := r.Marshal(setup, marshalHostFields{})
+		obj, err := r.Marshal(setup, marshalHostFields{})
 		require.NoError(t, err)
-		host := value.(*types.Struct)
-		method := host.Field(host.Typ.FieldIndex("Context"))
-		fn, err := setup.Load(method.Ref())
+		fn, err := r.Marshal(setup, (*marshalHostFields).Context)
 		require.NoError(t, err)
 
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
+		// The receiver is the first parameter, so guest code pushes the host
+		// value ahead of the function it calls.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn, obj))
 		i := interp.New(prog)
 		defer i.Close()
 		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
@@ -374,52 +393,57 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, types.I64(src.UnixNano()), value)
 	})
 
-	t.Run("struct with methods", func(t *testing.T) {
+	t.Run("a struct with methods becomes a live view", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
 		value, err := r.Marshal(i, marshalHostFields{Count: 7})
 		require.NoError(t, err)
-		host, ok := value.(*types.Struct)
+		host, ok := value.(*interp.HostStruct)
 		require.True(t, ok)
-		require.Equal(t, types.BoxI32(7), host.Field(host.Typ.FieldIndex("Count")))
 
-		bound := host.Field(host.Typ.FieldIndex("Context"))
-		require.Equal(t, types.KindRef, bound.Kind())
-		fn, err := i.Load(bound.Ref())
-		require.NoError(t, err)
-		require.IsType(t, &interp.HostFunction{}, fn)
+		// The VM type is the one a copy would have had, methods included in
+		// neither: a method is a function of its own, not a field.
+		typ, ok := host.Type().(*types.StructType)
+		require.True(t, ok)
+		require.Len(t, typ.Fields, 1)
+		require.Equal(t, "Count", typ.Fields[0].Name)
+		require.Equal(t, types.KindRef, host.Kind())
 	})
 
-	t.Run("methods bind to the caller's pointer", func(t *testing.T) {
+	t.Run("a method reached through a host value mutates the caller", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := &marshalHostFields{}
 
-		value, err := r.Marshal(i, src)
+		obj, err := r.Marshal(i, src)
 		require.NoError(t, err)
-		st := value.(*types.Struct)
-		bound, err := i.Load(st.Field(st.Typ.FieldIndex("Bump")).Ref())
+		fn, err := r.Marshal(i, (*marshalHostFields).Bump)
 		require.NoError(t, err)
-		_, err = bound.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxI32(2)})
+		recv, err := i.Alloc(obj)
+		require.NoError(t, err)
+
+		_, err = fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(recv), types.BoxI32(2)})
 		require.NoError(t, err)
 		require.Equal(t, int32(2), src.Count)
 	})
 
-	t.Run("a marshaled value binds methods to its own copy", func(t *testing.T) {
+	t.Run("a marshaled value views the conversion's copy", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := marshalHostFields{}
 
-		value, err := r.Marshal(i, src)
+		obj, err := r.Marshal(i, src)
 		require.NoError(t, err)
-		st := value.(*types.Struct)
-		bound, err := i.Load(st.Field(st.Typ.FieldIndex("Bump")).Ref())
+		fn, err := r.Marshal(i, (*marshalHostFields).Bump)
 		require.NoError(t, err)
-		_, err = bound.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxI32(2)})
+		recv, err := i.Alloc(obj)
+		require.NoError(t, err)
+
+		_, err = fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(recv), types.BoxI32(2)})
 		require.NoError(t, err)
 		require.Zero(t, src.Count)
 	})
@@ -566,6 +590,54 @@ func TestRegistry_Marshal(t *testing.T) {
 
 		_, err := r.Marshal(i, map[*int32]int32{nil: 7})
 		require.ErrorIs(t, err, interp.ErrTypeMismatch)
+	})
+
+	t.Run("a host layout leaves out a field holding a VM value", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		value, err := r.Marshal(i, &codecHeld{Count: 7, Held: types.I32(1)})
+		require.NoError(t, err)
+		typ, ok := value.(*interp.HostStruct).Type().(*types.StructType)
+		require.True(t, ok)
+
+		// A host value never owns a VM reference, so Held has no slot even
+		// though it is exported and would otherwise convert.
+		require.Len(t, typ.Fields, 1)
+		require.Equal(t, "Count", typ.Fields[0].Name)
+	})
+
+	t.Run("a registered marshaler wins over the host rule", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[codecHeld](), types.TypeI32,
+			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				return types.I32((*codecHeld)(p).Count), nil
+			})))
+		defer i.Close()
+
+		value, err := r.Marshal(i, codecHeld{Count: 7})
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), value)
+	})
+
+	t.Run("a method runs against a struct guest code built", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		fn, err := r.Marshal(i, (*marshalHostFields).Bump)
+		require.NoError(t, err)
+
+		// Not a host value: the receiver decodes into a fresh Go struct, so the
+		// call still runs and the mutation stays on that copy.
+		typ := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("Count")))
+		recv, err := i.Alloc(types.NewStruct(typ, types.BoxI32(5)))
+		require.NoError(t, err)
+
+		got, err := fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(recv), types.BoxI32(2)})
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI32(7)}, got)
 	})
 
 	t.Run("a marshaled alias keeps its target alive", func(t *testing.T) {
@@ -802,12 +874,15 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, context.Background(), got)
 	})
 
-	t.Run("VM function non-first context", func(t *testing.T) {
+	t.Run("VM function context in any position is host-only", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
+		// The VM signature carries the i32 alone: a context.Context stays on
+		// the host side wherever it sits, so a method expression whose receiver
+		// comes first is no different from a plain leading context.
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32},
+			Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
 
 		var call func(int32, context.Context) (int32, error)
@@ -924,16 +999,19 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, time.Unix(0, 123), dst)
 	})
 
-	t.Run("struct with methods round-trips exported fields", func(t *testing.T) {
+	t.Run("a host value round-trips unexported state", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		value, err := r.Marshal(i, marshalHostFields{Count: 7})
+		src := marshalHostFields{Count: 7}
+		src.mark(3)
+		value, err := r.Marshal(i, src)
 		require.NoError(t, err)
 		var dst marshalHostFields
 
 		require.NoError(t, r.Unmarshal(i, value, &dst))
-		require.Equal(t, marshalHostFields{Count: 7}, dst)
+		require.Equal(t, src, dst)
+		require.Equal(t, int32(3), dst.marked())
 	})
 
 	t.Run("invalid target", func(t *testing.T) {

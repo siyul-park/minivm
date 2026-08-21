@@ -106,6 +106,24 @@ func unmarshalValue(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) 
 	}
 }
 
+// unmarshalHost recovers the Go value a host value stands for, unexported state
+// included, and decodes structurally from any other VM value. Both halves
+// matter: a method reached through a host value mutates the caller's value,
+// while the same conversion applied to a struct guest code built still runs.
+func unmarshalHost(t reflect.Type, structural func(*Decoder, types.Value, unsafe.Pointer) error) func(*Decoder, types.Value, unsafe.Pointer) error {
+	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
+		value, err := d.registry.resolve(d.interp, val)
+		if err != nil {
+			return err
+		}
+		if src, ok := hosting(value, t); ok {
+			reflect.NewAt(t, p).Elem().Set(reflect.NewAt(t, src).Elem())
+			return nil
+		}
+		return structural(d, value, p)
+	}
+}
+
 // unmarshalPointer allocates the pointee and decodes into it, leaving a nil
 // pointer for a null value.
 func unmarshalPointer(elem *conversion) func(*Decoder, types.Value, unsafe.Pointer) error {
@@ -113,6 +131,19 @@ func unmarshalPointer(elem *conversion) func(*Decoder, types.Value, unsafe.Point
 		if types.IsNull(val) {
 			*(*unsafe.Pointer)(p) = nil
 			return nil
+		}
+		if elem.host {
+			value, err := d.registry.resolve(d.interp, val)
+			if err != nil {
+				return err
+			}
+			// A pointer to a host value is the address it views, not a copy of
+			// it. This is what makes a method expression mutate the value the
+			// caller marshaled rather than a decoded duplicate.
+			if target, ok := hosting(value, elem.typ); ok {
+				*(*unsafe.Pointer)(p) = target
+				return nil
+			}
 		}
 		out := reflect.New(elem.typ)
 		if err := elem.set(d, val, out.UnsafePointer()); err != nil {
@@ -126,7 +157,6 @@ func unmarshalPointer(elem *conversion) func(*Decoder, types.Value, unsafe.Point
 // unmarshalFunc wraps a VM function as a Go function that marshals arguments,
 // runs the VM function on the same interpreter, then decodes the results.
 func unmarshalFunc(t reflect.Type, typ *types.FunctionType) func(*Decoder, types.Value, unsafe.Pointer) error {
-	ctxParam := t.NumIn() > 0 && t.In(0) == typeContext
 	failing := t.NumOut() > 0 && t.Out(t.NumOut()-1).Implements(typeError)
 
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
@@ -149,18 +179,16 @@ func unmarshalFunc(t reflect.Type, typ *types.FunctionType) func(*Decoder, types
 			}
 
 			ctx := context.Background()
-			offset := 0
-			if ctxParam {
-				if caller, _ := in[0].Interface().(context.Context); caller != nil {
-					ctx = caller
-				}
-				offset = 1
-			}
-
 			enc := &Encoder{interp: d.interp, registry: registry}
-			params := make([]types.Boxed, len(in)-offset)
-			for idx := range params {
-				arg := in[idx+offset]
+			params := make([]types.Boxed, 0, len(typ.Params))
+			for idx := range in {
+				arg := in[idx]
+				if t.In(idx) == typeContext {
+					if caller, _ := arg.Interface().(context.Context); caller != nil {
+						ctx = caller
+					}
+					continue
+				}
 				holder := reflect.New(arg.Type())
 				holder.Elem().Set(arg)
 				c, err := registry.conversion(arg.Type())
@@ -169,13 +197,13 @@ func unmarshalFunc(t reflect.Type, typ *types.FunctionType) func(*Decoder, types
 				}
 				value, err := c.value(enc, holder.UnsafePointer())
 				if err != nil {
-					return fail(fmt.Errorf("function param %d: %w", idx, err))
+					return fail(fmt.Errorf("function param %d: %w", len(params), err))
 				}
-				boxed, err := enc.boxAs(value, typ.Params[idx])
+				boxed, err := enc.boxAs(value, typ.Params[len(params)])
 				if err != nil {
-					return fail(fmt.Errorf("function param %d: %w", idx, err))
+					return fail(fmt.Errorf("function param %d: %w", len(params), err))
 				}
-				params[idx] = boxed
+				params = append(params, boxed)
 			}
 
 			returns, err := d.interp.invoke(ctx, val, params)

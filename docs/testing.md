@@ -65,7 +65,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 44 | 44 | 0 | 0 |
-| `interp` | 59 | 59 | 0 | 0 |
+| `interp` | 64 | 64 | 0 | 0 |
 | `optimize` | 4 | 4 | 0 | 0 |
 | `pass` | 9 | 9 | 0 | 0 |
 | `prof` | 22 | 22 | 0 | 0 |
@@ -354,6 +354,11 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/host.go` | `TestHostFunction_Kind` | ✅ |
 | `interp/host.go` | `TestHostFunction_String` | ✅ |
 | `interp/host.go` | `TestHostFunction_Type` | ✅ |
+| `interp/host.go` | `TestHostStruct_Field` | ✅ |
+| `interp/host.go` | `TestHostStruct_Kind` | ✅ |
+| `interp/host.go` | `TestHostStruct_SetField` | ✅ |
+| `interp/host.go` | `TestHostStruct_String` | ✅ |
+| `interp/host.go` | `TestHostStruct_Type` | ✅ |
 | `interp/host.go` | `TestNewHostFunction` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Alloc` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Close` | ✅ |
