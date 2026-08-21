@@ -215,8 +215,9 @@ The built-in codec compiles and caches one conversion per Go type. Compilation i
 | other `[]T` | `*Array` ref | generic fallback |
 | `map[K]V` with a primitive or `string` key | `*TypedMap[K]` ref | key type drives the concrete map; content-keyed |
 | other `map[K]V` | `*Map` ref | heap ref identity keys |
-| struct | `*Struct` ref | exported fields, then exported methods of `*T` |
-| defined scalar with methods | underlying scalar | keeps primitive fast path |
+| struct | `*Struct` ref | exported fields, in declaration order |
+| struct with methods or unexported fields | `*HostStruct` ref | live view of the Go struct |
+| defined scalar or string with methods | underlying scalar or `string` | keeps primitive fast path |
 | `*T` | `T` or `Null` | nil pointer becomes `Null` |
 | `func(...)` | `*HostFunction` ref | final `error` return is host-only |
 | `interface{}` / `any` | `ref` | dynamic value |
@@ -237,7 +238,7 @@ A Go function marshals to `*HostFunction`.
 
 A final `error` return is treated as a host error. If it returns non-nil, the VM call fails with that error.
 
-An exact first `context.Context` parameter is host-only and omitted from the VM function signature. When guest code calls the marshaled function, minivm passes the active `Interpreter.Context`; a nil active context is normalized to `context.Background()`. The same rule applies to exported host-object methods. A `context.Context` in any other position is converted as an ordinary VM argument.
+An exact `context.Context` parameter is host-only and omitted from the VM function signature, wherever it appears. When guest code calls the marshaled function, minivm passes the active `Interpreter.Context`; a nil active context is normalized to `context.Background()`. Position does not matter because a method expression carries its receiver first, and the context that follows it is no less host-only for that.
 
 ```go
 add := func(a, b int32) (int32, error) {
@@ -292,12 +293,17 @@ A struct or array key, or a pointer to one, is therefore reachable only through 
 
 ## Structs and Methods
 
-A Go struct marshals to a native `*types.Struct`: exported data fields become
-real slots in declaration order, followed by one slot per exported method of
-the pointer receiver, each holding a bound `*HostFunction`. Fields with no VM
-representation are skipped, and a method whose name a field already took is
-dropped. A pointer to a defined scalar with methods reserves field `0` as
-`Value`.
+A Go struct whose state a copy can reproduce marshals to a native
+`*types.Struct`: exported data fields become real slots in declaration order,
+and a field with no VM representation is skipped.
+
+A struct carrying **unexported fields**, or one with any method on `*T`,
+marshals to a `*interp.HostStruct` instead — a live view of the Go struct rather
+than a snapshot of it. A copy would lose that state: unexported fields have no
+slot, and a mutation a pointer receiver makes lands on the copy. The view
+reports the same VM struct type a copy would have reported, so guest code reads
+and writes it with `STRUCT_GET` and `STRUCT_SET` exactly as it reads a native
+struct, and those reads and writes address the Go memory in place.
 
 ```go
 type Counter struct {
@@ -305,29 +311,35 @@ type Counter struct {
     count int
 }
 
-func (c *Counter) Bump() int32 { c.count++; return int32(c.count) }
+func (c *Counter) Bump(n int32) int32 { c.count += int(n); return int32(c.count) }
 
-// vm.Marshal(&Counter{Name: "a"}) yields *types.Struct{Name, Bump}
+c := &Counter{Name: "a"}
+obj, _ := vm.Marshal(c)                 // *interp.HostStruct{Name}
+bump, _ := vm.Marshal((*Counter).Bump)  // *interp.HostFunction
 ```
 
-Because the result is a native struct, `STRUCT_GET` and `STRUCT_SET` read and
-write it directly and the fused and JIT paths apply, with no separate host
-representation to fall back from.
+Methods are not fields. A method is an ordinary Go function, so a **method
+expression** marshals through the same path any `func` does, with the receiver
+as its first parameter. Called with the host value, it mutates the value the
+caller marshaled; called with any other VM value, the receiver decodes into a
+fresh Go value and the call still runs, with the mutation staying on that copy.
+A **method value** — `c.Bump`, already bound — marshals just as well and takes
+no receiver parameter.
 
-Unexported state stays reachable without being visible: each bound method
-closes over the Go receiver, so a method that reads or mutates a private field
-behaves exactly as it does in Go. When the marshaled value is a pointer,
-methods bind to the caller's pointer and Go-side state stays live and
-observable in Go; when it is a value, they bind to the copy the conversion
-allocates.
+A host view never owns a VM reference, so a Go field whose type is a
+`types.Value` stays out of the layout. Writing a field copies what the VM value
+holds into the Go field rather than storing the slot, so a reference the write
+carried is released rather than retained.
 
-VM writes to a data slot change the VM struct only. They do not reach the Go
-value, and a bound method does not observe them. `Unmarshal` recovers exported
-fields; unexported state is not recoverable from the VM value.
+When the marshaled value is a pointer, the view addresses the caller's value and
+Go-side state stays observable in Go; when it is a value, it addresses the copy
+the conversion allocates. `Unmarshal` recovers the whole Go value from a host
+view, unexported state included, and falls back to the structural decode for any
+other VM value.
 
-Binding allocates one heap reference per method. If the heap is exhausted part
-way through, the references already bound are released and `Marshal` returns
-`ErrHeapExhausted`.
+An `interp.Interpreter` is passed into each field access rather than captured, so
+a host view reached from a program constant is safe to share across pooled
+interpreters.
 
 ## Unmarshal
 

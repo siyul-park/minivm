@@ -45,10 +45,14 @@ type registry struct {
 // form Marshal returns and an interface slot stores, while box produces a slot
 // of vm, allocating a heap ref when the slot needs one. set is the reverse of
 // both, because a slot resolves to a value before it is written back.
+//
+// host marks a conversion whose value is a live view of the Go value rather than
+// a copy of it, which is what lets a pointer to it stay the caller's pointer.
 type conversion struct {
 	typ  reflect.Type
 	kind reflect.Kind
 	vm   types.Type
+	host bool
 
 	value func(*Encoder, unsafe.Pointer) (types.Value, error)
 	box   func(*Encoder, unsafe.Pointer) (types.Boxed, error)
@@ -60,13 +64,6 @@ type field struct {
 	name       string
 	offset     uintptr
 	conversion *conversion
-}
-
-// method binds one exported method of the receiver type as a VM function field.
-type method struct {
-	name  string
-	index int
-	typ   *types.FunctionType
 }
 
 var (
@@ -299,7 +296,7 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		return nil
 
 	case reflect.Func:
-		fn, err := r.function(t, 0, seen)
+		fn, err := r.function(t, seen)
 		if err != nil {
 			return err
 		}
@@ -313,8 +310,9 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		if err != nil {
 			return err
 		}
-		p.vm = types.NewArrayType(elem.vm)
-		p.value = marshalArray(t, p.vm.(*types.ArrayType), elem)
+		at := types.NewArrayType(elem.vm)
+		p.vm = at
+		p.value = marshalArray(t, at, elem)
 		p.set = unmarshalArray(t, elem)
 		return nil
 
@@ -334,12 +332,24 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		return nil
 
 	case reflect.Struct:
-		vm, fields, methods, err := r.layout(t, seen)
+		// A copy of this struct would lose state no VM value carries -
+		// unexported fields have no slot, and a pointer receiver's mutation
+		// lands on the copy - so it is exposed as a live view instead.
+		p.host = reflect.PointerTo(t).NumMethod() > 0
+		for idx := 0; idx < t.NumField() && !p.host; idx++ {
+			p.host = t.Field(idx).PkgPath != ""
+		}
+		vm, fields, err := r.layout(t, seen, p.host)
 		if err != nil {
 			return err
 		}
 		p.vm = vm
-		p.value = marshalStruct(t, vm, fields, methods)
+		if p.host {
+			p.value = marshalHostStruct(t, vm, fields)
+			p.set = unmarshalHost(t, unmarshalStruct(fields))
+			return nil
+		}
+		p.value = marshalStruct(vm, fields)
 		p.set = unmarshalStruct(fields)
 		return nil
 	}
@@ -347,72 +357,51 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 }
 
 // layout compiles a Go struct into a VM struct type: exported data fields in
-// declaration order, then the exported methods of the pointer receiver. A field
-// whose type has no VM representation is skipped, and a method name already
-// taken by a field is dropped.
-func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion) (*types.StructType, []field, []method, error) {
+// declaration order. A field whose type has no VM representation is skipped,
+// and a host layout also skips a field holding a VM value, because a host value
+// never owns a VM reference.
+func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion, host bool) (*types.StructType, []field, error) {
 	var slots []types.StructField
 	var fields []field
-	names := make(map[string]bool)
 
 	for idx := range t.NumField() {
 		f := t.Field(idx)
 		if f.PkgPath != "" {
 			continue
 		}
+		if host {
+			// A host value never owns a VM reference, so a Go field that holds
+			// one stays out of the layout.
+			if _, ok := natives[f.Type]; ok || f.Type.Implements(typeValue) {
+				continue
+			}
+		}
 		child, err := r.compile(f.Type, seen)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("struct field %s: %w", f.Name, err)
+			return nil, nil, fmt.Errorf("struct field %s: %w", f.Name, err)
 		}
 		slots = append(slots, types.NewStructField(child.vm, types.FieldWithName(f.Name)))
 		fields = append(fields, field{name: f.Name, offset: f.Offset, conversion: child})
-		names[f.Name] = true
 	}
-
-	methods, err := r.methods(t, names, seen)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	for _, m := range methods {
-		slots = append(slots, types.NewStructField(m.typ, types.FieldWithName(m.name)))
-	}
-	return types.NewStructType(slots...), fields, methods, nil
+	return types.NewStructType(slots...), fields, nil
 }
 
-// methods compiles the exported methods of *t, skipping any name already used
-// and any signature with no VM mapping.
-func (r *Registry) methods(t reflect.Type, names map[string]bool, seen map[reflect.Type]*conversion) ([]method, error) {
-	ptr := reflect.PointerTo(t)
-	var out []method
-	for idx := range ptr.NumMethod() {
-		m := ptr.Method(idx)
-		if !m.IsExported() || names[m.Name] {
+// function compiles a Go function signature into a VM function type. An exact
+// context.Context parameter and a trailing error return stay on the host side,
+// so they do not appear in the VM signature. Position does not matter for the
+// context: a method expression carries its receiver first, and the context that
+// follows is no less host-only for it.
+func (r *Registry) function(t reflect.Type, seen map[reflect.Type]*conversion) (*types.FunctionType, error) {
+	var params []types.Type
+	for idx := range t.NumIn() {
+		if t.In(idx) == typeContext {
 			continue
 		}
-		fn, err := r.function(m.Func.Type(), 1, seen)
-		if err != nil {
-			return nil, fmt.Errorf("method %s: %w", m.Name, err)
-		}
-		out = append(out, method{name: m.Name, index: idx, typ: fn})
-		names[m.Name] = true
-	}
-	return out, nil
-}
-
-// function compiles a Go function signature into a VM function type, skipping
-// the first skip parameters, an exact leading context.Context, and a trailing
-// error return, all of which stay on the host side.
-func (r *Registry) function(t reflect.Type, skip int, seen map[reflect.Type]*conversion) (*types.FunctionType, error) {
-	if skip < t.NumIn() && t.In(skip) == typeContext {
-		skip++
-	}
-	params := make([]types.Type, t.NumIn()-skip)
-	for idx := range params {
-		p, err := r.compile(t.In(idx+skip), seen)
+		p, err := r.compile(t.In(idx), seen)
 		if err != nil {
 			return nil, fmt.Errorf("function param %d: %w", idx, err)
 		}
-		params[idx] = p.vm
+		params = append(params, p.vm)
 	}
 	outs := t.NumOut()
 	if outs > 0 && t.Out(outs-1).Implements(typeError) {

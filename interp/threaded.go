@@ -4440,6 +4440,10 @@ var (
 					default:
 						panic(ErrTypeMismatch)
 					}
+				case *HostStruct:
+					if err := s.SetField(i, idx, val); err != nil {
+						panic(err)
+					}
 				default:
 					panic(ErrTypeMismatch)
 				}

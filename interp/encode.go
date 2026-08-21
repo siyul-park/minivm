@@ -214,37 +214,38 @@ func (e *Encoder) boxI64(n int64) (types.Boxed, error) {
 func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction {
 	registry := e.registry
 	sig := fn.Type()
-	ctxParam := sig.NumIn() > 0 && sig.In(0) == typeContext
 
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 		if len(params) != len(typ.Params) {
 			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), len(typ.Params))
 		}
 		in := make([]reflect.Value, sig.NumIn())
-		offset := 0
-		if ctxParam {
-			ctx := i.Context()
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			in[0] = reflect.ValueOf(ctx)
-			offset = 1
-		}
 		dec := &Decoder{interp: i, registry: registry}
-		for idx := range params {
-			arg := reflect.New(sig.In(idx + offset))
-			value, err := registry.resolve(i, params[idx])
-			if err != nil {
-				return nil, fmt.Errorf("function param %d: %w", idx, err)
+		at := 0
+		for idx := range in {
+			param := sig.In(idx)
+			if param == typeContext {
+				ctx := i.Context()
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				in[idx] = reflect.ValueOf(ctx)
+				continue
 			}
-			c, err := registry.conversion(sig.In(idx + offset))
+			arg := reflect.New(param)
+			value, err := registry.resolve(i, params[at])
+			if err != nil {
+				return nil, fmt.Errorf("function param %d: %w", at, err)
+			}
+			c, err := registry.conversion(param)
 			if err != nil {
 				return nil, err
 			}
 			if err := c.set(dec, value, arg.UnsafePointer()); err != nil {
-				return nil, fmt.Errorf("function param %d: %w", idx, err)
+				return nil, fmt.Errorf("function param %d: %w", at, err)
 			}
-			in[idx+offset] = arg.Elem()
+			in[idx] = arg.Elem()
+			at++
 		}
 
 		out := fn.Call(in)
@@ -378,9 +379,8 @@ func marshalFunc(t reflect.Type, typ *types.FunctionType) func(*Encoder, unsafe.
 	}
 }
 
-// marshalStruct writes exported fields into a native VM struct, then binds the
-// exported methods of the pointer receiver into the trailing function slots.
-func marshalStruct(t reflect.Type, vm *types.StructType, fields []field, methods []method) func(*Encoder, unsafe.Pointer) (types.Value, error) {
+// marshalStruct writes exported fields into a native VM struct.
+func marshalStruct(vm *types.StructType, fields []field) func(*Encoder, unsafe.Pointer) (types.Value, error) {
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		out := types.NewStruct(vm)
 		for idx, f := range fields {
@@ -394,20 +394,17 @@ func marshalStruct(t reflect.Type, vm *types.StructType, fields []field, methods
 				out.SetField(idx, boxed)
 			}
 		}
-		if len(methods) == 0 {
-			return out, nil
-		}
-
-		recv := reflect.NewAt(t, p)
-		for idx, m := range methods {
-			slot := len(fields) + idx
-			bound, err := e.alloc(e.wrap(recv.Method(m.index), m.typ))
-			if err != nil {
-				return nil, fmt.Errorf("bind method %s: %w", m.name, err)
-			}
-			out.SetField(slot, bound)
-		}
 		return out, nil
+	}
+}
+
+// marshalHostStruct exposes the Go struct at p as a live view instead of copying
+// it. The view keeps p after the call returns, which is what makes it live: an
+// unsafe.Pointer is pointer-shaped to the GC, so the Go struct stays alive for
+// as long as the VM holds the view.
+func marshalHostStruct(t reflect.Type, vm *types.StructType, fields []field) func(*Encoder, unsafe.Pointer) (types.Value, error) {
+	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+		return &HostStruct{typ: vm, fields: fields, registry: e.registry, rtyp: t, ptr: p}, nil
 	}
 }
 
@@ -526,6 +523,11 @@ func typedArray[T int8 | int32 | int64 | float32 | float64 | bool](
 // chosen once at compile time.
 func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) func(*Encoder, unsafe.Pointer) (types.Value, error) {
 	write := mapWriter(mt, key)
+	// A hosted entry keeps the address it was marshaled from, so it needs
+	// storage of its own rather than the scratch every other entry shares. Go
+	// map memory is not addressable, so such a view stands for a copy either
+	// way; what matters is that two entries are not the same copy.
+	shared := !key.host && !elem.host
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		if target := *(*unsafe.Pointer)(p); target != nil {
 			if !e.enter(target) {
@@ -537,6 +539,9 @@ func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) func(*
 		out := types.NewMapForType(mt, rv.Len())
 		entryKey, entryValue := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
 		for iter := rv.MapRange(); iter.Next(); {
+			if !shared {
+				entryKey, entryValue = reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
+			}
 			entryKey.SetIterKey(iter)
 			entryValue.SetIterValue(iter)
 			value, err := elem.box(e, entryValue.Addr().UnsafePointer())

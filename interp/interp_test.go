@@ -2629,6 +2629,49 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("parity/host struct field write reaches the Go value", func(t *testing.T) {
+		type counter struct {
+			Count  int32
+			hidden int32
+		}
+		bump := func(c *counter) int32 { c.hidden++; return c.Count }
+
+		runHost := func(opts ...func(*option)) (types.Value, int32) {
+			setup := New(program.New(nil))
+			defer setup.Close()
+			src := &counter{Count: 7}
+			host, err := NewRegistry().Marshal(setup, src)
+			require.NoError(t, err)
+
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.STRUCT_SET),
+				instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			}, program.WithConstants(host))
+			i := New(prog, opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			// The Go value carries the write, so a method reading it agrees
+			// with what the guest just stored.
+			return value, bump(src)
+		}
+
+		want, seen := runHost(WithTick(1), WithThreshold(-1))
+		require.Equal(t, types.I32(99), want)
+		require.Equal(t, int32(99), seen)
+		got, seen := runHost(WithThreshold(-1))
+		require.Equal(t, want, got)
+		require.Equal(t, int32(99), seen)
+		if runtime.GOARCH == "arm64" {
+			got, seen = runHost(WithThreshold(0))
+			require.Equal(t, want, got)
+			require.Equal(t, int32(99), seen)
+		}
+	})
+
 	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),

@@ -66,6 +66,13 @@ type Interpreter struct {
 	arrays  pool[*types.Array]
 	structs pool[*types.Struct]
 
+	// enc and dec are the scratch a host value converts through. A conversion
+	// takes a pointer, so building one per field access would allocate on every
+	// read; the interpreter executing the access owns it instead, which also
+	// keeps a host value shared by pooled interpreters off a single encoder.
+	enc Encoder
+	dec Decoder
+
 	// tail is the append-only byte buffer the most recent string.concat
 	// published from. A join whose left operand ends exactly where tail ends
 	// extends it and publishes a new ref over the longer prefix; bytes below any
@@ -930,7 +937,7 @@ func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
 		val = loaded
 	}
 	switch val.(type) {
-	case *types.Function, *types.Closure:
+	case *types.Function, *types.Closure, *HostFunction:
 		return val, true
 	default:
 		return nil, false
@@ -2256,37 +2263,48 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 }
 
 // structField reads the field at index at off the struct bound to heap address
-// addr. It is the generic counterpart to the specialized reads struct.get
+// addr, covering a native *types.Struct and a *HostStruct alike. It is the
+// generic counterpart to the specialized reads struct.get
 // fusion emits for a declared *types.StructType slot: the unfused STRUCT_GET
 // handler calls it unconditionally, and a fused handler falls back to it when
 // the runtime value does not match the slot it specialized for. A KindRef
 // field is retained. structField does not release addr itself, for the same
 // reason arrayGet does not.
 func (i *Interpreter) structField(addr, at int) types.Boxed {
-	value, ok := i.heap[addr].(*types.Struct)
-	if !ok {
-		panic(ErrTypeMismatch)
-	}
-	if at < 0 || at >= len(value.Typ.Fields) {
-		panic(ErrSegmentationFault)
-	}
-	data := value.Data[at]
-	switch value.Typ.Fields[at].Kind {
-	case types.KindI1:
-		return types.BoxI1(data != 0)
-	case types.KindI8:
-		return types.BoxI8(int8(uint32(data)))
-	case types.KindI32:
-		return types.BoxI32(int32(uint32(data)))
-	case types.KindI64:
-		return i.boxI64(int64(data))
-	case types.KindF32:
-		return types.BoxF32(math.Float32frombits(uint32(data)))
-	case types.KindF64:
-		return types.BoxF64(math.Float64frombits(data))
-	case types.KindRef:
-		result := types.Boxed(data)
-		i.retainBox(result)
+	switch value := i.heap[addr].(type) {
+	case *types.Struct:
+		if at < 0 || at >= len(value.Typ.Fields) {
+			panic(ErrSegmentationFault)
+		}
+		data := value.Data[at]
+		switch value.Typ.Fields[at].Kind {
+		case types.KindI1:
+			return types.BoxI1(data != 0)
+		case types.KindI8:
+			return types.BoxI8(int8(uint32(data)))
+		case types.KindI32:
+			return types.BoxI32(int32(uint32(data)))
+		case types.KindI64:
+			return i.boxI64(int64(data))
+		case types.KindF32:
+			return types.BoxF32(math.Float32frombits(uint32(data)))
+		case types.KindF64:
+			return types.BoxF64(math.Float64frombits(data))
+		case types.KindRef:
+			result := types.Boxed(data)
+			i.retainBox(result)
+			return result
+		default:
+			panic(ErrTypeMismatch)
+		}
+	case *HostStruct:
+		// A host struct converts on the way out instead of holding VM words,
+		// so a conversion that fails traps the way the threaded contract
+		// expects rather than reporting inward.
+		result, err := value.Field(i, at)
+		if err != nil {
+			panic(err)
+		}
 		return result
 	default:
 		panic(ErrTypeMismatch)
