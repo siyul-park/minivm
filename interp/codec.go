@@ -176,13 +176,21 @@ func (r *registry) entry(t reflect.Type) *conversion {
 }
 
 // conversion returns t's compiled form, building and caching it on first use.
+// Every type the build reached is cached with it, so a type used only inside
+// another one compiles once rather than once per referencing type. The set is
+// published only after the build succeeds, because compile holds an incomplete
+// conversion for every type still in flight.
 func (r *Registry) conversion(t reflect.Type) (*conversion, error) {
 	if p, ok := r.conversions.Load(t); ok {
 		return p.(*conversion), nil
 	}
-	p, err := r.compile(t, make(map[reflect.Type]*conversion))
+	seen := make(map[reflect.Type]*conversion)
+	p, err := r.compile(t, seen)
 	if err != nil {
 		return nil, err
+	}
+	for typ, c := range seen {
+		r.conversions.LoadOrStore(typ, c)
 	}
 	actual, _ := r.conversions.LoadOrStore(t, p)
 	return actual.(*conversion), nil
