@@ -145,7 +145,8 @@ Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple go
 - Values that contain refs must implement `types.Traceable`.
 - Large `i64` values may spill to the heap while preserving bytecode semantics.
 - Strings carry no identity invariant: every comparison and every map keyed by a string compares content, so equal contents may occupy different refs. Only the constant pool deduplicates, at load time.
-- A host value never owns a VM reference. A Go field holding a `types.Value` stays out of a `HostStruct` layout, and a field write copies what the VM value holds rather than storing the slot, so a host value implements no `types.Traceable` and reclaims nothing.
+- A host value never owns a VM reference. Reading a field publishes one the caller owns, and writing one copies what the VM value holds into the Go field rather than storing the slot, so a host value implements no `types.Traceable` and reclaims nothing.
+- A struct compiles to one VM struct type whatever form it takes, because a value and a pointer to it must report the same type. The pointer is what selects the live view; the value copies unless unexported fields make a copy unfaithful.
 
 See `memory-model.md` and `value-representation.md` for the detailed rules.
 

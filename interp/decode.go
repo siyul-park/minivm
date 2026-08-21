@@ -132,7 +132,7 @@ func unmarshalPointer(elem *conversion) func(*Decoder, types.Value, unsafe.Point
 			*(*unsafe.Pointer)(p) = nil
 			return nil
 		}
-		if elem.host {
+		if elem.view != nil {
 			value, err := d.registry.resolve(d.interp, val)
 			if err != nil {
 				return err

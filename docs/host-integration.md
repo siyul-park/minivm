@@ -215,10 +215,10 @@ The built-in codec compiles and caches one conversion per Go type. Compilation i
 | other `[]T` | `*Array` ref | generic fallback |
 | `map[K]V` with a primitive or `string` key | `*TypedMap[K]` ref | key type drives the concrete map; content-keyed |
 | other `map[K]V` | `*Map` ref | heap ref identity keys |
-| struct | `*Struct` ref | exported fields, in declaration order |
-| struct with methods or unexported fields | `*HostStruct` ref | live view of the Go struct |
+| struct, by value, all fields exported | `*Struct` ref | exported fields, in declaration order |
+| struct with an unexported field | `*HostStruct` ref | live view of the Go struct |
 | defined scalar or string with methods | underlying scalar or `string` | keeps primitive fast path |
-| `*T` | `T` or `Null` | nil pointer becomes `Null` |
+| `*T` | `T` or `Null` | nil pointer becomes `Null`; a struct behind it is a `*HostStruct` view |
 | `func(...)` | `*HostFunction` ref | final `error` return is host-only |
 | `interface{}` / `any` | `ref` | dynamic value |
 | `types.Value` | passthrough | returned as-is |
@@ -228,9 +228,9 @@ The built-in codec compiles and caches one conversion per Go type. Compilation i
 | `complex64` | `*Struct{Real, Imag F32}` | heap-allocated |
 | `complex128` | `*Struct{Real, Imag F64}` | heap-allocated |
 | `VMMarshaler` | custom | `MarshalVM` decides representation |
-| recursive `*T` field | `any` ref | a true cycle returns `ErrMarshalCycle` |
+| recursive `*T` field | `*HostStruct` ref | a view is shallow, so the walk terminates |
 
-Nil pointers marshal to `types.Null`. Pointer cycles return `ErrMarshalCycle`. Shared non-cycle pointers are allowed.
+Nil pointers marshal to `types.Null`. A map or slice that reaches itself returns `ErrMarshalCycle`; a struct behind a pointer does not, because the view it produces is shallow. Shared pointers are allowed.
 
 ### Go Functions
 
@@ -293,17 +293,24 @@ A struct or array key, or a pointer to one, is therefore reachable only through 
 
 ## Structs and Methods
 
-A Go struct whose state a copy can reproduce marshals to a native
-`*types.Struct`: exported data fields become real slots in declaration order,
-and a field with no VM representation is skipped.
+The form a Go struct takes follows one rule: **use the VM type system whenever a
+copy reproduces the whole value, and a live view only when it cannot.**
 
-A struct carrying **unexported fields**, or one with any method on `*T`,
-marshals to a `*interp.HostStruct` instead — a live view of the Go struct rather
-than a snapshot of it. A copy would lose that state: unexported fields have no
-slot, and a mutation a pointer receiver makes lands on the copy. The view
-reports the same VM struct type a copy would have reported, so guest code reads
-and writes it with `STRUCT_GET` and `STRUCT_SET` exactly as it reads a native
-struct, and those reads and writes address the Go memory in place.
+| Marshaled | Result | Why |
+|---|---|---|
+| a value, all fields exported | `*types.Struct` | the VM struct holds every field; nothing is left behind |
+| a value with methods, all fields exported | `*types.Struct` | a method that mutates a copy is Go value semantics, not a loss |
+| a pointer | `*interp.HostStruct` | the caller asked for a reference; a copy would drop the aliasing |
+| a value with an unexported field | `*interp.HostStruct` | unexported state has no slot, so no copy is faithful |
+
+A native `*types.Struct` keeps the fast path: fused `STRUCT_GET` and native JIT
+lowering apply, and `Unmarshal` rebuilds an equal Go value from it.
+
+A `*interp.HostStruct` is a live view of the Go struct that reports the same VM
+struct type a copy would have reported, so guest code reads and writes it with
+`STRUCT_GET` and `STRUCT_SET` exactly as it reads a native struct — and those
+reads and writes address the Go memory in place. `Unmarshal` recovers the whole
+Go value from a view, unexported state included.
 
 ```go
 type Counter struct {
@@ -314,28 +321,23 @@ type Counter struct {
 func (c *Counter) Bump(n int32) int32 { c.count += int(n); return int32(c.count) }
 
 c := &Counter{Name: "a"}
-obj, _ := vm.Marshal(c)                 // *interp.HostStruct{Name}
+obj, _ := vm.Marshal(c)                 // *interp.HostStruct{Name}: pointer, and unexported state
 bump, _ := vm.Marshal((*Counter).Bump)  // *interp.HostFunction
 ```
 
 Methods are not fields. A method is an ordinary Go function, so a **method
 expression** marshals through the same path any `func` does, with the receiver
-as its first parameter. Called with the host value, it mutates the value the
-caller marshaled; called with any other VM value, the receiver decodes into a
-fresh Go value and the call still runs, with the mutation staying on that copy.
-A **method value** — `c.Bump`, already bound — marshals just as well and takes
-no receiver parameter.
+as its first parameter. Called with a host view, it mutates the value the caller
+marshaled; called with any other VM value — a native `*types.Struct` among them
+— the receiver decodes into a fresh Go value and the call still runs, with the
+mutation staying on that copy. A **method value** — `c.Bump`, already bound —
+marshals just as well and takes no receiver parameter.
 
-A host view never owns a VM reference, so a Go field whose type is a
-`types.Value` stays out of the layout. Writing a field copies what the VM value
-holds into the Go field rather than storing the slot, so a reference the write
-carried is released rather than retained.
-
-When the marshaled value is a pointer, the view addresses the caller's value and
-Go-side state stays observable in Go; when it is a value, it addresses the copy
-the conversion allocates. `Unmarshal` recovers the whole Go value from a host
-view, unexported state included, and falls back to the structural decode for any
-other VM value.
+One layout serves both forms, because a value and a pointer to it must report
+the same VM type. A view owns none of the references it hands out: reading a
+field publishes a reference the caller owns, and writing one copies what the VM
+value holds into the Go field rather than storing the slot, leaving the Go side
+holding a borrowed reference exactly as `Unmarshal` does.
 
 An `interp.Interpreter` is passed into each field access rather than captured, so
 a host view reached from a program constant is safe to share across pooled
@@ -479,7 +481,7 @@ A type providing only one direction leaves the other returning
 | `RuntimeError` | guest execution failed; unwraps to the cause and carries frames |
 | `types.Error` | guest exception value with code, message, payload, and optional wrapped Go cause |
 | `ErrHeapExhausted` | heap allocation exceeded `WithHeapLimit` |
-| `ErrMarshalCycle` | pointer graph contains a cycle |
+| `ErrMarshalCycle` | a map, slice, or non-struct pointer chain reaches itself |
 | `ErrUnsupportedMarshalType` | Go type or conversion direction is unsupported |
 | `ErrInvalidUnmarshalTarget` | destination is not a non-nil pointer |
 | `ErrValueOverflow` | numeric value does not fit destination type |
