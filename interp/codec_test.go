@@ -64,6 +64,12 @@ type codecPair struct {
 	Count int32
 }
 
+type codecShared struct{ A, B int32 }
+
+type codecFirst struct{ Shared codecShared }
+
+type codecSecond struct{ Shared codecShared }
+
 func TestNewRegistry(t *testing.T) {
 	t.Run("standard library defaults", func(t *testing.T) {
 		i := interp.New(program.New(nil))
@@ -559,6 +565,49 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
 	})
 
+	t.Run("shared nested type", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		first, err := r.Marshal(i, codecFirst{})
+		require.NoError(t, err)
+		second, err := r.Marshal(i, codecSecond{})
+		require.NoError(t, err)
+
+		// A struct type is built once per compile, so the two outer types hold
+		// the same one only when the nested type was compiled once.
+		lhs := first.Type().(*types.StructType)
+		rhs := second.Type().(*types.StructType)
+		require.Same(t, lhs.Fields[0].Type, rhs.Fields[0].Type)
+	})
+
+	t.Run("shared nested type across interpreters", func(t *testing.T) {
+		r := interp.NewRegistry()
+		i1 := interp.New(program.New(nil))
+		defer i1.Close()
+		i2 := interp.New(program.New(nil))
+		defer i2.Close()
+
+		var wg sync.WaitGroup
+		var err1, err2 error
+		var v1, v2 types.Value
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			v1, err1 = r.Marshal(i1, codecFirst{})
+		}()
+		go func() {
+			defer wg.Done()
+			v2, err2 = r.Marshal(i2, codecSecond{})
+		}()
+		wg.Wait()
+
+		require.NoError(t, err1)
+		require.NoError(t, err2)
+		require.IsType(t, &types.Struct{}, v1)
+		require.IsType(t, &types.Struct{}, v2)
+	})
 }
 
 func TestRegistry_Unmarshal(t *testing.T) {
