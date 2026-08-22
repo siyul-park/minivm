@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/asm/arm64"
+	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/stretchr/testify/require"
 )
 

@@ -46,7 +46,7 @@ continue tracing; ref `ARRAY_SET` and ref-field `STRUCT_SET` report a terminal
 status. When the no-spill register budget is exceeded, native compilation
 falls back to threaded execution.
 
-JIT stubs compile cleanly but do not emit native code. `asm/amd64` is currently a placeholder: it preserves the generic `asm.Arch` shape, but its encoder and ABI return `asm.ErrNotImplemented`.
+JIT stubs compile cleanly but do not emit native code. `internal/asm/amd64` is currently a placeholder: it preserves the generic `asm.Arch` shape, but its encoder and ABI return `asm.ErrNotImplemented`.
 
 ## CGO
 
@@ -54,7 +54,7 @@ CGO is optional except for Darwin/ARM64 with JIT enabled.
 
 On Apple Silicon, Darwin requires explicit instruction-cache synchronization
 after code is written and before its pages are sealed for execution. minivm
-performs this flush through CGO in `asm/icache_darwin_arm64.go`.
+performs this flush through CGO in `internal/asm/icache_darwin_arm64.go`.
 
 | Build | CGO | Icache behavior |
 |---|---:|---|
@@ -96,7 +96,7 @@ Each published code block keeps its own immutable executable mapping until
 `asm.Buffer.Free`, so a later install never removes execute permission from a
 running block.
 
-Platforms without executable-memory support use `asm/memory_stub.go`. In that case, `asm.NewBuffer` returns `ErrMmapFailed`.
+Platforms without executable-memory support use `internal/asm/memory_stub.go`. In that case, `asm.NewBuffer` returns `ErrMmapFailed`.
 
 ## Low-Level Code
 
@@ -113,7 +113,7 @@ Keep these assumptions local, obvious, and documented. Do not spread them into h
 
 Windows and Plan9 do not support JIT execution in minivm.
 
-The threaded interpreter and optimizer still build and run normally. `asm/memory_stub.go` keeps packages that import `asm` buildable, but executable buffer allocation fails with `ErrMmapFailed`.
+The threaded interpreter and optimizer still build and run normally. `internal/asm/memory_stub.go` keeps packages that import `asm` buildable, but executable buffer allocation fails with `ErrMmapFailed`.
 
 No special build setup is required.
 
@@ -135,10 +135,14 @@ optimize
 Low-level implementation packages that may change without a major version bump:
 
 ```text
-asm
-asm/arm64
-asm/amd64
+internal/asm
+internal/asm/arm64
+internal/asm/amd64
 ```
+
+The compiler enforces this boundary rather than documentation alone. Go rejects
+any import of an `internal/` package from outside this module's tree, so
+external code cannot depend on these packages at all.
 
 ## Maintenance Notes
 

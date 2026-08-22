@@ -1,6 +1,6 @@
 package arm64
 
-import "github.com/siyul-park/minivm/asm"
+import "github.com/siyul-park/minivm/internal/asm"
 
 type Op uint16
 

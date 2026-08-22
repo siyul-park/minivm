@@ -106,8 +106,8 @@ current `stop` field.
 |---|---|
 | `analysis` | CFG/GVN public terminology and private numbering roles normalized. |
 | `asm` | Phase prefixes removed; register field spelling normalized. |
-| `asm/amd64` | Existing `arch`, `abi`, `encoder`, and `New` retained. |
-| `asm/arm64` | Operand-shape and architecture symmetry retained. |
+| `internal/asm/amd64` | Existing `arch`, `abi`, `encoder`, and `New` retained. |
+| `internal/asm/arm64` | Operand-shape and architecture symmetry retained. |
 | `cli` | Command handlers and renderers renamed by role. |
 | `cmd/minivm` | Only `main`; no change required. |
 | `debug` | Public API retained; private pause state normalized. |

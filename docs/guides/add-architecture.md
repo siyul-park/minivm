@@ -10,8 +10,8 @@ Use this guide when adding a new JIT backend. For the runtime model, journal lay
 
 | Concern | File or package |
 |---|---|
-| Generic native-code interfaces | `asm/` |
-| ARM64 reference backend | `asm/arm64/`, `interp/jit_arm64.go` |
+| Generic native-code interfaces | `internal/asm/` |
+| ARM64 reference backend | `internal/asm/arm64/`, `interp/jit_arm64.go` |
 | Architecture-neutral JIT driver | `interp/jit.go` |
 | Trace recording | `interp/trace.go` |
 | Platform and CGO support | `docs/compatibility.md` |
@@ -19,7 +19,7 @@ Use this guide when adding a new JIT backend. For the runtime model, journal lay
 
 Do not change ARM64 behavior unless the shared `asm` contract requires it.
 
-## Step 1 — Create `asm/<arch>/`
+## Step 1 — Create `internal/asm/<arch>/`
 
 Mirror the ARM64 package shape where it applies:
 
@@ -100,7 +100,7 @@ More complex paths, such as calls, ref-counted stores, heap reads, loops, and co
 ## Step 5 — Verify
 
 ```bash
-go test ./asm/<arch>/... ./interp/...
+go test ./internal/asm/<arch>/... ./interp/...
 GOOS=linux GOARCH=<arch> go build ./...
 ```
 

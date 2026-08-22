@@ -49,7 +49,7 @@ Detailed implementation behavior belongs in the topic docs, especially `jit-inte
 | P1 | Broaden benchmark scenarios | Validate JIT thresholds and runtime tradeoffs on realistic workloads |
 | P1 | Improve host embedding examples | Make adoption easier for Go services |
 | P2 | Refine runtime control APIs | Keep cancellation, fuel, heap limits, and errors consistent |
-| P2 | Decide x86-64 JIT strategy | `asm/amd64` is currently a placeholder; backend work needs users and benchmarks |
+| P2 | Decide x86-64 JIT strategy | `internal/asm/amd64` is currently a placeholder; backend work needs users and benchmarks |
 
 ## Benchmark Priorities
 

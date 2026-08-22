@@ -1,6 +1,6 @@
 package arm64
 
-import "github.com/siyul-park/minivm/asm"
+import "github.com/siyul-park/minivm/internal/asm"
 
 var (
 	X0  = asm.NewPReg(0, asm.RegTypeInt, asm.Width64)

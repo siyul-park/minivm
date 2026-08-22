@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -391,7 +391,7 @@ func TestARM64_StackReserve(t *testing.T) {
 
 	_, thisFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
-	abiFile := filepath.Join(filepath.Dir(thisFile), "..", "asm", "arm64", "abi_arm64.s")
+	abiFile := filepath.Join(filepath.Dir(thisFile), "..", "internal", "asm", "arm64", "abi_arm64.s")
 	src, err := os.ReadFile(abiFile)
 	require.NoError(t, err)
 

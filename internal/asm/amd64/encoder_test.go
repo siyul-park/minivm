@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/asm"
-	amd64 "github.com/siyul-park/minivm/asm/amd64"
+	"github.com/siyul-park/minivm/internal/asm"
+	amd64 "github.com/siyul-park/minivm/internal/asm/amd64"
 )
 
 func TestNew(t *testing.T) {

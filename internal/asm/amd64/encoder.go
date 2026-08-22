@@ -1,6 +1,6 @@
 package amd64
 
-import "github.com/siyul-park/minivm/asm"
+import "github.com/siyul-park/minivm/internal/asm"
 
 type encoder struct{}
 

@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/asm"
-	arm64 "github.com/siyul-park/minivm/asm/arm64"
+	"github.com/siyul-park/minivm/internal/asm"
+	arm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 )
 
 // TestArch_Relax covers the structural contract of asm.Relaxer.Relax:

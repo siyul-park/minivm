@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/bits"
 
-	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/internal/asm"
 )
 
 // ---------------------------------------------------------------------------

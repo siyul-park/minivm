@@ -12,8 +12,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/asm"
-	arm64 "github.com/siyul-park/minivm/asm/arm64"
+	"github.com/siyul-park/minivm/internal/asm"
+	arm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 )
 
 func TestLDI(t *testing.T) {

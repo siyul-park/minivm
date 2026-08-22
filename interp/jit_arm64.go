@@ -5,9 +5,9 @@ import (
 	"slices"
 	"unsafe"
 
-	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
