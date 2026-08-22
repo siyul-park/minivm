@@ -2338,6 +2338,25 @@ func (i *Interpreter) structField(addr, at int) types.Boxed {
 	}
 }
 
+// resolve follows a value to the one it stands for, so a caller that accepts
+// any VM value sees a standalone one however the source stored it. It is the
+// borrowing counterpart of unbox: the heap value it reports stays owned by the
+// slot that named it.
+func (i *Interpreter) resolve(val types.Value) (types.Value, error) {
+	boxed, ok := val.(types.Boxed)
+	if !ok {
+		return val, nil
+	}
+	if boxed.Kind() != types.KindRef {
+		return types.Unbox(boxed), nil
+	}
+	out, err := i.Load(boxed.Ref())
+	if err != nil {
+		return nil, fmt.Errorf("load ref %d: %w", boxed.Ref(), err)
+	}
+	return out, nil
+}
+
 func (i *Interpreter) unbox(val types.Boxed) types.Value {
 	if val.Kind() != types.KindRef {
 		return types.Unbox(val)

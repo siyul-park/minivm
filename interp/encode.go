@@ -28,6 +28,16 @@ type VMMarshaler interface {
 	MarshalVM(*Encoder) (types.Value, error)
 }
 
+// Encoder is one marshal conversion in flight. A Marshaler uses it to reach the
+// interpreter and to convert the dependencies of the value it owns, so nested
+// conversion always runs through the codec that started the call.
+type Encoder struct {
+	interp   *Interpreter
+	registry *Registry
+	seen     map[unsafe.Pointer]bool
+	owned    []int
+}
+
 // span reports the base pointer and length of the Go array or slice at p.
 type span func(unsafe.Pointer) (unsafe.Pointer, int)
 
@@ -42,16 +52,6 @@ type sliceHeader struct {
 	data unsafe.Pointer
 	len  int
 	cap  int
-}
-
-// Encoder is one marshal conversion in flight. A Marshaler uses it to reach the
-// interpreter and to convert the dependencies of the value it owns, so nested
-// conversion always runs through the codec that started the call.
-type Encoder struct {
-	interp   *Interpreter
-	registry *Registry
-	seen     map[unsafe.Pointer]bool
-	owned    []int
 }
 
 func (f MarshalerFunc) Marshal(e *Encoder, p unsafe.Pointer) (types.Value, error) {
@@ -140,6 +140,23 @@ func (e *Encoder) boxAs(val types.Value, typ types.Type) (types.Boxed, error) {
 	default:
 		return 0, fmt.Errorf("%w: target=%s", ErrTypeMismatch, typ)
 	}
+}
+
+// slot converts the Go value v into a slot of typ, the form a declared VM
+// signature holds a parameter or a result in. v is a value rather than an
+// address, so it takes a holder of its own for the conversion to read.
+func (e *Encoder) slot(v reflect.Value, typ types.Type) (types.Boxed, error) {
+	holder := reflect.New(v.Type())
+	holder.Elem().Set(v)
+	c, err := e.registry.conversion(v.Type())
+	if err != nil {
+		return 0, err
+	}
+	val, err := c.value(e, holder.UnsafePointer())
+	if err != nil {
+		return 0, err
+	}
+	return e.boxAs(val, typ)
 }
 
 // boxed holds val the way the VM holds a value on its stack, so a key or an
@@ -240,16 +257,12 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 				in[idx] = reflect.ValueOf(ctx)
 				continue
 			}
-			arg := reflect.New(param)
-			value, err := registry.resolve(i, params[at])
+			value, err := i.resolve(params[at])
 			if err != nil {
 				return nil, fmt.Errorf("function param %d: %w", at, err)
 			}
-			c, err := registry.conversion(param)
-			if err != nil {
-				return nil, err
-			}
-			if err := c.set(dec, value, arg.UnsafePointer()); err != nil {
+			arg := reflect.New(param)
+			if err := dec.Decode(value, param, arg.UnsafePointer()); err != nil {
 				return nil, fmt.Errorf("function param %d: %w", at, err)
 			}
 			in[idx] = arg.Elem()
@@ -268,18 +281,7 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 		enc := &Encoder{interp: i, registry: registry}
 		returns := make([]types.Boxed, len(out))
 		for idx := range out {
-			holder := reflect.New(out[idx].Type())
-			holder.Elem().Set(out[idx])
-			c, err := registry.conversion(out[idx].Type())
-			if err != nil {
-				return nil, err
-			}
-			value, err := c.value(enc, holder.UnsafePointer())
-			if err != nil {
-				enc.discard()
-				return nil, fmt.Errorf("function return %d: %w", idx, err)
-			}
-			boxed, err := enc.boxAs(value, typ.Returns[idx])
+			boxed, err := enc.slot(out[idx], typ.Returns[idx])
 			if err != nil {
 				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
@@ -319,13 +321,15 @@ func marshalNative(t reflect.Type) MarshalerFunc {
 		if !ok || val == nil {
 			return types.Null, nil
 		}
-		return e.registry.resolve(e.interp, val)
+		return e.interp.resolve(val)
 	}
 }
 
 // marshalDynamic converts through the concrete type an interface slot holds.
-func marshalDynamic(t reflect.Type) (MarshalerFunc, boxer) {
-	value := func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+// An interface slot is typed any, so complete derives its slot form: boxing
+// through TypeAny is the reference the conversion would have published itself.
+func marshalDynamic(t reflect.Type) MarshalerFunc {
+	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		rv := reflect.NewAt(t, p).Elem()
 		if rv.IsNil() {
 			return types.Null, nil
@@ -334,13 +338,6 @@ func marshalDynamic(t reflect.Type) (MarshalerFunc, boxer) {
 		holder := reflect.New(elem.Type())
 		holder.Elem().Set(elem)
 		return e.Encode(elem.Type(), holder.UnsafePointer())
-	}
-	return value, func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-		val, err := value(e, p)
-		if err != nil {
-			return 0, err
-		}
-		return e.ref(val)
 	}
 }
 
@@ -630,41 +627,44 @@ func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, u
 		})
 	case types.KindF64:
 		return typedMap(key, func(val types.Value) (float64, error) { return keyFloat(val, mt.Key) })
-	}
-	if mt.Key.Equals(types.TypeString) {
+
+	case types.KindRef:
+		// A declared string key has no identity to preserve, so it keys by
+		// content like every other typed key; NewMapForType picks the same
+		// representation from the same test. Any other ref keys by heap ref.
+		if mt.Key.Equals(types.TypeString) {
+			return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
+				val, err := key.value(e, p)
+				if err != nil {
+					return err
+				}
+				text, ok := val.(types.String)
+				if !ok {
+					return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, mt.Key)
+				}
+				m.(*types.TypedMap[string]).Set(string(text), value)
+				return nil
+			}
+		}
 		return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
 			val, err := key.value(e, p)
 			if err != nil {
 				return err
 			}
-			text, ok := val.(types.String)
-			if !ok {
-				return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, mt.Key)
+			boxed, err := e.box(val)
+			if err != nil {
+				return err
 			}
-			m.(*types.TypedMap[string]).Set(string(text), value)
+			k, entryKey := e.interp.mapKey(boxed)
+			if old, replaced := m.(*types.Map).Set(k, types.MapEntry{Key: entryKey, Value: value}); replaced {
+				e.interp.releaseBox(old.Key)
+				e.interp.releaseBox(old.Value)
+			}
 			return nil
 		}
 	}
-	if mt.KeyKind != types.KindRef {
-		return func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
-			return fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, mt.Key)
-		}
-	}
-	return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
-		val, err := key.value(e, p)
-		if err != nil {
-			return err
-		}
-		boxed, err := e.box(val)
-		if err != nil {
-			return err
-		}
-		k, entryKey := e.interp.mapKey(boxed)
-		if old, replaced := m.(*types.Map).Set(k, types.MapEntry{Key: entryKey, Value: value}); replaced {
-			e.interp.releaseBox(old.Key)
-			e.interp.releaseBox(old.Value)
-		}
-		return nil
+	return func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
+		return fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, mt.Key)
 	}
 }
 

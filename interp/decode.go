@@ -70,7 +70,7 @@ func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error)
 		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
 	case *types.Array:
 		return len(v.Elems), func(i int) (types.Value, error) {
-			return d.registry.resolve(d.interp, v.Elems[i])
+			return d.interp.resolve(v.Elems[i])
 		}, nil
 	default:
 		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
@@ -88,7 +88,7 @@ func unmarshalConverting(t reflect.Type) UnmarshalerFunc {
 // covering both a types.Value-implementing type and an interface slot.
 func unmarshalValue(t reflect.Type) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		value, err := d.registry.resolve(d.interp, val)
+		value, err := d.interp.resolve(val)
 		if err != nil {
 			return err
 		}
@@ -112,7 +112,7 @@ func unmarshalValue(t reflect.Type) UnmarshalerFunc {
 // while the same conversion applied to a struct guest code built still runs.
 func unmarshalHost(t reflect.Type, structural UnmarshalerFunc) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		value, err := d.registry.resolve(d.interp, val)
+		value, err := d.interp.resolve(val)
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,7 @@ func unmarshalPointer(elem *conversion) UnmarshalerFunc {
 			return nil
 		}
 		if elem.view != nil {
-			value, err := d.registry.resolve(d.interp, val)
+			value, err := d.interp.resolve(val)
 			if err != nil {
 				return err
 			}
@@ -189,18 +189,11 @@ func unmarshalFunc(t reflect.Type, typ *types.FunctionType) UnmarshalerFunc {
 					}
 					continue
 				}
-				holder := reflect.New(arg.Type())
-				holder.Elem().Set(arg)
-				c, err := registry.conversion(arg.Type())
+				boxed, err := enc.slot(arg, typ.Params[len(params)])
 				if err != nil {
-					return fail(err)
-				}
-				value, err := c.value(enc, holder.UnsafePointer())
-				if err != nil {
-					return fail(fmt.Errorf("function param %d: %w", len(params), err))
-				}
-				boxed, err := enc.boxAs(value, typ.Params[len(params)])
-				if err != nil {
+					// invoke never took these, so nothing else will release
+					// what the conversion already published.
+					enc.discard()
 					return fail(fmt.Errorf("function param %d: %w", len(params), err))
 				}
 				params = append(params, boxed)
@@ -281,7 +274,7 @@ func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n i
 // other Go type is unreachable the same way Go's own dynamic keys are. Every
 // other reference keys by identity, as it does in the VM.
 func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
-	value, err := d.registry.resolve(d.interp, val)
+	value, err := d.interp.resolve(val)
 	if err != nil {
 		return err
 	}
@@ -341,7 +334,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 		if err != nil {
 			return
 		}
-		elem, resolveErr := d.registry.resolve(d.interp, value)
+		elem, resolveErr := d.interp.resolve(value)
 		if resolveErr != nil {
 			err = fmt.Errorf("map value: %w", resolveErr)
 			return
@@ -373,7 +366,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 	case *types.Map:
 		reserve(m.Len())
 		m.Range(func(k types.MapKey, entry types.MapEntry) {
-			key, keyErr := d.registry.resolve(d.interp, k.Value(entry))
+			key, keyErr := d.interp.resolve(k.Value(entry))
 			if keyErr != nil {
 				if err == nil {
 					err = fmt.Errorf("map key: %w", keyErr)
@@ -393,7 +386,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 // slot when no name matches.
 func unmarshalStruct(fields []field) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		value, err := d.registry.resolve(d.interp, val)
+		value, err := d.interp.resolve(val)
 		if err != nil {
 			return err
 		}
@@ -411,7 +404,7 @@ func unmarshalStruct(fields []field) UnmarshalerFunc {
 			var field types.Value
 			if src.Typ.Fields[at].Kind == types.KindI64 {
 				field = types.I64(int64(src.Raw(at)))
-			} else if field, err = d.registry.resolve(d.interp, src.Field(at)); err != nil {
+			} else if field, err = d.interp.resolve(src.Field(at)); err != nil {
 				return fmt.Errorf("struct field %s: %w", f.name, err)
 			}
 			if err := f.conversion.set(d, field, unsafe.Add(p, f.offset)); err != nil {
@@ -423,7 +416,7 @@ func unmarshalStruct(fields []field) UnmarshalerFunc {
 }
 
 // fieldIndex locates the field a Go field reads from: the one sharing its name,
-// or the next unused slot that is not a bound function.
+// or the next unused slot that does not hold a function.
 func fieldIndex(typ *types.StructType, name string, used []bool) (int, bool) {
 	for idx, f := range typ.Fields {
 		if f.Name == name {
@@ -434,7 +427,7 @@ func fieldIndex(typ *types.StructType, name string, used []bool) (int, bool) {
 		if used[idx] {
 			continue
 		}
-		if _, bound := f.Type.(*types.FunctionType); bound {
+		if _, callable := f.Type.(*types.FunctionType); callable {
 			continue
 		}
 		return idx, true

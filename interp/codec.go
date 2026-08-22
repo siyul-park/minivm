@@ -197,9 +197,11 @@ func (r *Registry) conversion(t reflect.Type) (*conversion, error) {
 }
 
 // compile resolves t by the first rule that matches: a registered entry, a type
-// that converts itself, a VM runtime type, then the structural mapping. seen
-// holds the compiled form of every type on the current path, so a recursive
-// type reaches its own instead of compiling forever.
+// that converts itself, a VM runtime type, then the structural mapping. Only
+// the rules that read the registry take it as a receiver; the rest are the
+// conversion reading its own Go type. seen holds the compiled form of every
+// type on the current path, so a recursive type reaches its own instead of
+// compiling forever.
 func (r *Registry) compile(t reflect.Type, seen map[reflect.Type]*conversion) (*conversion, error) {
 	if p, ok := seen[t]; ok {
 		return p, nil
@@ -212,14 +214,14 @@ func (r *Registry) compile(t reflect.Type, seen map[reflect.Type]*conversion) (*
 	seen[t] = p
 
 	switch {
-	case r.registered(p), r.converting(p), r.native(p):
+	case r.registered(p), p.converting(), p.native():
 	default:
 		if err := r.structure(p, seen); err != nil {
 			delete(seen, t)
 			return nil, err
 		}
 	}
-	r.complete(p)
+	p.complete()
 	return p, nil
 }
 
@@ -239,7 +241,7 @@ func (r *Registry) registered(p *conversion) bool {
 // converting resolves a type that implements the conversion on itself. The
 // pointer method set is used in both directions, so a value-receiver
 // MarshalVM is reached without copying the value out of its slot.
-func (r *Registry) converting(p *conversion) bool {
+func (p *conversion) converting() bool {
 	ptr := reflect.PointerTo(p.typ)
 	marshals := ptr.Implements(typeVMMarshaler)
 	unmarshals := ptr.Implements(typeVMUnmarshaler)
@@ -256,7 +258,7 @@ func (r *Registry) converting(p *conversion) bool {
 }
 
 // native resolves a Go type that already holds a VM value.
-func (r *Registry) native(p *conversion) bool {
+func (p *conversion) native() bool {
 	vm, ok := natives[p.typ]
 	if !ok {
 		if !p.typ.Implements(typeValue) {
@@ -284,7 +286,7 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 
 	case reflect.Interface:
 		p.vm = types.TypeAny
-		p.value, p.box = marshalDynamic(t)
+		p.value = marshalDynamic(t)
 		p.set = unmarshalValue(t)
 		return nil
 
@@ -317,13 +319,9 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		// A Go slice is a reference: its elements live somewhere the caller
 		// still shares, so a copy drops every write. A Go array is a value and
 		// copies faithfully; only a pointer to one asks for a view.
+		copy := marshalArray(t, at, elem)
 		p.vm = at
-		p.host = t.Kind() == reflect.Slice
-		p.value = marshalArray(t, at, elem)
-		p.view = marshalHostArray(t, at, elem, p.value)
-		if p.host {
-			p.value = p.view
-		}
+		p.views(copy, marshalHostArray(t, at, elem, copy), t.Kind() == reflect.Slice)
 		p.set = unmarshalHost(t, unmarshalArray(t, elem))
 		return nil
 
@@ -345,10 +343,9 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		if t.Key().Kind() == reflect.Interface && t.Key().NumMethod() == 0 {
 			index = unmarshalKey
 		}
+		copy := marshalMap(t, mt, key, elem)
 		p.vm = mt
-		p.host = true
-		p.view = marshalHostMap(t, mt, index, elem, marshalMap(t, mt, key, elem))
-		p.value = p.view
+		p.views(copy, marshalHostMap(t, mt, index, elem, copy), true)
 		p.set = unmarshalHost(t, unmarshalMap(t, index, elem))
 		return nil
 
@@ -357,21 +354,13 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		if err != nil {
 			return err
 		}
-		// Unexported fields have no slot, so no VM struct reproduces the value
-		// and the view is its only faithful form. Everything else copies: a
-		// struct handed over by value carries all of its state into the VM
-		// struct, and a method that mutates that copy is Go value semantics
-		// rather than a loss. Asking for a view is what a pointer means, and
-		// marshalPointer is where that is answered.
-		for idx := 0; idx < t.NumField() && !p.host; idx++ {
-			p.host = t.Field(idx).PkgPath != ""
-		}
+		// Everything a copy can reproduce copies: a struct handed over by
+		// value carries all of its state into the VM struct, and a method
+		// that mutates that copy is Go value semantics rather than a loss.
+		// Asking for a view is what a pointer means, and marshalPointer is
+		// where that is answered.
 		p.vm = vm
-		p.view = marshalHostStruct(t, vm, fields)
-		p.value = marshalStruct(vm, fields)
-		if p.host {
-			p.value = p.view
-		}
+		p.views(marshalStruct(vm, fields), marshalHostStruct(t, vm, fields), opaque(t))
 		p.set = unmarshalHost(t, unmarshalStruct(fields))
 		return nil
 	}
@@ -399,6 +388,17 @@ func (r *Registry) layout(t reflect.Type, seen map[reflect.Type]*conversion) (*t
 		fields = append(fields, field{name: f.Name, offset: f.Offset, conversion: child})
 	}
 	return types.NewStructType(slots...), fields, nil
+}
+
+// opaque reports whether t carries state no VM struct slot holds. Such a value
+// has no faithful copy, so the view is its only form.
+func opaque(t reflect.Type) bool {
+	for idx := range t.NumField() {
+		if t.Field(idx).PkgPath != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // function compiles a Go function signature into a VM function type. An exact
@@ -433,10 +433,20 @@ func (r *Registry) function(t reflect.Type, seen map[reflect.Type]*conversion) (
 	return &types.FunctionType{Params: params, Returns: returns}, nil
 }
 
+// views installs a container's two marshaling forms and settles which one value
+// takes. A Go value a copy cannot reproduce is its view, so every route in —
+// standalone, slot, or through a pointer — reaches the same Go memory.
+func (p *conversion) views(copy, view MarshalerFunc, host bool) {
+	p.host, p.view, p.value = host, view, copy
+	if host {
+		p.value = view
+	}
+}
+
 // complete fills the directions a resolution rule left open, so every compiled
 // form is callable and an unsupported direction reports itself instead of
 // panicking.
-func (r *Registry) complete(p *conversion) {
+func (p *conversion) complete() {
 	if p.value == nil {
 		p.value = func(*Encoder, unsafe.Pointer) (types.Value, error) {
 			return nil, fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, p.typ)
@@ -450,23 +460,6 @@ func (r *Registry) complete(p *conversion) {
 			return fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, p.typ)
 		}
 	}
-}
-
-// resolve follows a boxed value to the value it stands for, so every compiled
-// conversion sees a standalone VM value however the source stored it.
-func (r *Registry) resolve(i *Interpreter, val types.Value) (types.Value, error) {
-	boxed, ok := val.(types.Boxed)
-	if !ok {
-		return val, nil
-	}
-	if boxed.Kind() != types.KindRef {
-		return types.Unbox(boxed), nil
-	}
-	out, err := i.Load(boxed.Ref())
-	if err != nil {
-		return nil, fmt.Errorf("load ref %d: %w", boxed.Ref(), err)
-	}
-	return out, nil
 }
 
 // leaves holds the conversion of every primitive Go kind, indexed by that kind.
@@ -709,7 +702,7 @@ func defaults() []func(*registry) {
 			})),
 		WithUnmarshaler(reflect.TypeFor[complex64](), UnmarshalerFunc(
 			func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-				c, err := d.complexOf(val)
+				c, err := complexOf(d, val)
 				if err != nil {
 					return err
 				}
@@ -726,7 +719,7 @@ func defaults() []func(*registry) {
 			})),
 		WithUnmarshaler(reflect.TypeFor[complex128](), UnmarshalerFunc(
 			func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-				c, err := d.complexOf(val)
+				c, err := complexOf(d, val)
 				if err != nil {
 					return err
 				}
@@ -737,8 +730,8 @@ func defaults() []func(*registry) {
 }
 
 // complexOf reads the {Real, Imag} struct both complex registrations produce.
-func (d *Decoder) complexOf(val types.Value) (complex128, error) {
-	value, err := d.registry.resolve(d.interp, val)
+func complexOf(d *Decoder, val types.Value) (complex128, error) {
+	value, err := d.interp.resolve(val)
 	if err != nil {
 		return 0, err
 	}
