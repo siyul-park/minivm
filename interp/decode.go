@@ -43,13 +43,19 @@ func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer
 func (d *Decoder) Interp() *Interpreter { return d.interp }
 
 // Decode writes val into the Go value of type t at p, resolving t through the
-// same codec that started the conversion.
+// same codec that started the conversion. Like Unmarshal, it takes a slot or a
+// standalone value: an Unmarshaler reading a container hands over what the
+// container held, and the conversion below sees the value that slot names.
 func (d *Decoder) Decode(val types.Value, t reflect.Type, p unsafe.Pointer) error {
 	c, err := d.registry.conversion(t)
 	if err != nil {
 		return err
 	}
-	return c.set(d, val, p)
+	value, err := d.interp.deref(val)
+	if err != nil {
+		return err
+	}
+	return c.set(d, value, p)
 }
 
 // elements reports the length of a VM array and a reader for its elements. The
@@ -70,7 +76,7 @@ func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error)
 		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
 	case *types.Array:
 		return len(v.Elems), func(i int) (types.Value, error) {
-			return d.interp.resolve(v.Elems[i])
+			return d.interp.deref(v.Elems[i])
 		}, nil
 	default:
 		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
@@ -88,7 +94,7 @@ func unmarshalConverting(t reflect.Type) UnmarshalerFunc {
 // covering both a types.Value-implementing type and an interface slot.
 func unmarshalValue(t reflect.Type) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		value, err := d.interp.resolve(val)
+		value, err := d.interp.deref(val)
 		if err != nil {
 			return err
 		}
@@ -112,7 +118,7 @@ func unmarshalValue(t reflect.Type) UnmarshalerFunc {
 // while the same conversion applied to a struct guest code built still runs.
 func unmarshalHost(t reflect.Type, structural UnmarshalerFunc) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		value, err := d.interp.resolve(val)
+		value, err := d.interp.deref(val)
 		if err != nil {
 			return err
 		}
@@ -133,7 +139,7 @@ func unmarshalPointer(elem *conversion) UnmarshalerFunc {
 			return nil
 		}
 		if elem.view != nil {
-			value, err := d.interp.resolve(val)
+			value, err := d.interp.deref(val)
 			if err != nil {
 				return err
 			}
@@ -274,7 +280,7 @@ func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n i
 // other Go type is unreachable the same way Go's own dynamic keys are. Every
 // other reference keys by identity, as it does in the VM.
 func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
-	value, err := d.interp.resolve(val)
+	value, err := d.interp.deref(val)
 	if err != nil {
 		return err
 	}
@@ -334,7 +340,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 		if err != nil {
 			return
 		}
-		elem, resolveErr := d.interp.resolve(value)
+		elem, resolveErr := d.interp.deref(value)
 		if resolveErr != nil {
 			err = fmt.Errorf("map value: %w", resolveErr)
 			return
@@ -366,7 +372,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 	case *types.Map:
 		reserve(m.Len())
 		m.Range(func(k types.MapKey, entry types.MapEntry) {
-			key, keyErr := d.interp.resolve(k.Value(entry))
+			key, keyErr := d.interp.deref(k.Value(entry))
 			if keyErr != nil {
 				if err == nil {
 					err = fmt.Errorf("map key: %w", keyErr)
@@ -386,7 +392,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 // slot when no name matches.
 func unmarshalStruct(fields []field) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		value, err := d.interp.resolve(val)
+		value, err := d.interp.deref(val)
 		if err != nil {
 			return err
 		}
@@ -404,7 +410,7 @@ func unmarshalStruct(fields []field) UnmarshalerFunc {
 			var field types.Value
 			if src.Typ.Fields[at].Kind == types.KindI64 {
 				field = types.I64(int64(src.Raw(at)))
-			} else if field, err = d.interp.resolve(src.Field(at)); err != nil {
+			} else if field, err = d.interp.deref(src.Field(at)); err != nil {
 				return fmt.Errorf("struct field %s: %w", f.name, err)
 			}
 			if err := f.conversion.set(d, field, unsafe.Add(p, f.offset)); err != nil {

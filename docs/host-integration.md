@@ -387,6 +387,12 @@ var s string
 err = vm.Unmarshal(types.String("hello"), &s)
 ```
 
+The source may be a standalone value or a slot the guest handed over. A slot is
+followed once, at the entry, so a `types.Boxed` naming a heap value decodes as
+the value it names — including a string or an `i64` too large to box inline.
+`Encoder.Encode`'s counterpart `Decoder.Decode` takes the same two forms, so an
+`Unmarshaler` may pass on whatever a container held.
+
 Struct fields are matched by name first. Unmatched destination fields fall back to the first unused VM field by position. VM function-typed fields are skipped.
 
 Errors:

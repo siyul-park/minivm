@@ -827,6 +827,45 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, int32(7), dst)
 	})
 
+	t.Run("a boxed ref decodes as the value it names", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		text, err := i.Alloc(types.String("hello"))
+		require.NoError(t, err)
+		var s string
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(text), &s))
+		require.Equal(t, "hello", s)
+		require.NoError(t, i.Release(text))
+
+		// An i64 past the boxed payload lives on the heap, so a slot naming it
+		// is the only form a guest can hand over.
+		big := int64(1) << 60
+		spilled, err := i.Alloc(types.I64(big))
+		require.NoError(t, err)
+		var n int64
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(spilled), &n))
+		require.Equal(t, big, n)
+		require.NoError(t, i.Release(spilled))
+	})
+
+	t.Run("a function the heap already holds keeps its slot", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+
+		var call func() int32
+		require.NoError(t, r.Unmarshal(i, fn, &call))
+		require.Equal(t, int32(7), call())
+		require.NoError(t, i.Release(addr))
+	})
+
 	t.Run("VM function", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()

@@ -150,6 +150,10 @@ func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	return val, nil
 }
 
+// Unmarshal writes val into dst. val may be a slot the guest handed over or a
+// standalone value: the slot resolves here, once, so every compiled conversion
+// sees the value it names. A container resolves its own elements, because a
+// container holds slots however it was reached.
 func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
 	rv := reflect.ValueOf(dst)
 	if !rv.IsValid() || rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -160,7 +164,11 @@ func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
 	if err != nil {
 		return err
 	}
-	if err := c.set(&Decoder{interp: i, registry: r}, val, rv.UnsafePointer()); err != nil {
+	value, err := i.deref(val)
+	if err != nil {
+		return fmt.Errorf("unmarshal %T into %s: %w", val, elem, err)
+	}
+	if err := c.set(&Decoder{interp: i, registry: r}, value, rv.UnsafePointer()); err != nil {
 		return fmt.Errorf("unmarshal %T into %s: %w", val, elem, err)
 	}
 	return nil
@@ -731,7 +739,7 @@ func defaults() []func(*registry) {
 
 // complexOf reads the {Real, Imag} struct both complex registrations produce.
 func complexOf(d *Decoder, val types.Value) (complex128, error) {
-	value, err := d.interp.resolve(val)
+	value, err := d.interp.deref(val)
 	if err != nil {
 		return 0, err
 	}

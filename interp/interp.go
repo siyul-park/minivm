@@ -885,6 +885,13 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		addr = v.Ref()
 		i.retain(addr)
 	default:
+		// A callable the heap already holds keeps the slot it has: a second
+		// one would alias the same Go value, which Alloc refuses. Only a
+		// callable the host built and never published needs one.
+		if addr = i.owner(target); addr >= 0 {
+			i.retain(addr)
+			break
+		}
 		addr, err = i.Alloc(target)
 		if err != nil {
 			i.sp = base
@@ -2338,11 +2345,11 @@ func (i *Interpreter) structField(addr, at int) types.Boxed {
 	}
 }
 
-// resolve follows a value to the one it stands for, so a caller that accepts
-// any VM value sees a standalone one however the source stored it. It is the
+// deref follows a value to the one it stands for, so a caller that accepts any
+// VM value sees a standalone one however the source stored it. It is the
 // borrowing counterpart of unbox: the heap value it reports stays owned by the
 // slot that named it.
-func (i *Interpreter) resolve(val types.Value) (types.Value, error) {
+func (i *Interpreter) deref(val types.Value) (types.Value, error) {
 	boxed, ok := val.(types.Boxed)
 	if !ok {
 		return val, nil

@@ -257,12 +257,8 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 				in[idx] = reflect.ValueOf(ctx)
 				continue
 			}
-			value, err := i.resolve(params[at])
-			if err != nil {
-				return nil, fmt.Errorf("function param %d: %w", at, err)
-			}
 			arg := reflect.New(param)
-			if err := dec.Decode(value, param, arg.UnsafePointer()); err != nil {
+			if err := dec.Decode(params[at], param, arg.UnsafePointer()); err != nil {
 				return nil, fmt.Errorf("function param %d: %w", at, err)
 			}
 			in[idx] = arg.Elem()
@@ -321,7 +317,7 @@ func marshalNative(t reflect.Type) MarshalerFunc {
 		if !ok || val == nil {
 			return types.Null, nil
 		}
-		return e.interp.resolve(val)
+		return e.interp.deref(val)
 	}
 }
 

@@ -319,7 +319,7 @@ func convert[T any](i *Interpreter, r *Registry, run func(*Encoder, unsafe.Point
 
 // assign writes a VM value into the live Go value at p.
 func assign(i *Interpreter, r *Registry, set UnmarshalerFunc, val types.Boxed, p unsafe.Pointer) error {
-	value, err := i.resolve(val)
+	value, err := i.deref(val)
 	if err != nil {
 		return err
 	}
