@@ -3962,3 +3962,463 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 		runParityErr(t, prog)
 	})
 }
+
+// hostLoopFields is the Go struct TestARM64_HostStructLoop reads and writes
+// through. It carries an unexported field so the codec picks a live view, one
+// exported field per Go kind the lowerer has a row for, a string field it has
+// none for, and an int64 field holding more than a box payload fits.
+type hostLoopFields struct {
+	Flag   bool
+	I8     int8
+	I16    int16
+	I32    int32
+	Int    int
+	I64    int64
+	U8     uint8
+	U16    uint16
+	U32    uint32
+	U64    uint64
+	F32    float32
+	F64    float64
+	Text   string
+	Big    int64
+	hidden int32
+}
+
+func (h *hostLoopFields) Hidden() int32 { return h.hidden }
+
+// hostNarrowField and hostWideField hold one field of the same VM kind in two
+// Go widths, which is what makes a lowered read of one wrong for the other.
+type hostNarrowField struct {
+	V      int16
+	hidden int32
+}
+
+func (h *hostNarrowField) Hidden() int32 { return h.hidden }
+
+type hostWideField struct {
+	V      int32
+	hidden int32
+}
+
+func (h *hostWideField) Hidden() int32 { return h.hidden }
+
+// TestARM64_HostStructLoop covers STRUCT_GET and STRUCT_SET against a
+// *HostStruct, whose fields hold Go memory rather than VM words. Every case
+// reads or writes inside a counted loop and hands the loop's own value back, so
+// a row that loads the wrong width or extension reports a wrong value rather
+// than merely a different speed, and the native entry count separates an access
+// that stayed in the loop from one that exited on every iteration.
+func TestARM64_HostStructLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	const size = int32(24)
+	negI32, negI64 := int32(-99), int64(-1)<<41
+	seed := hostLoopFields{
+		Flag: true, I8: -8, I16: -300, I32: -70000, Int: -1 << 40, I64: -1 << 40,
+		U8: 200, U16: 60000, U32: 0xFFFF_FFFF, U64: 1 << 40, F32: 1.5, F64: -2.5,
+		Text: "text", Big: 1 << 60,
+	}
+
+	// run marshals its own copy of seed, so a JIT run and a threaded run each
+	// own the Go memory they write and the comparison between them stays
+	// honest. body runs once per iteration and tail leaves the result.
+	run := func(t *testing.T, locals []types.Type, body, tail []instr.Instruction, opts ...func(*option)) (types.Value, hostLoopFields, float64) {
+		t.Helper()
+		setup := New(program.New(nil))
+		defer func() { require.NoError(t, setup.Close()) }()
+		src := seed
+		host, err := NewRegistry().Marshal(setup, &src)
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		require.Equal(t, 0, b.Const(host))
+		b.Locals(append([]types.Type{types.TypeI32}, locals...)...)
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		for _, step := range body {
+			b.Emit(step.Opcode(), step.Operands()...)
+		}
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		for _, step := range tail {
+			b.Emit(step.Opcode(), step.Operands()...)
+		}
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		i := New(prog, append(opts, WithProfiler(profile))...)
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		// Metrics land when the interpreter closes, so the count is read
+		// after the run has finished rather than during it.
+		require.NoError(t, i.Close())
+
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		return got, src, entries
+	}
+
+	t.Run("a read of every lowered field kind stays native and agrees with threaded", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			at   uint64
+			typ  types.Type
+			want types.Value
+		}{
+			{name: "bool", at: 0, typ: types.TypeI1, want: types.I1(true)},
+			{name: "int8", at: 1, typ: types.TypeI8, want: types.I8(-8)},
+			{name: "int16", at: 2, typ: types.TypeI32, want: types.I32(-300)},
+			{name: "int32", at: 3, typ: types.TypeI32, want: types.I32(-70000)},
+			{name: "int", at: 4, typ: types.TypeI64, want: types.I64(-1 << 40)},
+			{name: "int64", at: 5, typ: types.TypeI64, want: types.I64(-1 << 40)},
+			{name: "uint8", at: 6, typ: types.TypeI32, want: types.I32(200)},
+			{name: "uint16", at: 7, typ: types.TypeI32, want: types.I32(60000)},
+			// A uint32 field reaches the guest as the signed i32 its
+			// conversion casts to, so the load sign-extends the same four
+			// bytes rather than widening them.
+			{name: "uint32", at: 8, typ: types.TypeI32, want: types.I32(-1)},
+			{name: "uint64", at: 9, typ: types.TypeI64, want: types.I64(1 << 40)},
+			{name: "float32", at: 10, typ: types.TypeF32, want: types.F32(1.5)},
+			{name: "float64", at: 11, typ: types.TypeF64, want: types.F64(-2.5)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				locals := []types.Type{tt.typ}
+				body := []instr.Instruction{
+					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at),
+					instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1),
+				}
+				tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
+
+				want, _, _ := run(t, locals, body, tail, WithTick(1), WithThreshold(-1))
+				require.Equal(t, tt.want, want)
+
+				got, _, entries := run(t, locals, body, tail, WithTick(1), WithThreshold(0))
+				require.Equal(t, want, got)
+				require.Greater(t, entries, float64(0), "expected a native entry")
+				require.Less(t, entries, float64(size), "the read exits the native loop")
+			})
+		}
+	})
+
+	t.Run("a read the interpreter still owns agrees with threaded", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			at   uint64
+			typ  types.Type
+			want types.Value
+		}{
+			// A string field publishes a heap reference rather than loading
+			// a word, so it has no row at all.
+			{name: "no row for the field kind", at: 12, typ: types.TypeString, want: types.String("text")},
+			// An i64 past the box payload cannot stay raw, so the read
+			// leaves the loop where the interpreter spills it to the heap.
+			{name: "a value past the box payload", at: 13, typ: types.TypeI64, want: types.I64(1 << 60)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				locals := []types.Type{tt.typ}
+				body := []instr.Instruction{
+					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at),
+					instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1),
+				}
+				tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
+
+				want, _, _ := run(t, locals, body, tail, WithTick(1), WithThreshold(-1))
+				require.Equal(t, tt.want, want)
+				got, _, _ := run(t, locals, body, tail, WithTick(1), WithThreshold(0))
+				require.Equal(t, want, got)
+			})
+		}
+	})
+
+	t.Run("a write of every exactly imaged field kind reaches the Go value", func(t *testing.T) {
+		for _, tt := range []struct {
+			name  string
+			at    uint64
+			store []instr.Instruction
+			want  types.Value
+			check func(*testing.T, hostLoopFields)
+		}{
+			{
+				name: "bool", at: 0,
+				store: []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_EQZ)},
+				want:  types.I1(false),
+				check: func(t *testing.T, got hostLoopFields) { require.False(t, got.Flag) },
+			},
+			{
+				// No opcode makes an i8 constant, so the value written is the
+				// one a read of the same field produced.
+				name: "int8", at: 1,
+				store: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET)},
+				want:  types.I8(-8),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, int8(-8), got.I8) },
+			},
+			{
+				name: "int32", at: 3,
+				store: []instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(negI32)))},
+				want:  types.I32(negI32),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, negI32, got.I32) },
+			},
+			{
+				name: "int64", at: 5,
+				store: []instr.Instruction{instr.New(instr.I64_CONST, uint64(negI64))},
+				want:  types.I64(negI64),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, negI64, got.I64) },
+			},
+			{
+				// A uint32 field is as wide as its slot, so the store writes
+				// the same four bytes the conversion would reinterpret.
+				name: "uint32", at: 8,
+				store: []instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(negI32)))},
+				want:  types.I32(negI32),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, uint32(0xFFFF_FF9D), got.U32) },
+			},
+			{
+				name: "uint64", at: 9,
+				store: []instr.Instruction{instr.New(instr.I64_CONST, uint64(negI64))},
+				want:  types.I64(negI64),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, uint64(0xFFFF_FE00_0000_0000), got.U64) },
+			},
+			{
+				name: "float32", at: 10,
+				store: []instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5)))},
+				want:  types.F32(-3.5),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, float32(-3.5), got.F32) },
+			},
+			{
+				name: "float64", at: 11,
+				store: []instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(4.25))},
+				want:  types.F64(4.25),
+				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, float64(4.25), got.F64) },
+			},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				body := append([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at)}, tt.store...)
+				body = append(body, instr.New(instr.STRUCT_SET))
+				tail := []instr.Instruction{
+					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at), instr.New(instr.STRUCT_GET),
+				}
+
+				want, threaded, _ := run(t, nil, body, tail, WithTick(1), WithThreshold(-1))
+				require.Equal(t, tt.want, want)
+				tt.check(t, threaded)
+
+				got, jit, entries := run(t, nil, body, tail, WithTick(1), WithThreshold(0))
+				require.Equal(t, want, got)
+				require.Equal(t, threaded, jit, "the Go value diverged from the threaded run")
+				require.Greater(t, entries, float64(0), "expected a native entry")
+				require.Less(t, entries, float64(size), "the write exits the native loop")
+			})
+		}
+	})
+
+	t.Run("a write a range check governs agrees with threaded", func(t *testing.T) {
+		// An int16 field is narrower than the i32 slot the guest writes, so
+		// the store can overflow and the interpreter is the one that says so.
+		for _, threshold := range []int{-1, 0} {
+			setup := New(program.New(nil))
+			src := seed
+			host, err := NewRegistry().Marshal(setup, &src)
+			require.NoError(t, err)
+			i := New(program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 70000), instr.New(instr.STRUCT_SET),
+			}, program.WithConstants(host)), WithTick(1), WithThreshold(threshold))
+			require.ErrorIs(t, i.Run(context.Background()), ErrValueOverflow)
+			require.Equal(t, int16(-300), src.I16, "the rejected write left the Go field alone")
+			require.NoError(t, i.Close())
+			require.NoError(t, setup.Close())
+		}
+	})
+
+	t.Run("a field of another Go width at the same read exits", func(t *testing.T) {
+		// A Go int16 and a Go int32 field both reach the guest as i32, so the
+		// same compiled read serves both once the container arrives from the
+		// stack. Only the kind guard keeps the second run from loading two
+		// bytes of a four-byte field.
+		b := program.NewBuilder()
+		b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.LOCAL_SET, 0).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		read := func(threshold int) (types.Value, types.Value, float64) {
+			profile := prof.New()
+			i := New(prog, WithTick(1), WithThreshold(threshold), WithProfiler(profile))
+			pass := func(value any) types.Value {
+				host, err := i.Marshal(value)
+				require.NoError(t, err)
+				require.NoError(t, i.Push(host))
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				i.Reset()
+				return got
+			}
+			narrow, wide := pass(&hostNarrowField{V: -300}), pass(&hostWideField{V: -70000})
+			require.NoError(t, i.Close())
+			var entries float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_native_entries_total" {
+					entries += metric.Value
+				}
+			}
+			return narrow, wide, entries
+		}
+
+		narrow, wide, _ := read(-1)
+		require.Equal(t, types.I32(-300), narrow)
+		require.Equal(t, types.I32(-70000), wide)
+
+		gotNarrow, gotWide, entries := read(0)
+		require.Equal(t, narrow, gotNarrow)
+		require.Equal(t, wide, gotWide)
+		require.Greater(t, entries, float64(0), "expected a native entry")
+	})
+
+	t.Run("a write to a field a range check narrows agrees with threaded", func(t *testing.T) {
+		// A uint8 field is narrower than the i32 slot the guest writes, so a
+		// store past 255 has to report an overflow rather than truncate. The
+		// loop writes in range long enough to compile before it does not.
+		const wide = int32(64)
+		b := program.NewBuilder()
+		b.Locals(types.TypeAny, types.TypeI32)
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.LOCAL_SET, 0).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(wide))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 6)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 200).Emit(instr.I32_ADD)
+		b.Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		for _, threshold := range []int{-1, 0} {
+			i := New(prog, WithTick(1), WithThreshold(threshold))
+			src := seed
+			host, err := i.Marshal(&src)
+			require.NoError(t, err)
+			require.NoError(t, i.Push(host))
+			require.ErrorIs(t, i.Run(context.Background()), ErrValueOverflow)
+			// 200+55 is the last value a uint8 holds, so the field stops
+			// there instead of wrapping to what a raw byte store would leave.
+			require.Equal(t, uint8(255), src.U8)
+			require.NoError(t, i.Close())
+		}
+	})
+
+	t.Run("a write a range check governs agrees with threaded", func(t *testing.T) {
+		// An int16 field is narrower than the i32 slot the guest writes, so
+		// the store can overflow and the interpreter is the one that says so.
+		for _, threshold := range []int{-1, 0} {
+			setup := New(program.New(nil))
+			src := seed
+			host, err := NewRegistry().Marshal(setup, &src)
+			require.NoError(t, err)
+			i := New(program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 70000), instr.New(instr.STRUCT_SET),
+			}, program.WithConstants(host)), WithTick(1), WithThreshold(threshold))
+			require.ErrorIs(t, i.Run(context.Background()), ErrValueOverflow)
+			require.Equal(t, int16(-300), src.I16, "the rejected write left the Go field alone")
+			require.NoError(t, i.Close())
+			require.NoError(t, setup.Close())
+		}
+	})
+
+	t.Run("a field of another Go width at the same read exits", func(t *testing.T) {
+		// A Go int16 and a Go int32 field both reach the guest as i32, so one
+		// STRUCT_GET alternating between them keeps the same VM kind while
+		// changing the load width. Only the kind guard separates them.
+		build := func() *program.Program {
+			setup := New(program.New(nil))
+			defer func() { require.NoError(t, setup.Close()) }()
+			registry := NewRegistry()
+			narrow, err := registry.Marshal(setup, &hostNarrowField{V: -300})
+			require.NoError(t, err)
+			wide, err := registry.Marshal(setup, &hostWideField{V: -70000})
+			require.NoError(t, err)
+
+			b := program.NewBuilder()
+			require.Equal(t, 0, b.Const(narrow))
+			require.Equal(t, 1, b.Const(wide))
+			b.Locals(types.TypeI32, types.TypeAny, types.TypeI32)
+			loop, odd, read, done := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(odd)
+			b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 1).Br(read)
+			b.Bind(odd)
+			b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 1)
+			b.Bind(read)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(loop)
+			b.Bind(done)
+			b.Emit(instr.LOCAL_GET, 2)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+
+		read := func(threshold int) (types.Value, float64) {
+			profile := prof.New()
+			i := New(build(), WithTick(1), WithThreshold(threshold), WithProfiler(profile))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.NoError(t, i.Close())
+			var entries float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_native_entries_total" {
+					entries += metric.Value
+				}
+			}
+			return got, entries
+		}
+		want, _ := read(-1)
+		require.Equal(t, types.I32(-70000), want)
+		got, entries := read(0)
+		require.Equal(t, want, got)
+		require.Greater(t, entries, float64(0), "expected a native entry")
+	})
+
+	t.Run("an index past the layout faults the same way", func(t *testing.T) {
+		for _, threshold := range []int{-1, 0} {
+			setup := New(program.New(nil))
+			src := seed
+			host, err := NewRegistry().Marshal(setup, &src)
+			require.NoError(t, err)
+			i := New(program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.STRUCT_GET),
+			}, program.WithConstants(host)), WithTick(1), WithThreshold(threshold))
+			require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+			require.NoError(t, i.Close())
+			require.NoError(t, setup.Close())
+		}
+	})
+}

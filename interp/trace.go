@@ -2,6 +2,7 @@ package interp
 
 import (
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"sync"
@@ -546,11 +547,17 @@ func (t *tracer) op(i *Interpreter, op instr.Opcode, startFP int) record {
 		}
 		if i.sp > 1 {
 			st.shape = t.shape(i, i.stack[i.sp-2])
+			if op == instr.STRUCT_GET {
+				st.shape.field = t.field(i, i.stack[i.sp-2], st.arg)
+			}
 		}
 	case instr.ARRAY_SET, instr.STRUCT_SET:
 		if i.sp > 2 {
 			st.arg = i.stack[i.sp-2]
 			st.shape = t.shape(i, i.stack[i.sp-3])
+			if op == instr.STRUCT_SET {
+				st.shape.field = t.field(i, i.stack[i.sp-3], st.arg)
+			}
 		}
 	case instr.BR, instr.BR_IF:
 		st.target = f.ip + instr.ParseI16(i.instrs[f.addr], f.ip+1) + 3
@@ -582,6 +589,29 @@ func (t *tracer) shape(i *Interpreter, v types.Boxed) shape {
 		out.typ = uintptr(unsafe.Pointer(s.Typ))
 	}
 	return out
+}
+
+// field reports the Go kind the *HostStruct at container holds its at'th field
+// in. A host field is read and written through that kind rather than through a
+// VM word, so it is what the lowerer needs to pick a load and a store; see
+// shape.field. Anything else records reflect.Invalid, which has no row.
+func (t *tracer) field(i *Interpreter, container, at types.Boxed) reflect.Kind {
+	if container.Kind() != types.KindRef {
+		return reflect.Invalid
+	}
+	addr := container.Ref()
+	if addr < 0 || addr >= len(i.heap) {
+		return reflect.Invalid
+	}
+	host, ok := i.heap[addr].(*HostStruct)
+	if !ok {
+		return reflect.Invalid
+	}
+	idx := int(at.I32())
+	if idx < 0 || idx >= len(host.fields) {
+		return reflect.Invalid
+	}
+	return host.fields[idx].conversion.kind
 }
 
 func (t *tracer) finish(i *Interpreter, st *record, op instr.Opcode) {

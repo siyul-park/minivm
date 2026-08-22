@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"reflect"
 	"sort"
 
 	"github.com/siyul-park/minivm/analysis"
@@ -17,6 +18,13 @@ type anchor struct {
 type shape struct {
 	itab uintptr
 	typ  uintptr
+	// field is the Go kind a *HostStruct access read its field through. A
+	// host field converts on the way out, so its width and signedness are
+	// what the read loads with, and the VM kind alone does not name them:
+	// int16, int32, and uint32 all reach the guest as i32. It is
+	// reflect.Invalid for every other container, and for a host field the
+	// lowerer has no row for.
+	field reflect.Kind
 }
 
 type step struct {

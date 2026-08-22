@@ -8803,30 +8803,42 @@ func (h *structGetHostFields) Bump(n int32) int32 {
 // dispatch cost from any boxing or heap traffic. The marshal and reset work
 // outside the inner loop is amortized over repeats field reads per run, the
 // same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
+// The two rows separate the threaded read from the lowered one, which is the
+// pair a change to hostGet has to report.
 func BenchmarkInterpreter_StructGetHost(b *testing.B) {
 	const repeats = 10000
 
-	prog := structGetHostLoop(repeats)
-	vm := New(prog, WithThreshold(-1)) // threaded + fused, no JIT
-	b.Cleanup(func() { require.NoError(b, vm.Close()) })
-	ctx := context.Background()
+	for _, tt := range []struct {
+		name      string
+		threshold int
+	}{
+		{name: "Threaded", threshold: -1},
+		{name: "JIT", threshold: 0},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			prog := structGetHostLoop(repeats)
+			vm := New(prog, WithThreshold(tt.threshold))
+			b.Cleanup(func() { require.NoError(b, vm.Close()) })
+			ctx := context.Background()
 
-	run := func() types.Boxed {
-		host, err := vm.Marshal(&structGetHostFields{Count: 1})
-		require.NoError(b, err)
-		require.NoError(b, vm.Push(host))
-		require.NoError(b, vm.Run(ctx))
-		got, err := vm.PopBoxed()
-		require.NoError(b, err)
-		vm.Reset()
-		return got
-	}
+			run := func() types.Boxed {
+				host, err := vm.Marshal(&structGetHostFields{Count: 1})
+				require.NoError(b, err)
+				require.NoError(b, vm.Push(host))
+				require.NoError(b, vm.Run(ctx))
+				got, err := vm.PopBoxed()
+				require.NoError(b, err)
+				vm.Reset()
+				return got
+			}
 
-	want := run()
+			want := run()
 
-	b.ReportAllocs()
-	for b.Loop() {
-		require.Equal(b, want, run())
+			b.ReportAllocs()
+			for b.Loop() {
+				require.Equal(b, want, run())
+			}
+		})
 	}
 }
 

@@ -460,6 +460,10 @@ Native full-trace reads include observed shapes for scalar `REF_GET`, selected `
 
 Heap reads guard ref address, heap itab, array element kind, struct type pointer, struct field kind, index bounds, and release safety when needed.
 
+`STRUCT_GET` and `STRUCT_SET` also lower against a `*HostStruct`, whose fields hold Go memory rather than VM words (see `docs/host-integration.md`). `hostGet` and `hostSet` (`interp/jit_arm64.go`) guard the heap itab against `heapHostStruct`, bounds-guard the field index against the compiled layout the view carries, and guard that field's Go kind against the one the trace recorded in `shape.field`, then load or store the Go field through the address the layout's offset names. Nothing about a host view is assumed from the itab alone: the same compiled access serves every `*HostStruct`, so a container whose field at that index has another Go kind exits at the kind guard rather than loading the wrong width.
+
+`hostShapes` (`interp/jit.go`) is the one place a hosted Go field's layout is written down, indexed by the `reflect.Kind` the codec compiled the field through, and mirrors the codec's own `leaves` table. A kind with no row - `string`, a pointer, a nested container - publishes a heap reference rather than loading a word, so its access stays with the interpreter. A read reinterprets a field as wide as its VM slot and widens a narrower one by the field's own signedness, which is why an `int16`, an `int32`, and a `uint32` field all reach the guest as i32 but do not share a load. A write lowers only for a field as wide as its slot: a narrower one decodes through the range check `setSigned` and `setUnsigned` perform, and a check that can fail belongs with the interpreter that reports it.
+
 Ref reads retain the loaded element or payload. A container consumer releases its container handle only when that operand owns its retain, eliding the release for a deferred operand (see Reference Ownership): `CORO_VALUE` still retains the value and releases the handle when the handle is `backingStack`. `CORO_DONE` keeps the handle.
 
 Heap-promoted `i64` values fall back before boxing.

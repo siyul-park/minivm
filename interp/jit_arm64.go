@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"reflect"
 	"slices"
 	"unsafe"
 
@@ -30,17 +31,23 @@ const (
 )
 
 const (
-	sliceData   = 0
-	sliceLen    = 8
-	structTyp   = int(unsafe.Offsetof(types.Struct{}.Typ))
-	structData  = int(unsafe.Offsetof(types.Struct{}.Data))
-	closureUpvs = int(unsafe.Offsetof(types.Closure{}.Upvals))
-	fieldsSlice = int(unsafe.Offsetof(types.StructType{}.Fields))
-	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
-	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
-	errorValue  = types.ErrorValueOffset
-	coroValue   = int(unsafe.Offsetof(coroutine{}.value))
-	coroDone    = int(unsafe.Offsetof(coroutine{}.done))
+	sliceData       = 0
+	sliceLen        = 8
+	structTyp       = int(unsafe.Offsetof(types.Struct{}.Typ))
+	structData      = int(unsafe.Offsetof(types.Struct{}.Data))
+	closureUpvs     = int(unsafe.Offsetof(types.Closure{}.Upvals))
+	fieldsSlice     = int(unsafe.Offsetof(types.StructType{}.Fields))
+	fieldKind       = int(unsafe.Offsetof(types.StructField{}.Kind))
+	fieldSize       = int(unsafe.Sizeof(types.StructField{}))
+	hostFields      = int(unsafe.Offsetof(HostStruct{}.fields))
+	hostPtr         = int(unsafe.Offsetof(HostStruct{}.ptr))
+	hostFieldOffset = int(unsafe.Offsetof(field{}.offset))
+	hostFieldConv   = int(unsafe.Offsetof(field{}.conversion))
+	hostFieldSize   = int(unsafe.Sizeof(field{}))
+	hostConvKind    = int(unsafe.Offsetof(conversion{}.kind))
+	errorValue      = types.ErrorValueOffset
+	coroValue       = int(unsafe.Offsetof(coroutine{}.value))
+	coroDone        = int(unsafe.Offsetof(coroutine{}.done))
 )
 
 const branchTableLimit = 32
@@ -3494,6 +3501,9 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 || ctx.values[len(ctx.values)-2].kind != types.KindRef {
 		return false
 	}
+	if op.shape.itab == heapHostStruct {
+		return l.hostGet(ctx, op)
+	}
 	out := op.seen.Kind()
 	switch out {
 	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
@@ -3572,6 +3582,172 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	return true
 }
 
+// hostEntry walks the compiled layout of the *HostStruct at data to the field
+// the index in idx names, and returns the address of that field inside the Go
+// struct. The index is bounds-guarded against the layout the view carries and
+// the field's Go kind is guarded against the one the trace recorded, so the
+// caller's load or store is the one that kind compiled to.
+func (l arm64Lowerer) hostEntry(ctx *lowering, data, idx asm.VReg, kind reflect.Kind, bounds, kindFail asm.Label) asm.VReg {
+	a := ctx.assembler
+	fields, n := l.sliceHeader(ctx, data, int16(hostFields))
+	l.guardIndex(ctx, idx, n, bounds)
+
+	stride := a.Reg(asm.RegTypeInt, asm.Width64)
+	entry := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(stride, uint64(hostFieldSize))...)
+	a.Emit(arm64.MUL(stride, idx, stride), arm64.ADD(entry, fields, stride))
+
+	conv := a.Reg(asm.RegTypeInt, asm.Width64)
+	got := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(conv, entry, int16(hostFieldConv)), arm64.LDRB(got, conv, int16(hostConvKind)))
+	a.Emit(arm64.CMPI(got, uint16(kind)), arm64.BCondLabel(arm64.OpBNE, kindFail))
+
+	offset := a.Reg(asm.RegTypeInt, asm.Width64)
+	base := a.Reg(asm.RegTypeInt, asm.Width64)
+	target := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(offset, entry, int16(hostFieldOffset)), arm64.LDR(base, data, int16(hostPtr)), arm64.ADD(target, base, offset))
+	return target
+}
+
+// hostLoad reads size bytes at target into an integer register, extending them
+// as signed says, which leaves the register holding what a VM slot of that
+// field's kind holds raw. hostGet settles which widths reach here.
+func (l arm64Lowerer) hostLoad(ctx *lowering, size uintptr, signed bool, target asm.VReg) asm.VReg {
+	a := ctx.assembler
+	out := a.Reg(asm.RegTypeInt, asm.Width64)
+	switch {
+	case size == 1 && signed:
+		raw := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDRB(raw, target, 0), arm64.SXTB(out, raw))
+	case size == 1:
+		a.Emit(arm64.LDRB(out, target, 0))
+	case size == 2 && signed:
+		a.Emit(arm64.LDRSH(out, target, 0))
+	case size == 2:
+		a.Emit(arm64.LDRH(out, target, 0))
+	case size == 4:
+		a.Emit(arm64.LDRSW(out, target, 0))
+	default:
+		a.Emit(arm64.LDR(out, target, 0))
+	}
+	return out
+}
+
+// hostGet lowers STRUCT_GET against a *HostStruct. A host field holds Go memory
+// rather than a VM word, so the read loads that memory in the form the field's
+// conversion produces instead of reading a struct data slot.
+func (l arm64Lowerer) hostGet(ctx *lowering, op step) bool {
+	s, ok := hostShapeOf(op.shape.field)
+	if !ok || s.kind != op.seen.Kind() {
+		return false
+	}
+	size, signed := s.read()
+	if size == 4 && !signed {
+		// Four unsigned bytes widening into an eight-byte slot would need a
+		// zero-extending word load that no target this backend lowers for
+		// asks for, since int and uint are eight bytes on all of them.
+		return false
+	}
+	container := ctx.values[len(ctx.values)-2]
+	owned := container.backing == backingStack
+	pre := ctx.pre()
+	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	ref, ok := l.box(ctx, container)
+	if !ok {
+		return false
+	}
+	a := ctx.assembler
+	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
+	if !ok {
+		return false
+	}
+	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
+	if !ok {
+		return false
+	}
+	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+	if !ok {
+		return false
+	}
+	kindFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
+	if !ok {
+		return false
+	}
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, heapHostStruct, fail)
+	target := l.hostEntry(ctx, data, idx, op.shape.field, bounds, kindFail)
+	result := l.hostLoad(ctx, size, signed, target)
+	if s.kind == types.KindI64 {
+		l.guardBoxable(ctx, result, valueFail)
+	}
+	if owned {
+		rcBase := l.rcBase(ctx)
+		rc := l.guardRC(ctx, addr, rcBase, valueFail)
+		a.Emit(arm64.SUBI(rc, rc, 1), arm64.STRR(rc, rcBase, addr))
+	}
+	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: s.kind, raw: true})
+	return true
+}
+
+// hostSet lowers STRUCT_SET against a *HostStruct. It lowers only a field that
+// is the exact image of its VM slot, because every other field decodes through
+// the range check setSigned and setUnsigned perform, and a check that can fail
+// belongs with the interpreter that reports it.
+func (l arm64Lowerer) hostSet(ctx *lowering, op step) (bool, bool) {
+	s, ok := hostShapeOf(op.shape.field)
+	if !ok || !s.exact() || s.kind != ctx.values[len(ctx.values)-1].kind {
+		return false, false
+	}
+	container := ctx.values[len(ctx.values)-3]
+	owned := container.backing == backingStack
+	pre := ctx.pre()
+	val := ctx.values[len(ctx.values)-1]
+	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
+	ref, ok := l.box(ctx, container)
+	if !ok {
+		return false, false
+	}
+	a := ctx.assembler
+	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
+	if !ok {
+		return false, false
+	}
+	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
+	if !ok {
+		return false, false
+	}
+	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+	if !ok {
+		return false, false
+	}
+	kindFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
+	if !ok {
+		return false, false
+	}
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, heapHostStruct, fail)
+	target := l.hostEntry(ctx, data, idx, op.shape.field, bounds, kindFail)
+	if owned {
+		rcBase := l.rcBase(ctx)
+		rc := l.guardRC(ctx, addr, rcBase, valueFail)
+		a.Emit(arm64.SUBI(rc, rc, 1), arm64.STRR(rc, rcBase, addr))
+	}
+	// exact leaves three widths, so the store is total over them.
+	switch s.size {
+	case 1:
+		a.Emit(arm64.STRB(val.reg, target, 0))
+	case 4:
+		a.Emit(arm64.STRW(val.reg, target, 0))
+	default:
+		a.Emit(arm64.STR(val.reg, target, 0))
+	}
+	ctx.values = ctx.values[:len(ctx.values)-3]
+	if op.terminal {
+		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op)), true
+	}
+	return true, false
+}
+
 func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
 	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.SBFX(ext, v, 0, boxableWidth))
@@ -3582,6 +3758,9 @@ func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
 func (l arm64Lowerer) structSet(ctx *lowering, op step) (bool, bool) {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false, false
+	}
+	if op.shape.itab == heapHostStruct {
+		return l.hostSet(ctx, op)
 	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	switch kind {
