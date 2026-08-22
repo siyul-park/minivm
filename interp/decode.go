@@ -42,8 +42,8 @@ func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer
 // Interp returns the interpreter this conversion runs against.
 func (d *Decoder) Interp() *Interpreter { return d.interp }
 
-// Unmarshal writes val into the Go value of type t at p, resolving t through
-// the same codec that started the conversion.
+// Decode writes val into the Go value of type t at p, resolving t through the
+// same codec that started the conversion.
 func (d *Decoder) Decode(val types.Value, t reflect.Type, p unsafe.Pointer) error {
 	c, err := d.registry.conversion(t)
 	if err != nil {
@@ -78,7 +78,7 @@ func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error)
 }
 
 // unmarshalConverting calls the type's own UnmarshalVM.
-func unmarshalConverting(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalConverting(t reflect.Type) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		return reflect.NewAt(t, p).Interface().(VMUnmarshaler).UnmarshalVM(d, val)
 	}
@@ -86,7 +86,7 @@ func unmarshalConverting(t reflect.Type) func(*Decoder, types.Value, unsafe.Poin
 
 // unmarshalValue stores a VM value into a Go slot that holds one directly,
 // covering both a types.Value-implementing type and an interface slot.
-func unmarshalValue(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalValue(t reflect.Type) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		value, err := d.registry.resolve(d.interp, val)
 		if err != nil {
@@ -110,7 +110,7 @@ func unmarshalValue(t reflect.Type) func(*Decoder, types.Value, unsafe.Pointer) 
 // included, and decodes structurally from any other VM value. Both halves
 // matter: a method reached through a host value mutates the caller's value,
 // while the same conversion applied to a struct guest code built still runs.
-func unmarshalHost(t reflect.Type, structural func(*Decoder, types.Value, unsafe.Pointer) error) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalHost(t reflect.Type, structural UnmarshalerFunc) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		value, err := d.registry.resolve(d.interp, val)
 		if err != nil {
@@ -126,7 +126,7 @@ func unmarshalHost(t reflect.Type, structural func(*Decoder, types.Value, unsafe
 
 // unmarshalPointer allocates the pointee and decodes into it, leaving a nil
 // pointer for a null value.
-func unmarshalPointer(elem *conversion) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalPointer(elem *conversion) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		if types.IsNull(val) {
 			*(*unsafe.Pointer)(p) = nil
@@ -156,7 +156,7 @@ func unmarshalPointer(elem *conversion) func(*Decoder, types.Value, unsafe.Point
 
 // unmarshalFunc wraps a VM function as a Go function that marshals arguments,
 // runs the VM function on the same interpreter, then decodes the results.
-func unmarshalFunc(t reflect.Type, typ *types.FunctionType) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalFunc(t reflect.Type, typ *types.FunctionType) UnmarshalerFunc {
 	failing := t.NumOut() > 0 && t.Out(t.NumOut()-1).Implements(typeError)
 
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
@@ -230,7 +230,7 @@ func unmarshalFunc(t reflect.Type, typ *types.FunctionType) func(*Decoder, types
 }
 
 // unmarshalArray decodes a VM array into a Go array or slice.
-func unmarshalArray(t reflect.Type, elem *conversion) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalArray(t reflect.Type, elem *conversion) UnmarshalerFunc {
 	stride := t.Elem().Size()
 	if t.Kind() == reflect.Array {
 		size := t.Len()
@@ -310,7 +310,7 @@ func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
 }
 
 // unmarshalMap decodes a VM map into a Go map.
-func unmarshalMap(t reflect.Type, index func(*Decoder, types.Value, unsafe.Pointer) error, elem *conversion) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalMap(t reflect.Type, index UnmarshalerFunc, elem *conversion) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		var out reflect.Value
 		entryKey, entryValue := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
@@ -373,7 +373,7 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 	case *types.Map:
 		reserve(m.Len())
 		m.Range(func(k types.MapKey, entry types.MapEntry) {
-			key, keyErr := d.key(k, entry)
+			key, keyErr := d.registry.resolve(d.interp, k.Value(entry))
 			if keyErr != nil {
 				if err == nil {
 					err = fmt.Errorf("map key: %w", keyErr)
@@ -388,16 +388,10 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 	return err
 }
 
-// key recovers the VM value a generic map entry is keyed by, resolving the
-// reference an entry holds so a decoded key is a value like any other.
-func (d *Decoder) key(k types.MapKey, entry types.MapEntry) (types.Value, error) {
-	return d.registry.resolve(d.interp, k.Value(entry))
-}
-
 // unmarshalStruct decodes a VM struct into a Go struct, matching each Go field
 // to the VM field of the same name and falling back to the next unused data
 // slot when no name matches.
-func unmarshalStruct(fields []field) func(*Decoder, types.Value, unsafe.Pointer) error {
+func unmarshalStruct(fields []field) UnmarshalerFunc {
 	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
 		value, err := d.registry.resolve(d.interp, val)
 		if err != nil {
@@ -466,7 +460,7 @@ func setString(_ *Decoder, val types.Value, p unsafe.Pointer) error {
 	return nil
 }
 
-func setSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64]() func(*Decoder, types.Value, unsafe.Pointer) error {
+func setSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64]() UnmarshalerFunc {
 	target := reflect.TypeFor[T]()
 	return func(_ *Decoder, val types.Value, p unsafe.Pointer) error {
 		n, ok := asInt(val)
@@ -481,7 +475,7 @@ func setSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64]() func(*Decoder, types
 	}
 }
 
-func setUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr]() func(*Decoder, types.Value, unsafe.Pointer) error {
+func setUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr]() UnmarshalerFunc {
 	target := reflect.TypeFor[T]()
 	return func(_ *Decoder, val types.Value, p unsafe.Pointer) error {
 		n, ok := asUint(val)
@@ -496,7 +490,7 @@ func setUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr]() fu
 	}
 }
 
-func setFloat[T ~float32 | ~float64]() func(*Decoder, types.Value, unsafe.Pointer) error {
+func setFloat[T ~float32 | ~float64]() UnmarshalerFunc {
 	target := reflect.TypeFor[T]()
 	return func(_ *Decoder, val types.Value, p unsafe.Pointer) error {
 		f, ok := asFloat(val)

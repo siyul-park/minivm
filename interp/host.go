@@ -39,9 +39,9 @@ type HostStruct struct {
 type HostArray struct {
 	typ      *types.ArrayType
 	elem     *conversion
-	copy     func(*Encoder, unsafe.Pointer) (types.Value, error)
+	copy     MarshalerFunc
 	registry *Registry
-	bounds   func(unsafe.Pointer) (unsafe.Pointer, int)
+	bounds   span
 	stride   uintptr
 	rtyp     reflect.Type
 	ptr      unsafe.Pointer
@@ -51,9 +51,9 @@ type HostArray struct {
 // entries convert on the way through rather than being read in place.
 type HostMap struct {
 	typ      *types.MapType
-	index    func(*Decoder, types.Value, unsafe.Pointer) error
+	index    UnmarshalerFunc
 	elem     *conversion
-	copy     func(*Encoder, unsafe.Pointer) (types.Value, error)
+	copy     MarshalerFunc
 	registry *Registry
 	rtyp     reflect.Type
 	ptr      unsafe.Pointer
@@ -91,16 +91,7 @@ func (h *HostStruct) Field(i *Interpreter, at int) (types.Boxed, error) {
 		return 0, ErrSegmentationFault
 	}
 	f := &h.fields[at]
-	e := &i.enc
-	*e = Encoder{interp: i, registry: h.registry, owned: e.owned[:0]}
-	result, err := f.conversion.box(e, unsafe.Add(h.ptr, f.offset))
-	if err != nil {
-		// A conversion that failed partway has no result to own what it
-		// already published, so the read leaves the heap as it found it.
-		e.discard()
-		return 0, err
-	}
-	return result, nil
+	return convert(i, h.registry, f.conversion.box, unsafe.Add(h.ptr, f.offset))
 }
 
 // SetField writes val into the Go struct. The Go field takes a copy of what val
@@ -111,13 +102,7 @@ func (h *HostStruct) SetField(i *Interpreter, at int, val types.Boxed) error {
 		return ErrSegmentationFault
 	}
 	f := &h.fields[at]
-	value, err := h.registry.resolve(i, val)
-	if err != nil {
-		return err
-	}
-	d := &i.dec
-	*d = Decoder{interp: i, registry: h.registry}
-	if err := f.conversion.set(d, value, unsafe.Add(h.ptr, f.offset)); err != nil {
+	if err := assign(i, h.registry, f.conversion.set, val, unsafe.Add(h.ptr, f.offset)); err != nil {
 		return err
 	}
 	i.releaseBox(val)
@@ -141,14 +126,7 @@ func (h *HostArray) Element(i *Interpreter, at int) (types.Boxed, error) {
 	if at < 0 || at >= n {
 		return 0, ErrIndexOutOfRange
 	}
-	e := &i.enc
-	*e = Encoder{interp: i, registry: h.registry, owned: e.owned[:0]}
-	result, err := h.elem.box(e, unsafe.Add(base, uintptr(at)*h.stride))
-	if err != nil {
-		e.discard()
-		return 0, err
-	}
-	return result, nil
+	return convert(i, h.registry, h.elem.box, unsafe.Add(base, uintptr(at)*h.stride))
 }
 
 // SetElement writes val into the element at at. The Go element takes a copy of
@@ -158,13 +136,7 @@ func (h *HostArray) SetElement(i *Interpreter, at int, val types.Boxed) error {
 	if at < 0 || at >= n {
 		return ErrIndexOutOfRange
 	}
-	value, err := h.registry.resolve(i, val)
-	if err != nil {
-		return err
-	}
-	d := &i.dec
-	*d = Decoder{interp: i, registry: h.registry}
-	if err := h.elem.set(d, value, unsafe.Add(base, uintptr(at)*h.stride)); err != nil {
+	if err := assign(i, h.registry, h.elem.set, val, unsafe.Add(base, uintptr(at)*h.stride)); err != nil {
 		return err
 	}
 	i.releaseBox(val)
@@ -178,12 +150,13 @@ func (h *HostArray) Fill(i *Interpreter, at, n int, val types.Boxed) error {
 	if at < 0 || n < 0 || at+n > size {
 		return ErrIndexOutOfRange
 	}
-	entry, err := h.decode(i, val)
+	elem := h.rtyp.Elem()
+	entry, err := decode(i, h.registry, h.elem.set, elem, val)
 	if err != nil {
 		return err
 	}
 	for k := range n {
-		reflect.NewAt(h.rtyp.Elem(), unsafe.Add(base, uintptr(at+k)*h.stride)).Elem().Set(entry)
+		reflect.NewAt(elem, unsafe.Add(base, uintptr(at+k)*h.stride)).Elem().Set(entry)
 	}
 	i.releaseBox(val)
 	return nil
@@ -197,9 +170,10 @@ func (h *HostArray) Append(i *Interpreter, vals []types.Boxed) error {
 	if !ok {
 		return fmt.Errorf("%w: cannot append to %s", ErrUnsupportedMarshalType, h.rtyp)
 	}
+	elem := h.rtyp.Elem()
 	out := dst
 	for _, val := range vals {
-		entry, err := h.decode(i, val)
+		entry, err := decode(i, h.registry, h.elem.set, elem, val)
 		if err != nil {
 			return err
 		}
@@ -237,7 +211,7 @@ func (h *HostArray) Delete(i *Interpreter, at int) (types.Boxed, error) {
 // works from that copy, so the result is VM-owned and the view keeps
 // addressing Go memory.
 func (h *HostArray) Array(i *Interpreter) (types.Value, error) {
-	return materialize(i, h.registry, h.copy, h.ptr)
+	return convert(i, h.registry, h.copy, h.ptr)
 }
 
 // slice addresses the Go slice through the variable the view holds, so a slice
@@ -248,21 +222,6 @@ func (h *HostArray) slice() (reflect.Value, bool) {
 		return reflect.Value{}, false
 	}
 	return reflect.NewAt(h.rtyp, h.ptr).Elem(), true
-}
-
-// decode converts a VM value into a fresh Go element.
-func (h *HostArray) decode(i *Interpreter, val types.Boxed) (reflect.Value, error) {
-	value, err := h.registry.resolve(i, val)
-	if err != nil {
-		return reflect.Value{}, err
-	}
-	out := reflect.New(h.rtyp.Elem())
-	d := &i.dec
-	*d = Decoder{interp: i, registry: h.registry}
-	if err := h.elem.set(d, value, out.UnsafePointer()); err != nil {
-		return reflect.Value{}, err
-	}
-	return out.Elem(), nil
 }
 
 func (h *HostMap) Kind() types.Kind { return types.KindRef }
@@ -284,15 +243,10 @@ func (h *HostMap) Get(i *Interpreter, key types.Boxed) (types.Boxed, bool, error
 		i.releaseBox(key)
 		return types.Zero(h.typ.ElemKind), false, nil
 	}
-	// Go map memory is not addressable, so the entry converts out of a holder
-	// of its own rather than in place.
 	holder := reflect.New(h.rtyp.Elem())
 	holder.Elem().Set(entry)
-	e := &i.enc
-	*e = Encoder{interp: i, registry: h.registry, owned: e.owned[:0]}
-	result, err := h.elem.box(e, holder.UnsafePointer())
+	result, err := convert(i, h.registry, h.elem.box, holder.UnsafePointer())
 	if err != nil {
-		e.discard()
 		return 0, false, err
 	}
 	i.releaseBox(key)
@@ -306,21 +260,15 @@ func (h *HostMap) Set(i *Interpreter, key, val types.Boxed) error {
 	if err != nil {
 		return err
 	}
-	value, err := h.registry.resolve(i, val)
+	entry, err := decode(i, h.registry, h.elem.set, h.rtyp.Elem(), val)
 	if err != nil {
-		return err
-	}
-	entry := reflect.New(h.rtyp.Elem())
-	d := &i.dec
-	*d = Decoder{interp: i, registry: h.registry}
-	if err := h.elem.set(d, value, entry.UnsafePointer()); err != nil {
 		return err
 	}
 	m := h.value()
 	if m.IsNil() {
 		return ErrTypeMismatch
 	}
-	m.SetMapIndex(k, entry.Elem())
+	m.SetMapIndex(k, entry)
 	i.releaseBox(key)
 	i.releaseBox(val)
 	return nil
@@ -337,13 +285,12 @@ func (h *HostMap) Delete(i *Interpreter, key types.Boxed) error {
 	return nil
 }
 
-// Clear removes every entry from the Go map.
 func (h *HostMap) Clear() { h.value().Clear() }
 
 // Map rebuilds the view as the VM map a copy of the Go value would have
 // produced, for an opcode that yields a new value rather than changing this one.
 func (h *HostMap) Map(i *Interpreter) (types.Value, error) {
-	return materialize(i, h.registry, h.copy, h.ptr)
+	return convert(i, h.registry, h.copy, h.ptr)
 }
 
 // value addresses the Go map through the variable the view holds, so a map the
@@ -353,52 +300,60 @@ func (h *HostMap) value() reflect.Value { return reflect.NewAt(h.rtyp, h.ptr).El
 // key decodes a VM key into the Go key type, which is what makes a key the
 // guest computed find the entry the Go side stored.
 func (h *HostMap) key(i *Interpreter, key types.Boxed) (reflect.Value, error) {
-	value, err := h.registry.resolve(i, key)
+	return decode(i, h.registry, h.index, h.rtyp.Key(), key)
+}
+
+// convert reads the Go value at p through one compiled conversion. A conversion
+// that failed partway has no result to own what it already published, so the
+// read leaves the heap as it found it.
+func convert[T any](i *Interpreter, r *Registry, run func(*Encoder, unsafe.Pointer) (T, error), p unsafe.Pointer) (T, error) {
+	e := i.encoder(r)
+	out, err := run(e, p)
 	if err != nil {
-		return reflect.Value{}, err
+		e.discard()
+		var zero T
+		return zero, err
 	}
-	out := reflect.New(h.rtyp.Key())
-	d := &i.dec
-	*d = Decoder{interp: i, registry: h.registry}
-	if err := h.index(d, value, out.UnsafePointer()); err != nil {
+	return out, nil
+}
+
+// assign writes a VM value into the live Go value at p.
+func assign(i *Interpreter, r *Registry, set UnmarshalerFunc, val types.Boxed, p unsafe.Pointer) error {
+	value, err := r.resolve(i, val)
+	if err != nil {
+		return err
+	}
+	return set(i.decoder(r), value, p)
+}
+
+// decode writes a VM value into a fresh Go value of type t, for a destination
+// the view has no address for: a Go map entry, or an element append has yet to
+// make room for.
+func decode(i *Interpreter, r *Registry, set UnmarshalerFunc, t reflect.Type, val types.Boxed) (reflect.Value, error) {
+	out := reflect.New(t)
+	if err := assign(i, r, set, val, out.UnsafePointer()); err != nil {
 		return reflect.Value{}, err
 	}
 	return out.Elem(), nil
-}
-
-// materialize runs a view's copying conversion, the one its type would have
-// used had it never been a view.
-func materialize(i *Interpreter, r *Registry, copy func(*Encoder, unsafe.Pointer) (types.Value, error), p unsafe.Pointer) (types.Value, error) {
-	e := &i.enc
-	*e = Encoder{interp: i, registry: r, owned: e.owned[:0]}
-	out, err := copy(e, p)
-	if err != nil {
-		e.discard()
-		return nil, err
-	}
-	return out, nil
 }
 
 // hosting reports the Go value val stands for, when val is a host value over
 // rtyp. It is how a conversion recovers the value it handed the VM, including
 // the unexported state no VM representation carries.
 func hosting(val types.Value, rtyp reflect.Type) (unsafe.Pointer, bool) {
-	var (
-		typ reflect.Type
-		ptr unsafe.Pointer
-	)
 	switch h := val.(type) {
 	case *HostStruct:
-		typ, ptr = h.rtyp, h.ptr
+		if h.rtyp == rtyp {
+			return h.ptr, true
+		}
 	case *HostArray:
-		typ, ptr = h.rtyp, h.ptr
+		if h.rtyp == rtyp {
+			return h.ptr, true
+		}
 	case *HostMap:
-		typ, ptr = h.rtyp, h.ptr
-	default:
-		return nil, false
+		if h.rtyp == rtyp {
+			return h.ptr, true
+		}
 	}
-	if typ != rtyp {
-		return nil, false
-	}
-	return ptr, true
+	return nil, false
 }

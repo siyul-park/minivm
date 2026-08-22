@@ -2161,6 +2161,21 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 	return types.BoxRef(addr)
 }
 
+// encoder and decoder hand out the interpreter's own scratch, reset for one
+// conversion. A conversion that can nest another owns one instead, which is why
+// Marshal and Unmarshal build their own.
+func (i *Interpreter) encoder(r *Registry) *Encoder {
+	e := &i.enc
+	*e = Encoder{interp: i, registry: r, owned: e.owned[:0]}
+	return e
+}
+
+func (i *Interpreter) decoder(r *Registry) *Decoder {
+	d := &i.dec
+	*d = Decoder{interp: i, registry: r}
+	return d
+}
+
 // arrayGet reads the element at index at off the array bound to heap
 // address addr, covering every TypedArray[_] representation and the generic
 // *types.Array alike. It is the generic counterpart to the specialized reads

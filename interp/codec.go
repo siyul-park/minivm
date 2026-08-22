@@ -46,19 +46,19 @@ type registry struct {
 // of vm, allocating a heap ref when the slot needs one. set is the reverse of
 // both, because a slot resolves to a value before it is written back.
 //
-// view produces a live view of the Go value instead of a copy, and only a struct
-// has one. host reports that value is that view, so the conversion never copies
-// however it is reached.
+// view produces a live view of the Go value instead of a copy, and a struct,
+// array, slice, or map has one. host reports that value is that view, so the
+// conversion never copies however it is reached.
 type conversion struct {
 	typ  reflect.Type
 	kind reflect.Kind
 	vm   types.Type
 	host bool
 
-	value func(*Encoder, unsafe.Pointer) (types.Value, error)
-	view  func(*Encoder, unsafe.Pointer) (types.Value, error)
-	box   func(*Encoder, unsafe.Pointer) (types.Boxed, error)
-	set   func(*Decoder, types.Value, unsafe.Pointer) error
+	value MarshalerFunc
+	view  MarshalerFunc
+	box   boxer
+	set   UnmarshalerFunc
 }
 
 // field addresses one exported Go field through a compiled offset.
@@ -127,6 +127,7 @@ func NewRegistry(opts ...func(*registry)) *Registry {
 	}
 	return &Registry{entries: r.entries}
 }
+
 func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -591,7 +592,9 @@ var leaves = [...]conversion{
 	},
 }
 
-// asInt reads val as a VM integer.
+// asInt, asUint, and asFloat read a scalar VM value as the Go number a
+// conversion writes. asUint keeps the raw bits an unsigned Go value was stored
+// as, which is what makes its round trip through a signed VM slot exact.
 func asInt(val types.Value) (int64, bool) {
 	kind, bits, ok := bitsOf(val)
 	if !ok {
@@ -607,8 +610,6 @@ func asInt(val types.Value) (int64, bool) {
 	}
 }
 
-// asUint reads val as a VM integer, preserving the raw bits an unsigned Go
-// value was stored as.
 func asUint(val types.Value) (uint64, bool) {
 	kind, bits, ok := bitsOf(val)
 	if !ok {
@@ -624,7 +625,6 @@ func asUint(val types.Value) (uint64, bool) {
 	}
 }
 
-// asFloat reads val as a VM float.
 func asFloat(val types.Value) (float64, bool) {
 	kind, bits, ok := bitsOf(val)
 	if !ok {
