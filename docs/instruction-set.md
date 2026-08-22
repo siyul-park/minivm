@@ -268,8 +268,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | allocation and ownership stay threaded |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
-| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path; static plans resolve constant field indexes |
-| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | guarded native store when the no-spill budget permits; ref-field writes remain terminal |
+| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path; static plans resolve constant field indexes; a `*HostStruct` field loads Go memory in place |
+| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | guarded native store when the no-spill budget permits; ref-field writes remain terminal; a `*HostStruct` field stores Go memory in place when it is as wide as its slot |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | terminal fallback |

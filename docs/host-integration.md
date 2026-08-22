@@ -323,6 +323,13 @@ An opcode splits by what it produces:
 A view addresses the Go *variable* rather than the data behind it, so a slice or
 map the Go side replaced is the one the next access reaches.
 
+A host struct field also lowers natively on ARM64: `STRUCT_GET` and `STRUCT_SET`
+read and write the Go field from the compiled layout rather than leaving the
+native trace, so a loop over one runs at the speed of a loop over a VM struct. A
+field the backend has no load for — a string, a pointer, a nested container — and
+a write narrower than its VM slot, whose range check can fail, stay with the
+interpreter. `docs/jit-internals.md` holds the guards.
+
 ### Dynamic Map Keys
 
 A `map[any]V` is a view like any other map. A VM key carries no Go type of its
