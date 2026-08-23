@@ -61,6 +61,17 @@ func TestParse(t *testing.T) {
 		require.Equal(t, p0.Constants, p1.Constants)
 	})
 
+	t.Run("named struct field colon is not an index prefix", func(t *testing.T) {
+		// parseTypes strips the "NNNN:" index Format writes. A struct field
+		// name also carries a colon, so a hand-written line without an index
+		// must not lose everything up to it.
+		src := "\n.types\nstruct {value: i64; left: any}\n.code\n\tnop\n"
+		prog, err := program.Parse(strings.NewReader(src))
+		require.NoError(t, err)
+		require.Len(t, prog.Types, 1)
+		require.Equal(t, "struct {value: i64; left: any}", prog.Types[0].String())
+	})
+
 	t.Run("round trip preserves named struct fields", func(t *testing.T) {
 		p0 := program.New(
 			nil,

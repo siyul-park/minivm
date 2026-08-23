@@ -603,243 +603,281 @@ func permutationFlips(size, depth int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(permutationFlipsListing, size, size-1, depth))
 }
 
+// structTreeWalkListing builds a self-recursive binary-tree build/count
+// kernel over a named struct type (constant 0=build, 1=check; type 0=Node
+// {value, left, right}). build's params: 0=d; locals: 1=n. check's params:
+// 0=node.
+const structTreeWalkListing = `
+.types
+struct {value: i64; left: any; right: any}
+.constants
+func(i32) any
+	any
+	struct.new_default 0
+	local.set 1
+	local.get 1
+	i32.const 0
+	local.get 0
+	i32.to_i64_s
+	struct.set
+	local.get 0
+	i32.const 0
+	i32.le_s
+	br_if buildDone
+	local.get 1
+	i32.const 1
+	local.get 0
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	struct.set
+	local.get 1
+	i32.const 2
+	local.get 0
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	struct.set
+	buildDone:
+	local.get 1
+	return
+func(any) i32
+	local.get 0
+	ref.is_null
+	br_if nullCase
+	local.get 0
+	ref.cast 0
+	i32.const 1
+	struct.get
+	const.get 1
+	call
+	local.get 0
+	i32.const 2
+	struct.get
+	const.get 1
+	call
+	i32.add
+	i32.const 1
+	i32.add
+	return
+	nullCase:
+	i32.const 0
+	return
+.code
+	i32.const %d
+	const.get 0
+	call
+	const.get 1
+	call
+`
+
 func structTreeWalk(depth int32) *program.Program {
-	nodeType := types.NewStructType(
-		types.NewStructField(types.TypeI64, types.FieldWithName("value")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
-	)
-
-	// build locals: 0=d (param), 1=n
-	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
-		Params(types.TypeI32).
-		Locals(types.TypeAny)
-	buildDone := buildBuilder.Label()
-	buildFn := buildBuilder.
-		Emit(
-			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
-			// n.value = i64(d)
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_TO_I64_S),
-			instr.New(instr.STRUCT_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
-		).
-		BrIf(buildDone).
-		Emit(
-			// n.left = build(d-1)
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-			// n.right = build(d-1)
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-		).
-		Bind(buildDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 1),
-			instr.New(instr.RETURN),
-		).
-		MustBuild()
-
-	// check locals: 0=node (param)
-	checkBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeAny)
-	nullCase := checkBuilder.Label()
-	checkFn := checkBuilder.
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
-		BrIf(nullCase).
-		Emit(
-			// m := ref.cast[Node](node); left := m.left; check(left)
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_CAST, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-			// right := m.right; check(right)
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
-		).
-		Bind(nullCase).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
-		MustBuild()
-
-	return program.New(
-		[]instr.Instruction{
-			instr.New(instr.I32_CONST, uint64(uint32(depth))),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-		},
-		program.WithConstants(buildFn, checkFn),
-		program.WithTypes(nodeType),
-	)
+	return mustParseProgram(fmt.Sprintf(structTreeWalkListing, depth))
 }
 
-// binaryTrees builds the benchmarks-game binary-trees kernel. bottom_up_tree
-// and item_check are each self-recursive, so each reserves its own future
-// constant index before its body is built (matching fannkuch's permuteIdx
-// pattern) so its own recursive calls can CONST_GET that index.
-// STRUCT_NEW_DEFAULT zero-initializes ref fields to the null heap ref, so the
-// depth<=0 base case can leave left/right unset instead of writing REF_NULL.
+// binaryTreesListing builds the benchmarks-game binary-trees kernel over a
+// named struct type (type 0=Node{item, left, right}; constant 0=
+// bottom_up_tree, 1=item_check; each is self-recursive, calling back through
+// its own const.get index). bottom_up_tree params: 0=item,1=depth; locals:
+// 2=n. item_check params: 0=t. STRUCT_NEW_DEFAULT zero-initializes ref
+// fields to the null heap ref, so the depth<=0 base case can leave
+// left/right unset instead of writing a null ref. Main locals:
+// 0=stretchTree,1=checksum,2=longLivedTree,3=depth,4=iterations,5=shift,
+// 6=acc,7=i,8=t1,9=t2. %[1]d substitutes min_depth, %[2]d max_depth, %[3]d
+// max_depth+1.
+const binaryTreesListing = `
+.locals
+any
+i32
+any
+i32
+i32
+i32
+i32
+i32
+any
+any
+.types
+struct {item: i32; left: any; right: any}
+.constants
+func(i32, i32) any
+	any
+	struct.new_default 0
+	local.set 2
+	local.get 2
+	i32.const 0
+	local.get 0
+	struct.set
+	local.get 1
+	i32.const 0
+	i32.le_s
+	br_if buDone
+	local.get 2
+	i32.const 1
+	local.get 0
+	i32.const 2
+	i32.mul
+	i32.const 1
+	i32.sub
+	local.get 1
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	struct.set
+	local.get 2
+	i32.const 2
+	local.get 0
+	i32.const 2
+	i32.mul
+	local.get 1
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	struct.set
+	buDone:
+	local.get 2
+	return
+func(any) i32
+	local.get 0
+	ref.is_null
+	br_if nullCase
+	local.get 0
+	ref.cast 0
+	i32.const 1
+	struct.get
+	ref.is_null
+	br_if leafCase
+	local.get 0
+	i32.const 0
+	struct.get
+	local.get 0
+	i32.const 1
+	struct.get
+	const.get 1
+	call
+	i32.add
+	local.get 0
+	i32.const 2
+	struct.get
+	const.get 1
+	call
+	i32.sub
+	return
+	leafCase:
+	local.get 0
+	i32.const 0
+	struct.get
+	return
+	nullCase:
+	i32.const 0
+	return
+.code
+	i32.const 0
+	i32.const %[3]d
+	const.get 0
+	call
+	local.set 0
+	local.get 0
+	const.get 1
+	call
+	local.set 1
+	i32.const 0
+	i32.const %[2]d
+	const.get 0
+	call
+	local.set 2
+	i32.const %[1]d
+	local.set 3
+depthLoop:
+	local.get 3
+	i32.const %[2]d
+	i32.gt_s
+	br_if depthDone
+	i32.const 1
+	local.set 4
+	i32.const 0
+	local.set 5
+shiftLoop:
+	local.get 5
+	i32.const %[2]d
+	local.get 3
+	i32.sub
+	i32.const %[1]d
+	i32.add
+	i32.ge_s
+	br_if shiftDone
+	local.get 4
+	i32.const 2
+	i32.mul
+	local.set 4
+	local.get 5
+	i32.const 1
+	i32.add
+	local.set 5
+	br shiftLoop
+shiftDone:
+	i32.const 0
+	local.set 6
+	i32.const 1
+	local.set 7
+iLoop:
+	local.get 7
+	local.get 4
+	i32.gt_s
+	br_if iDone
+	local.get 7
+	local.get 3
+	const.get 0
+	call
+	local.set 8
+	local.get 6
+	local.get 8
+	const.get 1
+	call
+	i32.add
+	local.set 6
+	i32.const 0
+	local.get 7
+	i32.sub
+	local.get 3
+	const.get 0
+	call
+	local.set 9
+	local.get 6
+	local.get 9
+	const.get 1
+	call
+	i32.add
+	local.set 6
+	local.get 7
+	i32.const 1
+	i32.add
+	local.set 7
+	br iLoop
+iDone:
+	local.get 1
+	local.get 6
+	i32.add
+	local.set 1
+	local.get 3
+	i32.const 2
+	i32.add
+	local.set 3
+	br depthLoop
+depthDone:
+	local.get 1
+	local.get 2
+	const.get 1
+	call
+	i32.add
+`
+
 func binaryTrees(minDepth, maxDepth int32) *program.Program {
-	b := program.NewBuilder()
-	nodeType := b.Type(types.NewStructType(
-		types.NewStructField(types.TypeI32, types.FieldWithName("item")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
-	))
-
-	bottomUpTreeIdx := 0
-	// bottom_up_tree params: 0=item,1=depth; locals: 2=n
-	buBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
-		Params(types.TypeI32, types.TypeI32).
-		Locals(types.TypeAny)
-	buDone := buBuilder.Label()
-	bottomUpTreeFn := buBuilder.
-		Emit(
-			instr.New(instr.STRUCT_NEW_DEFAULT, uint64(nodeType)), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.STRUCT_SET),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
-		).
-		BrIf(buDone).
-		Emit(
-			// n.left = bottom_up_tree(2*item-1, depth-1)
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_MUL),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, uint64(bottomUpTreeIdx)), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-			// n.right = bottom_up_tree(2*item, depth-1)
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_MUL),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, uint64(bottomUpTreeIdx)), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-		).
-		Bind(buDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
-		MustBuild()
-	b.Const(bottomUpTreeFn)
-
-	itemCheckIdx := bottomUpTreeIdx + 1
-	// item_check params: 0=t
-	icBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeAny)
-	nullCase := icBuilder.Label()
-	leafCase := icBuilder.Label()
-	itemCheckFn := icBuilder.
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
-		BrIf(nullCase).
-		Emit(
-			// left := ref.cast[Node](t).left; if left is None: return t.item
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_CAST, uint64(nodeType)),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
-			instr.New(instr.REF_IS_NULL),
-		).
-		BrIf(leafCase).
-		Emit(
-			// t.item + item_check(t.left) - item_check(t.right)
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, uint64(itemCheckIdx)), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, uint64(itemCheckIdx)), instr.New(instr.CALL),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.RETURN),
-		).
-		Bind(leafCase).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.RETURN)).
-		Bind(nullCase).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
-		MustBuild()
-	b.Const(itemCheckFn)
-
-	// main locals: 0=stretchTree,1=checksum,2=longLivedTree,3=depth,
-	// 4=iterations,5=shift,6=acc,7=i,8=t1,9=t2
-	b.Locals(
-		types.TypeAny, types.TypeI32, types.TypeAny, types.TypeI32, types.TypeI32,
-		types.TypeI32, types.TypeI32, types.TypeI32, types.TypeAny, types.TypeAny,
-	)
-
-	// stretch_tree = bottom_up_tree(0, max_depth+1); checksum = item_check(stretch_tree)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, uint64(uint32(maxDepth+1)))
-	b.Emit(instr.CONST_GET, uint64(bottomUpTreeIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(itemCheckIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 1)
-
-	// long_lived_tree = bottom_up_tree(0, max_depth)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, uint64(uint32(maxDepth)))
-	b.Emit(instr.CONST_GET, uint64(bottomUpTreeIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 2)
-
-	b.Emit(instr.I32_CONST, uint64(uint32(minDepth))).Emit(instr.LOCAL_SET, 3)
-
-	depthLoop := b.Label()
-	depthDone := b.Label()
-	shiftLoop := b.Label()
-	shiftDone := b.Label()
-	iLoop := b.Label()
-	iDone := b.Label()
-
-	b.Bind(depthLoop)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(maxDepth))).Emit(instr.I32_GT_S).BrIf(depthDone)
-
-	// iterations = 1; shift = 0; while shift < max_depth-depth+min_depth: iterations *= 2; shift++
-	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 5)
-	b.Bind(shiftLoop)
-	b.Emit(instr.LOCAL_GET, 5)
-	b.Emit(instr.I32_CONST, uint64(uint32(maxDepth))).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_SUB).Emit(instr.I32_CONST, uint64(uint32(minDepth))).Emit(instr.I32_ADD)
-	b.Emit(instr.I32_GE_S).BrIf(shiftDone)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 2).Emit(instr.I32_MUL).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 5)
-	b.Br(shiftLoop)
-	b.Bind(shiftDone)
-
-	// acc = 0; i = 1; while i <= iterations: t1=build(i,depth); acc+=check(t1); t2=build(-i,depth); acc+=check(t2); i++
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 6)
-	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 7)
-	b.Bind(iLoop)
-	b.Emit(instr.LOCAL_GET, 7).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_GT_S).BrIf(iDone)
-
-	b.Emit(instr.LOCAL_GET, 7).Emit(instr.LOCAL_GET, 3)
-	b.Emit(instr.CONST_GET, uint64(bottomUpTreeIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 8)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 8).Emit(instr.CONST_GET, uint64(itemCheckIdx)).Emit(instr.CALL)
-	b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 6)
-
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 7).Emit(instr.I32_SUB).Emit(instr.LOCAL_GET, 3)
-	b.Emit(instr.CONST_GET, uint64(bottomUpTreeIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 9)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 9).Emit(instr.CONST_GET, uint64(itemCheckIdx)).Emit(instr.CALL)
-	b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 6)
-
-	b.Emit(instr.LOCAL_GET, 7).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 7)
-	b.Br(iLoop)
-	b.Bind(iDone)
-
-	// checksum += acc; depth += 2
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 6).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(depthLoop)
-	b.Bind(depthDone)
-
-	// checksum += item_check(long_lived_tree)
-	b.Emit(instr.LOCAL_GET, 1)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, uint64(itemCheckIdx)).Emit(instr.CALL)
-	b.Emit(instr.I32_ADD)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(binaryTreesListing, minDepth, maxDepth, maxDepth+1))
 }
 
 // sortStressListing builds the sortstress kernel. minivm has no sort opcode,
@@ -1019,129 +1057,180 @@ func sortStress(n, rounds int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(sortStressListing, n, rounds))
 }
 
-// stringBuild builds the strbuild kernel: digits(n) token generation, a
-// per-character checksum read back through STRING_ENCODE_UTF32, and
-// "big = big + tok + ' '" through STRING_CONCAT (the allocating operation
-// this kernel exists to measure).
+// stringBuildListing builds the strbuild kernel: digits(n) token generation
+// (constant 0; params: 0=n; locals: 1=count,2=v,3=arr,4=idx,5=d), a
+// per-character checksum read back through string.encode_utf32, and
+// "big = big + tok + ' '" through string.concat (the allocating operation
+// this kernel exists to measure). Type 0 is the []i32 code-point array used
+// to build each token. Constant 1 is the " " separator, constant 2 the ""
+// used to seed big. Main locals: 0=big,1=tokenChecksum,2=i,3=tok,
+// 4=codePoints,5=tokLen,6=j. %d substitutes n.
+const stringBuildListing = `
+.locals
+any
+i32
+i32
+any
+any
+i32
+i32
+.types
+[]i32
+.constants
+func(i32) any
+	i32
+	i32
+	any
+	i32
+	i32
+	local.get 0
+	i32.const 0
+	i32.eq
+	br_if zeroCase
+	i32.const 0
+	local.set 1
+	local.get 0
+	local.set 2
+	countLoop:
+	local.get 2
+	i32.const 0
+	i32.le_s
+	br_if countDone
+	local.get 1
+	i32.const 1
+	i32.add
+	local.set 1
+	local.get 2
+	i32.const 10
+	i32.div_s
+	local.set 2
+	br countLoop
+	countDone:
+	local.get 1
+	array.new_default 0
+	local.set 3
+	local.get 0
+	local.set 2
+	local.get 1
+	i32.const 1
+	i32.sub
+	local.set 4
+	fillLoop:
+	local.get 2
+	i32.const 0
+	i32.le_s
+	br_if fillDone
+	local.get 2
+	i32.const 10
+	i32.rem_s
+	local.set 5
+	local.get 3
+	local.get 4
+	local.get 5
+	i32.const 48
+	i32.add
+	array.set
+	local.get 2
+	i32.const 10
+	i32.div_s
+	local.set 2
+	local.get 4
+	i32.const 1
+	i32.sub
+	local.set 4
+	br fillLoop
+	fillDone:
+	local.get 3
+	string.new_utf32
+	return
+	zeroCase:
+	i32.const 1
+	array.new_default 0
+	local.set 3
+	local.get 3
+	i32.const 0
+	i32.const 48
+	array.set
+	local.get 3
+	string.new_utf32
+	return
+string " "
+string ""
+.code
+	const.get 2
+	local.set 0
+	i32.const 0
+	local.set 1
+	i32.const 0
+	local.set 2
+outer:
+	local.get 2
+	i32.const %[1]d
+	i32.ge_s
+	br_if outerDone
+	local.get 2
+	i32.to_i64_s
+	i64.const 2654435761
+	i64.mul
+	i64.const 99999
+	i64.rem_s
+	i64.to_i32
+	const.get 0
+	call
+	local.set 3
+	local.get 3
+	string.encode_utf32
+	local.set 4
+	local.get 3
+	string.len
+	local.set 5
+	i32.const 0
+	local.set 6
+charLoop:
+	local.get 6
+	local.get 5
+	i32.ge_s
+	br_if charDone
+	local.get 1
+	local.get 4
+	local.get 6
+	array.get
+	local.get 6
+	i32.const 1
+	i32.add
+	i32.mul
+	i32.add
+	local.set 1
+	local.get 6
+	i32.const 1
+	i32.add
+	local.set 6
+	br charLoop
+charDone:
+	local.get 1
+	i32.const 1000000007
+	i32.rem_s
+	local.set 1
+	local.get 0
+	local.get 3
+	string.concat
+	const.get 1
+	string.concat
+	local.set 0
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br outer
+outerDone:
+	local.get 1
+	local.get 0
+	string.len
+	i32.add
+`
+
 func stringBuild(n int32) *program.Program {
-	b := program.NewBuilder()
-	charType := b.Type(types.TypeI32Array)
-
-	// digits params: 0=n; locals: 1=count,2=v,3=arr,4=idx,5=d
-	dBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
-		Params(types.TypeI32).
-		Locals(types.TypeI32, types.TypeI32, types.TypeAny, types.TypeI32, types.TypeI32)
-	zeroCase := dBuilder.Label()
-	countLoop := dBuilder.Label()
-	countDone := dBuilder.Label()
-	fillLoop := dBuilder.Label()
-	fillDone := dBuilder.Label()
-	digitsFn := dBuilder.
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQ)).
-		BrIf(zeroCase).
-		Emit(
-			// count = number of decimal digits in n; v walks n down to 0
-			instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_SET, 2),
-		).
-		Bind(countLoop).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
-		BrIf(countDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_DIV_S), instr.New(instr.LOCAL_SET, 2),
-		).
-		Br(countLoop).
-		Bind(countDone).
-		Emit(
-			// arr = new i32[count]; v = n again; idx = count-1
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_NEW_DEFAULT, uint64(charType)), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 4),
-		).
-		Bind(fillLoop).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
-		BrIf(fillDone).
-		Emit(
-			// arr[idx] = '0' + (v%10); v /= 10; idx--
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_REM_S), instr.New(instr.LOCAL_SET, 5),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 4),
-			instr.New(instr.LOCAL_GET, 5), instr.New(instr.I32_CONST, 48), instr.New(instr.I32_ADD),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_DIV_S), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 4),
-		).
-		Br(fillLoop).
-		Bind(fillDone).
-		Emit(instr.New(instr.LOCAL_GET, 3), instr.New(instr.STRING_NEW_UTF32), instr.New(instr.RETURN)).
-		Bind(zeroCase).
-		Emit(
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, uint64(charType)), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 48), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.STRING_NEW_UTF32), instr.New(instr.RETURN),
-		).
-		MustBuild()
-	digitsIdx := b.Const(digitsFn)
-	spaceIdx := b.Const(types.String(" "))
-
-	// main locals: 0=big,1=tokenChecksum,2=i,3=tok,4=codePoints,5=tokLen,6=j
-	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeAny, types.TypeAny, types.TypeI32, types.TypeI32)
-	b.ConstGet(types.String("")).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
-
-	outer := b.Label()
-	outerDone := b.Label()
-	charLoop := b.Label()
-	charDone := b.Label()
-
-	b.Bind(outer)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(outerDone)
-
-	// tok = digits(i * 2654435761 % 99999); the multiply overflows i32 for
-	// i near this fixture's upper bound, so it runs in i64.
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_TO_I64_S)
-	b.Emit(instr.I64_CONST, 2654435761).Emit(instr.I64_MUL)
-	b.Emit(instr.I64_CONST, 99999).Emit(instr.I64_REM_S)
-	b.Emit(instr.I64_TO_I32)
-	b.Emit(instr.CONST_GET, uint64(digitsIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 3)
-
-	// token_checksum += sum(ord(tok[j])*(j+1) for j in range(len(tok))) via
-	// STRING_ENCODE_UTF32's code-point array; token_checksum %= 1000000007
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.STRING_ENCODE_UTF32).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.STRING_LEN).Emit(instr.LOCAL_SET, 5)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 6)
-	b.Bind(charLoop)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 5).Emit(instr.I32_GE_S).BrIf(charDone)
-	b.Emit(instr.LOCAL_GET, 1)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 6).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
-	b.Emit(instr.I32_MUL).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 6)
-	b.Br(charLoop)
-	b.Bind(charDone)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1000000007).Emit(instr.I32_REM_S).Emit(instr.LOCAL_SET, 1)
-
-	// big = big + tok + " "
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.STRING_CONCAT)
-	b.Emit(instr.CONST_GET, uint64(spaceIdx)).Emit(instr.STRING_CONCAT)
-	b.Emit(instr.LOCAL_SET, 0)
-
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Br(outer)
-	b.Bind(outerDone)
-
-	// return token_checksum + len(big)
-	b.Emit(instr.LOCAL_GET, 1)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN)
-	b.Emit(instr.I32_ADD)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(stringBuildListing, n))
 }
 
 func typedArraySumReference(size int32) int32 {
