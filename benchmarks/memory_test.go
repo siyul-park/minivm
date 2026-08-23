@@ -467,98 +467,140 @@ def run():
 	}, want)
 }
 
+// allocationGraphListing wraps a single-element []any depth times, each new
+// array holding the previous root at index 0 (root = [root]).
+const allocationGraphListing = `
+.locals
+any
+i32
+.types
+[]any
+.code
+	i32.const 1
+	array.new_default 0
+	local.set 0
+	i32.const 1
+	local.set 1
+loop:
+	local.get 1
+	i32.const %d
+	i32.ge_s
+	br_if done
+	i32.const 1
+	array.new_default 0
+	dup
+	i32.const 0
+	local.get 0
+	array.set
+	local.set 0
+	local.get 1
+	i32.const 1
+	i32.add
+	local.set 1
+	br loop
+done:
+	local.get 1
+`
+
 func allocationGraph(depth int32) *program.Program {
-	b := program.NewBuilder()
-	array := b.Type(types.NewArrayType(types.TypeAny))
-	loop := b.Label()
-	done := b.Label()
-	b.Locals(types.TypeAny, types.TypeI32)
-	b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(array)).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 1)
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(depth))).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(array)).Emit(instr.DUP)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_SET).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 1)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(allocationGraphListing, depth))
 }
 
+// permutationFlipsListing builds a self-recursive walk (constant 0; params:
+// 0=depth; locals: 1=arr, 2=i, 3=lo, 4=hi, 5=t) that reverses a fresh
+// size-length []any array each call and adds arr[size-1] to the recursive
+// result. %[1]d substitutes size, %[2]d substitutes size-1, %[3]d substitutes
+// depth.
+const permutationFlipsListing = `
+.types
+[]any
+.constants
+func(i32) i32
+	any
+	i32
+	i32
+	i32
+	i32
+	local.get 0
+	i32.const 0
+	i32.eq
+	br_if base
+	i32.const %[1]d
+	array.new_default 0
+	local.set 1
+	i32.const 0
+	local.set 2
+	fillLoop:
+	local.get 2
+	i32.const %[1]d
+	i32.ge_s
+	br_if fillDone
+	local.get 1
+	local.get 2
+	i32.const %[2]d
+	local.get 2
+	i32.sub
+	array.set
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br fillLoop
+	fillDone:
+	i32.const 0
+	local.set 3
+	i32.const %[2]d
+	local.set 4
+	swapLoop:
+	local.get 3
+	local.get 4
+	i32.ge_s
+	br_if swapDone
+	local.get 1
+	local.get 3
+	array.get
+	local.set 5
+	local.get 1
+	local.get 3
+	local.get 1
+	local.get 4
+	array.get
+	array.set
+	local.get 1
+	local.get 4
+	local.get 5
+	array.set
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	local.get 4
+	i32.const 1
+	i32.sub
+	local.set 4
+	br swapLoop
+	swapDone:
+	local.get 1
+	i32.const %[2]d
+	array.get
+	local.get 0
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	i32.add
+	return
+	base:
+	i32.const 0
+	return
+.code
+	i32.const %[3]d
+	const.get 0
+	call
+`
+
 func permutationFlips(size, depth int32) *program.Program {
-	arrayType := types.NewArrayType(types.TypeAny)
-
-	// locals: 0=depth (param), 1=arr, 2=i, 3=lo, 4=hi, 5=t
-	fb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeI32).
-		Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
-	base := fb.Label()
-	fillLoop := fb.Label()
-	fillDone := fb.Label()
-	swapLoop := fb.Label()
-	swapDone := fb.Label()
-
-	fn := fb.
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQ)).
-		BrIf(base).
-		Emit(
-			instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.ARRAY_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2),
-		).
-		Bind(fillLoop).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
-		BrIf(fillDone).
-		Emit(
-			// arr[i] = size-1-i
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2),
-			instr.New(instr.I32_CONST, uint64(uint32(size-1))), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_SUB),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-		).
-		Br(fillLoop).
-		Bind(fillDone).
-		Emit(
-			instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.I32_CONST, uint64(uint32(size-1))), instr.New(instr.LOCAL_SET, 4),
-		).
-		Bind(swapLoop).
-		Emit(instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_GE_S)).
-		BrIf(swapDone).
-		Emit(
-			// t = arr[lo]
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 3), instr.New(instr.ARRAY_GET), instr.New(instr.LOCAL_SET, 5),
-			// arr[lo] = arr[hi]
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 3),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 4), instr.New(instr.ARRAY_GET),
-			instr.New(instr.ARRAY_SET),
-			// arr[hi] = t
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 5), instr.New(instr.ARRAY_SET),
-			// lo++; hi--
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 4),
-		).
-		Br(swapLoop).
-		Bind(swapDone).
-		Emit(
-			// arr[size-1] + walk(depth-1)
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size-1))), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD), instr.New(instr.RETURN),
-		).
-		Bind(base).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
-		MustBuild()
-
-	return program.New(
-		[]instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(depth))), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
-		program.WithConstants(fn),
-		program.WithTypes(arrayType),
-	)
+	return mustParseProgram(fmt.Sprintf(permutationFlipsListing, size, size-1, depth))
 }
 
 func structTreeWalk(depth int32) *program.Program {
@@ -800,144 +842,181 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 	return prog
 }
 
-// sortStress builds the sortstress kernel. minivm has no sort opcode, so the
-// sort is written directly in bytecode as an insertion sort over the i32
-// array: it is a simple, obviously-correct in-place algorithm and the least
-// code among the alternatives, keeping the kernel a measure of VM dispatch
-// rather than of an algorithm choice. The LCG state overflows i32
-// (s*1103515245 can reach ~2.4e18), so make_list keeps s in i64; the sorted
-// values (s % 1000000) fit i32, so the array itself stays i32.
+// sortStressListing builds the sortstress kernel. minivm has no sort opcode,
+// so the sort is written directly in bytecode as an insertion sort over the
+// i32 array: it is a simple, obviously-correct in-place algorithm and the
+// least code among the alternatives, keeping the kernel a measure of VM
+// dispatch rather than of an algorithm choice. The LCG state overflows i32
+// (s*1103515245 can reach ~2.4e18), so make_list (constant 0; params: 0=n,
+// 1=seed; locals: 2=xs,3=s(i64),4=i) keeps s in i64; the sorted values
+// (s % 1000000) fit i32, so the array itself stays i32. insertion_sort
+// (constant 1; params: 0=arr,1=n; locals: 2=i,3=key,4=j) sorts in place.
+// Main locals: 0=xs,1=checksum,2=r,3=i. %[1]d substitutes n, %[2]d rounds.
+const sortStressListing = `
+.locals
+any
+i32
+i32
+i32
+.types
+[]i32
+.constants
+func(i32, i32) any
+	any
+	i64
+	i32
+	local.get 0
+	array.new_default 0
+	local.set 2
+	local.get 1
+	i32.to_i64_s
+	local.set 3
+	i32.const 0
+	local.set 4
+	mlLoop:
+	local.get 4
+	local.get 0
+	i32.ge_s
+	br_if mlDone
+	local.get 3
+	i64.const 1103515245
+	i64.mul
+	i64.const 12345
+	i64.add
+	i64.const 2147483648
+	i64.rem_s
+	local.set 3
+	local.get 2
+	local.get 4
+	local.get 3
+	i64.const 1000000
+	i64.rem_s
+	i64.to_i32
+	array.set
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+	br mlLoop
+	mlDone:
+	local.get 2
+	return
+func(any, i32)
+	i32
+	i32
+	i32
+	i32.const 1
+	local.set 2
+	outer:
+	local.get 2
+	local.get 1
+	i32.ge_s
+	br_if outerDone
+	local.get 0
+	local.get 2
+	array.get
+	local.set 3
+	local.get 2
+	i32.const 1
+	i32.sub
+	local.set 4
+	inner:
+	local.get 4
+	i32.const 0
+	i32.lt_s
+	br_if innerDone
+	local.get 0
+	local.get 4
+	array.get
+	local.get 3
+	i32.le_s
+	br_if innerDone
+	local.get 0
+	local.get 4
+	i32.const 1
+	i32.add
+	local.get 0
+	local.get 4
+	array.get
+	array.set
+	local.get 4
+	i32.const 1
+	i32.sub
+	local.set 4
+	br inner
+	innerDone:
+	local.get 0
+	local.get 4
+	i32.const 1
+	i32.add
+	local.get 3
+	array.set
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br outer
+	outerDone:
+	return
+.code
+	i32.const 0
+	local.set 1
+	i32.const 0
+	local.set 2
+roundLoop:
+	local.get 2
+	i32.const %[2]d
+	i32.ge_s
+	br_if roundDone
+	i32.const %[1]d
+	i32.const 1
+	local.get 2
+	i32.add
+	const.get 0
+	call
+	local.set 0
+	local.get 0
+	i32.const %[1]d
+	const.get 1
+	call
+	i32.const 0
+	local.set 3
+sumLoop:
+	local.get 3
+	i32.const %[1]d
+	i32.ge_s
+	br_if sumDone
+	local.get 1
+	local.get 0
+	local.get 3
+	array.get
+	local.get 3
+	i32.const 7
+	i32.rem_s
+	i32.mul
+	i32.add
+	local.set 1
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br sumLoop
+sumDone:
+	local.get 1
+	i32.const 1000000007
+	i32.rem_s
+	local.set 1
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br roundLoop
+roundDone:
+	local.get 1
+`
+
 func sortStress(n, rounds int32) *program.Program {
-	b := program.NewBuilder()
-	arrayType := b.Type(types.TypeI32Array)
-
-	// make_list params: 0=n,1=seed; locals: 2=xs,3=s(i64),4=i
-	mlBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
-		Params(types.TypeI32, types.TypeI32).
-		Locals(types.TypeAny, types.TypeI64, types.TypeI32)
-	mlLoop := mlBuilder.Label()
-	mlDone := mlBuilder.Label()
-	makeListFn := mlBuilder.
-		Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_TO_I64_S), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 4),
-		).
-		Bind(mlLoop).
-		Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).
-		BrIf(mlDone).
-		Emit(
-			// s = (s*1103515245 + 12345) % 2147483648
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I64_CONST, 1103515245), instr.New(instr.I64_MUL),
-			instr.New(instr.I64_CONST, 12345), instr.New(instr.I64_ADD),
-			instr.New(instr.I64_CONST, 2147483648), instr.New(instr.I64_REM_S),
-			instr.New(instr.LOCAL_SET, 3),
-			// xs[i] = i32(s % 1000000)
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 4),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I64_CONST, 1000000), instr.New(instr.I64_REM_S), instr.New(instr.I64_TO_I32),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4),
-		).
-		Br(mlLoop).
-		Bind(mlDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
-		MustBuild()
-	makeListIdx := b.Const(makeListFn)
-
-	// insertion_sort params: 0=arr,1=n; locals: 2=i,3=key,4=j
-	isBuilder := types.NewFunctionBuilder(&types.FunctionType{}).
-		Params(types.TypeAny, types.TypeI32).
-		Locals(types.TypeI32, types.TypeI32, types.TypeI32)
-	outer := isBuilder.Label()
-	outerDone := isBuilder.Label()
-	inner := isBuilder.Label()
-	innerDone := isBuilder.Label()
-	insertionSortFn := isBuilder.
-		Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.LOCAL_SET, 2)).
-		Bind(outer).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_GE_S)).
-		BrIf(outerDone).
-		Emit(
-			// key = arr[i]; j = i-1
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 2), instr.New(instr.ARRAY_GET), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 4),
-		).
-		Bind(inner).
-		Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)).
-		BrIf(innerDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 4), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_LE_S),
-		).
-		BrIf(innerDone).
-		Emit(
-			// arr[j+1] = arr[j]; j--
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 4), instr.New(instr.ARRAY_GET),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 4),
-		).
-		Br(inner).
-		Bind(innerDone).
-		Emit(
-			// arr[j+1] = key; i++
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.LOCAL_GET, 3),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-		).
-		Br(outer).
-		Bind(outerDone).
-		Emit(instr.New(instr.RETURN)).
-		MustBuild()
-	insertionSortIdx := b.Const(insertionSortFn)
-
-	// main locals: 0=xs,1=checksum,2=r,3=i
-	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
-
-	roundLoop := b.Label()
-	roundDone := b.Label()
-	sumLoop := b.Label()
-	sumDone := b.Label()
-
-	b.Bind(roundLoop)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(rounds))).Emit(instr.I32_GE_S).BrIf(roundDone)
-
-	// xs = make_list(n, seed+r); insertion_sort(xs, n)
-	b.Emit(instr.I32_CONST, uint64(uint32(n)))
-	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD)
-	b.Emit(instr.CONST_GET, uint64(makeListIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_SET, 0)
-
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(n)))
-	b.Emit(instr.CONST_GET, uint64(insertionSortIdx)).Emit(instr.CALL)
-
-	// checksum += sum(xs[i]*(i%7) for i in range(n)); checksum %= 1000000007
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Bind(sumLoop)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(sumDone)
-	b.Emit(instr.LOCAL_GET, 1)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 7).Emit(instr.I32_REM_S)
-	b.Emit(instr.I32_MUL).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(sumLoop)
-	b.Bind(sumDone)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1000000007).Emit(instr.I32_REM_S).Emit(instr.LOCAL_SET, 1)
-
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Br(roundLoop)
-	b.Bind(roundDone)
-
-	b.Emit(instr.LOCAL_GET, 1)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(sortStressListing, n, rounds))
 }
 
 // stringBuild builds the strbuild kernel: digits(n) token generation, a

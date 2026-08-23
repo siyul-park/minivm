@@ -3,9 +3,9 @@ package benchmarks_test
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -327,692 +327,1278 @@ def run():
 	}, want)
 }
 
+// branchTree builds nodes independent threshold branches over locals 0=input,
+// 1=total, each node's "left"/"join" labels distinguished by its index since
+// every node contributes its own label pair to one shared .code listing.
 func branchTree(input int32, nodes int) (*program.Program, int32) {
-	b := program.NewBuilder()
-	b.Locals(types.TypeI32, types.TypeI32)
-	b.Emit(instr.I32_CONST, uint64(uint32(input))).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	var sb strings.Builder
+	sb.WriteString(".locals\ni32\ni32\n.code\n")
+	fmt.Fprintf(&sb, "\ti32.const %d\n\tlocal.set 0\n", input)
+	sb.WriteString("\ti32.const 0\n\tlocal.set 1\n")
+
 	var want int32
 	for index := range nodes {
-		left := b.Label()
-		join := b.Label()
 		threshold := int32((index*17 + 11) % 97)
 		leftValue := int32(index%7 + 1)
 		rightValue := int32(index%5 + 2)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(threshold))).Emit(instr.I32_LT_S).BrIf(left)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(rightValue))).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-		b.Br(join)
-		b.Bind(left)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(leftValue))).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-		b.Bind(join)
+		fmt.Fprintf(&sb, "\tlocal.get 0\n\ti32.const %d\n\ti32.lt_s\n\tbr_if left%d\n", threshold, index)
+		fmt.Fprintf(&sb, "\tlocal.get 1\n\ti32.const %d\n\ti32.add\n\tlocal.set 1\n\tbr join%d\n", rightValue, index)
+		fmt.Fprintf(&sb, "left%d:\n\tlocal.get 1\n\ti32.const %d\n\ti32.add\n\tlocal.set 1\n", index, leftValue)
+		fmt.Fprintf(&sb, "join%d:\n", index)
 		if input < threshold {
 			want += leftValue
 		} else {
 			want += rightValue
 		}
 	}
-	b.Emit(instr.LOCAL_GET, 1)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog, want
+	sb.WriteString("\tlocal.get 1\n")
+
+	return mustParseProgram(sb.String()), want
 }
 
 // nbody builds the benchmarks-game N-body kernel: offset_momentum runs once,
 // advance runs steps times as a called function (it iterates in the source's
 // own loop), and energy's checksum is inlined since it has one call site.
+// nbodyListing builds the benchmarks-game N-body kernel: offset_momentum runs
+// once, advance (constant 0) runs steps times as a called function (it
+// iterates in the source's own loop), and energy's checksum is inlined since
+// it has one call site.
+//
+// advance params: 0=nb,1=x,2=y,3=z,4=vx,5=vy,6=vz,7=mass,8=dt; locals:
+// 9=i,10=j,11=dx,12=dy,13=dz,14=dist2,15=mag.
+//
+// Main locals: 0=x,1=y,2=z,3=vx,4=vy,5=vz,6=mass,7=pi,8=solarMass,
+// 9=daysPerYear,10=px,11=py,12=pz,13=i,14=steps,15=j,16=e,17=dx,18=dy,19=dz,
+// 20=dist. %[1]d substitutes steps.
+const nbodyListing = `
+.locals
+[]f64
+[]f64
+[]f64
+[]f64
+[]f64
+[]f64
+[]f64
+f64
+f64
+f64
+f64
+f64
+f64
+i32
+i32
+i32
+f64
+f64
+f64
+f64
+f64
+.types
+[]f64
+.constants
+func(i32, []f64, []f64, []f64, []f64, []f64, []f64, []f64, f64)
+	i32
+	i32
+	f64
+	f64
+	f64
+	f64
+	f64
+	i32.const 0
+	local.set 9
+	pairLoop:
+	local.get 9
+	local.get 0
+	i32.ge_s
+	br_if pairDone
+	local.get 9
+	i32.const 1
+	i32.add
+	local.set 10
+	bodyLoop:
+	local.get 10
+	local.get 0
+	i32.ge_s
+	br_if bodyDone
+	local.get 1
+	local.get 9
+	array.get
+	local.get 1
+	local.get 10
+	array.get
+	f64.sub
+	local.set 11
+	local.get 2
+	local.get 9
+	array.get
+	local.get 2
+	local.get 10
+	array.get
+	f64.sub
+	local.set 12
+	local.get 3
+	local.get 9
+	array.get
+	local.get 3
+	local.get 10
+	array.get
+	f64.sub
+	local.set 13
+	local.get 11
+	local.get 11
+	f64.mul
+	local.get 12
+	local.get 12
+	f64.mul
+	f64.add
+	local.get 13
+	local.get 13
+	f64.mul
+	f64.add
+	local.set 14
+	local.get 8
+	local.get 14
+	local.get 14
+	f64.sqrt
+	f64.mul
+	f64.div
+	local.set 15
+	local.get 4
+	local.get 9
+	local.get 4
+	local.get 9
+	array.get
+	local.get 11
+	local.get 7
+	local.get 10
+	array.get
+	f64.mul
+	local.get 15
+	f64.mul
+	f64.sub
+	array.set
+	local.get 5
+	local.get 9
+	local.get 5
+	local.get 9
+	array.get
+	local.get 12
+	local.get 7
+	local.get 10
+	array.get
+	f64.mul
+	local.get 15
+	f64.mul
+	f64.sub
+	array.set
+	local.get 6
+	local.get 9
+	local.get 6
+	local.get 9
+	array.get
+	local.get 13
+	local.get 7
+	local.get 10
+	array.get
+	f64.mul
+	local.get 15
+	f64.mul
+	f64.sub
+	array.set
+	local.get 4
+	local.get 10
+	local.get 4
+	local.get 10
+	array.get
+	local.get 11
+	local.get 7
+	local.get 9
+	array.get
+	f64.mul
+	local.get 15
+	f64.mul
+	f64.add
+	array.set
+	local.get 5
+	local.get 10
+	local.get 5
+	local.get 10
+	array.get
+	local.get 12
+	local.get 7
+	local.get 9
+	array.get
+	f64.mul
+	local.get 15
+	f64.mul
+	f64.add
+	array.set
+	local.get 6
+	local.get 10
+	local.get 6
+	local.get 10
+	array.get
+	local.get 13
+	local.get 7
+	local.get 9
+	array.get
+	f64.mul
+	local.get 15
+	f64.mul
+	f64.add
+	array.set
+	local.get 10
+	i32.const 1
+	i32.add
+	local.set 10
+	br bodyLoop
+	bodyDone:
+	local.get 9
+	i32.const 1
+	i32.add
+	local.set 9
+	br pairLoop
+	pairDone:
+	i32.const 0
+	local.set 9
+	settleLoop:
+	local.get 9
+	local.get 0
+	i32.ge_s
+	br_if settleDone
+	local.get 1
+	local.get 9
+	local.get 1
+	local.get 9
+	array.get
+	local.get 8
+	local.get 4
+	local.get 9
+	array.get
+	f64.mul
+	f64.add
+	array.set
+	local.get 2
+	local.get 9
+	local.get 2
+	local.get 9
+	array.get
+	local.get 8
+	local.get 5
+	local.get 9
+	array.get
+	f64.mul
+	f64.add
+	array.set
+	local.get 3
+	local.get 9
+	local.get 3
+	local.get 9
+	array.get
+	local.get 8
+	local.get 6
+	local.get 9
+	array.get
+	f64.mul
+	f64.add
+	array.set
+	local.get 9
+	i32.const 1
+	i32.add
+	local.set 9
+	br settleLoop
+	settleDone:
+	return
+.code
+	f64.const 3.141592653589793
+	local.set 7
+	f64.const 4.0
+	local.get 7
+	f64.mul
+	local.get 7
+	f64.mul
+	local.set 8
+	f64.const 365.24
+	local.set 9
+	i32.const 5
+	array.new_default 0
+	local.set 0
+	local.get 0
+	i32.const 0
+	f64.const 0.0
+	array.set
+	local.get 0
+	i32.const 1
+	f64.const 4.84143144246472090
+	array.set
+	local.get 0
+	i32.const 2
+	f64.const 8.34336671824457987
+	array.set
+	local.get 0
+	i32.const 3
+	f64.const 12.94350551331783510
+	array.set
+	local.get 0
+	i32.const 4
+	f64.const 15.37969711485094510
+	array.set
+	i32.const 5
+	array.new_default 0
+	local.set 1
+	local.get 1
+	i32.const 0
+	f64.const 0.0
+	array.set
+	local.get 1
+	i32.const 1
+	f64.const -1.16032004402742839
+	array.set
+	local.get 1
+	i32.const 2
+	f64.const 4.12479856412430479
+	array.set
+	local.get 1
+	i32.const 3
+	f64.const -15.11151401698631891
+	array.set
+	local.get 1
+	i32.const 4
+	f64.const -25.91931460998796403
+	array.set
+	i32.const 5
+	array.new_default 0
+	local.set 2
+	local.get 2
+	i32.const 0
+	f64.const 0.0
+	array.set
+	local.get 2
+	i32.const 1
+	f64.const -0.10362204447112311
+	array.set
+	local.get 2
+	i32.const 2
+	f64.const -0.40352341711432138
+	array.set
+	local.get 2
+	i32.const 3
+	f64.const -0.22370579633577680
+	array.set
+	local.get 2
+	i32.const 4
+	f64.const 0.17925877295037118
+	array.set
+	i32.const 5
+	array.new_default 0
+	local.set 3
+	local.get 3
+	i32.const 0
+	f64.const 0.0
+	array.set
+	local.get 3
+	i32.const 1
+	f64.const 0.00166007664274403
+	local.get 9
+	f64.mul
+	array.set
+	local.get 3
+	i32.const 2
+	f64.const 0.00283009096225471
+	local.get 9
+	f64.mul
+	array.set
+	local.get 3
+	i32.const 3
+	f64.const 0.00296460137564761
+	local.get 9
+	f64.mul
+	array.set
+	local.get 3
+	i32.const 4
+	f64.const 0.00268067772490389
+	local.get 9
+	f64.mul
+	array.set
+	i32.const 5
+	array.new_default 0
+	local.set 4
+	local.get 4
+	i32.const 0
+	f64.const 0.0
+	array.set
+	local.get 4
+	i32.const 1
+	f64.const 0.00769901118419740
+	local.get 9
+	f64.mul
+	array.set
+	local.get 4
+	i32.const 2
+	f64.const 0.00453000209594919
+	local.get 9
+	f64.mul
+	array.set
+	local.get 4
+	i32.const 3
+	f64.const 0.00237847173959480
+	local.get 9
+	f64.mul
+	array.set
+	local.get 4
+	i32.const 4
+	f64.const 0.00162824170038242
+	local.get 9
+	f64.mul
+	array.set
+	i32.const 5
+	array.new_default 0
+	local.set 5
+	local.get 5
+	i32.const 0
+	f64.const 0.0
+	array.set
+	local.get 5
+	i32.const 1
+	f64.const -0.00006902509938426
+	local.get 9
+	f64.mul
+	array.set
+	local.get 5
+	i32.const 2
+	f64.const -0.00019131288713706
+	local.get 9
+	f64.mul
+	array.set
+	local.get 5
+	i32.const 3
+	f64.const -0.00029589288865580
+	local.get 9
+	f64.mul
+	array.set
+	local.get 5
+	i32.const 4
+	f64.const -0.00095159225451337
+	local.get 9
+	f64.mul
+	array.set
+	i32.const 5
+	array.new_default 0
+	local.set 6
+	local.get 6
+	i32.const 0
+	local.get 8
+	array.set
+	local.get 6
+	i32.const 1
+	f64.const 9.54791938424326609e-04
+	local.get 8
+	f64.mul
+	array.set
+	local.get 6
+	i32.const 2
+	f64.const 2.85885980666130812e-04
+	local.get 8
+	f64.mul
+	array.set
+	local.get 6
+	i32.const 3
+	f64.const 4.36624404335156298e-05
+	local.get 8
+	f64.mul
+	array.set
+	local.get 6
+	i32.const 4
+	f64.const 5.15138902046611451e-05
+	local.get 8
+	f64.mul
+	array.set
+	f64.const 0.0
+	local.set 10
+	f64.const 0.0
+	local.set 11
+	f64.const 0.0
+	local.set 12
+	i32.const 0
+	local.set 13
+momentumLoop:
+	local.get 13
+	i32.const 5
+	i32.ge_s
+	br_if momentumDone
+	local.get 10
+	local.get 3
+	local.get 13
+	array.get
+	local.get 6
+	local.get 13
+	array.get
+	f64.mul
+	f64.add
+	local.set 10
+	local.get 11
+	local.get 4
+	local.get 13
+	array.get
+	local.get 6
+	local.get 13
+	array.get
+	f64.mul
+	f64.add
+	local.set 11
+	local.get 12
+	local.get 5
+	local.get 13
+	array.get
+	local.get 6
+	local.get 13
+	array.get
+	f64.mul
+	f64.add
+	local.set 12
+	local.get 13
+	i32.const 1
+	i32.add
+	local.set 13
+	br momentumLoop
+momentumDone:
+	local.get 3
+	i32.const 0
+	f64.const 0.0
+	local.get 10
+	local.get 8
+	f64.div
+	f64.sub
+	array.set
+	local.get 4
+	i32.const 0
+	f64.const 0.0
+	local.get 11
+	local.get 8
+	f64.div
+	f64.sub
+	array.set
+	local.get 5
+	i32.const 0
+	f64.const 0.0
+	local.get 12
+	local.get 8
+	f64.div
+	f64.sub
+	array.set
+	i32.const 0
+	local.set 14
+stepsLoop:
+	local.get 14
+	i32.const %[1]d
+	i32.ge_s
+	br_if stepsDone
+	i32.const 5
+	local.get 0
+	local.get 1
+	local.get 2
+	local.get 3
+	local.get 4
+	local.get 5
+	local.get 6
+	f64.const 0.01
+	const.get 0
+	call
+	local.get 14
+	i32.const 1
+	i32.add
+	local.set 14
+	br stepsLoop
+stepsDone:
+	f64.const 0.0
+	local.set 16
+	i32.const 0
+	local.set 13
+energyOuter:
+	local.get 13
+	i32.const 5
+	i32.ge_s
+	br_if energyOuterDone
+	local.get 16
+	f64.const 0.5
+	local.get 6
+	local.get 13
+	array.get
+	f64.mul
+	local.get 3
+	local.get 13
+	array.get
+	local.get 3
+	local.get 13
+	array.get
+	f64.mul
+	local.get 4
+	local.get 13
+	array.get
+	local.get 4
+	local.get 13
+	array.get
+	f64.mul
+	f64.add
+	local.get 5
+	local.get 13
+	array.get
+	local.get 5
+	local.get 13
+	array.get
+	f64.mul
+	f64.add
+	f64.mul
+	f64.add
+	local.set 16
+	local.get 13
+	i32.const 1
+	i32.add
+	local.set 15
+energyInner:
+	local.get 15
+	i32.const 5
+	i32.ge_s
+	br_if energyInnerDone
+	local.get 0
+	local.get 13
+	array.get
+	local.get 0
+	local.get 15
+	array.get
+	f64.sub
+	local.set 17
+	local.get 1
+	local.get 13
+	array.get
+	local.get 1
+	local.get 15
+	array.get
+	f64.sub
+	local.set 18
+	local.get 2
+	local.get 13
+	array.get
+	local.get 2
+	local.get 15
+	array.get
+	f64.sub
+	local.set 19
+	local.get 17
+	local.get 17
+	f64.mul
+	local.get 18
+	local.get 18
+	f64.mul
+	f64.add
+	local.get 19
+	local.get 19
+	f64.mul
+	f64.add
+	f64.sqrt
+	local.set 20
+	local.get 16
+	local.get 6
+	local.get 13
+	array.get
+	local.get 6
+	local.get 15
+	array.get
+	f64.mul
+	local.get 20
+	f64.div
+	f64.sub
+	local.set 16
+	local.get 15
+	i32.const 1
+	i32.add
+	local.set 15
+	br energyInner
+energyInnerDone:
+	local.get 13
+	i32.const 1
+	i32.add
+	local.set 13
+	br energyOuter
+energyOuterDone:
+	local.get 16
+	f64.const 1e9
+	f64.mul
+	f64.to_i32_s
+`
+
 func nbody(steps int32) *program.Program {
-	b := program.NewBuilder()
-	arrayType := b.Type(types.TypeF64Array)
-
-	// advance params: 0=nb,1=x,2=y,3=z,4=vx,5=vy,6=vz,7=mass,8=dt
-	// advance locals: 9=i,10=j,11=dx,12=dy,13=dz,14=dist2,15=mag
-	advanceBuilder := types.NewFunctionBuilder(&types.FunctionType{}).
-		Params(types.TypeI32, types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeF64).
-		Locals(types.TypeI32, types.TypeI32, types.TypeF64, types.TypeF64, types.TypeF64, types.TypeF64, types.TypeF64)
-	pairLoop := advanceBuilder.Label()
-	pairDone := advanceBuilder.Label()
-	bodyLoop := advanceBuilder.Label()
-	bodyDone := advanceBuilder.Label()
-	settleLoop := advanceBuilder.Label()
-	settleDone := advanceBuilder.Label()
-	advanceFn := advanceBuilder.
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 9)).
-		Bind(pairLoop).
-		Emit(instr.New(instr.LOCAL_GET, 9), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).
-		BrIf(pairDone).
-		Emit(instr.New(instr.LOCAL_GET, 9), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 10)).
-		Bind(bodyLoop).
-		Emit(instr.New(instr.LOCAL_GET, 10), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).
-		BrIf(bodyDone).
-		Emit(
-			// dx,dy,dz = x[i]-x[j], y[i]-y[j], z[i]-z[j]
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET),
-			instr.New(instr.F64_SUB), instr.New(instr.LOCAL_SET, 11),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET),
-			instr.New(instr.F64_SUB), instr.New(instr.LOCAL_SET, 12),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET),
-			instr.New(instr.F64_SUB), instr.New(instr.LOCAL_SET, 13),
-			// dist2 = dx*dx + dy*dy + dz*dz
-			instr.New(instr.LOCAL_GET, 11), instr.New(instr.LOCAL_GET, 11), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 12), instr.New(instr.LOCAL_GET, 12), instr.New(instr.F64_MUL), instr.New(instr.F64_ADD),
-			instr.New(instr.LOCAL_GET, 13), instr.New(instr.LOCAL_GET, 13), instr.New(instr.F64_MUL), instr.New(instr.F64_ADD),
-			instr.New(instr.LOCAL_SET, 14),
-			// mag = dt / (dist2 * sqrt(dist2))
-			instr.New(instr.LOCAL_GET, 8),
-			instr.New(instr.LOCAL_GET, 14), instr.New(instr.LOCAL_GET, 14), instr.New(instr.F64_SQRT), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_DIV), instr.New(instr.LOCAL_SET, 15),
-			// vx[i],vy[i],vz[i] -= d*mass[j]*mag
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 9),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 11), instr.New(instr.LOCAL_GET, 7), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 15), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_SUB), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 9),
-			instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 12), instr.New(instr.LOCAL_GET, 7), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 15), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_SUB), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 9),
-			instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 13), instr.New(instr.LOCAL_GET, 7), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 15), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_SUB), instr.New(instr.ARRAY_SET),
-			// vx[j],vy[j],vz[j] += d*mass[i]*mag
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 10),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 11), instr.New(instr.LOCAL_GET, 7), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 15), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_ADD), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 10),
-			instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 12), instr.New(instr.LOCAL_GET, 7), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 15), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_ADD), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 10),
-			instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 10), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 13), instr.New(instr.LOCAL_GET, 7), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 15), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_ADD), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 10),
-		).
-		Br(bodyLoop).
-		Bind(bodyDone).
-		Emit(instr.New(instr.LOCAL_GET, 9), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 9)).
-		Br(pairLoop).
-		Bind(pairDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 9)).
-		Bind(settleLoop).
-		Emit(instr.New(instr.LOCAL_GET, 9), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).
-		BrIf(settleDone).
-		Emit(
-			// x[i],y[i],z[i] += dt*v[i]
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 9),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 8), instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_ADD), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 9),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 8), instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_ADD), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 9),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET),
-			instr.New(instr.LOCAL_GET, 8), instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 9), instr.New(instr.ARRAY_GET), instr.New(instr.F64_MUL),
-			instr.New(instr.F64_ADD), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 9), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 9),
-		).
-		Br(settleLoop).
-		Bind(settleDone).
-		Emit(instr.New(instr.RETURN)).
-		MustBuild()
-	advanceIdx := b.Const(advanceFn)
-
-	// main locals: 0=x,1=y,2=z,3=vx,4=vy,5=vz,6=mass,7=pi,8=solarMass,9=daysPerYear,
-	// 10=px,11=py,12=pz,13=i,14=steps,15=j,16=e,17=dx,18=dy,19=dz,20=dist
-	b.Locals(
-		types.TypeF64Array, types.TypeF64Array, types.TypeF64Array,
-		types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeF64Array,
-		types.TypeF64, types.TypeF64, types.TypeF64,
-		types.TypeF64, types.TypeF64, types.TypeF64,
-		types.TypeI32, types.TypeI32, types.TypeI32,
-		types.TypeF64, types.TypeF64, types.TypeF64, types.TypeF64, types.TypeF64,
-	)
-
-	// pi, solar_mass, days_per_year
-	b.Emit(instr.F64_CONST, math.Float64bits(3.141592653589793)).Emit(instr.LOCAL_SET, 7)
-	b.Emit(instr.F64_CONST, math.Float64bits(4.0)).Emit(instr.LOCAL_GET, 7).Emit(instr.F64_MUL).Emit(instr.LOCAL_GET, 7).Emit(instr.F64_MUL).Emit(instr.LOCAL_SET, 8)
-	b.Emit(instr.F64_CONST, math.Float64bits(365.24)).Emit(instr.LOCAL_SET, 9)
-
-	// x, y, z (plain literals)
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
-	arraySet(b, 0, 0, 0.0)
-	arraySet(b, 0, 1, 4.84143144246472090)
-	arraySet(b, 0, 2, 8.34336671824457987)
-	arraySet(b, 0, 3, 12.94350551331783510)
-	arraySet(b, 0, 4, 15.37969711485094510)
-
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 1)
-	arraySet(b, 1, 0, 0.0)
-	arraySet(b, 1, 1, -1.16032004402742839)
-	arraySet(b, 1, 2, 4.12479856412430479)
-	arraySet(b, 1, 3, -15.11151401698631891)
-	arraySet(b, 1, 4, -25.91931460998796403)
-
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 2)
-	arraySet(b, 2, 0, 0.0)
-	arraySet(b, 2, 1, -0.10362204447112311)
-	arraySet(b, 2, 2, -0.40352341711432138)
-	arraySet(b, 2, 3, -0.22370579633577680)
-	arraySet(b, 2, 4, 0.17925877295037118)
-
-	// vx, vy, vz (literal * days_per_year, index 0 stays 0.0)
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 3)
-	arraySet(b, 3, 0, 0.0)
-	arraySetScaled(b, 3, 1, 0.00166007664274403, 9)
-	arraySetScaled(b, 3, 2, 0.00283009096225471, 9)
-	arraySetScaled(b, 3, 3, 0.00296460137564761, 9)
-	arraySetScaled(b, 3, 4, 0.00268067772490389, 9)
-
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 4)
-	arraySet(b, 4, 0, 0.0)
-	arraySetScaled(b, 4, 1, 0.00769901118419740, 9)
-	arraySetScaled(b, 4, 2, 0.00453000209594919, 9)
-	arraySetScaled(b, 4, 3, 0.00237847173959480, 9)
-	arraySetScaled(b, 4, 4, 0.00162824170038242, 9)
-
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 5)
-	arraySet(b, 5, 0, 0.0)
-	arraySetScaled(b, 5, 1, -0.00006902509938426, 9)
-	arraySetScaled(b, 5, 2, -0.00019131288713706, 9)
-	arraySetScaled(b, 5, 3, -0.00029589288865580, 9)
-	arraySetScaled(b, 5, 4, -0.00095159225451337, 9)
-
-	// mass (index 0 is solar_mass itself, others scale it)
-	b.Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 6)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 8).Emit(instr.ARRAY_SET)
-	arraySetScaled(b, 6, 1, 9.54791938424326609e-04, 8)
-	arraySetScaled(b, 6, 2, 2.85885980666130812e-04, 8)
-	arraySetScaled(b, 6, 3, 4.36624404335156298e-05, 8)
-	arraySetScaled(b, 6, 4, 5.15138902046611451e-05, 8)
-
-	// offset_momentum(nb=5, vx, vy, vz, mass, solar_mass)
-	momentumLoop := b.Label()
-	momentumDone := b.Label()
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 10)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 11)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 12)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 13)
-	b.Bind(momentumLoop)
-	b.Emit(instr.LOCAL_GET, 13).Emit(instr.I32_CONST, 5).Emit(instr.I32_GE_S).BrIf(momentumDone)
-	b.Emit(instr.LOCAL_GET, 10)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 10)
-	b.Emit(instr.LOCAL_GET, 11)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 11)
-	b.Emit(instr.LOCAL_GET, 12)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 12)
-	b.Emit(instr.LOCAL_GET, 13).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 13)
-	b.Br(momentumLoop)
-	b.Bind(momentumDone)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_GET, 10).Emit(instr.LOCAL_GET, 8).Emit(instr.F64_DIV).Emit(instr.F64_SUB)
-	b.Emit(instr.ARRAY_SET)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 0)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_GET, 11).Emit(instr.LOCAL_GET, 8).Emit(instr.F64_DIV).Emit(instr.F64_SUB)
-	b.Emit(instr.ARRAY_SET)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.I32_CONST, 0)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_GET, 12).Emit(instr.LOCAL_GET, 8).Emit(instr.F64_DIV).Emit(instr.F64_SUB)
-	b.Emit(instr.ARRAY_SET)
-
-	// steps x advance(nb, x, y, z, vx, vy, vz, mass, dt)
-	stepsLoop := b.Label()
-	stepsDone := b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 14)
-	b.Bind(stepsLoop)
-	b.Emit(instr.LOCAL_GET, 14).Emit(instr.I32_CONST, uint64(uint32(steps))).Emit(instr.I32_GE_S).BrIf(stepsDone)
-	b.Emit(instr.I32_CONST, 5)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 6)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.01))
-	b.Emit(instr.CONST_GET, uint64(advanceIdx))
-	b.Emit(instr.CALL)
-	b.Emit(instr.LOCAL_GET, 14).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 14)
-	b.Br(stepsLoop)
-	b.Bind(stepsDone)
-
-	// e = energy(nb, x, y, z, vx, vy, vz, mass)
-	energyOuter := b.Label()
-	energyOuterDone := b.Label()
-	energyInner := b.Label()
-	energyInnerDone := b.Label()
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 16)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 13)
-	b.Bind(energyOuter)
-	b.Emit(instr.LOCAL_GET, 13).Emit(instr.I32_CONST, 5).Emit(instr.I32_GE_S).BrIf(energyOuterDone)
-	b.Emit(instr.LOCAL_GET, 16)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.5))
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD)
-	b.Emit(instr.F64_MUL)
-	b.Emit(instr.F64_ADD)
-	b.Emit(instr.LOCAL_SET, 16)
-	b.Emit(instr.LOCAL_GET, 13).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 15)
-	b.Bind(energyInner)
-	b.Emit(instr.LOCAL_GET, 15).Emit(instr.I32_CONST, 5).Emit(instr.I32_GE_S).BrIf(energyInnerDone)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 15).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_SUB).Emit(instr.LOCAL_SET, 17)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 15).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_SUB).Emit(instr.LOCAL_SET, 18)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 15).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_SUB).Emit(instr.LOCAL_SET, 19)
-	b.Emit(instr.LOCAL_GET, 17).Emit(instr.LOCAL_GET, 17).Emit(instr.F64_MUL)
-	b.Emit(instr.LOCAL_GET, 18).Emit(instr.LOCAL_GET, 18).Emit(instr.F64_MUL).Emit(instr.F64_ADD)
-	b.Emit(instr.LOCAL_GET, 19).Emit(instr.LOCAL_GET, 19).Emit(instr.F64_MUL).Emit(instr.F64_ADD)
-	b.Emit(instr.F64_SQRT).Emit(instr.LOCAL_SET, 20)
-	b.Emit(instr.LOCAL_GET, 16)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 13).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.LOCAL_GET, 15).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL)
-	b.Emit(instr.LOCAL_GET, 20).Emit(instr.F64_DIV)
-	b.Emit(instr.F64_SUB).Emit(instr.LOCAL_SET, 16)
-	b.Emit(instr.LOCAL_GET, 15).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 15)
-	b.Br(energyInner)
-	b.Bind(energyInnerDone)
-	b.Emit(instr.LOCAL_GET, 13).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 13)
-	b.Br(energyOuter)
-	b.Bind(energyOuterDone)
-
-	b.Emit(instr.LOCAL_GET, 16)
-	b.Emit(instr.F64_CONST, math.Float64bits(1e9))
-	b.Emit(instr.F64_MUL)
-	b.Emit(instr.F64_TO_I32_S)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(nbodyListing, steps))
 }
 
-// arraySet emits array[idx] = value for a local f64 array and a literal.
-func arraySet(b *program.Builder, array, idx int, value float64) {
-	b.Emit(instr.LOCAL_GET, uint64(array)).Emit(instr.I32_CONST, uint64(uint32(idx))).Emit(instr.F64_CONST, math.Float64bits(value)).Emit(instr.ARRAY_SET)
-}
+// spectralnormListing builds the benchmarks-game spectral-norm kernel. eval_a
+// (constant 0), eval_a_times_u (constant 1), and eval_at_times_u (constant 2)
+// each have several call sites, so they stay real bytecode functions;
+// eval_ata_times_u has one call site (the round loop body) and is inlined
+// into it. eval_a_times_u and eval_at_times_u share every instruction except
+// the order of eval_a's two arguments (local.get 3/4 vs 4/3). Main locals:
+// 0=u,1=v,2=tmp,3=it,4=vbv,5=vv,6=i. %[1]d substitutes n, %[2]d rounds.
+const spectralnormListing = `
+.locals
+[]f64
+[]f64
+[]f64
+i32
+f64
+f64
+i32
+.types
+[]f64
+.constants
+func(i32, i32) f64
+	f64.const 1.0
+	local.get 0
+	local.get 1
+	i32.add
+	local.get 0
+	local.get 1
+	i32.add
+	i32.const 1
+	i32.add
+	i32.mul
+	i32.const 2
+	i32.div_s
+	local.get 0
+	i32.const 1
+	i32.add
+	i32.add
+	i32.to_f64_s
+	f64.div
+	return
+func(i32, []f64, []f64)
+	i32
+	i32
+	f64
+	i32.const 0
+	local.set 3
+	outer:
+	local.get 3
+	local.get 0
+	i32.ge_s
+	br_if outerDone
+	f64.const 0.0
+	local.set 5
+	i32.const 0
+	local.set 4
+	inner:
+	local.get 4
+	local.get 0
+	i32.ge_s
+	br_if innerDone
+	local.get 5
+	local.get 3
+	local.get 4
+	const.get 0
+	call
+	local.get 1
+	local.get 4
+	array.get
+	f64.mul
+	f64.add
+	local.set 5
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+	br inner
+	innerDone:
+	local.get 2
+	local.get 3
+	local.get 5
+	array.set
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br outer
+	outerDone:
+	return
+func(i32, []f64, []f64)
+	i32
+	i32
+	f64
+	i32.const 0
+	local.set 3
+	outer:
+	local.get 3
+	local.get 0
+	i32.ge_s
+	br_if outerDone
+	f64.const 0.0
+	local.set 5
+	i32.const 0
+	local.set 4
+	inner:
+	local.get 4
+	local.get 0
+	i32.ge_s
+	br_if innerDone
+	local.get 5
+	local.get 4
+	local.get 3
+	const.get 0
+	call
+	local.get 1
+	local.get 4
+	array.get
+	f64.mul
+	f64.add
+	local.set 5
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+	br inner
+	innerDone:
+	local.get 2
+	local.get 3
+	local.get 5
+	array.set
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br outer
+	outerDone:
+	return
+.code
+	i32.const %[1]d
+	array.new_default 0
+	local.set 0
+	local.get 0
+	i32.const 0
+	f64.const 1.0
+	i32.const %[1]d
+	array.fill
+	i32.const %[1]d
+	array.new_default 0
+	local.set 1
+	i32.const %[1]d
+	array.new_default 0
+	local.set 2
+	i32.const 0
+	local.set 3
+itLoop:
+	local.get 3
+	i32.const %[2]d
+	i32.ge_s
+	br_if itDone
+	i32.const %[1]d
+	local.get 0
+	local.get 2
+	const.get 1
+	call
+	i32.const %[1]d
+	local.get 2
+	local.get 1
+	const.get 2
+	call
+	i32.const %[1]d
+	local.get 1
+	local.get 2
+	const.get 1
+	call
+	i32.const %[1]d
+	local.get 2
+	local.get 0
+	const.get 2
+	call
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br itLoop
+itDone:
+	f64.const 0.0
+	local.set 4
+	f64.const 0.0
+	local.set 5
+	i32.const 0
+	local.set 6
+sumLoop:
+	local.get 6
+	i32.const %[1]d
+	i32.ge_s
+	br_if sumDone
+	local.get 4
+	local.get 0
+	local.get 6
+	array.get
+	local.get 1
+	local.get 6
+	array.get
+	f64.mul
+	f64.add
+	local.set 4
+	local.get 5
+	local.get 1
+	local.get 6
+	array.get
+	local.get 1
+	local.get 6
+	array.get
+	f64.mul
+	f64.add
+	local.set 5
+	local.get 6
+	i32.const 1
+	i32.add
+	local.set 6
+	br sumLoop
+sumDone:
+	local.get 4
+	local.get 5
+	f64.div
+	f64.sqrt
+	f64.const 1e9
+	f64.mul
+	f64.to_i32_s
+`
 
-// arraySetScaled emits array[idx] = component * local, matching an
-// initializer that scales a literal by a runtime variable.
-func arraySetScaled(b *program.Builder, array, idx int, component float64, scale int) {
-	b.Emit(instr.LOCAL_GET, uint64(array)).Emit(instr.I32_CONST, uint64(uint32(idx)))
-	b.Emit(instr.F64_CONST, math.Float64bits(component)).Emit(instr.LOCAL_GET, uint64(scale)).Emit(instr.F64_MUL)
-	b.Emit(instr.ARRAY_SET)
-}
-
-// spectralnorm builds the benchmarks-game spectral-norm kernel. eval_a,
-// eval_a_times_u, and eval_at_times_u each have several call sites, so they
-// stay real bytecode functions; eval_ata_times_u has one call site (the round
-// loop body) and is inlined into it.
 func spectralnorm(n, rounds int32) *program.Program {
-	b := program.NewBuilder()
-	arrayType := b.Type(types.TypeF64Array)
-
-	// eval_a params: 0=i,1=j
-	evalAFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF64}}).
-		Params(types.TypeI32, types.TypeI32).
-		Emit(
-			instr.New(instr.F64_CONST, math.Float64bits(1.0)),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.I32_MUL),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_S),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.I32_TO_F64_S),
-			instr.New(instr.F64_DIV),
-			instr.New(instr.RETURN),
-		).
-		MustBuild()
-	evalAIdx := b.Const(evalAFn)
-
-	// eval_a_times_u / eval_at_times_u params: 0=n,1=u,2=out; locals: 3=i,4=j,5=s
-	aTimesUFn := spectralnormTimesU(evalAIdx, false)
-	aTimesUIdx := b.Const(aTimesUFn)
-	atTimesUFn := spectralnormTimesU(evalAIdx, true)
-	atTimesUIdx := b.Const(atTimesUFn)
-
-	// main locals: 0=u,1=v,2=tmp,3=it,4=vbv,5=vv,6=i
-	b.Locals(types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeI32, types.TypeF64, types.TypeF64, types.TypeI32)
-
-	// u = [1.0] * n
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.F64_CONST, math.Float64bits(1.0)).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.ARRAY_FILL)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 2)
-
-	itLoop := b.Label()
-	itDone := b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Bind(itLoop)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(rounds))).Emit(instr.I32_GE_S).BrIf(itDone)
-	// eval_ata_times_u(n, u, v, tmp): eval_a_times_u(n, u, tmp); eval_at_times_u(n, tmp, v)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, uint64(aTimesUIdx)).Emit(instr.CALL)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, uint64(atTimesUIdx)).Emit(instr.CALL)
-	// eval_ata_times_u(n, v, u, tmp): eval_a_times_u(n, v, tmp); eval_at_times_u(n, tmp, u)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, uint64(aTimesUIdx)).Emit(instr.CALL)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(atTimesUIdx)).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(itLoop)
-	b.Bind(itDone)
-
-	sumLoop := b.Label()
-	sumDone := b.Label()
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 5)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 6)
-	b.Bind(sumLoop)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(sumDone)
-	b.Emit(instr.LOCAL_GET, 4)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 6).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 6).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.LOCAL_GET, 5)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 6).Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 6).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 5)
-	b.Emit(instr.LOCAL_GET, 6).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 6)
-	b.Br(sumLoop)
-	b.Bind(sumDone)
-
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 5).Emit(instr.F64_DIV).Emit(instr.F64_SQRT)
-	b.Emit(instr.F64_CONST, math.Float64bits(1e9)).Emit(instr.F64_MUL)
-	b.Emit(instr.F64_TO_I32_S)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// spectralnormTimesU builds eval_a_times_u (transposed=false) or
-// eval_at_times_u (transposed=true): both share every instruction except the
-// order of eval_a's two arguments.
-func spectralnormTimesU(evalAIdx int, transposed bool) *types.Function {
-	fb := types.NewFunctionBuilder(&types.FunctionType{}).
-		Params(types.TypeI32, types.TypeF64Array, types.TypeF64Array).
-		Locals(types.TypeI32, types.TypeI32, types.TypeF64)
-	outer := fb.Label()
-	outerDone := fb.Label()
-	inner := fb.Label()
-	innerDone := fb.Label()
-	first, second := instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 4)
-	if transposed {
-		first, second = second, first
-	}
-	return fb.
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 3)).
-		Bind(outer).
-		Emit(instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).
-		BrIf(outerDone).
-		Emit(
-			instr.New(instr.F64_CONST, math.Float64bits(0.0)), instr.New(instr.LOCAL_SET, 5),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 4),
-		).
-		Bind(inner).
-		Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).
-		BrIf(innerDone).
-		Emit(
-			// s = s + eval_a(i, j) * u[j] (args swapped for eval_at_times_u)
-			instr.New(instr.LOCAL_GET, 5),
-			first, second,
-			instr.New(instr.CONST_GET, uint64(evalAIdx)), instr.New(instr.CALL),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 4), instr.New(instr.ARRAY_GET),
-			instr.New(instr.F64_MUL), instr.New(instr.F64_ADD), instr.New(instr.LOCAL_SET, 5),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4),
-		).
-		Br(inner).
-		Bind(innerDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 5), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 3),
-		).
-		Br(outer).
-		Bind(outerDone).
-		Emit(instr.New(instr.RETURN)).
-		MustBuild()
+	return mustParseProgram(fmt.Sprintf(spectralnormListing, n, rounds))
 }
 
 // mandelbrot builds the benchmarks-game Mandelbrot kernel. escape_count has
 // an early return inside its loop, so it stays a real bytecode function with
 // a genuine early RETURN rather than a flag variable.
+// mandelbrotListing's escape_count constant (params: 0=cr,1=ci,2=maxIter;
+// locals: 3=zr,4=zi,5=i,6=zr2,7=zi2,8=newZr,9=newZi) has an early return
+// inside its loop, so it stays a real bytecode function with a genuine early
+// RETURN rather than a flag variable. Main locals: 0=total,1=py,2=cy,3=px,
+// 4=cx. %[2]d and %[4]d substitute height-1/width-1 as f64.const literals
+// (the trailing ".0" keeps them float tokens, not integer ones).
+const mandelbrotListing = `
+.locals
+i32
+i32
+f64
+i32
+f64
+.constants
+func(f64, f64, i32) i32
+	f64
+	f64
+	i32
+	f64
+	f64
+	f64
+	f64
+	f64.const 0.0
+	local.set 3
+	f64.const 0.0
+	local.set 4
+	i32.const 0
+	local.set 5
+	loop:
+	local.get 5
+	local.get 2
+	i32.ge_s
+	br_if loopDone
+	local.get 3
+	local.get 3
+	f64.mul
+	local.set 6
+	local.get 4
+	local.get 4
+	f64.mul
+	local.set 7
+	local.get 6
+	local.get 7
+	f64.add
+	f64.const 4.0
+	f64.gt
+	br_if escape
+	local.get 6
+	local.get 7
+	f64.sub
+	local.get 0
+	f64.add
+	local.set 8
+	f64.const 2.0
+	local.get 3
+	f64.mul
+	local.get 4
+	f64.mul
+	local.get 1
+	f64.add
+	local.set 9
+	local.get 8
+	local.set 3
+	local.get 9
+	local.set 4
+	local.get 5
+	i32.const 1
+	i32.add
+	local.set 5
+	br loop
+	escape:
+	local.get 5
+	return
+	loopDone:
+	local.get 2
+	return
+.code
+	i32.const 0
+	local.set 0
+	i32.const 0
+	local.set 1
+pyLoop:
+	local.get 1
+	i32.const %[1]d
+	i32.ge_s
+	br_if pyDone
+	f64.const -1.5
+	f64.const 1.5
+	f64.const -1.5
+	f64.sub
+	local.get 1
+	i32.to_f64_s
+	f64.mul
+	f64.const %[2]d.0
+	f64.div
+	f64.add
+	local.set 2
+	i32.const 0
+	local.set 3
+pxLoop:
+	local.get 3
+	i32.const %[3]d
+	i32.ge_s
+	br_if pxDone
+	f64.const -2.0
+	f64.const 1.0
+	f64.const -2.0
+	f64.sub
+	local.get 3
+	i32.to_f64_s
+	f64.mul
+	f64.const %[4]d.0
+	f64.div
+	f64.add
+	local.set 4
+	local.get 0
+	local.get 4
+	local.get 2
+	i32.const %[5]d
+	const.get 0
+	call
+	i32.add
+	local.set 0
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br pxLoop
+pxDone:
+	local.get 1
+	i32.const 1
+	i32.add
+	local.set 1
+	br pyLoop
+pyDone:
+	local.get 0
+`
+
 func mandelbrot(width, height, maxIter int32) *program.Program {
-	b := program.NewBuilder()
-
-	// escape_count params: 0=cr,1=ci,2=maxIter
-	// locals: 3=zr,4=zi,5=i,6=zr2,7=zi2,8=newZr,9=newZi
-	escapeBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeF64, types.TypeF64, types.TypeI32).
-		Locals(types.TypeF64, types.TypeF64, types.TypeI32, types.TypeF64, types.TypeF64, types.TypeF64, types.TypeF64)
-	loop := escapeBuilder.Label()
-	loopDone := escapeBuilder.Label()
-	escape := escapeBuilder.Label()
-	escapeFn := escapeBuilder.
-		Emit(
-			instr.New(instr.F64_CONST, math.Float64bits(0.0)), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.F64_CONST, math.Float64bits(0.0)), instr.New(instr.LOCAL_SET, 4),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 5),
-		).
-		Bind(loop).
-		Emit(instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_GE_S)).
-		BrIf(loopDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 3), instr.New(instr.F64_MUL), instr.New(instr.LOCAL_SET, 6),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 4), instr.New(instr.F64_MUL), instr.New(instr.LOCAL_SET, 7),
-			instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 7), instr.New(instr.F64_ADD),
-			instr.New(instr.F64_CONST, math.Float64bits(4.0)), instr.New(instr.F64_GT),
-		).
-		BrIf(escape).
-		Emit(
-			instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 7), instr.New(instr.F64_SUB),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.F64_ADD), instr.New(instr.LOCAL_SET, 8),
-			instr.New(instr.F64_CONST, math.Float64bits(2.0)), instr.New(instr.LOCAL_GET, 3), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 4), instr.New(instr.F64_MUL),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_ADD), instr.New(instr.LOCAL_SET, 9),
-			instr.New(instr.LOCAL_GET, 8), instr.New(instr.LOCAL_SET, 3),
-			instr.New(instr.LOCAL_GET, 9), instr.New(instr.LOCAL_SET, 4),
-			instr.New(instr.LOCAL_GET, 5), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 5),
-		).
-		Br(loop).
-		Bind(escape).
-		Emit(instr.New(instr.LOCAL_GET, 5), instr.New(instr.RETURN)).
-		Bind(loopDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
-		MustBuild()
-	escapeIdx := b.Const(escapeFn)
-
-	// main locals: 0=total,1=py,2=cy,3=px,4=cx
-	b.Locals(types.TypeI32, types.TypeI32, types.TypeF64, types.TypeI32, types.TypeF64)
-
-	pyLoop := b.Label()
-	pyDone := b.Label()
-	pxLoop := b.Label()
-	pxDone := b.Label()
-
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Bind(pyLoop)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(height))).Emit(instr.I32_GE_S).BrIf(pyDone)
-	// cy = y_min + (y_max - y_min) * float(py) / float(height - 1)
-	b.Emit(instr.F64_CONST, math.Float64bits(-1.5))
-	b.Emit(instr.F64_CONST, math.Float64bits(1.5)).Emit(instr.F64_CONST, math.Float64bits(-1.5)).Emit(instr.F64_SUB)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_TO_F64_S).Emit(instr.F64_MUL)
-	b.Emit(instr.F64_CONST, math.Float64bits(float64(height-1))).Emit(instr.F64_DIV)
-	b.Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 2)
-
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Bind(pxLoop)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(width))).Emit(instr.I32_GE_S).BrIf(pxDone)
-	// cx = x_min + (x_max - x_min) * float(px) / float(width - 1)
-	b.Emit(instr.F64_CONST, math.Float64bits(-2.0))
-	b.Emit(instr.F64_CONST, math.Float64bits(1.0)).Emit(instr.F64_CONST, math.Float64bits(-2.0)).Emit(instr.F64_SUB)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_TO_F64_S).Emit(instr.F64_MUL)
-	b.Emit(instr.F64_CONST, math.Float64bits(float64(width-1))).Emit(instr.F64_DIV)
-	b.Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 4)
-
-	// total += escape_count(cx, cy, max_iter)
-	b.Emit(instr.LOCAL_GET, 0)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(maxIter)))
-	b.Emit(instr.CONST_GET, uint64(escapeIdx)).Emit(instr.CALL)
-	b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(pxLoop)
-	b.Bind(pxDone)
-
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(pyLoop)
-	b.Bind(pyDone)
-
-	b.Emit(instr.LOCAL_GET, 0)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(mandelbrotListing, height, height-1, width, width-1, maxIter))
 }
 
-// matmul builds the benchmarks-game dense-matmul kernel. matmul has one call
-// site in the source (main calls it once), so it is inlined into the
-// top-level code rather than built as a separate bytecode function.
+// matmulListing builds the benchmarks-game dense-matmul kernel. matmul has
+// one call site in the source (main calls it once), so it is inlined into
+// the top-level code rather than built as a separate bytecode function.
+// Locals: 0=a,1=b,2=out,3=i,4=j,5=k,6=s,7=idx,8=checksum. %[1]d substitutes
+// n*n (array sizes and the checksum loop bound); %[2]d substitutes n (every
+// other loop bound and index stride).
+const matmulListing = `
+.locals
+[]f64
+[]f64
+[]f64
+i32
+i32
+i32
+f64
+i32
+f64
+.types
+[]f64
+.code
+	i32.const %[1]d
+	array.new_default 0
+	local.set 0
+	i32.const %[1]d
+	array.new_default 0
+	local.set 1
+	i32.const %[1]d
+	array.new_default 0
+	local.set 2
+	i32.const 0
+	local.set 3
+fillOuter:
+	local.get 3
+	i32.const %[2]d
+	i32.ge_s
+	br_if fillOuterDone
+	i32.const 0
+	local.set 4
+fillInner:
+	local.get 4
+	i32.const %[2]d
+	i32.ge_s
+	br_if fillInnerDone
+	local.get 0
+	local.get 3
+	i32.const %[2]d
+	i32.mul
+	local.get 4
+	i32.add
+	local.get 3
+	i32.const 7
+	i32.mul
+	local.get 4
+	i32.const 3
+	i32.mul
+	i32.add
+	i32.const 13
+	i32.rem_s
+	i32.to_f64_s
+	f64.const 6.0
+	f64.sub
+	array.set
+	local.get 1
+	local.get 3
+	i32.const %[2]d
+	i32.mul
+	local.get 4
+	i32.add
+	local.get 3
+	i32.const 5
+	i32.mul
+	local.get 4
+	i32.const 11
+	i32.mul
+	i32.add
+	i32.const 17
+	i32.rem_s
+	i32.to_f64_s
+	f64.const 8.0
+	f64.sub
+	array.set
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+	br fillInner
+fillInnerDone:
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br fillOuter
+fillOuterDone:
+	i32.const 0
+	local.set 3
+mmI:
+	local.get 3
+	i32.const %[2]d
+	i32.ge_s
+	br_if mmIDone
+	i32.const 0
+	local.set 4
+mmJ:
+	local.get 4
+	i32.const %[2]d
+	i32.ge_s
+	br_if mmJDone
+	f64.const 0.0
+	local.set 6
+	i32.const 0
+	local.set 5
+mmK:
+	local.get 5
+	i32.const %[2]d
+	i32.ge_s
+	br_if mmKDone
+	local.get 6
+	local.get 0
+	local.get 3
+	i32.const %[2]d
+	i32.mul
+	local.get 5
+	i32.add
+	array.get
+	local.get 1
+	local.get 5
+	i32.const %[2]d
+	i32.mul
+	local.get 4
+	i32.add
+	array.get
+	f64.mul
+	f64.add
+	local.set 6
+	local.get 5
+	i32.const 1
+	i32.add
+	local.set 5
+	br mmK
+mmKDone:
+	local.get 2
+	local.get 3
+	i32.const %[2]d
+	i32.mul
+	local.get 4
+	i32.add
+	local.get 6
+	array.set
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+	br mmJ
+mmJDone:
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br mmI
+mmIDone:
+	f64.const 0.0
+	local.set 8
+	i32.const 0
+	local.set 7
+sumLoop:
+	local.get 7
+	i32.const %[1]d
+	i32.ge_s
+	br_if sumDone
+	local.get 8
+	local.get 2
+	local.get 7
+	array.get
+	f64.add
+	local.set 8
+	local.get 7
+	i32.const 1
+	i32.add
+	local.set 7
+	br sumLoop
+sumDone:
+	local.get 8
+	f64.const 1e6
+	f64.mul
+	f64.to_i32_s
+`
+
 func matmul(n int32) *program.Program {
-	b := program.NewBuilder()
-	arrayType := b.Type(types.TypeF64Array)
-
-	// locals: 0=a,1=b,2=out,3=i,4=j,5=k,6=s,7=idx,8=checksum
-	b.Locals(types.TypeF64Array, types.TypeF64Array, types.TypeF64Array, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeF64, types.TypeI32, types.TypeF64)
-
 	nn := uint64(uint32(n * n))
-	b.Emit(instr.I32_CONST, nn).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, nn).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, nn).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 2)
-
-	fillOuter := b.Label()
-	fillOuterDone := b.Label()
-	fillInner := b.Label()
-	fillInnerDone := b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Bind(fillOuter)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(fillOuterDone)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
-	b.Bind(fillInner)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(fillInnerDone)
-	// a[i*n+j] = float((i*7+j*3)%13) - 6.0
-	b.Emit(instr.LOCAL_GET, 0)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL)
-	b.Emit(instr.I32_ADD).Emit(instr.I32_CONST, 13).Emit(instr.I32_REM_S).Emit(instr.I32_TO_F64_S)
-	b.Emit(instr.F64_CONST, math.Float64bits(6.0)).Emit(instr.F64_SUB)
-	b.Emit(instr.ARRAY_SET)
-	// b[i*n+j] = float((i*5+j*11)%17) - 8.0
-	b.Emit(instr.LOCAL_GET, 1)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 5).Emit(instr.I32_MUL)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 11).Emit(instr.I32_MUL)
-	b.Emit(instr.I32_ADD).Emit(instr.I32_CONST, 17).Emit(instr.I32_REM_S).Emit(instr.I32_TO_F64_S)
-	b.Emit(instr.F64_CONST, math.Float64bits(8.0)).Emit(instr.F64_SUB)
-	b.Emit(instr.ARRAY_SET)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
-	b.Br(fillInner)
-	b.Bind(fillInnerDone)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(fillOuter)
-	b.Bind(fillOuterDone)
-
-	mmI := b.Label()
-	mmIDone := b.Label()
-	mmJ := b.Label()
-	mmJDone := b.Label()
-	mmK := b.Label()
-	mmKDone := b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Bind(mmI)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(mmIDone)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
-	b.Bind(mmJ)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(mmJDone)
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 6)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 5)
-	b.Bind(mmK)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_GE_S).BrIf(mmKDone)
-	// s = s + a[i*n+k]*b[k*n+j]
-	b.Emit(instr.LOCAL_GET, 6)
-	b.Emit(instr.LOCAL_GET, 0)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 5).Emit(instr.I32_ADD)
-	b.Emit(instr.ARRAY_GET)
-	b.Emit(instr.LOCAL_GET, 1)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
-	b.Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_MUL).Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 6)
-	b.Emit(instr.LOCAL_GET, 5).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 5)
-	b.Br(mmK)
-	b.Bind(mmKDone)
-	// out[i*n+j] = s
-	b.Emit(instr.LOCAL_GET, 2)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
-	b.Emit(instr.LOCAL_GET, 6)
-	b.Emit(instr.ARRAY_SET)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
-	b.Br(mmJ)
-	b.Bind(mmJDone)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(mmI)
-	b.Bind(mmIDone)
-
-	sumLoop := b.Label()
-	sumDone := b.Label()
-	b.Emit(instr.F64_CONST, math.Float64bits(0.0)).Emit(instr.LOCAL_SET, 8)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 7)
-	b.Bind(sumLoop)
-	b.Emit(instr.LOCAL_GET, 7).Emit(instr.I32_CONST, nn).Emit(instr.I32_GE_S).BrIf(sumDone)
-	b.Emit(instr.LOCAL_GET, 8)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 7).Emit(instr.ARRAY_GET)
-	b.Emit(instr.F64_ADD).Emit(instr.LOCAL_SET, 8)
-	b.Emit(instr.LOCAL_GET, 7).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 7)
-	b.Br(sumLoop)
-	b.Bind(sumDone)
-
-	b.Emit(instr.LOCAL_GET, 8)
-	b.Emit(instr.F64_CONST, math.Float64bits(1e6)).Emit(instr.F64_MUL)
-	b.Emit(instr.F64_TO_I32_S)
-
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(matmulListing, nn, n))
 }
 
 // nbodyReference transcribes nbody's advance/energy loops operation-for-
