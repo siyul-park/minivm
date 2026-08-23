@@ -71,7 +71,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `prof` | 22 | 22 | 0 | 0 |
 | `program` | 25 | 25 | 0 | 0 |
 | `transform` | 10 | 10 | 0 | 0 |
-| `types` | 173 | 173 | 0 | 0 |
+| `types` | 171 | 171 | 0 | 0 |
 
 ### Symbol Matrix
 
@@ -548,10 +548,10 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/function.go` | `TestFunctionBuilder_Label` | ✅ |
 | `types/function.go` | `TestFunctionBuilder_MustBuild` | ✅ |
 | `types/function.go` | `TestFunctionBuilder_Try` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithCaptures` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithLocals` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithParams` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithReturns` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Captures` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Locals` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Params` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Returns` | ✅ |
 | `types/function.go` | `TestFunctionType_Cast` | ✅ |
 | `types/function.go` | `TestFunctionType_Equals` | ✅ |
 | `types/function.go` | `TestFunctionType_Kind` | ✅ |
@@ -652,10 +652,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/struct.go` | `TestStructType_FieldIndex` | ✅ |
 | `types/struct.go` | `TestStructType_Kind` | ✅ |
 | `types/struct.go` | `TestStructType_String` | ✅ |
-| `types/struct.go` | `TestStruct_Field` | ✅ |
 | `types/struct.go` | `TestStruct_FieldByName` | ✅ |
 | `types/struct.go` | `TestStruct_Kind` | ✅ |
-| `types/struct.go` | `TestStruct_Raw` | ✅ |
 | `types/struct.go` | `TestStruct_Refs` | ✅ |
 | `types/struct.go` | `TestStruct_SetField` | ✅ |
 | `types/struct.go` | `TestStruct_SetRaw` | ✅ |

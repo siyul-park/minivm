@@ -268,35 +268,6 @@ func TestUnbox(t *testing.T) {
 	}
 }
 
-func TestBoxed_Kind(t *testing.T) {
-	tests := []struct {
-		val  types.Boxed
-		kind types.Kind
-	}{
-		{
-			val:  types.BoxI32(0),
-			kind: types.KindI32,
-		},
-		{
-			val:  types.BoxI64(0),
-			kind: types.KindI64,
-		},
-		{
-			val:  types.BoxF32(0),
-			kind: types.KindF32,
-		},
-		{
-			val:  types.BoxF64(0),
-			kind: types.KindF64,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-			require.Equal(t, tt.kind, tt.val.Kind())
-		})
-	}
-}
-
 func TestBoxed_Type(t *testing.T) {
 	tests := []struct {
 		val types.Boxed
@@ -333,36 +304,9 @@ func TestBoxed_Type(t *testing.T) {
 		})
 	}
 }
-
-func TestBoxed_I32(t *testing.T) {
-	require.Equal(t, int32(-42), types.BoxI32(-42).I32())
-}
-
 func TestBoxed_I8(t *testing.T) {
 	require.Equal(t, int8(-8), types.BoxI8(-8).I8())
 }
-
-func TestBoxed_I64(t *testing.T) {
-	require.Equal(t, int64(-64), types.BoxI64(-64).I64())
-}
-
-func TestBoxed_F32(t *testing.T) {
-	require.Equal(t, float32(3.5), types.BoxF32(3.5).F32())
-}
-
-func TestBoxed_F64(t *testing.T) {
-	require.Equal(t, 6.25, types.BoxF64(6.25).F64())
-}
-
-func TestBoxed_Bool(t *testing.T) {
-	require.True(t, types.BoxI32(1).Bool())
-	require.False(t, types.BoxI32(0).Bool())
-}
-
-func TestBoxed_Ref(t *testing.T) {
-	require.Equal(t, 42, types.BoxRef(42).Ref())
-}
-
 func TestBoxed_String(t *testing.T) {
 	tests := []struct {
 		val types.Boxed
@@ -398,4 +342,51 @@ func TestBoxed_String(t *testing.T) {
 			require.Equal(t, tt.str, tt.val.String())
 		})
 	}
+}
+func TestBoxed_Kind(t *testing.T) {
+	tests := []struct {
+		val  types.Boxed
+		kind types.Kind
+	}{
+		{
+			val:  types.BoxI32(0),
+			kind: types.KindI32,
+		},
+		{
+			val:  types.BoxI64(0),
+			kind: types.KindI64,
+		},
+		{
+			val:  types.BoxF32(0),
+			kind: types.KindF32,
+		},
+		{
+			val:  types.BoxF64(0),
+			kind: types.KindF64,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
+			require.Equal(t, tt.kind, tt.val.Kind())
+		})
+	}
+}
+func TestBoxed_I32(t *testing.T) {
+	require.Equal(t, int32(-42), types.BoxI32(-42).I32())
+}
+func TestBoxed_I64(t *testing.T) {
+	require.Equal(t, int64(-64), types.BoxI64(-64).I64())
+}
+func TestBoxed_F32(t *testing.T) {
+	require.Equal(t, float32(3.5), types.BoxF32(3.5).F32())
+}
+func TestBoxed_F64(t *testing.T) {
+	require.Equal(t, 6.25, types.BoxF64(6.25).F64())
+}
+func TestBoxed_Bool(t *testing.T) {
+	require.True(t, types.BoxI32(1).Bool())
+	require.False(t, types.BoxI32(0).Bool())
+}
+func TestBoxed_Ref(t *testing.T) {
+	require.Equal(t, 42, types.BoxRef(42).Ref())
 }

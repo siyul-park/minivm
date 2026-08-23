@@ -16,6 +16,18 @@ func TestNewFunctionBuilder(t *testing.T) {
 	require.Equal(t, &types.FunctionType{}, fn.Typ)
 }
 
+func TestNewFunction(t *testing.T) {
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}
+	locals := []types.Type{types.TypeAny}
+	body := []instr.Instruction{instr.New(instr.RETURN)}
+	fn := types.NewFunction(typ, locals, body)
+	require.Same(t, typ, fn.Typ)
+	require.Equal(t, locals, fn.Locals)
+	require.Equal(t, body, instr.Unmarshal(fn.Code))
+
+	require.Equal(t, &types.FunctionType{}, types.NewFunction(nil, nil, nil).Typ)
+}
+
 func TestFunctionBuilder_Params(t *testing.T) {
 	fn := types.NewFunctionBuilder(nil).Params(types.TypeI32, types.TypeAny).MustBuild()
 	require.Equal(t, []types.Type{types.TypeI32, types.TypeAny}, fn.Typ.Params)
@@ -112,26 +124,9 @@ func TestFunctionBuilder_Build(t *testing.T) {
 	})
 }
 
-func TestNewFunction(t *testing.T) {
-	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}
-	locals := []types.Type{types.TypeAny}
-	body := []instr.Instruction{instr.New(instr.RETURN)}
-	fn := types.NewFunction(typ, locals, body)
-	require.Same(t, typ, fn.Typ)
-	require.Equal(t, locals, fn.Locals)
-	require.Equal(t, body, instr.Unmarshal(fn.Code))
-
-	require.Equal(t, &types.FunctionType{}, types.NewFunction(nil, nil, nil).Typ)
-}
-
 func TestFunction_Kind(t *testing.T) {
 	fn := types.NewFunction(nil, nil, nil)
 	require.Equal(t, types.KindRef, fn.Kind())
-}
-
-func TestFunction_Type(t *testing.T) {
-	fn := types.NewFunction(nil, nil, nil)
-	require.Equal(t, &types.FunctionType{}, fn.Type())
 }
 
 func TestFunction_String(t *testing.T) {
@@ -148,6 +143,11 @@ func TestFunction_String(t *testing.T) {
 			MustBuild()
 		require.Contains(t, fn.String(), "capture i32\ncapture any\n")
 	})
+}
+
+func TestFunction_Type(t *testing.T) {
+	fn := types.NewFunction(nil, nil, nil)
+	require.Equal(t, &types.FunctionType{}, fn.Type())
 }
 
 func TestFunction_Slots(t *testing.T) {

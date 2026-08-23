@@ -31,24 +31,6 @@ func TestTypedArray_Kind(t *testing.T) {
 	}
 }
 
-func TestTypedArray_Type(t *testing.T) {
-	tests := []struct {
-		val types.Value
-		typ types.Type
-	}{
-		{val: types.TypedArray[int8]{}, typ: types.TypeI8Array},
-		{val: types.TypedArray[int32]{}, typ: types.TypeI32Array},
-		{val: types.TypedArray[int64]{}, typ: types.TypeI64Array},
-		{val: types.TypedArray[float32]{}, typ: types.TypeF32Array},
-		{val: types.TypedArray[float64]{}, typ: types.TypeF64Array},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-			require.Equal(t, tt.typ, tt.val.Type())
-		})
-	}
-}
-
 func TestTypedArray_String(t *testing.T) {
 	tests := []struct {
 		val types.Value
@@ -67,18 +49,36 @@ func TestTypedArray_String(t *testing.T) {
 	}
 }
 
-func TestArray_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeAny)).Kind())
+func TestTypedArray_Type(t *testing.T) {
+	tests := []struct {
+		val types.Value
+		typ types.Type
+	}{
+		{val: types.TypedArray[int8]{}, typ: types.TypeI8Array},
+		{val: types.TypedArray[int32]{}, typ: types.TypeI32Array},
+		{val: types.TypedArray[int64]{}, typ: types.TypeI64Array},
+		{val: types.TypedArray[float32]{}, typ: types.TypeF32Array},
+		{val: types.TypedArray[float64]{}, typ: types.TypeF64Array},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
+			require.Equal(t, tt.typ, tt.val.Type())
+		})
+	}
 }
 
-func TestArray_Type(t *testing.T) {
-	typ := types.NewArrayType(types.TypeAny)
-	require.Equal(t, typ, types.NewArray(typ).Type())
+func TestArray_Kind(t *testing.T) {
+	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeAny)).Kind())
 }
 
 func TestArray_String(t *testing.T) {
 	a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 	require.Equal(t, "[]any{1, 2, 3}", a.String())
+}
+
+func TestArray_Type(t *testing.T) {
+	typ := types.NewArrayType(types.TypeAny)
+	require.Equal(t, typ, types.NewArray(typ).Type())
 }
 
 func TestArray_Refs(t *testing.T) {
