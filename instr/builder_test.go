@@ -27,12 +27,14 @@ func TestBuilder_Label(t *testing.T) {
 
 func TestBuilder_Bind(t *testing.T) {
 	b := instr.NewBuilder()
-	end := b.Label()
-	require.Same(t, b, b.Br(end).Emit(instr.NOP).Bind(end).Emit(instr.RETURN))
+	start, end := b.Label(), b.Label()
+	require.Same(t, b, b.Bind(start).Emit(instr.NOP).Emit(instr.NOP).Bind(end))
 
-	instrs, err := b.Assemble()
+	b.Try(start, end, end, 0)
+
+	_, err := b.Assemble()
 	require.NoError(t, err)
-	require.Equal(t, 1, instr.ParseI16(instrs[0], 1))
+	require.Equal(t, []instr.Handler{{Start: 0, End: 2, Catch: 2, Depth: 0}}, b.Handlers())
 }
 
 func TestBuilder_Emit(t *testing.T) {

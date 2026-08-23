@@ -107,7 +107,7 @@ func TestHostStruct_String(t *testing.T) {
 	require.Equal(t, "struct {i32}\n<native>", value.(*interp.HostStruct).String())
 }
 
-func TestHostStruct_Field(t *testing.T) {
+func TestHostStruct_SetField(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -130,7 +130,7 @@ func TestHostStruct_Field(t *testing.T) {
 		require.Equal(t, types.BoxI32(9), got)
 	})
 
-	t.Run("an index outside the layout faults", func(t *testing.T) {
+	t.Run("reading an index outside the layout faults", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
@@ -144,9 +144,7 @@ func TestHostStruct_Field(t *testing.T) {
 		_, err = host.Field(i, -1)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
-}
 
-func TestHostStruct_SetField(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -165,7 +163,7 @@ func TestHostStruct_SetField(t *testing.T) {
 		require.Equal(t, int32(5), src.Bump(0))
 	})
 
-	t.Run("an index outside the layout faults", func(t *testing.T) {
+	t.Run("writing an index outside the layout faults", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
@@ -223,7 +221,7 @@ func TestHostArray_Len(t *testing.T) {
 	require.Equal(t, 3, host.Len())
 }
 
-func TestHostArray_Element(t *testing.T) {
+func TestHostArray_SetElement(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -244,7 +242,7 @@ func TestHostArray_Element(t *testing.T) {
 		require.Equal(t, types.BoxI32(9), got)
 	})
 
-	t.Run("an index outside the length faults", func(t *testing.T) {
+	t.Run("reading an index outside the length faults", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
@@ -258,9 +256,7 @@ func TestHostArray_Element(t *testing.T) {
 		_, err = host.Element(i, -1)
 		require.ErrorIs(t, err, interp.ErrIndexOutOfRange)
 	})
-}
 
-func TestHostArray_SetElement(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -274,7 +270,7 @@ func TestHostArray_SetElement(t *testing.T) {
 		require.Equal(t, []int32{5}, src)
 	})
 
-	t.Run("an index outside the length faults", func(t *testing.T) {
+	t.Run("writing an index outside the length faults", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
@@ -448,7 +444,7 @@ func TestHostMap_Len(t *testing.T) {
 	require.Equal(t, 2, host.Len())
 }
 
-func TestHostMap_Get(t *testing.T) {
+func TestHostMap_Set(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -500,9 +496,7 @@ func TestHostMap_Get(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(7), got)
 	})
-}
 
-func TestHostMap_Set(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()

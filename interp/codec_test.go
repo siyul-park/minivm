@@ -101,32 +101,6 @@ type codecFirst struct{ Shared codecShared }
 
 type codecSecond struct{ Shared codecShared }
 
-func TestNewRegistry(t *testing.T) {
-	t.Run("standard library defaults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-
-		value, err := r.Marshal(i, time.Unix(1, 2))
-		require.NoError(t, err)
-		require.Equal(t, types.I64(time.Unix(1, 2).UnixNano()), value)
-	})
-
-	t.Run("registration replaces a default", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry(interp.WithMarshaler(
-			reflect.TypeFor[time.Time](), types.TypeI64,
-			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
-				return types.I64((*(*time.Time)(p)).Unix()), nil
-			})))
-		defer i.Close()
-
-		value, err := r.Marshal(i, time.Unix(1, 2))
-		require.NoError(t, err)
-		require.Equal(t, types.I64(1), value)
-	})
-}
-
 func TestWithMarshaler(t *testing.T) {
 	millis := interp.WithMarshaler(
 		reflect.TypeFor[codecMillis](), types.TypeI64,
@@ -219,6 +193,32 @@ func TestWithUnmarshaler(t *testing.T) {
 
 		var dst codecMillis
 		require.ErrorIs(t, r.Unmarshal(i, types.I64(1), &dst), interp.ErrUnsupportedMarshalType)
+	})
+}
+
+func TestNewRegistry(t *testing.T) {
+	t.Run("standard library defaults", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		value, err := r.Marshal(i, time.Unix(1, 2))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(time.Unix(1, 2).UnixNano()), value)
+	})
+
+	t.Run("registration replaces a default", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[time.Time](), types.TypeI64,
+			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				return types.I64((*(*time.Time)(p)).Unix()), nil
+			})))
+		defer i.Close()
+
+		value, err := r.Marshal(i, time.Unix(1, 2))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1), value)
 	})
 }
 
@@ -896,29 +896,62 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, int32(5), got)
 	})
 
-	t.Run("VM function context identity", func(t *testing.T) {
-		var got context.Context
-		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		r := interp.NewRegistry()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
+	// Each case builds an I32_CONST 7 function, unmarshals it to a Go func,
+	// calls it, and checks which context the call observed.
+	for _, tt := range []struct {
+		name   string
+		invoke func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (value int32, err error, wantCtx context.Context)
+	}{
+		{
+			name: "VM function context identity",
+			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, error, context.Context) {
+				var call func(context.Context) (int32, error)
+				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
+				ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
+				value, err := call(ctx)
+				return value, err, ctx
+			},
+		},
+		{
+			name: "VM function nil context uses background",
+			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, error, context.Context) {
+				var call func(context.Context) (int32, error)
+				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
+				value, err := call(nil)
+				return value, err, context.Background()
+			},
+		},
+		{
+			name: "VM function without context uses background",
+			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, error, context.Context) {
+				var call func() (int32, error)
+				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
+				value, err := call()
+				return value, err, context.Background()
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var got context.Context
+			i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
+				got = i.Context()
+				return nil
+			}))
+			defer i.Close()
+			r := interp.NewRegistry()
+			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+				instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+			).MustBuild()
+			addr, err := i.Alloc(fn)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, i.Release(addr)) }()
 
-		var call func(context.Context) (int32, error)
-		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
-		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
-		value, err := call(ctx)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, ctx, got)
-	})
+			value, err, wantCtx := tt.invoke(t, r, i, addr)
+			require.NoError(t, err)
+			require.Equal(t, int32(7), value)
+			require.Equal(t, wantCtx, got)
+		})
+	}
 
 	t.Run("VM function canceled context", func(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithTick(1))
@@ -934,29 +967,6 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		cancel()
 		_, err := call(ctx)
 		require.ErrorIs(t, err, context.Canceled)
-	})
-
-	t.Run("VM function nil context uses background", func(t *testing.T) {
-		var got context.Context
-		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		r := interp.NewRegistry()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
-		value, err := call(nil)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, context.Background(), got)
 	})
 
 	t.Run("VM function context in any position is host-only", func(t *testing.T) {
@@ -995,29 +1005,6 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		got, err := call(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, int32(7), got)
-	})
-
-	t.Run("VM function without context uses background", func(t *testing.T) {
-		var got context.Context
-		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		r := interp.NewRegistry()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func() (int32, error)
-		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
-		value, err := call()
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, context.Background(), got)
 	})
 
 	t.Run("function ref", func(t *testing.T) {

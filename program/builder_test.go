@@ -15,14 +15,6 @@ func TestNewBuilder(t *testing.T) {
 	require.Empty(t, prog.Code)
 }
 
-func TestBuilder_Emit(t *testing.T) {
-	b := program.NewBuilder()
-	require.Same(t, b, b.Emit(instr.I32_CONST, 42).Emit(instr.DROP))
-	prog, err := b.Build()
-	require.NoError(t, err)
-	require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)}, instr.Unmarshal(prog.Code))
-}
-
 func TestBuilder_Label(t *testing.T) {
 	b := program.NewBuilder()
 	require.NotEqual(t, b.Label(), b.Label())
@@ -91,6 +83,14 @@ func TestBuilder_ConstGet(t *testing.T) {
 	require.Equal(t, instr.CONST_GET, instrs[0].Opcode())
 	require.Equal(t, uint64(0), instrs[0].Operand(0))
 	require.Equal(t, uint64(0), instrs[1].Operand(0))
+}
+
+func TestBuilder_Emit(t *testing.T) {
+	b := program.NewBuilder()
+	require.Same(t, b, b.Emit(instr.I32_CONST, 42).Emit(instr.DROP))
+	prog, err := b.Build()
+	require.NoError(t, err)
+	require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)}, instr.Unmarshal(prog.Code))
 }
 
 func TestBuilder_Const(t *testing.T) {

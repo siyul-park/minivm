@@ -53,57 +53,94 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, program.Verify(prog))
 	})
 
-	t.Run("valid/narrow int operands", func(t *testing.T) {
-		// i8 and i1 share the i32 representation: an i8 param and an i1
-		// comparison result both satisfy i32 operands.
-		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}},
-			Code: instr.Marshal([]instr.Instruction{
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_LT_S),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.RETURN),
-			}),
-		}
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
-		require.NoError(t, program.Verify(prog))
-	})
-
-	t.Run("valid/narrow bitwise operands", func(t *testing.T) {
-		// Width-closed bitwise ops on a shared narrow kind keep that kind
-		// (i8 & i8 → i8); the result still satisfies an i32 operand, so chaining
-		// another i32 op on it verifies.
-		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}},
-			Code: instr.Marshal([]instr.Instruction{
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I32_AND),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_OR),
-				instr.New(instr.RETURN),
-			}),
-		}
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
-		require.NoError(t, program.Verify(prog))
-	})
-
-	t.Run("calls/function returns", func(t *testing.T) {
-		fn := &types.Function{
-			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			Code: instr.Marshal([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)}),
-		}
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
-		require.NoError(t, program.Verify(prog))
-	})
+	// Each row builds a top-level NOP program with fn as its sole constant and
+	// checks the verifier's outcome. fn is built through types.FunctionBuilder
+	// except for "control/function branch to end", which needs a raw jump
+	// operand (see its comment) that no label-based builder call can produce.
+	functionCases := []struct {
+		name  string
+		fn    *types.Function
+		check func(t *testing.T, err error)
+	}{
+		{
+			// i8 and i1 share the i32 representation: an i8 param and an i1
+			// comparison result both satisfy i32 operands.
+			name: "valid/narrow int operands",
+			fn: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
+				Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_LT_S),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+				).MustBuild(),
+			check: func(t *testing.T, err error) { require.NoError(t, err) },
+		},
+		{
+			// Width-closed bitwise ops on a shared narrow kind keep that kind
+			// (i8 & i8 → i8); the result still satisfies an i32 operand, so
+			// chaining another i32 op on it verifies.
+			name: "valid/narrow bitwise operands",
+			fn: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
+				Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_AND),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_OR),
+					instr.New(instr.RETURN),
+				).MustBuild(),
+			check: func(t *testing.T, err error) { require.NoError(t, err) },
+		},
+		{
+			name: "calls/function returns",
+			fn: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+				MustBuild(),
+			check: func(t *testing.T, err error) { require.NoError(t, err) },
+		},
+		{
+			// Left as a raw literal: it needs a BR_IF with a hand-picked jump
+			// operand landing past the function's last real instruction.
+			// FunctionBuilder only ever emits branches to labels it resolved
+			// to instructions it actually assembled, so it cannot produce this
+			// out-of-range target; the point of the case is exercising the
+			// verifier's rejection of a malformed function body.
+			name: "control/function branch to end",
+			fn: &types.Function{
+				Typ: &types.FunctionType{},
+				Code: instr.Marshal([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.BR_IF, 0),
+				}),
+			},
+			check: func(t *testing.T, err error) { require.ErrorIs(t, err, program.ErrInvalidJump) },
+		},
+		{
+			name: "control/function falls through",
+			fn: types.NewFunctionBuilder(&types.FunctionType{}).
+				Emit(instr.New(instr.I32_CONST, 1)).
+				MustBuild(),
+			check: func(t *testing.T, err error) {
+				var ve *program.VerifyError
+				require.ErrorAs(t, err, &ve)
+				require.ErrorIs(t, ve.Err, program.ErrFallThrough)
+				require.Equal(t, 1, ve.Slot)
+			},
+		},
+	}
+	for _, tc := range functionCases {
+		t.Run(tc.name, func(t *testing.T) {
+			prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(tc.fn))
+			tc.check(t, program.Verify(prog))
+		})
+	}
 
 	t.Run("calls/direct call", func(t *testing.T) {
-		fn := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			Code: instr.Marshal([]instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)}),
-		}
+		fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
@@ -112,21 +149,45 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, program.Verify(prog))
 	})
 
-	t.Run("control/balanced merge", func(t *testing.T) {
-		b := program.NewBuilder()
-		els, end := b.Label(), b.Label()
-		b.Emit(instr.I32_CONST, 0)
-		b.BrIf(els)
-		b.Emit(instr.I32_CONST, 1)
-		b.Br(end)
-		b.Bind(els)
-		b.Emit(instr.I32_CONST, 2)
-		b.Bind(end)
-		b.Emit(instr.DROP)
-		prog, err := b.Build()
-		require.NoError(t, err)
-		require.NoError(t, program.Verify(prog))
-	})
+	// Both rows build the same if/else merge skeleton; the unbalanced row
+	// pushes one extra value in the else arm before the merge, parameterizing
+	// the single difference between the two cases.
+	mergeCases := []struct {
+		name    string
+		extra   func(b *program.Builder)
+		wantErr error
+	}{
+		{name: "control/balanced merge"},
+		{
+			name:    "stack/unbalanced merge",
+			extra:   func(b *program.Builder) { b.Emit(instr.I32_CONST, 3) },
+			wantErr: program.ErrStackMismatch,
+		},
+	}
+	for _, tc := range mergeCases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := program.NewBuilder()
+			els, end := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0)
+			b.BrIf(els)
+			b.Emit(instr.I32_CONST, 1)
+			b.Br(end)
+			b.Bind(els)
+			b.Emit(instr.I32_CONST, 2)
+			if tc.extra != nil {
+				tc.extra(b)
+			}
+			b.Bind(end)
+			b.Emit(instr.DROP)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, program.Verify(prog), tc.wantErr)
+			} else {
+				require.NoError(t, program.Verify(prog))
+			}
+		})
+	}
 
 	t.Run("control/loop fixpoint", func(t *testing.T) {
 		b := program.NewBuilder()
@@ -149,13 +210,35 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, program.Verify(prog))
 	})
 
-	t.Run("bounds/top-level local", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.DROP),
+	boundsCases := []struct {
+		name   string
+		instrs []instr.Instruction
+		opts   []func(*program.Program)
+	}{
+		{
+			name:   "bounds/top-level local",
+			instrs: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.DROP)},
+		},
+		{
+			name:   "bounds/constant index",
+			instrs: []instr.Instruction{instr.New(instr.CONST_GET, 5)},
+		},
+		{
+			name:   "bounds/local index",
+			instrs: []instr.Instruction{instr.New(instr.LOCAL_GET, 9)},
+		},
+		{
+			name:   "bounds/global index",
+			instrs: []instr.Instruction{instr.New(instr.GLOBAL_GET, 9)},
+			opts:   []func(*program.Program){program.WithGlobals(types.TypeI32)},
+		},
+	}
+	for _, tc := range boundsCases {
+		t.Run(tc.name, func(t *testing.T) {
+			prog := program.New(tc.instrs, tc.opts...)
+			require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
 		})
-		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
-	})
+	}
 
 	t.Run("stack/underflow", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_ADD)})
@@ -187,14 +270,36 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, program.Verify(prog), program.ErrStackUnderflow)
 	})
 
-	t.Run("types/operand mismatch", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
+	// Each row starts from the identical F32_CONST(1) and differs only in the
+	// instructions that follow and any extra program options; all assert
+	// ErrTypeMismatch.
+	typeMismatchCases := []struct {
+		name   string
+		follow []instr.Instruction
+		opts   []func(*program.Program)
+	}{
+		{
+			name:   "types/operand mismatch",
+			follow: []instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)},
+		},
+		{
+			name:   "types/global set mismatch",
+			follow: []instr.Instruction{instr.New(instr.GLOBAL_SET, 0)},
+			opts:   []func(*program.Program){program.WithGlobals(types.TypeI32)},
+		},
+		{
+			name:   "types/global tee mismatch",
+			follow: []instr.Instruction{instr.New(instr.GLOBAL_TEE, 0)},
+			opts:   []func(*program.Program){program.WithGlobals(types.TypeI32)},
+		},
+	}
+	for _, tc := range typeMismatchCases {
+		t.Run(tc.name, func(t *testing.T) {
+			instrs := append([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1)))}, tc.follow...)
+			prog := program.New(instrs, tc.opts...)
+			require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 		})
-		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
-	})
+	}
 
 	t.Run("structure/unknown opcode", func(t *testing.T) {
 		prog := &program.Program{Code: []byte{0xFE}}
@@ -206,38 +311,12 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, program.Verify(prog), program.ErrTruncated)
 	})
 
-	t.Run("bounds/constant index", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 5)})
-		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
-	})
-
-	t.Run("bounds/local index", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 9)})
-		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
-	})
-
 	t.Run("valid/global index", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.DROP),
 		}, program.WithGlobals(types.TypeI32))
 		require.NoError(t, program.Verify(prog))
-	})
-
-	t.Run("types/global set mismatch", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
-			instr.New(instr.GLOBAL_SET, 0),
-		}, program.WithGlobals(types.TypeI32))
-		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
-	})
-
-	t.Run("types/global tee mismatch", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
-			instr.New(instr.GLOBAL_TEE, 0),
-		}, program.WithGlobals(types.TypeI32))
-		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 	})
 
 	t.Run("types/dynamic global accepts scalar", func(t *testing.T) {
@@ -256,11 +335,6 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
 	})
 
-	t.Run("bounds/global index", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, program.WithGlobals(types.TypeI32))
-		require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
-	})
-
 	t.Run("control/invalid jump", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.BR, 100)})
 		require.ErrorIs(t, program.Verify(prog), program.ErrInvalidJump)
@@ -272,48 +346,6 @@ func TestVerify(t *testing.T) {
 			instr.New(instr.I64_CONST, uint64(7)<<48),
 		})
 		require.ErrorIs(t, program.Verify(prog), program.ErrInvalidJump)
-	})
-
-	t.Run("control/function branch to end", func(t *testing.T) {
-		fn := &types.Function{
-			Typ: &types.FunctionType{},
-			Code: instr.Marshal([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_IF, 0),
-			}),
-		}
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
-		require.ErrorIs(t, program.Verify(prog), program.ErrInvalidJump)
-	})
-
-	t.Run("control/function falls through", func(t *testing.T) {
-		fn := &types.Function{
-			Typ:  &types.FunctionType{},
-			Code: instr.Marshal([]instr.Instruction{instr.New(instr.I32_CONST, 1)}),
-		}
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
-
-		var ve *program.VerifyError
-		require.ErrorAs(t, program.Verify(prog), &ve)
-		require.ErrorIs(t, ve.Err, program.ErrFallThrough)
-		require.Equal(t, 1, ve.Slot)
-	})
-
-	t.Run("stack/unbalanced merge", func(t *testing.T) {
-		b := program.NewBuilder()
-		els, end := b.Label(), b.Label()
-		b.Emit(instr.I32_CONST, 0)
-		b.BrIf(els)
-		b.Emit(instr.I32_CONST, 1)
-		b.Br(end)
-		b.Bind(els)
-		b.Emit(instr.I32_CONST, 2)
-		b.Emit(instr.I32_CONST, 3)
-		b.Bind(end)
-		b.Emit(instr.DROP)
-		prog, err := b.Build()
-		require.NoError(t, err)
-		require.ErrorIs(t, program.Verify(prog), program.ErrStackMismatch)
 	})
 
 	t.Run("handlers/valid protected region", func(t *testing.T) {

@@ -13,18 +13,6 @@ func TestMarshal(t *testing.T) {
 	require.Len(t, code, 11)
 }
 
-func TestUnmarshal(t *testing.T) {
-	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
-	actual := instr.Unmarshal(instr.Marshal(insts))
-	require.Equal(t, insts, actual)
-}
-
-func TestFormat(t *testing.T) {
-	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
-	assembly := instr.Format(instr.Marshal(insts))
-	require.Equal(t, "0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000002\n0010:\ti32.add\n", assembly)
-}
-
 func TestTargets(t *testing.T) {
 	t.Run("branch", func(t *testing.T) {
 		b := instr.NewBuilder()
@@ -62,4 +50,16 @@ func TestTargets(t *testing.T) {
 	t.Run("non branch", func(t *testing.T) {
 		require.Nil(t, instr.Targets(instr.Marshal([]instr.Instruction{instr.New(instr.NOP)}), 0))
 	})
+}
+
+func TestFormat(t *testing.T) {
+	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
+	assembly := instr.Format(instr.Marshal(insts))
+	require.Equal(t, "0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000002\n0010:\ti32.add\n", assembly)
+}
+
+func TestUnmarshal(t *testing.T) {
+	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
+	actual := instr.Unmarshal(instr.Marshal(insts))
+	require.Equal(t, insts, actual)
 }
