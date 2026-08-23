@@ -667,6 +667,17 @@ func (i *Interpreter) Release(addr int) error {
 	return nil
 }
 
+// RefCount returns the live reference count for the heap value at addr, or
+// ErrSegmentationFault if addr does not name a live value. An embedder that
+// passes references across the host boundary with Retain and Release has no
+// other way to verify that the two stayed balanced.
+func (i *Interpreter) RefCount(addr int) (int, error) {
+	if !i.alive(addr) {
+		return 0, ErrSegmentationFault
+	}
+	return i.rc[addr], nil
+}
+
 func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {
@@ -723,6 +734,14 @@ func (i *Interpreter) Peek(n int) (types.Boxed, error) {
 
 func (i *Interpreter) Len() int {
 	return i.sp
+}
+
+// Flush publishes the interpreter's pending execution samples and JIT
+// counters into the attached profiler without closing the interpreter, so a
+// long-running embedded VM can observe metrics without waiting for Close. It
+// has no observable effect when no profiler is attached (see WithProfiler).
+func (i *Interpreter) Flush() {
+	i.flush()
 }
 
 func (i *Interpreter) Close() error {

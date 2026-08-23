@@ -4342,6 +4342,49 @@ func TestInterpreter_Release(t *testing.T) {
 	require.ErrorIs(t, err, ErrSegmentationFault)
 }
 
+func TestInterpreter_RefCount(t *testing.T) {
+	t.Run("counts a fresh allocation", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		count, err := i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+	})
+
+	t.Run("tracks retain and release", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		count, err := i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 2, count)
+
+		require.NoError(t, i.Release(addr))
+		count, err = i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+	})
+
+	t.Run("rejects a dead address", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		_, err = i.RefCount(addr)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+	})
+}
+
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("pushes scalar", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -4479,6 +4522,35 @@ func TestInterpreter_Len(t *testing.T) {
 	require.Equal(t, 1, i.Len())
 }
 
+func TestInterpreter_Flush(t *testing.T) {
+	t.Run("publishes samples without closing", func(t *testing.T) {
+		p := prof.New()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+		})
+		i := New(prog, WithProfiler(p), WithTick(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		i.Flush()
+
+		total, ok := p.Metric("vm_samples_total")
+		require.True(t, ok)
+		require.Equal(t, float64(3), total)
+
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), v)
+	})
+
+	t.Run("is a no-op without an attached profiler", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NotPanics(t, func() { i.Flush() })
+	})
+}
+
 func TestInterpreter_Close(t *testing.T) {
 	i := New(program.New(nil))
 	value := &trackedValue{}
@@ -4510,9 +4582,12 @@ func TestInterpreter_Reset(t *testing.T) {
 			require.NoError(t, i.Run(context.Background()))
 			require.Equal(t, 1, i.Len())
 			i.Reset()
-			require.Equal(t, 0, i.frames[0].bp)
-			require.Equal(t, 0, i.frames[0].ip)
-			require.Same(t, &i.frames[0], i.fr)
+			require.Equal(t, 1, i.FP())
+			fn, ip, bp, err := i.Frame(0)
+			require.NoError(t, err)
+			require.Equal(t, 0, fn)
+			require.Equal(t, 0, ip)
+			require.Equal(t, 0, bp)
 		}
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -4541,13 +4616,19 @@ func TestInterpreter_Reset(t *testing.T) {
 		i := New(prog)
 		defer i.Close()
 
-		require.Equal(t, i.base, len(i.heap))
 		require.NoError(t, i.Push(types.String("temporary")))
-		require.Greater(t, len(i.heap), i.base)
+		boxed, err := i.Peek(0)
+		require.NoError(t, err)
+		addr := boxed.Ref()
 
 		i.Reset()
-		require.Equal(t, i.base, len(i.heap))
-		require.Equal(t, 0, i.sp)
+		require.Equal(t, 0, i.Len())
+
+		// A slot the heap reused after Reset proves the heap actually
+		// returned to its baseline rather than merely growing further.
+		reused, err := i.Alloc(types.String("temporary"))
+		require.NoError(t, err)
+		require.Equal(t, addr, reused)
 	})
 
 	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
@@ -4639,9 +4720,13 @@ func TestNew(t *testing.T) {
 		i := New(prog)
 		defer i.Close()
 
-		require.Equal(t, types.KindRef, i.constants[0].Kind())
-		require.Equal(t, types.KindRef, i.constants[1].Kind())
-		require.Equal(t, i.constants[0].Ref(), i.constants[1].Ref())
+		c0, err := i.Const(0)
+		require.NoError(t, err)
+		c1, err := i.Const(1)
+		require.NoError(t, err)
+		require.Equal(t, types.KindRef, c0.Kind())
+		require.Equal(t, types.KindRef, c1.Kind())
+		require.Equal(t, c0.Ref(), c1.Ref())
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
@@ -4849,12 +4934,14 @@ func TestWithProfiler(t *testing.T) {
 			program.WithLocals(types.TypeAny))
 		require.NoError(t, program.Verify(prog))
 
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(prof.New()))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		captures := func() float64 {
+			i.Flush()
 			var total float64
-			for _, metric := range i.samples.Metrics() {
+			for _, metric := range p.Metrics() {
 				if metric.Name == "vm_jit_trace_captures_total" {
 					total += metric.Value
 				}
@@ -4896,11 +4983,11 @@ func TestWithProfiler(t *testing.T) {
 		require.True(t, i.isCold(incAddr), "the entry should have retired once its give-up rate crossed the window threshold")
 		require.True(t, i.natives[incAddr] == nil, "retire must clear the function-entry call-fast-path slot")
 
-		// flush syncs the interpreter's local sample collector into p: metrics
-		// live in i.samples until flush (see Interpreter.Close), so a mid-test
+		// Flush publishes the interpreter's pending samples into p: metrics
+		// stay local until flushed (see Interpreter.Close), so a mid-test
 		// check needs it directly instead of waiting for the deferred Close.
 		label := func() (float64, bool) {
-			i.flush()
+			i.Flush()
 			return p.Metric("vm_jit_native_entries_total",
 				prof.Label{Key: "func", Value: strconv.Itoa(incAddr)}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
@@ -4940,7 +5027,7 @@ func TestWithProfiler(t *testing.T) {
 		require.False(t, i.isCold(incAddr))
 		require.True(t, i.natives[incAddr] != nil)
 
-		i.flush()
+		i.Flush()
 		entries, ok := p.Metric("vm_jit_native_entries_total",
 			prof.Label{Key: "func", Value: strconv.Itoa(incAddr)}, prof.Label{Key: "ip", Value: "0"},
 			prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
@@ -5008,7 +5095,9 @@ func installFakeExit(t *testing.T, p *prof.Profiler, iterations int32, reason pr
 	require.NoError(t, program.Verify(prog))
 
 	i := New(prog, WithProfiler(p), WithThreshold(-1))
-	incAddr := i.constants[idx].Ref()
+	c, err := i.Const(idx)
+	require.NoError(t, err)
+	incAddr := c.Ref()
 	root := anchor{addr: incAddr, ip: 0}
 	mod := &module{entries: map[anchor]native{
 		root: {
@@ -5084,14 +5173,18 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
-		i := New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
+		firstMetrics := prof.New()
+		i := New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0), WithProfiler(firstMetrics))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(nativeFrameLimit), v)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		firstEmits, ok := firstMetrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.GreaterOrEqual(t, firstEmits, float64(1))
 
 		prog = program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, nativeFrameLimit+1),
