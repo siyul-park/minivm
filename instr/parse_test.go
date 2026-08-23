@@ -144,6 +144,97 @@ func TestParseAll(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, original, got)
 	})
+
+	t.Run("label forward reference", func(t *testing.T) {
+		got, err := instr.ParseAll(strings.NewReader("br done\nnop\ndone:\nreturn"))
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{
+			instr.New(instr.BR, uint64(uint16(1))),
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		}, got)
+	})
+
+	t.Run("label backward reference", func(t *testing.T) {
+		got, err := instr.ParseAll(strings.NewReader("loop:\nnop\nbr loop"))
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.BR, uint64(uint16(-4+1<<16))),
+		}, got)
+	})
+
+	t.Run("br_if label", func(t *testing.T) {
+		got, err := instr.ParseAll(strings.NewReader("br_if done\nnop\ndone:\nreturn"))
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{
+			instr.New(instr.BR_IF, uint64(uint16(1))),
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		}, got)
+	})
+
+	t.Run("br_table labels", func(t *testing.T) {
+		got, err := instr.ParseAll(strings.NewReader(
+			"br_table 0x02 case0 case1 def\ncase0:\nnop\ncase1:\nnop\ndef:\nreturn"))
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{
+			instr.New(instr.BR_TABLE, 2, uint64(0), uint64(1), uint64(2)),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		}, got)
+	})
+
+	t.Run("br_table mixes numeric and label operands", func(t *testing.T) {
+		got, err := instr.ParseAll(strings.NewReader("br_table 0x01 case0 0x0004\ncase0:\nnop\nreturn"))
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{
+			instr.New(instr.BR_TABLE, 1, uint64(0), uint64(4)),
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		}, got)
+	})
+
+	t.Run("round-trip labeled loop with Format", func(t *testing.T) {
+		b := instr.NewBuilder()
+		loop := b.Label()
+		b.Bind(loop).Emit(instr.NOP).BrIf(loop).Emit(instr.RETURN)
+		original, err := b.Assemble()
+		require.NoError(t, err)
+
+		got, err := instr.ParseAll(strings.NewReader(instr.Format(instr.Marshal(original))))
+		require.NoError(t, err)
+		require.Equal(t, original, got)
+	})
+
+	t.Run("undefined label", func(t *testing.T) {
+		_, err := instr.ParseAll(strings.NewReader("br missing\nreturn"))
+		require.ErrorIs(t, err, instr.ErrUnboundLabel)
+		require.Contains(t, err.Error(), "line 1")
+		require.Contains(t, err.Error(), `"missing"`)
+	})
+
+	t.Run("duplicate label", func(t *testing.T) {
+		_, err := instr.ParseAll(strings.NewReader("loop:\nnop\nloop:\nreturn"))
+		require.ErrorIs(t, err, instr.ErrDuplicateLabel)
+		require.Contains(t, err.Error(), "line 3")
+		require.Contains(t, err.Error(), `"loop"`)
+	})
+
+	t.Run("branch offset out of i16 range", func(t *testing.T) {
+		var sb strings.Builder
+		sb.WriteString("br far\n")
+		for i := 0; i < math.MaxInt16+1; i++ {
+			sb.WriteString("nop\n")
+		}
+		sb.WriteString("far:\nreturn")
+
+		_, err := instr.ParseAll(strings.NewReader(sb.String()))
+		require.ErrorIs(t, err, instr.ErrOffsetRange)
+		require.Contains(t, err.Error(), "line 1")
+		require.Contains(t, err.Error(), `"far"`)
+	})
 }
 
 func TestParse(t *testing.T) {
