@@ -4025,7 +4025,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 	// run marshals its own copy of seed, so a JIT run and a threaded run each
 	// own the Go memory they write and the comparison between them stays
 	// honest. body runs once per iteration and tail leaves the result.
-	run := func(t *testing.T, locals []types.Type, body, tail []instr.Instruction, opts ...func(*option)) (types.Value, hostLoopFields, float64) {
+	run := func(t *testing.T, locals []types.Type, body, tail []instr.Instruction, opts ...Option) (types.Value, hostLoopFields, float64) {
 		t.Helper()
 		setup := New(program.New(nil))
 		defer func() { require.NoError(t, setup.Close()) }()

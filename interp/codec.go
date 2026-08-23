@@ -32,6 +32,11 @@ type Registry struct {
 	conversions sync.Map
 }
 
+// RegistryOption configures a Registry at construction. Only WithMarshaler and
+// WithUnmarshaler produce one, so callers can name and collect options without
+// reaching the unexported state they configure.
+type RegistryOption func(*registry)
+
 // registry collects registrations until NewRegistry freezes them.
 type registry struct {
 	entries map[reflect.Type]*conversion
@@ -101,7 +106,7 @@ var (
 // WithMarshaler registers m as the conversion of Go type t into a VM value. vm
 // is the VM type m produces; enclosing struct, array, and map layouts compile
 // from it, so it must not vary per value.
-func WithMarshaler(t reflect.Type, vm types.Type, m Marshaler) func(*registry) {
+func WithMarshaler(t reflect.Type, vm types.Type, m Marshaler) RegistryOption {
 	return func(r *registry) {
 		e := r.entry(t)
 		e.vm = vm
@@ -111,13 +116,13 @@ func WithMarshaler(t reflect.Type, vm types.Type, m Marshaler) func(*registry) {
 
 // WithUnmarshaler registers u as the conversion of a VM value into Go type t.
 // It needs no VM type: the source value carries its own.
-func WithUnmarshaler(t reflect.Type, u Unmarshaler) func(*registry) {
+func WithUnmarshaler(t reflect.Type, u Unmarshaler) RegistryOption {
 	return func(r *registry) { r.entry(t).set = u.Unmarshal }
 }
 
 // NewRegistry builds the built-in codec. Defaults for standard-library types
 // install first, so an option naming the same Go type replaces one.
-func NewRegistry(opts ...func(*registry)) *Registry {
+func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &registry{entries: make(map[reflect.Type]*conversion)}
 	for _, opt := range defaults() {
 		opt(r)
@@ -688,8 +693,8 @@ var (
 // defaults registers the standard-library types that have no direct VM kind.
 // They take the same path as a user registration, so naming one of them in
 // NewRegistry replaces it rather than layering on it.
-func defaults() []func(*registry) {
-	return []func(*registry){
+func defaults() []RegistryOption {
+	return []RegistryOption{
 		WithMarshaler(reflect.TypeFor[time.Time](), types.TypeI64, MarshalerFunc(
 			func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
 				return types.I64((*(*time.Time)(p)).UnixNano()), nil

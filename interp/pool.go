@@ -16,7 +16,7 @@ import (
 type Pool struct {
 	prog  *program.Program
 	cache *cache
-	opts  []func(*option)
+	opts  []Option
 	size  int
 
 	idle chan *Interpreter
@@ -31,13 +31,13 @@ var ErrPoolClosed = errors.New("pool closed")
 // NewPool builds a pool that lends up to size Interpreters constructed from
 // prog with opts. size <= 0 is normalized to 1. Interpreters are created lazily
 // on Get; NewPool itself does not allocate JIT memory.
-func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
+func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
 	if size <= 0 {
 		size = 1
 	}
 	cache := newCache(prog)
 	tracer := newTracer()
-	all := make([]func(*option), 0, len(opts)+2)
+	all := make([]Option, 0, len(opts)+2)
 	all = append(all, opts...)
 	all = append(all, withCache(cache), withTracer(tracer))
 	return &Pool{

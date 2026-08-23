@@ -2343,10 +2343,10 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 	modes := []struct {
 		name string
-		opts []func(*option)
+		opts []Option
 	}{
-		{name: "standalone", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
-		{name: "fused", opts: []func(*option){WithThreshold(-1)}},
+		{name: "standalone", opts: []Option{WithTick(1), WithThreshold(-1)}},
+		{name: "fused", opts: []Option{WithThreshold(-1)}},
 	}
 	for _, tt := range runTests {
 		for _, mode := range modes {
@@ -2548,7 +2548,7 @@ func TestInterpreter_Run(t *testing.T) {
 		globals []types.Boxed
 		code    types.ErrorCode
 	}
-	run := func(t *testing.T, prog *program.Program, opts ...func(*option)) outcome {
+	run := func(t *testing.T, prog *program.Program, opts ...Option) outcome {
 		t.Helper()
 		i := New(prog, opts...)
 		defer i.Close()
@@ -2596,7 +2596,7 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 
 	t.Run("parity/host callback effect", func(t *testing.T) {
-		runHost := func(opts ...func(*option)) (types.Value, int) {
+		runHost := func(opts ...Option) (types.Value, int) {
 			calls := 0
 			host := NewHostFunction(
 				&types.FunctionType{Returns: []types.Type{types.TypeI32}},
@@ -2636,7 +2636,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		bump := func(c *counter) int32 { c.hidden++; return c.Count }
 
-		runHost := func(opts ...func(*option)) (types.Value, int32) {
+		runHost := func(opts ...Option) (types.Value, int32) {
 			setup := New(program.New(nil))
 			defer setup.Close()
 			src := &counter{Count: 7}
@@ -2673,7 +2673,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("parity/host container writes reach the Go value", func(t *testing.T) {
-		runHost := func(value any, code []instr.Instruction, opts ...func(*option)) types.Value {
+		runHost := func(value any, code []instr.Instruction, opts ...Option) types.Value {
 			setup := New(program.New(nil))
 			defer setup.Close()
 			host, err := NewRegistry().Marshal(setup, value)
@@ -2689,12 +2689,12 @@ func TestInterpreter_Run(t *testing.T) {
 
 		for _, tt := range []struct {
 			name string
-			run  func(opts ...func(*option)) (types.Value, any)
+			run  func(opts ...Option) (types.Value, any)
 			want any
 		}{
 			{
 				name: "array element",
-				run: func(opts ...func(*option)) (types.Value, any) {
+				run: func(opts ...Option) (types.Value, any) {
 					src := []int32{7}
 					out := runHost(src, []instr.Instruction{
 						instr.New(instr.CONST_GET, 0),
@@ -2708,7 +2708,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 			{
 				name: "map entry",
-				run: func(opts ...func(*option)) (types.Value, any) {
+				run: func(opts ...Option) (types.Value, any) {
 					src := map[int32]int32{}
 					out := runHost(src, []instr.Instruction{
 						instr.New(instr.CONST_GET, 0),
@@ -3208,10 +3208,10 @@ func TestInterpreter_Run(t *testing.T) {
 
 	for _, tt := range []struct {
 		name string
-		opts []func(*option)
+		opts []Option
 	}{
 		{name: "fused"},
-		{name: "generic", opts: []func(*option){WithTick(1)}},
+		{name: "generic", opts: []Option{WithTick(1)}},
 	} {
 		t.Run("host call releases the consumed callable ref on fused and generic paths "+tt.name, func(t *testing.T) {
 			hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
@@ -3504,7 +3504,7 @@ func TestInterpreter_Run(t *testing.T) {
 	for _, tt := range parity {
 		t.Run(tt.name, func(t *testing.T) {
 			states := make([]parityState, 0, 2)
-			for _, opts := range [][]func(*option){
+			for _, opts := range [][]Option{
 				{WithTick(1)},
 				{WithThreshold(-1)},
 			} {
@@ -8216,10 +8216,10 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			modes := []struct {
 				name string
-				opts []func(*option)
+				opts []Option
 			}{
-				{name: "Threaded", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
-				{name: "Fused", opts: []func(*option){WithThreshold(-1)}},
+				{name: "Threaded", opts: []Option{WithTick(1), WithThreshold(-1)}},
+				{name: "Fused", opts: []Option{WithThreshold(-1)}},
 			}
 			jit := runtime.GOARCH == "arm64"
 			codes := [][]byte{tt.program.Code}
@@ -8241,8 +8241,8 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			if jit {
 				modes = append(modes, struct {
 					name string
-					opts []func(*option)
-				}{name: "JITWarm", opts: []func(*option){WithTick(1), WithThreshold(0)}})
+					opts []Option
+				}{name: "JITWarm", opts: []Option{WithTick(1), WithThreshold(0)}})
 			}
 
 			for _, mode := range modes {
@@ -8314,26 +8314,26 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 	tests := []struct {
 		name string
 		prog *program.Program
-		opts []func(*option)
+		opts []Option
 	}{
 		{
 			name: "Scalar",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 42), instr.New(instr.GLOBAL_SET, 0),
 			}, program.WithGlobals(types.TypeI32)),
-			opts: []func(*option){WithThreshold(-1)},
+			opts: []Option{WithThreshold(-1)},
 		},
 		{
 			name: "Heap",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 8), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			}, program.WithTypes(types.NewArrayType(types.TypeAny))),
-			opts: []func(*option){WithThreshold(-1)},
+			opts: []Option{WithThreshold(-1)},
 		},
 		{
 			name: "JITState",
 			prog: program.New(jitCode),
-			opts: []func(*option){WithThreshold(0)},
+			opts: []Option{WithThreshold(0)},
 		},
 	}
 
