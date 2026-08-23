@@ -15,6 +15,14 @@ func FuzzParseProgram(f *testing.F) {
 	f.Add(program.New(
 		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.DROP)}, program.WithConstants(types.String("value")), program.WithLocals(types.TypeI32), program.WithGlobals(types.TypeAny), program.WithTypes(types.NewArrayType(types.TypeI32)),
 	).String())
+	f.Add(program.New(
+		[]instr.Instruction{instr.New(instr.NOP)},
+		program.WithConstants(types.String("has  spaces, \"quotes\", and a \t tab")),
+		program.WithTypes(types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		)),
+	).String())
 	f.Add("invalid")
 
 	f.Fuzz(func(t *testing.T, text string) {

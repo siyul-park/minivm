@@ -184,7 +184,25 @@ func TestStructType_Kind(t *testing.T) {
 }
 
 func TestStructType_String(t *testing.T) {
-	require.Equal(t, "struct {i32; any}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)).String())
+	t.Run("unnamed fields render without names", func(t *testing.T) {
+		require.Equal(t, "struct {i32; any}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)).String())
+	})
+
+	t.Run("named fields render with their names", func(t *testing.T) {
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		)
+		require.Equal(t, "struct {value: i64; left: any}", typ.String())
+	})
+
+	t.Run("named and unnamed fields mix", func(t *testing.T) {
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny),
+		)
+		require.Equal(t, "struct {value: i64; any}", typ.String())
+	})
 }
 
 func TestStructType_Cast(t *testing.T) {

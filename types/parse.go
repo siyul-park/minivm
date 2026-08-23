@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/siyul-park/minivm/instr"
 )
@@ -224,7 +225,7 @@ func parseFunctionType(s string) (*FunctionType, error) {
 }
 
 func parseStructType(s string) (*StructType, error) {
-	// "struct {i32; f64}"
+	// "struct {i32; f64}" or "struct {name: i32; f64}"
 	inner := strings.TrimPrefix(s, "struct {")
 	inner = strings.TrimSuffix(inner, "}")
 	if strings.TrimSpace(inner) == "" {
@@ -232,13 +233,47 @@ func parseStructType(s string) (*StructType, error) {
 	}
 	var fields []StructField
 	for _, f := range strings.Split(inner, ";") {
-		t, err := Parse(strings.TrimSpace(f))
+		name, typeStr := splitStructFieldName(strings.TrimSpace(f))
+		t, err := Parse(typeStr)
 		if err != nil {
 			return nil, fmt.Errorf("struct field type: %w", err)
 		}
-		fields = append(fields, NewStructField(t))
+		var opts []func(*StructField)
+		if name != "" {
+			opts = append(opts, FieldWithName(name))
+		}
+		fields = append(fields, NewStructField(t, opts...))
 	}
 	return NewStructType(fields...), nil
+}
+
+// splitStructFieldName splits a struct field entry produced by
+// StructType.String() into its optional name and type string. A named field
+// is rendered as "name: type"; ":" never otherwise appears in a type string,
+// so its presence after a leading identifier unambiguously marks a name.
+func splitStructFieldName(f string) (name, typeStr string) {
+	idx := strings.Index(f, ": ")
+	if idx < 0 || !isStructFieldName(f[:idx]) {
+		return "", f
+	}
+	return f[:idx], f[idx+2:]
+}
+
+// isStructFieldName reports whether s is a valid identifier: a non-empty
+// run of letters, digits, or underscores that does not start with a digit.
+func isStructFieldName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_' || unicode.IsLetter(r):
+		case unicode.IsDigit(r) && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // isInstrLine reports whether s looks like a plain instruction line without an

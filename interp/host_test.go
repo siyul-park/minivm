@@ -104,7 +104,7 @@ func TestHostStruct_String(t *testing.T) {
 
 	value, err := r.Marshal(i, &hostCounter{})
 	require.NoError(t, err)
-	require.Equal(t, "struct {i32}\n<native>", value.(*interp.HostStruct).String())
+	require.Equal(t, "struct {Count: i32}\n<native>", value.(*interp.HostStruct).String())
 }
 
 func TestHostStruct_SetField(t *testing.T) {

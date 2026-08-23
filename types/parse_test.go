@@ -131,6 +131,7 @@ func TestParse(t *testing.T) {
 		{"func(i32, f64) i32", &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeF64}, Returns: []types.Type{types.TypeI32}}, false},
 		{"func(i32) (i32, i64)", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32, types.TypeI64}}, false},
 		{"struct {i32; f64}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)), false},
+		{"struct {value: i64; any}", types.NewStructType(types.NewStructField(types.TypeI64, types.FieldWithName("value")), types.NewStructField(types.TypeAny)), false},
 		{"ref", nil, true},
 		{"map[]i32", nil, true},
 		{"map[i32]", nil, true},
@@ -150,4 +151,33 @@ func TestParse(t *testing.T) {
 			require.True(t, tt.want.Equals(got), "got %v, want %v", got, tt.want)
 		})
 	}
+}
+
+func TestParse_StructFieldNames(t *testing.T) {
+	// StructType.Equals ignores field names, so a dedicated test is needed to
+	// confirm parseStructType actually restores them instead of only matching
+	// field types.
+	t.Run("restores named and unnamed fields from String output", func(t *testing.T) {
+		want := types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+			types.NewStructField(types.TypeAny),
+		)
+		got, err := types.Parse(want.String())
+		require.NoError(t, err)
+
+		st, ok := got.(*types.StructType)
+		require.True(t, ok)
+		require.Equal(t, want, st)
+		require.Equal(t, "value", st.Fields[0].Name)
+		require.Equal(t, "left", st.Fields[1].Name)
+		require.Equal(t, "", st.Fields[2].Name)
+	})
+
+	t.Run("field name lookalike prefix without colon-space stays part of the type", func(t *testing.T) {
+		// "notaname" here isn't followed by ": ", so parseStructType must not
+		// misread it as a name and swallow the following token into the type.
+		_, err := types.Parse("struct {notaname i32}")
+		require.Error(t, err)
+	})
 }

@@ -329,13 +329,15 @@ func parseHandlers(lines []string) ([]instr.Handler, error) {
 }
 
 func parseLiteral(s string) (types.Value, error) {
-	fields := strings.Fields(s)
-	if len(fields) < 2 {
+	idx := strings.IndexAny(s, " \t")
+	if idx < 0 {
 		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
 	}
-
-	typeName := fields[0]
-	valueStr := strings.Join(fields[1:], " ")
+	typeName := s[:idx]
+	valueStr := strings.TrimSpace(s[idx+1:])
+	if valueStr == "" {
+		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
+	}
 
 	switch typeName {
 	case "i32":
@@ -383,6 +385,12 @@ func parseLiteral(s string) (types.Value, error) {
 			return nil, fmt.Errorf("invalid any literal %q", valueStr)
 		}
 		return types.Ref(v), nil
+	case "string":
+		v, err := strconv.Unquote(valueStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid string literal %q: %w", valueStr, err)
+		}
+		return types.String(v), nil
 	default:
 		return nil, fmt.Errorf("unknown constant type %q", typeName)
 	}

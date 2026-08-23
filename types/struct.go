@@ -178,6 +178,10 @@ func (t *StructType) String() string {
 		if i > 0 {
 			sb.WriteString("; ")
 		}
+		if f.Name != "" {
+			sb.WriteString(f.Name)
+			sb.WriteString(": ")
+		}
 		sb.WriteString(f.Type.String())
 	}
 	sb.WriteString("}")
