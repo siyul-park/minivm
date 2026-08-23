@@ -2,9 +2,9 @@ package benchmarks_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -146,75 +146,144 @@ func Run() int32 { composite := make([]int32, %d); for value := int32(2); value*
 	}, want)
 }
 
-func iterativeFib(n int32) *program.Program {
-	b := program.NewBuilder()
-	loop := b.Label()
-	done := b.Label()
-	b.Locals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
-	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 1)
-	prog, err := b.Build()
+// mustParseProgram assembles a program from a symbolic-label assembly
+// listing (see program.Parse), panicking on malformed input. Fixtures are
+// static test data, so a parse failure means the listing itself is broken.
+func mustParseProgram(text string) *program.Program {
+	prog, err := program.Parse(strings.NewReader(text))
 	if err != nil {
 		panic(err)
 	}
 	return prog
 }
 
+// iterativeFib computes fib(n) with a running (current, next) pair. Locals:
+// 0=n (loop bound), 1=current, 2=next, 3=index, 4=sum scratch.
+const iterativeFibListing = `
+.locals
+i32
+i32
+i32
+i32
+i32
+.code
+	i32.const %d
+	local.set 0
+	i32.const 0
+	local.set 1
+	i32.const 1
+	local.set 2
+	i32.const 0
+	local.set 3
+loop:
+	local.get 3
+	local.get 0
+	i32.ge_s
+	br_if done
+	local.get 1
+	local.get 2
+	i32.add
+	local.set 4
+	local.get 2
+	local.set 1
+	local.get 4
+	local.set 2
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br loop
+done:
+	local.get 1
+`
+
+func iterativeFib(n int32) *program.Program {
+	return mustParseProgram(fmt.Sprintf(iterativeFibListing, n))
+}
+
+// sieve counts primes below size with the sieve of Eratosthenes. Locals:
+// 0=composite array, 1=value (outer candidate), 2=multiple, 3=value (count
+// scan), 4=count. Type 0 is the []i32 composite array.
+const sieveListing = `
+.locals
+[]i32
+i32
+i32
+i32
+i32
+.types
+[]i32
+.code
+	i32.const %[1]d
+	array.new_default 0
+	local.set 0
+	i32.const 2
+	local.set 1
+outer:
+	local.get 1
+	local.get 1
+	i32.mul
+	i32.const %[1]d
+	i32.ge_s
+	br_if count
+	local.get 1
+	local.get 1
+	i32.mul
+	local.set 2
+inner:
+	local.get 2
+	i32.const %[1]d
+	i32.ge_s
+	br_if next
+	local.get 0
+	local.get 2
+	i32.const 1
+	array.set
+	local.get 2
+	local.get 1
+	i32.add
+	local.set 2
+	br inner
+next:
+	local.get 1
+	i32.const 1
+	i32.add
+	local.set 1
+	br outer
+count:
+	i32.const 0
+	local.set 4
+	i32.const 2
+	local.set 3
+scan:
+	local.get 3
+	i32.const %[1]d
+	i32.ge_s
+	br_if done
+	local.get 0
+	local.get 3
+	array.get
+	i32.const 0
+	i32.eq
+	br_if prime
+	br advance
+prime:
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+advance:
+	local.get 3
+	i32.const 1
+	i32.add
+	local.set 3
+	br scan
+done:
+	local.get 4
+`
+
 func sieve(size int32) *program.Program {
-	b := program.NewBuilder()
-	outer := b.Label()
-	inner := b.Label()
-	next := b.Label()
-	count := b.Label()
-	scan := b.Label()
-	prime := b.Label()
-	advance := b.Label()
-	done := b.Label()
-	array := b.Type(types.TypeI32Array)
-	b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32)
-	b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(array)).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 1)
-	b.Bind(outer)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_MUL)
-	b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(count)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_MUL).Emit(instr.LOCAL_SET, 2)
-	b.Bind(inner)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(next)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Br(inner)
-	b.Bind(next)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(outer)
-	b.Bind(count)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 3)
-	b.Bind(scan)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.ARRAY_GET)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(prime)
-	b.Br(advance)
-	b.Bind(prime)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
-	b.Bind(advance)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Br(scan)
-	b.Bind(done).Emit(instr.LOCAL_GET, 4)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
+	return mustParseProgram(fmt.Sprintf(sieveListing, size))
 }
 
 func iterativeFibReference(n int32) int32 {
