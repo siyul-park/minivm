@@ -83,14 +83,6 @@ func TestProfiler_Flush(t *testing.T) {
 	})
 }
 
-func TestProfiler_Metrics(t *testing.T) {
-	local := prof.NewCollector()
-	local.Add(0, 0, byte(instr.I32_CONST))
-	profiler := prof.New()
-	profiler.Flush(local)
-	require.Contains(t, profiler.Metrics(), prof.Metric{Name: "vm_samples_total", Value: 1})
-}
-
 func TestProfiler_Metric(t *testing.T) {
 	local := prof.NewCollector()
 	local.AddMetric("custom", 3)
@@ -101,4 +93,12 @@ func TestProfiler_Metric(t *testing.T) {
 	require.Equal(t, float64(3), value)
 	_, ok = profiler.Metric("missing")
 	require.False(t, ok)
+}
+
+func TestProfiler_Metrics(t *testing.T) {
+	local := prof.NewCollector()
+	local.Add(0, 0, byte(instr.I32_CONST))
+	profiler := prof.New()
+	profiler.Flush(local)
+	require.Contains(t, profiler.Metrics(), prof.Metric{Name: "vm_samples_total", Value: 1})
 }
