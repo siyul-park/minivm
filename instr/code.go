@@ -71,6 +71,10 @@ func Format(code []byte) string {
 		sb.WriteString(line)
 		ip += len(inst)
 	}
+	if name, ok := labelAt[ip]; ok {
+		sb.WriteString(name)
+		sb.WriteString(":\n")
+	}
 	return sb.String()
 }
 
@@ -86,11 +90,12 @@ func Unmarshal(code []byte) []Instruction {
 }
 
 // branchLabelNames computes a deterministic "L%04d" name for every branch
-// target that lands exactly on the start of an instruction in instrs. A
-// target that does not land on a boundary is left unnamed; Format renders it
-// numerically instead.
+// target that lands exactly on an instruction boundary in instrs. The offset
+// one past the last instruction is a boundary too: a loop exit branches there
+// to leave the code, and program/verify.go accepts it. A target that lands
+// anywhere else is left unnamed; Format renders it numerically instead.
 func branchLabelNames(code []byte, instrs []Instruction) map[int]string {
-	starts := make(map[int]bool, len(instrs))
+	starts := make(map[int]bool, len(instrs)+1)
 	var targets []int
 	ip := 0
 	for _, inst := range instrs {
@@ -98,6 +103,7 @@ func branchLabelNames(code []byte, instrs []Instruction) map[int]string {
 		targets = append(targets, Targets(code, ip)...)
 		ip += len(inst)
 	}
+	starts[ip] = true
 
 	names := make(map[int]string, len(targets))
 	for _, t := range targets {

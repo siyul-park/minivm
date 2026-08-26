@@ -331,7 +331,7 @@ references.
 | `types` | VM values, type invariants, value comparison and tracing |
 | `program` | bytecode aggregates, builders, labels, verification boundary |
 | `interp` | VM execution state, threaded dispatch, fallback, JIT orchestration |
-| `asm` | architecture-neutral assembly IR, allocation, linking, executable buffers |
+| `internal/asm` | architecture-neutral assembly IR, allocation, linking, executable buffers |
 | `internal/asm/<arch>` | architecture encoding, ABI, registers, relaxation |
 | `prof` | samples, counters, profile aggregation |
 | `pass` | generic pass lifecycle and analysis cache |

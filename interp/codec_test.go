@@ -900,34 +900,34 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	// calls it, and checks which context the call observed.
 	for _, tt := range []struct {
 		name   string
-		invoke func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (value int32, err error, wantCtx context.Context)
+		invoke func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (value int32, wantCtx context.Context, err error)
 	}{
 		{
 			name: "VM function context identity",
-			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, error, context.Context) {
+			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, context.Context, error) {
 				var call func(context.Context) (int32, error)
 				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 				ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 				value, err := call(ctx)
-				return value, err, ctx
+				return value, ctx, err
 			},
 		},
 		{
 			name: "VM function nil context uses background",
-			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, error, context.Context) {
+			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, context.Context, error) {
 				var call func(context.Context) (int32, error)
 				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 				value, err := call(nil)
-				return value, err, context.Background()
+				return value, context.Background(), err
 			},
 		},
 		{
 			name: "VM function without context uses background",
-			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, error, context.Context) {
+			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, context.Context, error) {
 				var call func() (int32, error)
 				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
 				value, err := call()
-				return value, err, context.Background()
+				return value, context.Background(), err
 			},
 		},
 	} {
@@ -946,7 +946,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { require.NoError(t, i.Release(addr)) }()
 
-			value, err, wantCtx := tt.invoke(t, r, i, addr)
+			value, wantCtx, err := tt.invoke(t, r, i, addr)
 			require.NoError(t, err)
 			require.Equal(t, int32(7), value)
 			require.Equal(t, wantCtx, got)

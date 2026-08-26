@@ -95,10 +95,26 @@ func TestFormat(t *testing.T) {
 		require.Equal(t, "0000:\tbr_table 0x02 L0008 L0009 L0010\nL0008:\n0008:\tnop\nL0009:\n0009:\tnop\nL0010:\n0010:\treturn\n", assembly)
 	})
 
-	t.Run("target outside code falls back to numeric", func(t *testing.T) {
+	t.Run("end of code is a label site", func(t *testing.T) {
+		// A loop exit branches one past the last instruction to leave the code,
+		// and program/verify.go accepts that offset, so it earns a label like
+		// any other boundary.
+		b := instr.NewBuilder()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 1).BrIf(done).Emit(instr.NOP).Bind(done)
+		insts, err := b.Assemble()
+		require.NoError(t, err)
+
+		assembly := instr.Format(instr.Marshal(insts))
+		require.Equal(t, "0000:\ti32.const 0x00000001\n0005:\tbr_if L0009\n0008:\tnop\nL0009:\n", assembly)
+	})
+
+	t.Run("target past the end falls back to numeric", func(t *testing.T) {
+		// next is 8 and the code is 8 bytes, so 0x0001 lands at 9 -- past the
+		// end, on no boundary at all -- while 0x0000 lands exactly at the end.
 		insts := []instr.Instruction{instr.New(instr.BR_TABLE, 2, 0, 1, 0)}
 		assembly := instr.Format(instr.Marshal(insts))
-		require.Equal(t, "0000:\tbr_table 0x02 0x0000 0x0001 0x0000\n", assembly)
+		require.Equal(t, "0000:\tbr_table 0x02 L0008 0x0001 L0008\nL0008:\n", assembly)
 	})
 }
 
