@@ -678,6 +678,15 @@ func (i *Interpreter) RefCount(addr int) (int, error) {
 	return i.rc[addr], nil
 }
 
+// HeapCap returns one past the highest heap address the interpreter has
+// allocated, so an embedder can walk live addresses with RefCount or Load.
+// It bounds a scan; it is not a count of live values, because released slots
+// stay in range until they are reused. Watching it grow against WithHeapLimit
+// is the only way to observe memory pressure before allocation fails.
+func (i *Interpreter) HeapCap() int {
+	return len(i.heap)
+}
+
 func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {

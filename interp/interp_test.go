@@ -3361,12 +3361,12 @@ func TestInterpreter_Run(t *testing.T) {
 					require.NoError(t, globalErr)
 					state.globals = append(state.globals, v)
 				}
-				// state.rc enumerates every live ref, which needs the heap's length;
-				// there is no public accessor for that (see HeapLen proposal).
-				for ref, count := range i.rc[1:] {
-					if count != 0 {
-						state.rc[ref+1] = count
+				for addr := 1; addr < i.HeapCap(); addr++ {
+					count, rcErr := i.RefCount(addr)
+					if rcErr != nil || count == 0 {
+						continue
 					}
+					state.rc[addr] = count
 				}
 				states = append(states, state)
 				require.NoError(t, i.Close())
@@ -3593,7 +3593,11 @@ func TestInterpreter_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 			live := 0
-			for _, count := range i.rc[1:] {
+			for addr := 1; addr < i.HeapCap(); addr++ {
+				count, rcErr := i.RefCount(addr)
+				if rcErr != nil {
+					continue
+				}
 				live += count
 			}
 			require.Equal(t, tt.refs, live)
@@ -4439,6 +4443,52 @@ func TestInterpreter_RefCount(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, i.Release(addr))
 
+		_, err = i.RefCount(addr)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+	})
+}
+
+func TestInterpreter_HeapCap(t *testing.T) {
+	t.Run("grows to cover a new allocation", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		before := i.HeapCap()
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, i.HeapCap(), before)
+		require.Less(t, addr, i.HeapCap())
+	})
+
+	t.Run("bounds a scan over live addresses", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		first, err := i.Alloc(types.String("one"))
+		require.NoError(t, err)
+		second, err := i.Alloc(types.String("two"))
+		require.NoError(t, err)
+
+		live := map[int]int{}
+		for addr := 1; addr < i.HeapCap(); addr++ {
+			count, rcErr := i.RefCount(addr)
+			if rcErr != nil {
+				continue
+			}
+			live[addr] = count
+		}
+		require.Equal(t, map[int]int{first: 1, second: 1}, live)
+	})
+
+	t.Run("keeps a released slot in range until it is reused", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		require.Less(t, addr, i.HeapCap())
 		_, err = i.RefCount(addr)
 		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
