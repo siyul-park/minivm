@@ -34,6 +34,21 @@ Internal invariants use public behavior, generated output, or executable
 artifacts; tests that cannot express an observable contract are removed rather
 than widening production APIs for test access.
 
+### Known Coverage Gaps
+
+Recorded so a gap stays visible instead of being rediscovered. Each is a claim
+with no expression through the public API, removed rather than kept alive by a
+proxy double (`docs/coding-patterns.md` §12.2, §12.3).
+
+| Uncovered | Why it cannot be reached publicly |
+|---|---|
+| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold`, `checkRetire` in `interp/jit.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
+| Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
+| Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
+
+Closing the first one needs either a public signal that an anchor was retired,
+or a workload that makes retirement observable through existing metrics.
+
 ### JIT Harness Migration
 
 The former `internal/jitcheck` package has no remaining contract. Its cases are

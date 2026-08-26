@@ -5799,7 +5799,13 @@ func TestWithThreshold(t *testing.T) {
 	// instead of wrapping. Neither the entry counter nor hit() is reachable
 	// through the public API, and no realistic run reaches MaxUint64 entries,
 	// so that overflow-safety invariant is no longer expressible here.
-	t.Run("entry counter saturates", func(t *testing.T) {
+	// This used to force the per-address hot-entry counter and the tier-up
+	// trigger to MaxUint64 and call the private hit() to prove the counter
+	// saturates instead of wrapping. That overflow edge is not reachable from
+	// any public entry point, so the saturation invariant is no longer covered
+	// here; only the ordinary tier-up path's absence of a fault survives, and
+	// the name says so rather than promising the counter check.
+	t.Run("tiering a trivial program does not fault", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		i := interp.New(prog, interp.WithThreshold(1))
 		defer i.Close()
@@ -5825,7 +5831,7 @@ func TestWithThreshold(t *testing.T) {
 	// compile()/entered() nor a frame's ip is reachable through the public
 	// API, so that invariant is no longer expressible here; only the ordinary
 	// entry path's absence of error survives.
-	t.Run("records entry only from actual entry state", func(t *testing.T) {
+	t.Run("the ordinary entry path does not fault", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
