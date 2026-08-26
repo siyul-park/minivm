@@ -30,6 +30,26 @@ func (i *blockingIterator) Current() types.Value {
 	return types.I32(0)
 }
 
+// trackedValue mirrors the copy in interp_test.go (package interp_test); this
+// package stays package interp and cannot import that one.
+type trackedValue struct {
+	refs   []types.Ref
+	closed int
+}
+
+func (v *trackedValue) Kind() types.Kind { return types.KindRef }
+func (v *trackedValue) Type() types.Type { return types.TypeAny }
+func (v *trackedValue) String() string   { return "tracked" }
+
+func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, v.refs...)
+}
+
+func (v *trackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
 func TestTracer_Capture(t *testing.T) {
 	t.Run("records top-level fallthrough as completed", func(t *testing.T) {
 		tracer := newTracer()
