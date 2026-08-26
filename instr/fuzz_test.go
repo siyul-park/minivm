@@ -117,3 +117,34 @@ func FuzzParse(f *testing.F) {
 		require.Equal(t, inst, roundTrip)
 	})
 }
+
+// FuzzParseAll drives whole listings, including malformed ones. Parse covers a
+// single line and FuzzFormatRoundTrip only ever feeds ParseAll well-formed
+// Format output, so neither reaches the label table or the br_table count that
+// only ParseAll interprets. Text is a trust boundary: a bad listing must be an
+// error, never a panic.
+func FuzzParseAll(f *testing.F) {
+	f.Add("i32.const 42\nnop\n")
+	f.Add("loop:\n\tbr loop\n")
+	f.Add("br_if done\ndone:\n\tnop\n")
+	f.Add("br_table 0x02 case0 case1 fallback\ncase0:\ncase1:\nfallback:\n\tnop\n")
+	f.Add("br_table 0xFFFFFFFFFFFFFFFF\n")
+	f.Add("dup:\ndup:\n\tnop\n")
+	f.Add("br missing\n")
+
+	f.Fuzz(func(t *testing.T, listing string) {
+		if len(listing) > 4096 {
+			t.Skip()
+		}
+		instrs, err := instr.ParseAll(strings.NewReader(listing))
+		if err != nil {
+			require.Nil(t, instrs)
+			return
+		}
+		// Anything ParseAll accepts must re-render and re-parse to the same code.
+		code := instr.Marshal(instrs)
+		again, err := instr.ParseAll(strings.NewReader(instr.Format(code)))
+		require.NoError(t, err)
+		require.Equal(t, code, instr.Marshal(again))
+	})
+}

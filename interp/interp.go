@@ -678,12 +678,13 @@ func (i *Interpreter) RefCount(addr int) (int, error) {
 	return i.rc[addr], nil
 }
 
-// HeapCap returns one past the highest heap address the interpreter has
+// HeapLen returns one past the highest heap address the interpreter has
 // allocated, so an embedder can walk live addresses with RefCount or Load.
 // It bounds a scan; it is not a count of live values, because released slots
-// stay in range until they are reused. Watching it grow against WithHeapLimit
-// is the only way to observe memory pressure before allocation fails.
-func (i *Interpreter) HeapCap() int {
+// stay in range until they are reused, and it is not the backing array's
+// capacity, which runs ahead of it. Watching it grow against WithHeapLimit is
+// the only way to observe memory pressure before allocation fails.
+func (i *Interpreter) HeapLen() int {
 	return len(i.heap)
 }
 

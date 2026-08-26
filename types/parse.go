@@ -232,7 +232,7 @@ func parseStructType(s string) (*StructType, error) {
 		return NewStructType(), nil
 	}
 	var fields []StructField
-	for _, f := range strings.Split(inner, ";") {
+	for _, f := range splitStructFields(inner) {
 		name, typeStr := splitStructFieldName(strings.TrimSpace(f))
 		t, err := Parse(typeStr)
 		if err != nil {
@@ -298,4 +298,27 @@ func isFormatLine(s string) bool {
 		}
 	}
 	return true
+}
+
+// splitStructFields splits a struct body on its top-level ";" separators. A
+// nested struct type carries its own separators, so a plain strings.Split
+// would cut "struct {a: struct {x: i32; y: i32}; b: i32}" in the middle of the
+// inner type.
+func splitStructFields(inner string) []string {
+	var fields []string
+	depth, start := 0, 0
+	for i, r := range inner {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case ';':
+			if depth == 0 {
+				fields = append(fields, inner[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(fields, inner[start:])
 }

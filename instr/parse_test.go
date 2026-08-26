@@ -196,6 +196,18 @@ func TestParseAll(t *testing.T) {
 		}, got)
 	})
 
+	t.Run("br_table rejects a count wider than the operands supplied", func(t *testing.T) {
+		// A count near the top of uint64 wraps negative when narrowed to int,
+		// which used to satisfy the arity check and under-allocate the operand
+		// slice, panicking inside New instead of returning an error.
+		_, err := instr.ParseAll(strings.NewReader("br_table 0xFFFFFFFFFFFFFFFF\n"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "br_table")
+
+		_, err = instr.ParseAll(strings.NewReader("br_table 0x05 0x0000\n"))
+		require.Error(t, err)
+	})
+
 	t.Run("round-trip labeled loop with Format", func(t *testing.T) {
 		b := instr.NewBuilder()
 		loop := b.Label()

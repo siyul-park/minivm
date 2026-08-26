@@ -153,6 +153,23 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestParse_NestedStructFields(t *testing.T) {
+	// A nested struct carries its own ";" separators, so the field split has to
+	// track brace depth rather than cutting on every semicolon.
+	inner := types.NewStructType(
+		types.NewStructField(types.TypeI32, types.FieldWithName("x")),
+		types.NewStructField(types.TypeI32, types.FieldWithName("y")),
+	)
+	outer := types.NewStructType(
+		types.NewStructField(inner, types.FieldWithName("a")),
+		types.NewStructField(types.TypeI32, types.FieldWithName("b")),
+	)
+
+	parsed, err := types.Parse(outer.String())
+	require.NoError(t, err)
+	require.Equal(t, outer.String(), parsed.String())
+}
+
 func TestParse_StructFieldNames(t *testing.T) {
 	// StructType.Equals ignores field names, so a dedicated test is needed to
 	// confirm parseStructType actually restores them instead of only matching

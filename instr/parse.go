@@ -346,6 +346,12 @@ func parseBranch(op Opcode, mnemonic string, fields []string, lt *labelTable, li
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: count: %w", mnemonic, err)
 		}
+		// Compare before narrowing: a count near the top of uint64 wraps
+		// negative as an int, which would satisfy the check below and then
+		// under-allocate operands.
+		if got := uint64(len(fields) - 1); count >= got {
+			return nil, nil, fmt.Errorf("%s: count %d exceeds the %d operands supplied", mnemonic, count, got)
+		}
 		want := int(count) + 1
 		if len(fields)-1 != want {
 			return nil, nil, fmt.Errorf("%s: count %d requires %d targets, got %d", mnemonic, count, want, len(fields)-1)

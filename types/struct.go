@@ -204,6 +204,11 @@ func (t *StructType) Cast(other Type) bool {
 	return true
 }
 
+// Equals compares field types only. Two structs whose fields differ just in
+// name are equal here but render differently from String, which does show
+// names, and FieldIndex does treat a name as meaningful. Structural
+// compatibility is the contract; do not use Equals to decide whether two types
+// print alike.
 func (t *StructType) Equals(other Type) bool {
 	if t == other {
 		return true

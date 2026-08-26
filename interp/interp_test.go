@@ -3404,7 +3404,7 @@ func TestInterpreter_Run(t *testing.T) {
 					require.NoError(t, globalErr)
 					state.globals = append(state.globals, v)
 				}
-				for addr := 1; addr < i.HeapCap(); addr++ {
+				for addr := 1; addr < i.HeapLen(); addr++ {
 					count, rcErr := i.RefCount(addr)
 					if rcErr != nil || count == 0 {
 						continue
@@ -3636,7 +3636,7 @@ func TestInterpreter_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 			live := 0
-			for addr := 1; addr < i.HeapCap(); addr++ {
+			for addr := 1; addr < i.HeapLen(); addr++ {
 				count, rcErr := i.RefCount(addr)
 				if rcErr != nil {
 					continue
@@ -4496,11 +4496,11 @@ func TestInterpreter_HeapCap(t *testing.T) {
 		i := interp.New(program.New(nil))
 		defer i.Close()
 
-		before := i.HeapCap()
+		before := i.HeapLen()
 		addr, err := i.Alloc(types.String("hi"))
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, i.HeapCap(), before)
-		require.Less(t, addr, i.HeapCap())
+		require.GreaterOrEqual(t, i.HeapLen(), before)
+		require.Less(t, addr, i.HeapLen())
 	})
 
 	t.Run("bounds a scan over live addresses", func(t *testing.T) {
@@ -4513,7 +4513,7 @@ func TestInterpreter_HeapCap(t *testing.T) {
 		require.NoError(t, err)
 
 		live := map[int]int{}
-		for addr := 1; addr < i.HeapCap(); addr++ {
+		for addr := 1; addr < i.HeapLen(); addr++ {
 			count, rcErr := i.RefCount(addr)
 			if rcErr != nil {
 				continue
@@ -4531,7 +4531,7 @@ func TestInterpreter_HeapCap(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, i.Release(addr))
 
-		require.Less(t, addr, i.HeapCap())
+		require.Less(t, addr, i.HeapLen())
 		_, err = i.RefCount(addr)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
@@ -5710,7 +5710,7 @@ func TestWithTick(t *testing.T) {
 // interpreters that ran the same program can be compared for ownership parity.
 func refCounts(i *interp.Interpreter) map[int]int {
 	out := map[int]int{}
-	for addr := 1; addr < i.HeapCap(); addr++ {
+	for addr := 1; addr < i.HeapLen(); addr++ {
 		count, err := i.RefCount(addr)
 		if err != nil {
 			continue
