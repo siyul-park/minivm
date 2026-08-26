@@ -2162,14 +2162,22 @@ func TestInterpreter_Run(t *testing.T) {
 
 	if runtime.GOARCH == "arm64" {
 		t.Run("I32Add/Straight/JITCold", func(t *testing.T) {
-			vm := New(program.New(benchmarkNumeric), WithTick(1), WithThreshold(0))
+			profile := prof.New()
+			vm := New(program.New(benchmarkNumeric), WithTick(1), WithThreshold(0), WithProfiler(profile))
 			defer vm.Close()
 
 			require.NoError(t, vm.Run(context.Background()))
 			value, err := vm.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), value)
-			require.Greater(t, vm.samples.Value("vm_jit_emits_total"), float64(0))
+			vm.Flush()
+			var emits float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_emits_total" {
+					emits += metric.Value
+				}
+			}
+			require.Greater(t, emits, float64(0))
 		})
 
 		arrayExitValues := types.TypedArray[float64]{7}
@@ -2552,8 +2560,11 @@ func TestInterpreter_Run(t *testing.T) {
 		top, err := i.Peek(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, top.Ref())
-		require.Equal(t, 1, i.rc[1]) // selected ref survives on the stack
-		require.Equal(t, 0, i.rc[2]) // discarded ref released to zero
+		rc1, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc1) // selected ref survives on the stack
+		_, err = i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault) // discarded ref released to zero
 	})
 
 	t.Run("GLOBAL_TEE retains the ref stored into the global slot", func(t *testing.T) {
@@ -2570,7 +2581,9 @@ func TestInterpreter_Run(t *testing.T) {
 		g, err := i.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, g.Ref())
-		require.Equal(t, 1, i.rc[1]) // global slot keeps the ref alive
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc) // global slot keeps the ref alive
 	})
 
 	t.Run("LOCAL_TEE retains the ref stored into the local slot", func(t *testing.T) {
@@ -2587,7 +2600,9 @@ func TestInterpreter_Run(t *testing.T) {
 		l, err := i.Local(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, l.Ref())
-		require.Equal(t, 1, i.rc[1]) // local slot keeps the ref alive
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc) // local slot keeps the ref alive
 	})
 
 	t.Run("REF_EQ releases both consumed refs", func(t *testing.T) {
@@ -2601,8 +2616,10 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
-		require.Equal(t, 0, i.rc[2])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+		_, err = i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
 
 	t.Run("REF_NE releases both consumed refs", func(t *testing.T) {
@@ -2616,8 +2633,10 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
-		require.Equal(t, 0, i.rc[2])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+		_, err = i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
 
 	t.Run("REF_TEST releases the consumed ref", func(t *testing.T) {
@@ -2630,7 +2649,8 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
 
 	t.Run("REF_IS_NULL releases the consumed ref", func(t *testing.T) {
@@ -2643,7 +2663,8 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
 
 	t.Run("fused trapping sources use the remaining stack slot", func(t *testing.T) {
@@ -2675,7 +2696,7 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
-		require.Equal(t, 1, i.sp)
+		require.Equal(t, 1, i.Len())
 	})
 
 	t.Run("CONST_GET reports overflow before retaining a ref", func(t *testing.T) {
@@ -2736,7 +2757,7 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
-		require.Equal(t, 1, i.sp)
+		require.Equal(t, 1, i.Len())
 	})
 
 	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
@@ -2748,7 +2769,7 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
-		require.Equal(t, 1, i.sp)
+		require.Equal(t, 1, i.Len())
 	})
 
 	t.Run("LOCAL_GET rejects one-past-current local slot", func(t *testing.T) {
@@ -2843,10 +2864,16 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 3, i.sp)
-		require.Equal(t, types.BoxI32(2), i.stack[0])
-		require.Equal(t, types.BoxF64(0), i.stack[1])
-		require.Equal(t, types.BoxedNull, i.stack[2])
+		require.Equal(t, 3, i.Len())
+		v0, err := i.Peek(2)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(2), v0)
+		v1, err := i.Peek(1)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxF64(0), v1)
+		v2, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxedNull, v2)
 	})
 
 	t.Run("GLOBAL_GET declares and reads an I32 global with a fused superinstruction", func(t *testing.T) {
@@ -2861,8 +2888,10 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 1, i.sp)
-		require.Equal(t, types.BoxI32(7), i.stack[i.sp-1])
+		require.Equal(t, 1, i.Len())
+		v, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(7), v)
 	})
 
 	t.Run("GLOBAL_TEE retains the ref stored into a declared ref global", func(t *testing.T) {
@@ -2879,7 +2908,9 @@ func TestInterpreter_Run(t *testing.T) {
 		g, err := i.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, g.Ref())
-		require.Equal(t, 1, i.rc[1])
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc)
 	})
 
 	t.Run("I64 local rejects non-I64 heap refs", func(t *testing.T) {
@@ -2929,10 +2960,15 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[2]) // every overwritten element is released,
-		require.Equal(t, 0, i.rc[3]) // not just the first one
-		require.Equal(t, 0, i.rc[4])
-		require.Equal(t, 3, i.rc[5]) // fill value owned once per filled slot
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault) // every overwritten element is released,
+		_, err = i.RefCount(3)
+		require.ErrorIs(t, err, ErrSegmentationFault) // not just the first one
+		_, err = i.RefCount(4)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+		rc5, err := i.RefCount(5)
+		require.NoError(t, err)
+		require.Equal(t, 3, rc5) // fill value owned once per filled slot
 	})
 
 	t.Run("host call with an all-scalar signature works through the generic path (exact, fusion disabled)", func(t *testing.T) {
@@ -2966,7 +3002,8 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // arg not returned: host cleanup released it
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault) // arg not returned: host cleanup released it
 	})
 
 	t.Run("host call releases a ref param the callee does not return (generic, exact)", func(t *testing.T) {
@@ -2982,7 +3019,8 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2])
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
 
 	for _, tt := range []struct {
@@ -3005,14 +3043,20 @@ func TestInterpreter_Run(t *testing.T) {
 			defer i.Close()
 
 			require.NoError(t, i.Run(context.Background()))
-			require.Equal(t, 1, i.rc[1])
+			rc, err := i.RefCount(1)
+			require.NoError(t, err)
+			require.Equal(t, 1, rc)
 		})
 	}
 
 	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
 		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
 			func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
-				return []types.Boxed{i.stack[i.sp-1]}, nil
+				v, peekErr := i.Peek(0)
+				if peekErr != nil {
+					return nil, peekErr
+				}
+				return []types.Boxed{v}, nil
 			})
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
@@ -3021,7 +3065,9 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 2, i.rc[1])
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 2, rc)
 	})
 
 	t.Run("host call releases a promoted i64 param even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
@@ -3038,7 +3084,8 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // promoted i64 arg released: I64 params keep the generic scanning path
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault) // promoted i64 arg released: I64 params keep the generic scanning path
 	})
 
 	t.Run("UPVAL_GET retains a ref capture (generic path)", func(t *testing.T) {
@@ -3056,8 +3103,8 @@ func TestInterpreter_Run(t *testing.T) {
 
 		maxRC := 0
 		i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
-			if len(i.heap) > 2 && i.rc[2] > maxRC {
-				maxRC = i.rc[2]
+			if count, hookErr := i.RefCount(2); hookErr == nil && count > maxRC {
+				maxRC = count
 			}
 			return nil
 		}))
@@ -3084,7 +3131,8 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // old ref capture released on overwrite
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault) // old ref capture released on overwrite
 	})
 
 	t.Run("UPVAL_SET releases a promoted i64 capture even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
@@ -3107,7 +3155,8 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // old promoted capture released: I64 captures keep the generic ref-aware path
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, ErrSegmentationFault) // old promoted capture released: I64 captures keep the generic ref-aware path
 	})
 
 	t.Run("fused LOCAL_GET+CONST binop computes correctly for i32 (interp-only)", func(t *testing.T) {
@@ -3296,14 +3345,24 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 
 				state := parityState{
-					code:    ErrorCode(err),
-					ip:      i.fr.ip,
-					fp:      i.fp,
-					sp:      i.sp,
-					stack:   append([]types.Boxed(nil), i.stack[:i.sp]...),
-					globals: append([]types.Boxed(nil), i.globals...),
-					rc:      make(map[int]int),
+					code: ErrorCode(err),
+					ip:   i.IP(),
+					fp:   i.FP(),
+					sp:   i.Len(),
+					rc:   make(map[int]int),
 				}
+				for idx := 0; idx < state.sp; idx++ {
+					v, peekErr := i.Peek(state.sp - 1 - idx)
+					require.NoError(t, peekErr)
+					state.stack = append(state.stack, v)
+				}
+				for idx := range tt.prog.Globals {
+					v, globalErr := i.Global(idx)
+					require.NoError(t, globalErr)
+					state.globals = append(state.globals, v)
+				}
+				// state.rc enumerates every live ref, which needs the heap's length;
+				// there is no public accessor for that (see HeapLen proposal).
 				for ref, count := range i.rc[1:] {
 					if count != 0 {
 						state.rc[ref+1] = count
