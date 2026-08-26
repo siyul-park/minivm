@@ -5187,6 +5187,13 @@ func TestWithProfiler(t *testing.T) {
 			i.Reset()
 		}
 
+		// The result must hold on every architecture; only the exit reason
+		// needs a backend that emits native code, and CI runs amd64, where the
+		// ARM64 lowering is not compiled at all.
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+
 		i.Flush()
 		cuts, ok := p.Metric("vm_jit_native_exits_total",
 			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
