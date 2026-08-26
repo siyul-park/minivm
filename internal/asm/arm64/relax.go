@@ -1,6 +1,6 @@
 package arm64
 
-import "github.com/siyul-park/minivm/asm"
+import "github.com/siyul-park/minivm/internal/asm"
 
 // skipDisp is the fixed forward byte displacement the inverted skip
 // branch Relax emits uses to jump over the single unconditional B that

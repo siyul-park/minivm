@@ -3,7 +3,7 @@ package amd64
 import (
 	"unsafe"
 
-	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/internal/asm"
 )
 
 type abi struct{}

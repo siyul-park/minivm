@@ -1,6 +1,6 @@
 # JIT Internals
 
-Contracts for the ARM64 JIT in `interp/` and its interaction with `asm/`.
+Contracts for the ARM64 JIT in `interp/` and its interaction with `internal/asm/`.
 
 ## When to Read
 
@@ -17,7 +17,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | trace recording | `interp/trace.go` |
 | architecture-neutral compiler | `interp/jit.go`, `interp/jit_plan.go` |
 | ARM64 lowering | `interp/jit_arm64.go` |
-| callable ABI | `asm/` |
+| callable ABI | `internal/asm/` |
 | value layout | `docs/value-representation.md` |
 | heap ownership | `docs/memory-model.md` |
 | ticks and thresholds | `docs/profile.md` |
@@ -225,7 +225,7 @@ area.
 Native code starts at the top of the reserve, so generated SP adjustments stay
 inside memory covered by Go's stack-growth check. X26 is the stable spill-frame
 base, so a native self-call may move SP without changing spill addresses. Keep
-the allocator limit, native frame limit, and `asm/arm64/abi_arm64.s` reserve in
+the allocator limit, native frame limit, and `internal/asm/arm64/abi_arm64.s` reserve in
 sync: `interp.TestNativeStackReserve` (`interp/jit_arm64_test.go`) asserts
 `asm.MaxSpillSlots*8 + nativeFrameLimit*journalStride*8` equals the reserve
 literal parsed out of `abi_arm64.s`, and that the reserve plus the 80-byte
@@ -233,11 +233,11 @@ callee-saved save area equals the trampoline's total Go frame size, so an
 edit to any one constant without the others fails a test instead of
 corrupting the native stack at runtime.
 
-Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills the live vreg whose final use is farthest ahead to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. A call whose target label is bound in the same build runs through the shared epilogue on return, so the rewriter reserves the caller's spill area again after it. Linear-scan lifetimes describe a forward-only stream, so a build containing a back-edge runs without a spill frame at all: a value live across the loop would otherwise be spilled at what merely looks like its last use. The frame prologue sits ahead of the first instruction, and internal branches rebase past it, so a back-edge can never reserve the frame twice.
+Register allocation (`internal/asm/rewriter.go`) is a single linear-scan pass: it spills the live vreg whose final use is farthest ahead to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. A call whose target label is bound in the same build runs through the shared epilogue on return, so the rewriter reserves the caller's spill area again after it. Linear-scan lifetimes describe a forward-only stream, so a build containing a back-edge runs without a spill frame at all: a value live across the loop would otherwise be spilled at what merely looks like its last use. The frame prologue sits ahead of the first instruction, and internal branches rebase past it, so a back-edge can never reserve the frame twice.
 
 Linear spill state is unsafe across a loop back-edge, and mutation blocks can combine paths around state materialization. Two layers enforce safety:
 
-- `asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
+- `internal/asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
 - `noSpill` scans every step in the completed plan, including learned continuations, and forbids spilling whenever `ARRAY_SET` or `STRUCT_SET` is present.
 
 When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. `ARRAY_SET` and `STRUCT_SET` use the common fresh-register heap path rather than a store-specific register-recycling path.
@@ -328,7 +328,7 @@ Native calls are frame-aware. The lowering checks frame budget, increments nativ
 
 A native call invalidates the caller's cached local registers: the callee owns every allocatable register, so the call sites clear `activation.state` on return, and the committing flush before the call leaves the VM stack slot authoritative. `activation.locals` still names the register each value was last materialized into, so `activation.isLoadedAt` is the one test for whether that name is still good. `guardFrame` reads every ref local for the frame teardown; boxing an unloaded one releases whatever the callee left in that register, which faults inside the Go runtime rather than diverging quietly. `TestARM64_SelfCallFrameLocals` pins it.
 
-X26 carries the caller's spill base across a `BLR`. The callee is entered at its own offset zero, so it runs the frame prologue and repoints X26 at its own frame; the caller saves X26 into its 32-byte save area before the call and restores it immediately after, on both the normal and the trap path. A self-call (`BL` to `ctx.head`) needs no such save: it shares the caller's frame, and that stream cannot spill at all because the backward branch to `head` disables the spill frame (`asm/rewriter.go` `backEdge`).
+X26 carries the caller's spill base across a `BLR`. The callee is entered at its own offset zero, so it runs the frame prologue and repoints X26 at its own frame; the caller saves X26 into its 32-byte save area before the call and restores it immediately after, on both the normal and the trap path. A self-call (`BL` to `ctx.head`) needs no such save: it shares the caller's frame, and that stream cannot spill at all because the backward branch to `head` disables the spill frame (`internal/asm/rewriter.go` `backEdge`).
 
 On deoptimization, native frames append enough journal records for Go to rebuild the VM call chain.
 
@@ -368,9 +368,9 @@ A committing flush (`selfCall`, `tailLoop`) transfers operand ownership to the V
 
 ### Branch range validation
 
-ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `publish` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable.
+ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `internal/asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `publish` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable.
 
-Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation fixpoint (`asm.Relaxer`, implemented by `asm/arm64.arch.Relax`) between the draft and final encoding passes. Each pass drafts the current instruction list once, collects every `B.cond`/`CBZ`/`CBNZ` label branch whose imm19 displacement does not fit, and rewrites all of them together into an inverted-condition branch that skips a following unconditional `B` (imm26, ±128MB) to the original target; it then re-drafts and repeats until a pass finds nothing left to relax. Both replacement instructions are constructed to already be in range, so a given branch relaxes at most once and the loop always terminates, and batching every out-of-range branch within a pass keeps the number of drafts proportional to the number of passes rather than the number of branches; if the unconditional `B` itself would not reach the target (>±128MB), `Relax` returns `false` and `ErrBranchOutOfRange`/the JIT fallback still applies. `TBZ`/`TBNZ` never carry a `LabelOperand` in this codebase (their offset is always a caller-computed immediate — see `asm/arm64/instr.go`), so they never reach `Relax` and the imm14 (±32KB) window has no relaxation path; architectures without a `Relaxer` (amd64) are unaffected — `encode` no-ops the pass.
+Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation fixpoint (`asm.Relaxer`, implemented by `internal/asm/arm64.arch.Relax`) between the draft and final encoding passes. Each pass drafts the current instruction list once, collects every `B.cond`/`CBZ`/`CBNZ` label branch whose imm19 displacement does not fit, and rewrites all of them together into an inverted-condition branch that skips a following unconditional `B` (imm26, ±128MB) to the original target; it then re-drafts and repeats until a pass finds nothing left to relax. Both replacement instructions are constructed to already be in range, so a given branch relaxes at most once and the loop always terminates, and batching every out-of-range branch within a pass keeps the number of drafts proportional to the number of passes rather than the number of branches; if the unconditional `B` itself would not reach the target (>±128MB), `Relax` returns `false` and `ErrBranchOutOfRange`/the JIT fallback still applies. `TBZ`/`TBNZ` never carry a `LabelOperand` in this codebase (their offset is always a caller-computed immediate — see `internal/asm/arm64/instr.go`), so they never reach `Relax` and the imm14 (±32KB) window has no relaxation path; architectures without a `Relaxer` (amd64) are unaffected — `encode` no-ops the pass.
 
 ## Loops
 
@@ -536,14 +536,14 @@ Retirement only ever mutates the local interpreter's dispatch table (`i.code`, `
 Run focused tests after JIT changes:
 
 ```bash
-go test ./asm/... ./interp/...
+go test ./internal/asm/... ./interp/...
 ```
 
 Use this guide:
 
 | Change | Test focus |
 |---|---|
-| ABI or callable behavior | `asm/assembler_test.go` |
+| ABI or callable behavior | `internal/asm/assembler_test.go` |
 | trace recording | `interp/interp_test.go` |
 | native lowering | `interp/interp_test.go` |
 | install or wiring behavior | `interp/interp_test.go` |

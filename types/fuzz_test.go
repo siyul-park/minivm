@@ -16,6 +16,7 @@ func FuzzParseType(f *testing.F) {
 		"iterator[map[i64]f32]",
 		"func(i32, ref) (i64, f32)",
 		"struct {i32; []ref}",
+		"struct {value: i64; left: any; right: any}",
 		"invalid",
 	} {
 		f.Add(value)

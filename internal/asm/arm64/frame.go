@@ -1,6 +1,6 @@
 package arm64
 
-import "github.com/siyul-park/minivm/asm"
+import "github.com/siyul-park/minivm/internal/asm"
 
 // frame implements asm.Frame so the shared register allocator can spill to a
 // native stack frame. X26 holds its stable base because native self-calls move

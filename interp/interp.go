@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -108,6 +108,11 @@ type frame struct {
 	bp int
 }
 
+// Option configures an Interpreter or Pool at construction. Only the With
+// constructors produce one, so callers can name and collect options without
+// reaching the unexported state they configure.
+type Option func(*option)
+
 type option struct {
 	hook      func(*Interpreter) error
 	codec     Codec
@@ -146,7 +151,7 @@ const entryWarmup = 8
 // is cooled and stops being instrumented. See checkCool.
 const coolLimit = 2
 
-func WithHook(fn func(*Interpreter) error) func(*option) {
+func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
 }
 
@@ -154,7 +159,7 @@ func WithHook(fn func(*Interpreter) error) func(*option) {
 // run through. It defaults to NewRegistry(), so per-type registration is the
 // normal way to customize conversion and replacing the codec is the escape
 // hatch for a wholly different one.
-func WithCodec(c Codec) func(*option) {
+func WithCodec(c Codec) Option {
 	return func(o *option) { o.codec = c }
 }
 
@@ -163,53 +168,53 @@ func WithCodec(c Codec) func(*option) {
 // decided by the call and back-edge counters either way, so attaching one only
 // adds the per-tick sampling that fills the profile. Pass the same Profiler to
 // NewPool so every pooled interpreter shares it.
-func WithProfiler(p *prof.Profiler) func(*option) {
+func WithProfiler(p *prof.Profiler) Option {
 	return func(o *option) {
 		o.profiler = p
 	}
 }
 
-func WithFrame(val int) func(*option) {
+func WithFrame(val int) Option {
 	return func(o *option) { o.frame = val }
 }
 
-func WithStack(val int) func(*option) {
+func WithStack(val int) Option {
 	return func(o *option) { o.stack = val }
 }
 
-func WithHeap(val int) func(*option) {
+func WithHeap(val int) Option {
 	return func(o *option) { o.heap = val }
 }
 
-func WithHeapLimit(val int) func(*option) {
+func WithHeapLimit(val int) Option {
 	return func(o *option) { o.maxHeap = val }
 }
 
-func WithTick(val int) func(*option) {
+func WithTick(val int) Option {
 	return func(o *option) { o.tick = val }
 }
 
-func WithThreshold(val int) func(*option) {
+func WithThreshold(val int) Option {
 	return func(o *option) { o.threshold = val }
 }
 
-func WithFuel(val uint64) func(*option) {
+func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
 }
 
-func withCache(c *cache) func(*option) {
+func withCache(c *cache) Option {
 	return func(o *option) { o.cache = c }
 }
 
 // withTracer shares tracing state with interpreters for the same program.
 // A tracer already bound to another program is isolated automatically.
-func withTracer(t *tracer) func(*option) {
+func withTracer(t *tracer) Option {
 	return func(o *option) { o.tracer = t }
 }
 
 // New builds an interpreter for prog. It trusts prog to be well-formed; run
 // program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
-func New(prog *program.Program, opts ...func(*option)) *Interpreter {
+func New(prog *program.Program, opts ...Option) *Interpreter {
 	opt := option{
 		frame:     128,
 		stack:     1024,
@@ -662,6 +667,27 @@ func (i *Interpreter) Release(addr int) error {
 	return nil
 }
 
+// RefCount returns the live reference count for the heap value at addr, or
+// ErrSegmentationFault if addr does not name a live value. An embedder that
+// passes references across the host boundary with Retain and Release has no
+// other way to verify that the two stayed balanced.
+func (i *Interpreter) RefCount(addr int) (int, error) {
+	if !i.alive(addr) {
+		return 0, ErrSegmentationFault
+	}
+	return i.rc[addr], nil
+}
+
+// HeapLen returns one past the highest heap address the interpreter has
+// allocated, so an embedder can walk live addresses with RefCount or Load.
+// It bounds a scan; it is not a count of live values, because released slots
+// stay in range until they are reused, and it is not the backing array's
+// capacity, which runs ahead of it. Watching it grow against WithHeapLimit is
+// the only way to observe memory pressure before allocation fails.
+func (i *Interpreter) HeapLen() int {
+	return len(i.heap)
+}
+
 func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {
@@ -718,6 +744,14 @@ func (i *Interpreter) Peek(n int) (types.Boxed, error) {
 
 func (i *Interpreter) Len() int {
 	return i.sp
+}
+
+// Flush publishes the interpreter's pending execution samples and JIT
+// counters into the attached profiler without closing the interpreter, so a
+// long-running embedded VM can observe metrics without waiting for Close. It
+// has no observable effect when no profiler is attached (see WithProfiler).
+func (i *Interpreter) Flush() {
+	i.flush()
 }
 
 func (i *Interpreter) Close() error {

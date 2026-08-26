@@ -7,11 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFieldWithName(t *testing.T) {
-	field := types.NewStructField(types.TypeI32, types.FieldWithName("value"))
-	require.Equal(t, "value", field.Name)
-}
-
 func TestNewStruct(t *testing.T) {
 	t.Run("initial fields", func(t *testing.T) {
 		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny))
@@ -57,6 +52,22 @@ func TestStruct_Reset(t *testing.T) {
 	})
 }
 
+func TestNewStructType(t *testing.T) {
+	fields := []types.StructField{types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)}
+	typ := types.NewStructType(fields...)
+	require.Equal(t, fields, typ.Fields)
+}
+
+func TestFieldWithName(t *testing.T) {
+	field := types.NewStructField(types.TypeI32, types.FieldWithName("value"))
+	require.Equal(t, "value", field.Name)
+}
+
+func TestNewStructField(t *testing.T) {
+	field := types.NewStructField(types.TypeI8, types.FieldWithName("small"))
+	require.Equal(t, types.StructField{Name: "small", Type: types.TypeI8, Kind: types.KindI8}, field)
+}
+
 func TestStruct_FieldByName(t *testing.T) {
 	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("foo"))))
 
@@ -64,44 +75,48 @@ func TestStruct_FieldByName(t *testing.T) {
 	require.Zero(t, s.FieldByName("missing"))
 }
 
-func TestStruct_Field(t *testing.T) {
-	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)))
-
-	require.Equal(t, int32(0), s.Field(0).I32())
-	require.Zero(t, s.Field(1))
-}
-
 func TestStruct_SetField(t *testing.T) {
-	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64), types.NewStructField(types.TypeF32), types.NewStructField(types.TypeF64), types.NewStructField(types.TypeAny)))
+	t.Run("reading an unset field returns the zero value", func(t *testing.T) {
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)))
 
-	s.SetField(0, types.BoxI32(1))
-	s.SetField(1, types.BoxI64(2))
-	s.SetField(2, types.BoxF32(3))
-	s.SetField(3, types.BoxF64(4))
-	s.SetField(4, types.BoxRef(5))
-	s.SetField(5, types.BoxRef(6))
+		require.Equal(t, int32(0), s.Field(0).I32())
+		require.Zero(t, s.Field(1))
+	})
 
-	require.Equal(t, int32(1), s.Field(0).I32())
-	require.Equal(t, int64(2), s.Field(1).I64())
-	require.Equal(t, float32(3), s.Field(2).F32())
-	require.Equal(t, float64(4), s.Field(3).F64())
-	require.Equal(t, 5, s.Field(4).Ref())
-}
+	t.Run("writing fields by kind", func(t *testing.T) {
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64), types.NewStructField(types.TypeF32), types.NewStructField(types.TypeF64), types.NewStructField(types.TypeAny)))
 
-func TestStruct_Raw(t *testing.T) {
-	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)))
-	s.SetRaw(0, 42)
+		s.SetField(0, types.BoxI32(1))
+		s.SetField(1, types.BoxI64(2))
+		s.SetField(2, types.BoxF32(3))
+		s.SetField(3, types.BoxF64(4))
+		s.SetField(4, types.BoxRef(5))
+		s.SetField(5, types.BoxRef(6))
 
-	require.Equal(t, uint64(42), s.Raw(0))
-	require.Zero(t, s.Raw(1))
+		require.Equal(t, int32(1), s.Field(0).I32())
+		require.Equal(t, int64(2), s.Field(1).I64())
+		require.Equal(t, float32(3), s.Field(2).F32())
+		require.Equal(t, float64(4), s.Field(3).F64())
+		require.Equal(t, 5, s.Field(4).Ref())
+	})
 }
 
 func TestStruct_SetRaw(t *testing.T) {
-	s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)))
-	s.SetRaw(0, 42)
-	s.SetRaw(1, 99)
+	t.Run("reading a written slot", func(t *testing.T) {
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)))
+		s.SetRaw(0, 42)
 
-	require.Equal(t, uint64(42), s.Raw(0))
+		require.Equal(t, uint64(42), s.Raw(0))
+		require.Zero(t, s.Raw(1))
+	})
+
+	t.Run("writing out of range is a no-op", func(t *testing.T) {
+		s := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)))
+		s.SetRaw(0, 42)
+		s.SetRaw(1, 99)
+
+		require.Equal(t, uint64(42), s.Raw(0))
+	})
 }
 
 func TestStruct_Kind(t *testing.T) {
@@ -146,12 +161,6 @@ func TestStruct_Refs(t *testing.T) {
 	})
 }
 
-func TestNewStructType(t *testing.T) {
-	fields := []types.StructField{types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)}
-	typ := types.NewStructType(fields...)
-	require.Equal(t, fields, typ.Fields)
-}
-
 func TestStructType_FieldByName(t *testing.T) {
 	typ := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("foo")))
 
@@ -175,7 +184,25 @@ func TestStructType_Kind(t *testing.T) {
 }
 
 func TestStructType_String(t *testing.T) {
-	require.Equal(t, "struct {i32; any}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)).String())
+	t.Run("unnamed fields render without names", func(t *testing.T) {
+		require.Equal(t, "struct {i32; any}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny)).String())
+	})
+
+	t.Run("named fields render with their names", func(t *testing.T) {
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		)
+		require.Equal(t, "struct {value: i64; left: any}", typ.String())
+	})
+
+	t.Run("named and unnamed fields mix", func(t *testing.T) {
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny),
+		)
+		require.Equal(t, "struct {value: i64; any}", typ.String())
+	})
 }
 
 func TestStructType_Cast(t *testing.T) {
@@ -195,11 +222,6 @@ func TestStructType_Equals(t *testing.T) {
 	require.False(t, typ.Equals(types.NewStructType(types.NewStructField(types.TypeI32))))
 	require.False(t, typ.Equals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64))))
 	require.False(t, typ.Equals(types.TypeI32))
-}
-
-func TestNewStructField(t *testing.T) {
-	field := types.NewStructField(types.TypeI8, types.FieldWithName("small"))
-	require.Equal(t, types.StructField{Name: "small", Type: types.TypeI8, Kind: types.KindI8}, field)
 }
 
 func BenchmarkStruct_Refs(b *testing.B) {

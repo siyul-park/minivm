@@ -49,20 +49,6 @@ func TestCollector_RecordEmit(t *testing.T) {
 	require.Equal(t, float64(128), bytes)
 }
 
-func TestCounter_Inc(t *testing.T) {
-	s := prof.NewCollector()
-	entry := s.RegisterEntry(2, 11, prof.EntryCall, prof.FrontendStatic)
-	exit := s.RegisterExit(2, 11, prof.EntryCall, prof.FrontendStatic, prof.ExitColdBranch, prof.OpcodeNone)
-	yield := s.RegisterYield(2, 11, prof.EntryCall, prof.FrontendStatic)
-
-	allocs := testing.AllocsPerRun(100, func() {
-		entry.Inc()
-		exit.Inc()
-		yield.Inc()
-	})
-	require.Zero(t, allocs)
-}
-
 func TestCollector_RegisterEntry(t *testing.T) {
 	local := prof.NewCollector()
 	entry := local.RegisterEntry(3, 17, prof.EntryLoop, prof.FrontendTrace)
@@ -125,4 +111,18 @@ func TestCollector_RegisterYield(t *testing.T) {
 		prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"})
 	require.True(t, ok)
 	require.Equal(t, float64(2), value)
+}
+
+func TestCounter_Inc(t *testing.T) {
+	s := prof.NewCollector()
+	entry := s.RegisterEntry(2, 11, prof.EntryCall, prof.FrontendStatic)
+	exit := s.RegisterExit(2, 11, prof.EntryCall, prof.FrontendStatic, prof.ExitColdBranch, prof.OpcodeNone)
+	yield := s.RegisterYield(2, 11, prof.EntryCall, prof.FrontendStatic)
+
+	allocs := testing.AllocsPerRun(100, func() {
+		entry.Inc()
+		exit.Inc()
+		yield.Inc()
+	})
+	require.Zero(t, allocs)
 }

@@ -3,7 +3,7 @@ package asm_test
 import (
 	"testing"
 
-	asm "github.com/siyul-park/minivm/asm"
+	asm "github.com/siyul-park/minivm/internal/asm"
 	"github.com/stretchr/testify/require"
 )
 

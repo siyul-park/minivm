@@ -211,11 +211,7 @@ func parseTypes(lines []string) ([]types.Type, error) {
 		if trimmed == "" {
 			continue
 		}
-		if idx := strings.Index(trimmed, ":\t"); idx >= 0 {
-			trimmed = trimmed[idx+2:]
-		} else if idx := strings.IndexByte(trimmed, ':'); idx >= 0 {
-			trimmed = strings.TrimSpace(trimmed[idx+1:])
-		}
+		trimmed = stripIndexPrefix(trimmed)
 		if trimmed == "" {
 			continue
 		}
@@ -248,12 +244,7 @@ func parseConstants(lines []string) ([]types.Value, error) {
 			if hasCurrent {
 				entries = append(entries, current)
 			}
-			content := trimmed
-			if idx := strings.Index(trimmed, ":\t"); idx >= 0 {
-				content = trimmed[idx+2:]
-			} else if idx := strings.IndexByte(trimmed, ':'); idx >= 0 {
-				content = strings.TrimSpace(trimmed[idx+1:])
-			}
+			content := stripIndexPrefix(trimmed)
 			current = []string{content}
 			hasCurrent = true
 		}
@@ -291,11 +282,7 @@ func parseHandlers(lines []string) ([]instr.Handler, error) {
 		if trimmed == "" {
 			continue
 		}
-		if idx := strings.Index(trimmed, ":\t"); idx >= 0 {
-			trimmed = trimmed[idx+2:]
-		} else if idx := strings.IndexByte(trimmed, ':'); idx >= 0 {
-			trimmed = strings.TrimSpace(trimmed[idx+1:])
-		}
+		trimmed = stripIndexPrefix(trimmed)
 		if trimmed == "" {
 			continue
 		}
@@ -329,13 +316,15 @@ func parseHandlers(lines []string) ([]instr.Handler, error) {
 }
 
 func parseLiteral(s string) (types.Value, error) {
-	fields := strings.Fields(s)
-	if len(fields) < 2 {
+	idx := strings.IndexAny(s, " \t")
+	if idx < 0 {
 		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
 	}
-
-	typeName := fields[0]
-	valueStr := strings.Join(fields[1:], " ")
+	typeName := s[:idx]
+	valueStr := strings.TrimSpace(s[idx+1:])
+	if valueStr == "" {
+		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
+	}
 
 	switch typeName {
 	case "i32":
@@ -383,7 +372,29 @@ func parseLiteral(s string) (types.Value, error) {
 			return nil, fmt.Errorf("invalid any literal %q", valueStr)
 		}
 		return types.Ref(v), nil
+	case "string":
+		v, err := strconv.Unquote(valueStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid string literal %q: %w", valueStr, err)
+		}
+		return types.String(v), nil
 	default:
 		return nil, fmt.Errorf("unknown constant type %q", typeName)
 	}
+}
+
+// stripIndexPrefix removes the "NNNN:" listing index Format writes ahead of an
+// entry. Only a run of digits followed by a colon counts, so a struct type's
+// field-name colon in "struct {value: i64}" is left alone.
+func stripIndexPrefix(s string) string {
+	for i, r := range s {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == ':' && i > 0 {
+			return strings.TrimSpace(s[i+1:])
+		}
+		return s
+	}
+	return s
 }

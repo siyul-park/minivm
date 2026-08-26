@@ -15,7 +15,6 @@ func TestNewTypedMap(t *testing.T) {
 	require.Equal(t, types.BoxedNull, m.Zero)
 	require.Zero(t, m.Len())
 }
-
 func TestNewMap(t *testing.T) {
 	typ := types.NewMapType(types.TypeAny, types.TypeI32)
 	m := types.NewMap(typ)
@@ -23,15 +22,6 @@ func TestNewMap(t *testing.T) {
 	require.Equal(t, types.BoxI32(0), m.Zero)
 	require.Zero(t, m.Len())
 }
-
-func TestNewMapWithCapacity(t *testing.T) {
-	typ := types.NewMapType(types.TypeI32, types.TypeAny)
-	m := types.NewMapWithCapacity(typ, 8)
-	require.Same(t, typ, m.Typ)
-	require.Equal(t, types.BoxedNull, m.Zero)
-	require.Zero(t, m.Len())
-}
-
 func TestNewMapForType(t *testing.T) {
 	structType := types.NewStructType(types.NewStructField(types.TypeI32))
 	tests := []struct {
@@ -52,14 +42,19 @@ func TestNewMapForType(t *testing.T) {
 		})
 	}
 }
-
+func TestNewMapWithCapacity(t *testing.T) {
+	typ := types.NewMapType(types.TypeI32, types.TypeAny)
+	m := types.NewMapWithCapacity(typ, 8)
+	require.Same(t, typ, m.Typ)
+	require.Equal(t, types.BoxedNull, m.Zero)
+	require.Zero(t, m.Len())
+}
 func TestNewMapIterator(t *testing.T) {
 	m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64, types.TypeI32), 0)
 	it := types.NewMapIterator(7, m)
 	require.Equal(t, types.NewIteratorType(types.TypeI64), it.Type())
 	require.True(t, it.Done())
 }
-
 func TestNewMapType(t *testing.T) {
 	t.Run("string key and i64 value", func(t *testing.T) {
 		typ := types.NewMapType(types.TypeString, types.TypeI64)
@@ -77,23 +72,13 @@ func TestNewMapType(t *testing.T) {
 		require.False(t, typ.TraceValues)
 	})
 }
-
 func TestTypedMap_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0).Kind())
 }
-
 func TestTypedMap_Type(t *testing.T) {
 	typ := types.NewMapType(types.TypeI32, types.TypeI32)
 	require.Equal(t, typ, types.NewTypedMap[int32](typ, 0).Type())
 }
-
-func TestTypedMap_Len(t *testing.T) {
-	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
-	require.Equal(t, 0, m.Len())
-	m.Set(1, types.BoxI32(2))
-	require.Equal(t, 1, m.Len())
-}
-
 func TestTypedMap_Get(t *testing.T) {
 	t.Run("i32", func(t *testing.T) {
 		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
@@ -123,7 +108,6 @@ func TestTypedMap_Get(t *testing.T) {
 		require.Equal(t, types.BoxI32(2), got)
 	})
 }
-
 func TestTypedMap_Set(t *testing.T) {
 	t.Run("overwrite returns old", func(t *testing.T) {
 		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
@@ -165,7 +149,6 @@ func TestTypedMap_Set(t *testing.T) {
 		require.False(t, ok)
 	})
 }
-
 func TestTypedMap_Delete(t *testing.T) {
 	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
 	m.Set(1, types.BoxI32(2))
@@ -178,18 +161,6 @@ func TestTypedMap_Delete(t *testing.T) {
 	_, ok = m.Delete(1)
 	require.False(t, ok)
 }
-
-func TestTypedMap_Range(t *testing.T) {
-	m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64, types.TypeI32), 0)
-	m.Set(1, types.BoxI32(2))
-
-	var keys []int64
-	m.Range(func(key int64, _ types.Boxed) {
-		keys = append(keys, key)
-	})
-	require.Equal(t, []int64{1}, keys)
-}
-
 func TestTypedMap_Clear(t *testing.T) {
 	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
 	m.Set(1, types.BoxI32(2))
@@ -201,7 +172,6 @@ func TestTypedMap_Clear(t *testing.T) {
 	require.Equal(t, []types.Boxed{types.BoxI32(2)}, values)
 	require.Equal(t, 0, m.Len())
 }
-
 func TestTypedMap_String(t *testing.T) {
 	t.Run("i32", func(t *testing.T) {
 		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
@@ -233,7 +203,22 @@ func TestTypedMap_String(t *testing.T) {
 		require.Equal(t, "map[string]i32{\"foo\": 2}", m.String())
 	})
 }
+func TestTypedMap_Len(t *testing.T) {
+	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
+	require.Equal(t, 0, m.Len())
+	m.Set(1, types.BoxI32(2))
+	require.Equal(t, 1, m.Len())
+}
+func TestTypedMap_Range(t *testing.T) {
+	m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64, types.TypeI32), 0)
+	m.Set(1, types.BoxI32(2))
 
+	var keys []int64
+	m.Range(func(key int64, _ types.Boxed) {
+		keys = append(keys, key)
+	})
+	require.Equal(t, []int64{1}, keys)
+}
 func TestTypedMap_Refs(t *testing.T) {
 	t.Run("inline i64 value", func(t *testing.T) {
 		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI64), 0)
@@ -254,24 +239,13 @@ func TestTypedMap_Refs(t *testing.T) {
 		require.Equal(t, []types.Ref{9, 2}, m.Refs([]types.Ref{9}))
 	})
 }
-
 func TestMap_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32)).Kind())
 }
-
 func TestMap_Type(t *testing.T) {
 	typ := types.NewMapType(types.TypeI32, types.TypeI32)
 	require.Equal(t, typ, types.NewMap(typ).Type())
 }
-
-func TestMap_Len(t *testing.T) {
-	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
-	require.Equal(t, 0, m.Len())
-
-	m.Set(types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(1), Value: types.BoxI32(2)})
-	require.Equal(t, 1, m.Len())
-}
-
 func TestMap_Get(t *testing.T) {
 	m := types.NewMap(types.NewMapType(types.TypeString, types.TypeI32))
 	m.Set(types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{Key: types.BoxRef(1), Value: types.BoxI32(2)})
@@ -283,7 +257,6 @@ func TestMap_Get(t *testing.T) {
 	_, ok = m.Get(types.MapKey{Kind: types.KindRef, Bits: 2})
 	require.False(t, ok)
 }
-
 func TestMap_Set(t *testing.T) {
 	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
 
@@ -299,7 +272,6 @@ func TestMap_Set(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, types.BoxI32(3), entry.Value)
 }
-
 func TestMap_Delete(t *testing.T) {
 	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
 	m.Set(types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(1), Value: types.BoxI32(2)})
@@ -312,18 +284,6 @@ func TestMap_Delete(t *testing.T) {
 	_, ok = m.Delete(types.MapKey{Kind: types.KindI32, Bits: 1})
 	require.False(t, ok)
 }
-
-func TestMap_Range(t *testing.T) {
-	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
-	m.Set(types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(1), Value: types.BoxI32(2)})
-
-	var keys []types.MapKey
-	m.Range(func(key types.MapKey, _ types.MapEntry) {
-		keys = append(keys, key)
-	})
-	require.Equal(t, []types.MapKey{{Kind: types.KindI32, Bits: 1}}, keys)
-}
-
 func TestMap_Clear(t *testing.T) {
 	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
 	m.Set(types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(1), Value: types.BoxI32(2)})
@@ -335,7 +295,6 @@ func TestMap_Clear(t *testing.T) {
 	require.Equal(t, []types.MapEntry{{Key: types.BoxI32(1), Value: types.BoxI32(2)}}, entries)
 	require.Equal(t, 0, m.Len())
 }
-
 func TestMap_String(t *testing.T) {
 	t.Run("i32 key", func(t *testing.T) {
 		typ := types.NewMapType(types.TypeI32, types.TypeI32)
@@ -365,7 +324,23 @@ func TestMap_String(t *testing.T) {
 		require.Equal(t, "map[i32]i32{1: 10, 2: 20}", m.String())
 	})
 }
+func TestMap_Len(t *testing.T) {
+	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
+	require.Equal(t, 0, m.Len())
 
+	m.Set(types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(1), Value: types.BoxI32(2)})
+	require.Equal(t, 1, m.Len())
+}
+func TestMap_Range(t *testing.T) {
+	m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))
+	m.Set(types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(1), Value: types.BoxI32(2)})
+
+	var keys []types.MapKey
+	m.Range(func(key types.MapKey, _ types.MapEntry) {
+		keys = append(keys, key)
+	})
+	require.Equal(t, []types.MapKey{{Kind: types.KindI32, Bits: 1}}, keys)
+}
 func TestMap_Refs(t *testing.T) {
 	t.Run("inline i64 value", func(t *testing.T) {
 		m := types.NewMap(types.NewMapType(types.TypeI32, types.TypeI64))
@@ -400,20 +375,16 @@ func TestMap_Refs(t *testing.T) {
 		require.Equal(t, []types.Ref{9, 2}, m.Refs([]types.Ref{9}))
 	})
 }
-
 func TestMapIterator_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeAny, types.TypeI32))).Kind())
 }
-
 func TestMapIterator_Type(t *testing.T) {
 	m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64, types.TypeI32), 0)
 	require.Equal(t, types.NewIteratorType(types.TypeI64), types.NewMapIterator(1, m).Type())
 }
-
 func TestMapIterator_String(t *testing.T) {
 	require.Equal(t, "map.iterator", types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeAny, types.TypeI32))).String())
 }
-
 func TestMapIterator_Next(t *testing.T) {
 	t.Run("typed key", func(t *testing.T) {
 		m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64, types.TypeI32), 0)
@@ -432,7 +403,6 @@ func TestMapIterator_Next(t *testing.T) {
 		require.Equal(t, types.BoxRef(9), it.Current())
 	})
 }
-
 func TestMapIterator_Current(t *testing.T) {
 	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
 	m.Set(3, types.BoxI32(4))
@@ -441,7 +411,6 @@ func TestMapIterator_Current(t *testing.T) {
 	require.True(t, it.Next())
 	require.Equal(t, types.I32(3), it.Current())
 }
-
 func TestMapIterator_Done(t *testing.T) {
 	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
 	m.Set(3, types.BoxI32(4))
@@ -452,7 +421,6 @@ func TestMapIterator_Done(t *testing.T) {
 	require.False(t, it.Next())
 	require.True(t, it.Done())
 }
-
 func TestMapIterator_Refs(t *testing.T) {
 	m := types.NewMap(types.NewMapType(types.TypeString, types.TypeI32))
 	m.Set(types.MapKey{Kind: types.KindRef, Bits: 9}, types.MapEntry{Key: types.BoxRef(9), Value: types.BoxI32(2)})
@@ -460,28 +428,6 @@ func TestMapIterator_Refs(t *testing.T) {
 	require.True(t, it.Next())
 	require.Equal(t, []types.Ref{5, 7, 9}, it.Refs([]types.Ref{5}))
 }
-
-func TestMapKey_Value(t *testing.T) {
-	tests := []struct {
-		key   types.MapKey
-		entry types.MapEntry
-		want  types.Value
-	}{
-		{types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{}, types.I32(1)},
-		{types.MapKey{Kind: types.KindI64, Bits: 1}, types.MapEntry{}, types.I64(1)},
-		{types.MapKey{Kind: types.KindF32, Bits: uint64(math.Float32bits(1))}, types.MapEntry{}, types.F32(1)},
-		{types.MapKey{Kind: types.KindF64, Bits: math.Float64bits(1)}, types.MapEntry{}, types.F64(1)},
-		{types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{}, types.Ref(1)},
-		{types.MapKey{Kind: types.KindText, Text: "a"}, types.MapEntry{}, types.String("a")},
-		{types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(2)}, types.BoxI32(2)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.key.String(), func(t *testing.T) {
-			require.Equal(t, tt.want, tt.key.Value(tt.entry))
-		})
-	}
-}
-
 func TestMapKey_String(t *testing.T) {
 	tests := []struct {
 		key types.MapKey
@@ -501,15 +447,12 @@ func TestMapKey_String(t *testing.T) {
 		})
 	}
 }
-
 func TestMapType_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewMapType(types.TypeI32, types.TypeI32).Kind())
 }
-
 func TestMapType_String(t *testing.T) {
 	require.Equal(t, "map[i32]string", types.NewMapType(types.TypeI32, types.TypeString).String())
 }
-
 func TestMapType_Cast(t *testing.T) {
 	typ := types.NewMapType(types.TypeI32, types.TypeI32)
 
@@ -518,7 +461,6 @@ func TestMapType_Cast(t *testing.T) {
 	require.False(t, typ.Cast(types.NewMapType(types.TypeI64, types.TypeI32)))
 	require.False(t, typ.Cast(types.TypeI32))
 }
-
 func TestMapType_Equals(t *testing.T) {
 	typ := types.NewMapType(types.TypeI32, types.TypeI32)
 
@@ -526,6 +468,26 @@ func TestMapType_Equals(t *testing.T) {
 	require.True(t, typ.Equals(types.NewMapType(types.TypeI32, types.TypeI32)))
 	require.False(t, typ.Equals(types.NewMapType(types.TypeI32, types.TypeI64)))
 	require.False(t, typ.Equals(types.TypeI32))
+}
+func TestMapKey_Value(t *testing.T) {
+	tests := []struct {
+		key   types.MapKey
+		entry types.MapEntry
+		want  types.Value
+	}{
+		{types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{}, types.I32(1)},
+		{types.MapKey{Kind: types.KindI64, Bits: 1}, types.MapEntry{}, types.I64(1)},
+		{types.MapKey{Kind: types.KindF32, Bits: uint64(math.Float32bits(1))}, types.MapEntry{}, types.F32(1)},
+		{types.MapKey{Kind: types.KindF64, Bits: math.Float64bits(1)}, types.MapEntry{}, types.F64(1)},
+		{types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{}, types.Ref(1)},
+		{types.MapKey{Kind: types.KindText, Text: "a"}, types.MapEntry{}, types.String("a")},
+		{types.MapKey{Kind: types.KindI32, Bits: 1}, types.MapEntry{Key: types.BoxI32(2)}, types.BoxI32(2)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key.String(), func(t *testing.T) {
+			require.Equal(t, tt.want, tt.key.Value(tt.entry))
+		})
+	}
 }
 
 func BenchmarkTypedMap_Refs(b *testing.B) {

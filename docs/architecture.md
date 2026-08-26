@@ -27,7 +27,7 @@ For detailed behavior, follow the related topic docs instead of duplicating the 
 - `types` must not import `interp`.
 - Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
 - `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
-- Architecture-specific native code should stay under `asm/<arch>/` and `interp/jit_<arch>.go`.
+- Architecture-specific native code should stay under `internal/asm/<arch>/` and `interp/jit_<arch>.go`.
 
 ## Package Dependency Graph
 
@@ -37,9 +37,9 @@ Import direction: `A → B` means `A` imports `B`.
 types   → instr
 program → instr, types
 prof    → instr
-asm/amd64 → asm
-asm/arm64 → asm
-interp  → program, instr, types, asm, asm/arm64, pass, analysis, prof
+internal/asm/amd64 → internal/asm
+internal/asm/arm64 → internal/asm
+interp  → program, instr, types, internal/asm, internal/asm/arm64, pass, analysis, prof
 debug   → interp
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -58,9 +58,9 @@ cmd/minivm → cli
 | `interp/` | interpreter state, threaded dispatch, host APIs, coroutines, tracing, JIT driver, and pooling |
 | `debug/` | bytecode-level debugger API |
 | `prof/` | execution samples and JIT metrics |
-| `asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
-| `asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
-| `asm/amd64/` | placeholder backend; does not emit native code yet |
+| `internal/asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
+| `internal/asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
+| `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `pass/` | generic analysis and transform infrastructure |
 | `analysis/` | reusable static analyses |
 | `transform/` | optimization transforms |

@@ -132,6 +132,21 @@ br @0x0010      absolute byte offset in accumulated program
 
 `.show` prints absolute byte offsets. The REPL normalizes absolute branch input to relative offsets.
 
+### Labels in Loaded Programs
+
+Whole-program text — `.load`, `run <file>`, and any `.code` section parsed by `program.Parse` — additionally accepts symbolic branch labels, resolved across the whole input instead of one line at a time. A label is declared with a bare identifier and a colon, and referenced by name on `br`, `br_if`, or `br_table`:
+
+```text
+loop:
+nop
+br_if done
+br loop
+done:
+return
+```
+
+`br_table` labels are written `br_table <count> <case0> <case1> ... <default>`, matching the case count, case targets, then default order the encoding and `.show`/`.save` output use; numeric targets remain valid wherever a label is accepted, and the two can be mixed on one line. `.show` and `.save` label every branch target that lands on an instruction boundary as `L%04d:` ahead of that instruction, so saved output round-trips back through `.load` unchanged. This label form is not available to instructions typed one at a time at the `>` prompt, since a forward reference cannot be resolved until the rest of the program is known; use the relative or `@`-absolute syntax above there instead.
+
 ## Related Docs
 
 - `docs/debugging.md` — debugger API and precision model

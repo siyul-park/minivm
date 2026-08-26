@@ -178,6 +178,10 @@ func (t *StructType) String() string {
 		if i > 0 {
 			sb.WriteString("; ")
 		}
+		if f.Name != "" {
+			sb.WriteString(f.Name)
+			sb.WriteString(": ")
+		}
 		sb.WriteString(f.Type.String())
 	}
 	sb.WriteString("}")
@@ -200,6 +204,11 @@ func (t *StructType) Cast(other Type) bool {
 	return true
 }
 
+// Equals compares field types only. Two structs whose fields differ just in
+// name are equal here but render differently from String, which does show
+// names, and FieldIndex does treat a name as meaningful. Structural
+// compatibility is the contract; do not use Equals to decide whether two types
+// print alike.
 func (t *StructType) Equals(other Type) bool {
 	if t == other {
 		return true

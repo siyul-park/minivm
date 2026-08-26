@@ -9,54 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParse(t *testing.T) {
-	tests := []struct {
-		input   string
-		want    types.Type
-		wantErr bool
-	}{
-		{"i1", types.TypeI1, false},
-		{"i8", types.TypeI8, false},
-		{"i32", types.TypeI32, false},
-		{"i64", types.TypeI64, false},
-		{"f32", types.TypeF32, false},
-		{"f64", types.TypeF64, false},
-		{"any", types.TypeAny, false},
-		{"string", types.TypeString, false},
-		{"[]i8", types.NewArrayType(types.TypeI8), false},
-		{"[]i32", types.NewArrayType(types.TypeI32), false},
-		{"[]f64", types.NewArrayType(types.TypeF64), false},
-		{"map[i32]string", types.NewMapType(types.TypeI32, types.TypeString), false},
-		{"map[string][]i32", types.NewMapType(types.TypeString, types.NewArrayType(types.TypeI32)), false},
-		{"map[[]i32]f64", types.NewMapType(types.NewArrayType(types.TypeI32), types.TypeF64), false},
-		{"iterator[i32]", types.NewIteratorType(types.TypeI32), false},
-		{"iterator[map[string]i32]", types.NewIteratorType(types.NewMapType(types.TypeString, types.TypeI32)), false},
-		{"func()", &types.FunctionType{}, false},
-		{"func(i32) i64", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}, false},
-		{"func(i32, f64) i32", &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeF64}, Returns: []types.Type{types.TypeI32}}, false},
-		{"func(i32) (i32, i64)", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32, types.TypeI64}}, false},
-		{"struct {i32; f64}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)), false},
-		{"ref", nil, true},
-		{"map[]i32", nil, true},
-		{"map[i32]", nil, true},
-		{"iterator[]", nil, true},
-		{"iterator[i32", nil, true},
-		{"bad", nil, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got, err := types.Parse(tt.input)
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			require.True(t, tt.want.Equals(got), "got %v, want %v", got, tt.want)
-		})
-	}
-}
-
 func TestParseFunction(t *testing.T) {
 	tests := []struct {
 		lines []string
@@ -150,5 +102,96 @@ func TestParseFunction(t *testing.T) {
 		require.Equal(t, []types.Type{types.TypeI32, types.TypeAny}, fn.Captures)
 		require.Equal(t, []types.Type{types.TypeI64}, fn.Locals)
 		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
+	})
+}
+func TestParse(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    types.Type
+		wantErr bool
+	}{
+		{"i1", types.TypeI1, false},
+		{"i8", types.TypeI8, false},
+		{"i32", types.TypeI32, false},
+		{"i64", types.TypeI64, false},
+		{"f32", types.TypeF32, false},
+		{"f64", types.TypeF64, false},
+		{"any", types.TypeAny, false},
+		{"string", types.TypeString, false},
+		{"[]i8", types.NewArrayType(types.TypeI8), false},
+		{"[]i32", types.NewArrayType(types.TypeI32), false},
+		{"[]f64", types.NewArrayType(types.TypeF64), false},
+		{"map[i32]string", types.NewMapType(types.TypeI32, types.TypeString), false},
+		{"map[string][]i32", types.NewMapType(types.TypeString, types.NewArrayType(types.TypeI32)), false},
+		{"map[[]i32]f64", types.NewMapType(types.NewArrayType(types.TypeI32), types.TypeF64), false},
+		{"iterator[i32]", types.NewIteratorType(types.TypeI32), false},
+		{"iterator[map[string]i32]", types.NewIteratorType(types.NewMapType(types.TypeString, types.TypeI32)), false},
+		{"func()", &types.FunctionType{}, false},
+		{"func(i32) i64", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}, false},
+		{"func(i32, f64) i32", &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeF64}, Returns: []types.Type{types.TypeI32}}, false},
+		{"func(i32) (i32, i64)", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32, types.TypeI64}}, false},
+		{"struct {i32; f64}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)), false},
+		{"struct {value: i64; any}", types.NewStructType(types.NewStructField(types.TypeI64, types.FieldWithName("value")), types.NewStructField(types.TypeAny)), false},
+		{"ref", nil, true},
+		{"map[]i32", nil, true},
+		{"map[i32]", nil, true},
+		{"iterator[]", nil, true},
+		{"iterator[i32", nil, true},
+		{"bad", nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := types.Parse(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, tt.want.Equals(got), "got %v, want %v", got, tt.want)
+		})
+	}
+
+	t.Run("nested struct fields", func(t *testing.T) {
+		// A nested struct carries its own ";" separators, so the field split has
+		// to track brace depth rather than cutting on every semicolon.
+		inner := types.NewStructType(
+			types.NewStructField(types.TypeI32, types.FieldWithName("x")),
+			types.NewStructField(types.TypeI32, types.FieldWithName("y")),
+		)
+		outer := types.NewStructType(
+			types.NewStructField(inner, types.FieldWithName("a")),
+			types.NewStructField(types.TypeI32, types.FieldWithName("b")),
+		)
+
+		parsed, err := types.Parse(outer.String())
+		require.NoError(t, err)
+		require.Equal(t, outer.String(), parsed.String())
+	})
+
+	t.Run("restores named and unnamed fields from String output", func(t *testing.T) {
+		// StructType.Equals ignores field names, so the table above cannot catch
+		// a regression that drops them; assert the names directly.
+		want := types.NewStructType(
+			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+			types.NewStructField(types.TypeAny),
+		)
+		got, err := types.Parse(want.String())
+		require.NoError(t, err)
+
+		st, ok := got.(*types.StructType)
+		require.True(t, ok)
+		require.Equal(t, want, st)
+		require.Equal(t, "value", st.Fields[0].Name)
+		require.Equal(t, "left", st.Fields[1].Name)
+		require.Equal(t, "", st.Fields[2].Name)
+	})
+
+	t.Run("field name lookalike prefix without colon-space stays part of the type", func(t *testing.T) {
+		// "notaname" here isn't followed by ": ", so parseStructType must not
+		// misread it as a name and swallow the following token into the type.
+		_, err := types.Parse("struct {notaname i32}")
+		require.Error(t, err)
 	})
 }

@@ -7,6 +7,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewClosure(t *testing.T) {
+	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
+	ups := []types.Boxed{types.BoxRef(2)}
+	cl := types.NewClosure(typ, 5, ups)
+	require.Equal(t, typ, cl.Typ)
+	require.Equal(t, types.Ref(5), cl.Fn)
+	require.Equal(t, ups, cl.Upvals)
+
+	t.Run("nil type defaults to empty", func(t *testing.T) {
+		cl := types.NewClosure(nil, 1, nil)
+		require.Equal(t, &types.FunctionType{}, cl.Typ)
+	})
+}
+
 func TestClosure_Kind(t *testing.T) {
 	cl := types.NewClosure(nil, 1, nil)
 	require.Equal(t, types.KindRef, cl.Kind())
@@ -44,19 +58,5 @@ func TestClosure_Refs(t *testing.T) {
 	t.Run("primitive upvalues are skipped", func(t *testing.T) {
 		cl := types.NewClosure(nil, 7, []types.Boxed{types.BoxI32(1), types.BoxF64(2)})
 		require.Equal(t, []types.Ref{types.Ref(7)}, cl.Refs(nil))
-	})
-}
-
-func TestNewClosure(t *testing.T) {
-	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-	ups := []types.Boxed{types.BoxRef(2)}
-	cl := types.NewClosure(typ, 5, ups)
-	require.Equal(t, typ, cl.Typ)
-	require.Equal(t, types.Ref(5), cl.Fn)
-	require.Equal(t, ups, cl.Upvals)
-
-	t.Run("nil type defaults to empty", func(t *testing.T) {
-		cl := types.NewClosure(nil, 1, nil)
-		require.Equal(t, &types.FunctionType{}, cl.Typ)
 	})
 }

@@ -14,22 +14,21 @@ func TestNewCollector(t *testing.T) {
 	require.Zero(t, collector.Total())
 }
 
-func TestCollector_Add(t *testing.T) {
+func TestCollector_Value(t *testing.T) {
 	collector := prof.NewCollector()
-	collector.Add(0, 0, byte(instr.I32_CONST))
-	collector.Add(0, 5, byte(instr.DROP))
-	collector.Add(-1, 0, 0)
-	collector.Add(0, -1, 0)
-
-	require.Equal(t, uint64(2), collector.Total())
-	require.Equal(t, uint64(2), collector.Samples(0))
+	collector.AddMetric("custom", 2)
+	require.Equal(t, float64(2), collector.Value("custom"))
+	require.Zero(t, collector.Value("missing"))
 }
 
-func TestCollector_AddMetric(t *testing.T) {
+func TestCollector_Metric(t *testing.T) {
 	collector := prof.NewCollector()
-	collector.AddMetric("custom", 2, prof.Label{Key: "mode", Value: "jit"})
-	collector.AddMetric("custom", 3, prof.Label{Key: "mode", Value: "jit"})
-	require.Equal(t, float64(5), collector.Value("custom", prof.Label{Key: "mode", Value: "jit"}))
+	collector.AddMetric("custom", 2)
+	value, ok := collector.Metric("custom")
+	require.True(t, ok)
+	require.Equal(t, float64(2), value)
+	_, ok = collector.Metric("missing")
+	require.False(t, ok)
 }
 
 func TestCollector_Metrics(t *testing.T) {
@@ -64,21 +63,22 @@ func TestCollector_Metrics(t *testing.T) {
 	})
 }
 
-func TestCollector_Metric(t *testing.T) {
+func TestCollector_Add(t *testing.T) {
 	collector := prof.NewCollector()
-	collector.AddMetric("custom", 2)
-	value, ok := collector.Metric("custom")
-	require.True(t, ok)
-	require.Equal(t, float64(2), value)
-	_, ok = collector.Metric("missing")
-	require.False(t, ok)
+	collector.Add(0, 0, byte(instr.I32_CONST))
+	collector.Add(0, 5, byte(instr.DROP))
+	collector.Add(-1, 0, 0)
+	collector.Add(0, -1, 0)
+
+	require.Equal(t, uint64(2), collector.Total())
+	require.Equal(t, uint64(2), collector.Samples(0))
 }
 
-func TestCollector_Value(t *testing.T) {
+func TestCollector_AddMetric(t *testing.T) {
 	collector := prof.NewCollector()
-	collector.AddMetric("custom", 2)
-	require.Equal(t, float64(2), collector.Value("custom"))
-	require.Zero(t, collector.Value("missing"))
+	collector.AddMetric("custom", 2, prof.Label{Key: "mode", Value: "jit"})
+	collector.AddMetric("custom", 3, prof.Label{Key: "mode", Value: "jit"})
+	require.Equal(t, float64(5), collector.Value("custom", prof.Label{Key: "mode", Value: "jit"}))
 }
 
 func TestCollector_Total(t *testing.T) {

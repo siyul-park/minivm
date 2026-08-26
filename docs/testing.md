@@ -34,6 +34,21 @@ Internal invariants use public behavior, generated output, or executable
 artifacts; tests that cannot express an observable contract are removed rather
 than widening production APIs for test access.
 
+### Known Coverage Gaps
+
+Recorded so a gap stays visible instead of being rediscovered. Each is a claim
+with no expression through the public API, removed rather than kept alive by a
+proxy double (`docs/coding-patterns.md` §12.2, §12.3).
+
+| Uncovered | Why it cannot be reached publicly |
+|---|---|
+| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold`, `checkRetire` in `interp/jit.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
+| Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
+| Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
+
+Closing the first one needs either a public signal that an anchor was retired,
+or a workload that makes retirement observable through existing metrics.
+
 ### JIT Harness Migration
 
 The former `internal/jitcheck` package has no remaining contract. Its cases are
@@ -59,9 +74,9 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | Package | Exported owners | Owned | Shared family | Missing |
 |---|---:|---:|---:|---:|
 | `analysis` | 5 | 5 | 0 | 0 |
-| `asm` | 37 | 37 | 0 | 0 |
-| `asm/amd64` | 1 | 1 | 0 | 0 |
-| `asm/arm64` | 155 | 155 | 152 | 0 |
+| `internal/asm` | 37 | 37 | 0 | 0 |
+| `internal/asm/amd64` | 1 | 1 | 0 | 0 |
+| `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 44 | 44 | 0 | 0 |
@@ -71,7 +86,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `prof` | 22 | 22 | 0 | 0 |
 | `program` | 25 | 25 | 0 | 0 |
 | `transform` | 10 | 10 | 0 | 0 |
-| `types` | 173 | 173 | 0 | 0 |
+| `types` | 171 | 171 | 0 | 0 |
 
 ### Symbol Matrix
 
@@ -82,199 +97,199 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `analysis/blocks.go` | `TestNewBlocksAnalysis` | ✅ |
 | `analysis/gvn.go` | `TestGVNAnalysis_Run` | ✅ |
 | `analysis/gvn.go` | `TestNewGVNAnalysis` | ✅ |
-| `asm/assembler.go` | `TestNew` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Reg` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Label` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Bind` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Pin` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Emit` | ✅ |
-| `asm/assembler.go` | `TestAssembler_Build` | ✅ |
-| `asm/buffer.go` | `TestNewBuffer` | ✅ |
-| `asm/buffer.go` | `TestBuffer_Free` | ✅ |
-| `asm/instr.go` | `TestInstruction_String` | ✅ |
-| `asm/link.go` | `TestLink` | ✅ |
-| `asm/operand.go` | `TestV` | ✅ |
-| `asm/operand.go` | `TestP` | ✅ |
-| `asm/operand.go` | `TestImm` | ✅ |
-| `asm/operand.go` | `TestMem` | ✅ |
-| `asm/operand.go` | `TestVRegOperand_String` | ✅ |
-| `asm/operand.go` | `TestPRegOperand_String` | ✅ |
-| `asm/operand.go` | `TestImmOperand_String` | ✅ |
-| `asm/operand.go` | `TestLabelOperand_String` | ✅ |
-| `asm/operand.go` | `TestMemOperand_String` | ✅ |
-| `asm/reg.go` | `TestNewPReg` | ✅ |
-| `asm/reg.go` | `TestNewVReg` | ✅ |
-| `asm/reg.go` | `TestNewRegInfo` | ✅ |
-| `asm/reg.go` | `TestNewRegMask` | ✅ |
-| `asm/reg.go` | `TestPReg_ID` | ✅ |
-| `asm/reg.go` | `TestPReg_Type` | ✅ |
-| `asm/reg.go` | `TestPReg_Width` | ✅ |
-| `asm/reg.go` | `TestPReg_String` | ✅ |
-| `asm/reg.go` | `TestVReg_ID` | ✅ |
-| `asm/reg.go` | `TestVReg_Type` | ✅ |
-| `asm/reg.go` | `TestVReg_Width` | ✅ |
-| `asm/reg.go` | `TestVReg_String` | ✅ |
-| `asm/reg.go` | `TestRegMask_Set` | ✅ |
-| `asm/reg.go` | `TestRegMask_Clear` | ✅ |
-| `asm/reg.go` | `TestRegMask_Contains` | ✅ |
-| `asm/reg.go` | `TestRegMask_First` | ✅ |
-| `asm/reg.go` | `TestRegInfo_Allocatable` | ✅ |
-| `asm/amd64/arch.go` | `TestNew` | ✅ |
-| `asm/arm64/arch.go` | `TestNew` | ✅ |
-| `asm/arm64/encoder.go` | `TestEncoder_Encode` | ✅ |
-| `asm/arm64/encoder.go` | `TestNewEncoder` | ✅ |
-| `asm/arm64/instr.go` | `TestADC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestADCS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestADDI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestADDS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestADDSI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestADDV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestAND` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestANDI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestANDS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestANDSI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestASR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestASRI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBCC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBCS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBCondLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBEQ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBGE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBGT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBHI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBIC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBICS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBLE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBLLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBLR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBLS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBLT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBMI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBNE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBPL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBRK` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBVC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestBVS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCBNZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCBNZLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCBZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCBZLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCCMP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCCMPI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCLZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCMN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCMNI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCMP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCMPI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCNT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCSEL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCSET` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCSETM` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCSINC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCSINV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestCSNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestDMB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestDSB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestEON` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestEOR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestEORI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestERET` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFABS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFCMP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFCMPE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFCVT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFCVTZS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFCVTZU` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFDIV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFMADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFMAX` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFMIN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFMOV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFMSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFMUL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFNMADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFNMSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFRINTM` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFRINTN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFRINTP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFRINTZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFSQRT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestFSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestHLT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestISB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDRB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDRH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDRR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDRSB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDRSH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLDRSW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLSL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLSLI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLSR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestLSRI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMOV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMOVI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMOVK` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMOVN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMOVZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMRS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMSR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMUL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestMVN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestNEGS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestNOP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestORN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestORR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestORRI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestRBIT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestRET` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestREV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestREV16` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestREV32` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestROR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestRORI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSBC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSBCS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSBFX` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSCVTF` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSDIV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSTP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSTR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSTRB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSTRH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSTRR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSTRW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSUBI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSUBS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSUBSI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSVC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSXTB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSXTH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestSXTW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestTBNZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestTBZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestTST` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestTSTI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestUCVTF` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestUDIV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestUXTB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestUXTH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
-| `asm/arm64/instr.go` | `TestUXTW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/assembler.go` | `TestNew` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Reg` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Label` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Bind` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Pin` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Emit` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Build` | ✅ |
+| `internal/asm/buffer.go` | `TestNewBuffer` | ✅ |
+| `internal/asm/buffer.go` | `TestBuffer_Free` | ✅ |
+| `internal/asm/instr.go` | `TestInstruction_String` | ✅ |
+| `internal/asm/link.go` | `TestLink` | ✅ |
+| `internal/asm/operand.go` | `TestV` | ✅ |
+| `internal/asm/operand.go` | `TestP` | ✅ |
+| `internal/asm/operand.go` | `TestImm` | ✅ |
+| `internal/asm/operand.go` | `TestMem` | ✅ |
+| `internal/asm/operand.go` | `TestVRegOperand_String` | ✅ |
+| `internal/asm/operand.go` | `TestPRegOperand_String` | ✅ |
+| `internal/asm/operand.go` | `TestImmOperand_String` | ✅ |
+| `internal/asm/operand.go` | `TestLabelOperand_String` | ✅ |
+| `internal/asm/operand.go` | `TestMemOperand_String` | ✅ |
+| `internal/asm/reg.go` | `TestNewPReg` | ✅ |
+| `internal/asm/reg.go` | `TestNewVReg` | ✅ |
+| `internal/asm/reg.go` | `TestNewRegInfo` | ✅ |
+| `internal/asm/reg.go` | `TestNewRegMask` | ✅ |
+| `internal/asm/reg.go` | `TestPReg_ID` | ✅ |
+| `internal/asm/reg.go` | `TestPReg_Type` | ✅ |
+| `internal/asm/reg.go` | `TestPReg_Width` | ✅ |
+| `internal/asm/reg.go` | `TestPReg_String` | ✅ |
+| `internal/asm/reg.go` | `TestVReg_ID` | ✅ |
+| `internal/asm/reg.go` | `TestVReg_Type` | ✅ |
+| `internal/asm/reg.go` | `TestVReg_Width` | ✅ |
+| `internal/asm/reg.go` | `TestVReg_String` | ✅ |
+| `internal/asm/reg.go` | `TestRegMask_Set` | ✅ |
+| `internal/asm/reg.go` | `TestRegMask_Clear` | ✅ |
+| `internal/asm/reg.go` | `TestRegMask_Contains` | ✅ |
+| `internal/asm/reg.go` | `TestRegMask_First` | ✅ |
+| `internal/asm/reg.go` | `TestRegInfo_Allocatable` | ✅ |
+| `internal/asm/amd64/arch.go` | `TestNew` | ✅ |
+| `internal/asm/arm64/arch.go` | `TestNew` | ✅ |
+| `internal/asm/arm64/encoder.go` | `TestEncoder_Encode` | ✅ |
+| `internal/asm/arm64/encoder.go` | `TestNewEncoder` | ✅ |
+| `internal/asm/arm64/instr.go` | `TestADC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestADCS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestADDI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestADDS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestADDSI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestADDV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestAND` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestANDI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestANDS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestANDSI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestASR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestASRI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBCC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBCS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBCondLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBEQ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBGE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBGT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBHI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBIC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBICS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBLE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBLLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBLR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBLS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBLT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBMI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBNE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBPL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBRK` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBVC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestBVS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCBNZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCBNZLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCBZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCBZLabel` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCCMP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCCMPI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCLZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCMN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCMNI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCMP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCMPI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCNT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCSEL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCSET` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCSETM` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCSINC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCSINV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestCSNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestDMB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestDSB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestEON` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestEOR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestEORI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestERET` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFABS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFCMP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFCMPE` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFCVT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFCVTZS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFCVTZU` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFDIV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFMADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFMAX` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFMIN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFMOV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFMSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFMUL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFNMADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFNMSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFRINTM` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFRINTN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFRINTP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFRINTZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFSQRT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestFSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestHLT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestISB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDRB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDRH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDRR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDRSB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDRSH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLDRSW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLSL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLSLI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLSR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestLSRI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMADD` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMOV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMOVI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMOVK` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMOVN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMOVZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMRS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMSR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMUL` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestMVN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestNEG` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestNEGS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestNOP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestORN` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestORR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestORRI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestRBIT` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestRET` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestREV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestREV16` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestREV32` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestROR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestRORI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSBC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSBCS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSBFX` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSCVTF` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSDIV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSTP` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSTR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSTRB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSTRH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSTRR` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSTRW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSUB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSUBI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSUBS` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSUBSI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSVC` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSXTB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSXTH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestSXTW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestTBNZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestTBZ` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestTST` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestTSTI` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestUCVTF` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestUDIV` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestUXTB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestUXTH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/asm/arm64/instr.go` | `TestUXTW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
 | `cli/cli.go` | `TestRoot` | ✅ |
 | `cli/cli.go` | `TestWithFS` | ✅ |
 | `cli/fs.go` | `TestOS` | ✅ |
@@ -548,10 +563,10 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/function.go` | `TestFunctionBuilder_Label` | ✅ |
 | `types/function.go` | `TestFunctionBuilder_MustBuild` | ✅ |
 | `types/function.go` | `TestFunctionBuilder_Try` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithCaptures` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithLocals` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithParams` | ✅ |
-| `types/function.go` | `TestFunctionBuilder_WithReturns` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Captures` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Locals` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Params` | ✅ |
+| `types/function.go` | `TestFunctionBuilder_Returns` | ✅ |
 | `types/function.go` | `TestFunctionType_Cast` | ✅ |
 | `types/function.go` | `TestFunctionType_Equals` | ✅ |
 | `types/function.go` | `TestFunctionType_Kind` | ✅ |
@@ -652,10 +667,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/struct.go` | `TestStructType_FieldIndex` | ✅ |
 | `types/struct.go` | `TestStructType_Kind` | ✅ |
 | `types/struct.go` | `TestStructType_String` | ✅ |
-| `types/struct.go` | `TestStruct_Field` | ✅ |
 | `types/struct.go` | `TestStruct_FieldByName` | ✅ |
 | `types/struct.go` | `TestStruct_Kind` | ✅ |
-| `types/struct.go` | `TestStruct_Raw` | ✅ |
 | `types/struct.go` | `TestStruct_Refs` | ✅ |
 | `types/struct.go` | `TestStruct_SetField` | ✅ |
 | `types/struct.go` | `TestStruct_SetRaw` | ✅ |

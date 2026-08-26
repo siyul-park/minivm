@@ -2,20 +2,36 @@ package cli_test
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
+	"fmt"
+	"io"
 	"testing"
+	"testing/fstest"
 
 	cli "github.com/siyul-park/minivm/cli"
 	"github.com/stretchr/testify/require"
 )
 
+// mapWriteFS adapts fstest.MapFS to cli.WriteFS so it can be passed to
+// cli.WithFS. Create is unused by the `run` subcommand exercised below.
+type mapWriteFS struct {
+	fstest.MapFS
+}
+
+func (mapWriteFS) Create(name string) (io.WriteCloser, error) {
+	return nil, fmt.Errorf("create %s: not supported", name)
+}
+
 func TestWithFS(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "main.vm")
-	require.NoError(t, os.WriteFile(path, []byte("0000:\ti32.const 0x00000007\n"), 0o644))
+	// This path is not a real file on the OS filesystem, so the default
+	// OS() filesystem would fail to find it. Only if WithFS actually
+	// overrides Root's filesystem does `run` succeed here.
+	const path = "virtual/main.vm"
+	fsys := mapWriteFS{MapFS: fstest.MapFS{
+		path: &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000007\n")},
+	}}
 
 	out := bytes.NewBuffer(nil)
-	root := cli.Root(cli.WithFS(cli.OS()))
+	root := cli.Root(cli.WithFS(fsys))
 	root.SetOut(out)
 	root.SetErr(out)
 	root.SetArgs([]string{"run", path})

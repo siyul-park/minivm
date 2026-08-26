@@ -16,27 +16,13 @@ import (
 func TestNew(t *testing.T) {
 	optimizer := optimize.New(optimize.O2)
 	require.Equal(t, optimize.O2, optimizer.Level())
-}
 
-func TestOptimizer_Level(t *testing.T) {
-	o := optimize.New(optimize.O0)
-	require.Equal(t, optimize.O0, o.Level())
-}
-
-func TestOptimizer_Add(t *testing.T) {
-	o := optimize.New(optimize.O0)
-	o.Add(transform.NewFoldPass())
-
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1),
-		instr.New(instr.I32_CONST, 2),
-		instr.New(instr.I32_ADD),
-	})
-	before := prog.String()
-
-	got, err := o.Optimize(prog)
+	// New wires the analyses and the level's transform pipeline, so the
+	// returned optimizer must be usable without any further registration.
+	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
+	optimized, err := optimizer.Optimize(prog)
 	require.NoError(t, err)
-	require.NotEqual(t, before, got.String())
+	require.NotNil(t, optimized)
 }
 
 func TestOptimizer_Optimize(t *testing.T) {
@@ -413,4 +399,26 @@ func TestOptimizer_Optimize(t *testing.T) {
 			require.Equal(t, want, values)
 		})
 	}
+}
+
+func TestOptimizer_Level(t *testing.T) {
+	for _, level := range []optimize.Level{optimize.O0, optimize.O1, optimize.O2, optimize.O3} {
+		require.Equal(t, level, optimize.New(level).Level())
+	}
+}
+
+func TestOptimizer_Add(t *testing.T) {
+	o := optimize.New(optimize.O0)
+	o.Add(transform.NewFoldPass())
+
+	prog := program.New([]instr.Instruction{
+		instr.New(instr.I32_CONST, 1),
+		instr.New(instr.I32_CONST, 2),
+		instr.New(instr.I32_ADD),
+	})
+	before := prog.String()
+
+	got, err := o.Optimize(prog)
+	require.NoError(t, err)
+	require.NotEqual(t, before, got.String())
 }

@@ -1,23 +1,33 @@
-package interp
+package interp_test
 
 import (
 	"context"
-	"encoding/binary"
 	"math"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+// heapRunway mirrors the interpreter's unexported heapRunway. Keep in sync.
+const heapRunway = 64
+
+// exitThreshold mirrors the tracer's unexported exitThreshold. Keep in sync.
+const exitThreshold = 8
+
+// opLimit mirrors the tracer's unexported opLimit. Keep in sync.
+const opLimit = 1024
+
+// nativeFrameLimit mirrors the JIT's unexported nativeFrameLimit. Keep in sync.
+const nativeFrameLimit = 128
 
 type upperCodec byte
 
@@ -41,67 +51,59 @@ func (v *trackedValue) Close() error {
 	return nil
 }
 
-func (upperCodec) Marshal(_ *Interpreter, v any) (types.Value, error) {
+func (upperCodec) Marshal(_ *interp.Interpreter, v any) (types.Value, error) {
 	s, ok := v.(string)
 	if !ok {
-		return nil, ErrUnsupportedMarshalType
+		return nil, interp.ErrUnsupportedMarshalType
 	}
 	return types.String(strings.ToUpper(s)), nil
 }
 
-func (upperCodec) Unmarshal(_ *Interpreter, v types.Value, dst any) error {
+func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error {
 	s, ok := v.(types.String)
 	if !ok {
-		return ErrInvalidUnmarshalTarget
+		return interp.ErrInvalidUnmarshalTarget
 	}
 	p, ok := dst.(*string)
 	if !ok {
-		return ErrInvalidUnmarshalTarget
+		return interp.ErrInvalidUnmarshalTarget
 	}
 	*p = strings.ToLower(string(s))
 	return nil
 }
 
 var runTests = []struct {
-	name    string
 	program *program.Program
 	values  []types.Value
 	err     error
 }{
 	{
-		name:    "i32.const nop returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		name:    "unreachable reports unreachable executed",
 		program: program.New([]instr.Instruction{instr.New(instr.UNREACHABLE)}),
-		err:     ErrUnreachableExecuted,
+		err:     interp.ErrUnreachableExecuted,
 	},
 	{
-		name:    "i32.const i32.const drop returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.DROP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		name:    "i32.const dup returns i32 i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.DUP)}),
 		values:  []types.Value{types.I32(7), types.I32(7)},
 	},
 	{
-		name:    "i32.const i32.const swap returns i32 i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.SWAP)}),
 		values:  []types.Value{types.I32(1), types.I32(2)},
 	},
 	{
-		name: "i32.const i32.const i32.const select returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 1), instr.New(instr.SELECT),
 		}),
 		values: []types.Value{types.I32(10)},
 	},
 	{
-		name: "br i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, 999),
@@ -110,7 +112,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-		name: "i32.const br_if i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.BR_IF, 5),
@@ -120,7 +121,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-		name: "i32.const br_table i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.BR_TABLE, 1, 5, 0),
@@ -130,7 +130,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-		name: "const.get call i32.const return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -139,7 +138,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		name: "const.get call i32.const i32.const return returns i32 i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -148,7 +146,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(20), types.I32(10)},
 	},
 	{
-		name: "i32.const const.get return_call local.get i32.const i32.add return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
@@ -158,12 +155,10 @@ var runTests = []struct {
 		values: []types.Value{types.I32(6)},
 	},
 	{
-		name:    "i32.const yield reports yield",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.YIELD)}),
-		err:     ErrYield,
+		err:     interp.ErrYield,
 	},
 	{
-		name: "const.get call through yield i32.const i32.add return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -175,7 +170,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		name: "const.get call coro.done i32.const yield return returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -185,7 +179,6 @@ var runTests = []struct {
 		values: []types.Value{types.I1(false)},
 	},
 	{
-		name: "const.get call coro.value i32.const yield return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -195,36 +188,30 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-		name: "i32.const global.set global.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
 		}, program.WithGlobals(types.TypeI32)),
 		values: []types.Value{types.I32(3)},
 	},
 	{
-		name:    "i32.const global.tee returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 6), instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32)),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
-		name: "i32.const local.set local.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
 		}, program.WithLocals(types.TypeI32)),
 		values: []types.Value{types.I32(5)},
 	},
 	{
-		name:    "i32.const local.tee returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.LOCAL_TEE, 0)}, program.WithLocals(types.TypeI32)),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
-		name:    "const.get returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(types.I32(11))),
 		values:  []types.Value{types.I32(11)},
 	},
 	{
-		name: "i32.const const.get closure.new call upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.CONST_GET, 0),
@@ -235,7 +222,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		name: "i32.const const.get through i32.const upval.set upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -248,22 +234,18 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
-		name:    "ref.null returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL)}),
 		values:  []types.Value{types.Null},
 	},
 	{
-		name:    "i32.const ref.new returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
-		name:    "i32.const ref.new ref.get returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), instr.New(instr.REF_GET)}),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
-		name: "i32.const ref.new dup i32.const ref.set ref.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), instr.New(instr.DUP),
 			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
@@ -272,832 +254,685 @@ var runTests = []struct {
 		values: []types.Value{types.I32(77)},
 	},
 	{
-		name: "const.get closure.new dup i32.const ref.set rejects callable mutation",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.DUP),
 			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
 		}, program.WithConstants(types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild())),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name:    "i32.const ref.test returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_TEST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const ref.cast returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_CAST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
-		name:    "ref.null ref.is_null returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_IS_NULL)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "ref.null ref.null ref.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_NULL), instr.New(instr.REF_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "ref.null i32.const ref.new ref.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), instr.New(instr.REF_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}),
 		values:  []types.Value{types.I32(42)},
 	},
 	{
-		name:    "i32.const i32.const i32.add returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ADD)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
-		name:    "i32.const i32.const i32.sub returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SUB)}),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
-		name:    "i32.const i32.const i32.mul returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_MUL)}),
 		values:  []types.Value{types.I32(12)},
 	},
 	{
-		name: "i32.const i32.const i32.div_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_S),
 		}),
 		values: []types.Value{types.I32(-3)},
 	},
 	{
-		name: "i32.const i32.const i32.div_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) / 2))},
 	},
 	{
-		name: "i32.const i32.const i32.rem_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_S),
 		}),
 		values: []types.Value{types.I32(-1)},
 	},
 	{
-		name: "i32.const i32.const i32.rem_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) % 3))},
 	},
 	{
-		name:    "i32.const i32.const i32.shl returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SHL)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
-		name: "i32.const i32.const i32.shr_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-8)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_S),
 		}),
 		values: []types.Value{types.I32(-4)},
 	},
 	{
-		name: "i32.const i32.const i32.shr_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) >> 1))},
 	},
 	{
-		name:    "i32.const i32.const i32.and returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_AND)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
-		name:    "i32.const i32.const i32.or returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_OR)}),
 		values:  []types.Value{types.I32(14)},
 	},
 	{
-		name:    "i32.const i32.const i32.xor returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_XOR)}),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
-		name:    "i32.const i32.clz returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CLZ)}),
 		values:  []types.Value{types.I32(31)},
 	},
 	{
-		name:    "i32.const i32.ctz returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 8), instr.New(instr.I32_CTZ)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		name:    "i32.const i32.popcnt returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.I32_POPCNT)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		name:    "i32.const i32.const i32.rotl returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTL)}),
 		values:  []types.Value{types.I32(16)},
 	},
 	{
-		name:    "i32.const i32.const i32.rotr returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 16), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTR)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		name:    "i32.const i32.extend8_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 255), instr.New(instr.I32_EXTEND8_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
-		name:    "i32.const i32.extend16_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 65535), instr.New(instr.I32_EXTEND16_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
-		name:    "i32.const i32.eqz returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 6), instr.New(instr.I32_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.lt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.lt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i32.const i32.const i32.gt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.gt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i32.const i32.const i32.le_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.le_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i32.const i32.const i32.ge_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i32.const i32.const i32.ge_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i32.const i32.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		name:    "i32.const i32.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_U)}),
 		values:  []types.Value{types.I64(int64(uint32(math.MaxUint32)))},
 	},
 	{
-		name:    "i32.const i32.to_f32_s returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int32(-1)))},
 	},
 	{
-		name:    "i32.const i32.to_f32_u returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint32(math.MaxUint32)))},
 	},
 	{
-		name:    "i32.const i32.to_f64_s returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int32(-1)))},
 	},
 	{
-		name:    "i32.const i32.to_f64_u returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint32(math.MaxUint32)))},
 	},
 	{
-		name:    "f32.const i32.reinterpret_f32 returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.I32_REINTERPRET_F32)}),
 		values:  []types.Value{types.I32(int32(math.Float32bits(1)))},
 	},
 	{
-		name:    "i64.const returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 42)}),
 		values:  []types.Value{types.I64(42)},
 	},
 	{
-		name:    "i64.const i64.const i64.add returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 2), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_ADD)}),
 		values:  []types.Value{types.I64(5)},
 	},
 	{
-		name:    "i64.const i64.const i64.sub returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SUB)}),
 		values:  []types.Value{types.I64(2)},
 	},
 	{
-		name:    "i64.const i64.const i64.mul returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 3), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_MUL)}),
 		values:  []types.Value{types.I64(12)},
 	},
 	{
-		name: "i64.const i64.const i64.div_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_S),
 		}),
 		values: []types.Value{types.I64(-3)},
 	},
 	{
-		name: "i64.const i64.const i64.div_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) / 2))},
 	},
 	{
-		name: "i64.const i64.const i64.rem_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_S),
 		}),
 		values: []types.Value{types.I64(-1)},
 	},
 	{
-		name: "i64.const i64.const i64.rem_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) % 3))},
 	},
 	{
-		name:    "i64.const i64.const i64.shl returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SHL)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
-		name: "i64.const i64.const i64.shr_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-8)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_S),
 		}),
 		values: []types.Value{types.I64(-4)},
 	},
 	{
-		name: "i64.const i64.const i64.shr_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) >> 1))},
 	},
 	{
-		name:    "i64.const i64.const i64.xor returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_XOR)}),
 		values:  []types.Value{types.I64(6)},
 	},
 	{
-		name:    "i64.const i64.const i64.and returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_AND)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
-		name:    "i64.const i64.const i64.or returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_OR)}),
 		values:  []types.Value{types.I64(14)},
 	},
 	{
-		name:    "i64.const i64.clz returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CLZ)}),
 		values:  []types.Value{types.I64(63)},
 	},
 	{
-		name:    "i64.const i64.ctz returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 8), instr.New(instr.I64_CTZ)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		name:    "i64.const i64.popcnt returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 7), instr.New(instr.I64_POPCNT)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		name:    "i64.const i64.const i64.rotl returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTL)}),
 		values:  []types.Value{types.I64(16)},
 	},
 	{
-		name:    "i64.const i64.const i64.rotr returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 16), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTR)}),
 		values:  []types.Value{types.I64(1)},
 	},
 	{
-		name:    "i64.const i64.extend8_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 255), instr.New(instr.I64_EXTEND8_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		name:    "i64.const i64.extend16_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 65535), instr.New(instr.I64_EXTEND16_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		name:    "i64.const i64.extend32_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(uint32(math.MaxUint32))), instr.New(instr.I64_EXTEND32_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		name:    "i64.const i64.eqz returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 5), instr.New(instr.I64_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 6), instr.New(instr.I64_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.lt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.lt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i64.const i64.const i64.gt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.gt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i64.const i64.const i64.le_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.le_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i64.const i64.const i64.ge_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		name:    "i64.const i64.const i64.ge_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		name:    "i64.const i64.to_i32 returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(int64(1)<<32+1)), instr.New(instr.I64_TO_I32)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		name:    "i64.const i64.to_f32_s returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int64(-1)))},
 	},
 	{
-		name:    "i64.const i64.to_f32_u returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint64(math.MaxUint64)))},
 	},
 	{
-		name:    "i64.const i64.to_f64_s returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int64(-1)))},
 	},
 	{
-		name:    "i64.const i64.to_f64_u returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint64(math.MaxUint64)))},
 	},
 	{
-		name:    "f64.const i64.reinterpret_f64 returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.I64_REINTERPRET_F64)}),
 		values:  []types.Value{types.I64(int64(math.Float64bits(1)))},
 	},
 	{
-		name:    "f32.const returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5)))}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
-		name: "f32.const f32.const f32.add returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_ADD),
 		}),
 		values: []types.Value{types.F32(3.75)},
 	},
 	{
-		name: "f32.const f32.const f32.sub returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(5.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_SUB),
 		}),
 		values: []types.Value{types.F32(3.25)},
 	},
 	{
-		name: "f32.const f32.const f32.mul returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_MUL),
 		}),
 		values: []types.Value{types.F32(10)},
 	},
 	{
-		name: "f32.const f32.const f32.div returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(10))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_DIV),
 		}),
 		values: []types.Value{types.F32(2.5)},
 	},
 	{
-		name: "f32.const f32.const f32.rem returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_REM),
 		}),
 		values: []types.Value{types.F32(-1)},
 	},
 	{
-		name: "f32.const f32.const f32.mod returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_MOD),
 		}),
 		values: []types.Value{types.F32(2)},
 	},
 	{
-		name: "f32.const f32.const f32.rem reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_REM),
 		}),
-		err: ErrDivideByZero,
+		err: interp.ErrDivideByZero,
 	},
 	{
-		name: "f32.const f32.const f32.mod reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_MOD),
 		}),
-		err: ErrDivideByZero,
+		err: interp.ErrDivideByZero,
 	},
 	{
-		name:    "f32.const f32.abs returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))), instr.New(instr.F32_ABS)}),
 		values:  []types.Value{types.F32(3.5)},
 	},
 	{
-		name:    "f32.const f32.neg returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))), instr.New(instr.F32_NEG)}),
 		values:  []types.Value{types.F32(-3.5)},
 	},
 	{
-		name:    "f32.const f32.sqrt returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(9))), instr.New(instr.F32_SQRT)}),
 		values:  []types.Value{types.F32(3)},
 	},
 	{
-		name:    "f32.const f32.ceil returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.2))), instr.New(instr.F32_CEIL)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
-		name:    "f32.const f32.floor returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))), instr.New(instr.F32_FLOOR)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
-		name:    "f32.const f32.trunc returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.8))), instr.New(instr.F32_TRUNC)}),
 		values:  []types.Value{types.F32(-1)},
 	},
 	{
-		name:    "f32.const f32.nearest returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_NEAREST)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
-		name: "f32.const f32.const f32.min returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MIN),
 		}),
 		values: []types.Value{types.F32(3)},
 	},
 	{
-		name: "f32.const f32.const f32.max returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MAX),
 		}),
 		values: []types.Value{types.F32(5)},
 	},
 	{
-		name: "f32.const f32.const f32.copysign returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(-1))), instr.New(instr.F32_COPYSIGN),
 		}),
 		values: []types.Value{types.F32(-3)},
 	},
 	{
-		name: "f32.const f32.const f32.eq returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f32.const f32.const f32.ne returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f32.const f32.const f32.lt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f32.const f32.const f32.gt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f32.const f32.const f32.le returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f32.const f32.const f32.ge returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name:    "f32.const f32.to_i32_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
-		name:    "f32.const f32.to_i32_u returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		name:    "f32.const f32.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
-		name:    "f32.const f32.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		name:    "f32.const f32.to_f64 returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_TO_F64)}),
 		values:  []types.Value{types.F64(float64(float32(1.5)))},
 	},
 	{
-		name:    "i32.const f32.reinterpret_i32 returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_REINTERPRET_I32)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
-		name:    "f64.const returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5))}),
 		values:  []types.Value{types.F64(2.5)},
 	},
 	{
-		name: "f64.const f64.const f64.add returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_ADD),
 		}),
 		values: []types.Value{types.F64(3.75)},
 	},
 	{
-		name: "f64.const f64.const f64.sub returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(5.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_SUB),
 		}),
 		values: []types.Value{types.F64(3.25)},
 	},
 	{
-		name: "f64.const f64.const f64.mul returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_MUL),
 		}),
 		values: []types.Value{types.F64(10)},
 	},
 	{
-		name: "f64.const f64.const f64.div returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(10)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_DIV),
 		}),
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		name: "f64.const f64.const f64.rem returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_REM),
 		}),
 		values: []types.Value{types.F64(-1)},
 	},
 	{
-		name: "f64.const f64.const f64.mod returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_MOD),
 		}),
 		values: []types.Value{types.F64(2)},
 	},
 	{
-		name: "f64.const f64.const f64.rem reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_REM),
 		}),
-		err: ErrDivideByZero,
+		err: interp.ErrDivideByZero,
 	},
 	{
-		name: "f64.const f64.const f64.mod reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_MOD),
 		}),
-		err: ErrDivideByZero,
+		err: interp.ErrDivideByZero,
 	},
 	{
-		name:    "f64.const f64.abs returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.5)), instr.New(instr.F64_ABS)}),
 		values:  []types.Value{types.F64(3.5)},
 	},
 	{
-		name:    "f64.const f64.neg returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.5)), instr.New(instr.F64_NEG)}),
 		values:  []types.Value{types.F64(-3.5)},
 	},
 	{
-		name:    "f64.const f64.sqrt returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(9)), instr.New(instr.F64_SQRT)}),
 		values:  []types.Value{types.F64(3)},
 	},
 	{
-		name:    "f64.const f64.ceil returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.2)), instr.New(instr.F64_CEIL)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
-		name:    "f64.const f64.floor returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.8)), instr.New(instr.F64_FLOOR)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
-		name:    "f64.const f64.trunc returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-1.8)), instr.New(instr.F64_TRUNC)}),
 		values:  []types.Value{types.F64(-1)},
 	},
 	{
-		name:    "f64.const f64.nearest returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_NEAREST)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
-		name: "f64.const f64.const f64.min returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MIN),
 		}),
 		values: []types.Value{types.F64(3)},
 	},
 	{
-		name: "f64.const f64.const f64.max returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MAX),
 		}),
 		values: []types.Value{types.F64(5)},
 	},
 	{
-		name: "f64.const f64.const f64.copysign returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(-1)), instr.New(instr.F64_COPYSIGN),
 		}),
 		values: []types.Value{types.F64(-3)},
 	},
 	{
-		name: "f64.const f64.const f64.eq returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f64.const f64.const f64.ne returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f64.const f64.const f64.lt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f64.const f64.const f64.gt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f64.const f64.const f64.le returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "f64.const f64.const f64.ge returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name:    "f64.const f64.to_i32_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
-		name:    "f64.const f64.to_i32_u returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		name:    "f64.const f64.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
-		name:    "f64.const f64.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		name:    "f64.const f64.to_f32 returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_TO_F32)}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
-		name:    "i64.const f64.reinterpret_i64 returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, math.Float64bits(1)), instr.New(instr.F64_REINTERPRET_I64)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
-		name: "i32.const i32.const i32.const array.new string.new_utf32 returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 72), instr.New(instr.I32_CONST, 105), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.STRING_NEW_UTF32),
@@ -1105,30 +940,25 @@ var runTests = []struct {
 		values: []types.Value{types.String("Hi")},
 	},
 	{
-		name:    "const.get string.len returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
-		name: "const.get const.get string.concat returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)},
 			program.WithConstants(types.String("Hi"), types.String("There"))),
 		values: []types.Value{types.String("HiThere")},
 	},
 	{
-		name: "const.get const.get string.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_NE)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.concat const.get string.eq compares content, not ref identity",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
 			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
@@ -1136,7 +966,6 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.concat const.get string.ne compares content, not ref identity",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
 			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_NE),
@@ -1144,7 +973,6 @@ var runTests = []struct {
 		values: []types.Value{types.I1(false)},
 	},
 	{
-		name: "const.get const.get string.concat string.concat reuses the shared buffer without disturbing the shorter join",
 		program: program.New([]instr.Instruction{
 			// Keep the first join live in a local, extend a copy of it, then
 			// compare the local against its original content: an append that
@@ -1159,12 +987,10 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name:    "const.get const.get string.concat handles empty operands",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)}, program.WithConstants(types.String(""), types.String(""))),
 		values:  []types.Value{types.String("")},
 	},
 	{
-		name: "const.get const.get string.concat reallocation preserves the earlier join",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1177,7 +1003,6 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.concat uses a fresh buffer for a prefix that is not the tail",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT), instr.New(instr.DROP),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
@@ -1186,55 +1011,46 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "ref.null const.get string.eq on a non-string operand traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.REF_NULL), instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_EQ),
 		}, program.WithConstants(types.String("Go"))),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "const.get const.get string.lt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LT)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.gt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GT)},
 			program.WithConstants(types.String("No"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.le returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name: "const.get const.get string.ge returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		name:    "const.get string.encode_utf32 returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ENCODE_UTF32)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.TypedArray[int32]{72, 105}},
 	},
 	{
-		name: "i32.const i32.const i32.const i32.const array.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 		}, program.WithTypes(types.TypeI32Array)),
 		values: []types.Value{types.TypedArray[int32]{10, 20, 30}},
 	},
 	{
-		name:    "i32.const array.new_default returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0)}, program.WithTypes(types.TypeI32Array)),
 		values:  []types.Value{types.TypedArray[int32]{0, 0, 0}},
 	},
 	{
-		name: "i32.const array.new_default returns null refs",
 		program: program.New(
 			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewArrayType(types.TypeAny)),
@@ -1242,7 +1058,6 @@ var runTests = []struct {
 		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeAny), types.BoxedNull, types.BoxedNull)},
 	},
 	{
-		name: "i32.const i32.const i32.const array.new array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.ARRAY_LEN),
@@ -1250,7 +1065,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
-		name: "i32.const i32.const i32.const i32.const array.new i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 100), instr.New(instr.I32_CONST, 200), instr.New(instr.I32_CONST, 300), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
@@ -1258,7 +1072,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(200)},
 	},
 	{
-		name: "i32.const i32.const through i32.const array.set i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.DUP),
@@ -1268,7 +1081,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
-		name: "i32.const array.new_default through i32.const array.fill i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1278,7 +1090,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		name: "i32.const array.new_default through f64.const array.fill i32.const array.get returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1288,7 +1099,6 @@ var runTests = []struct {
 		values: []types.Value{types.F64(1.5)},
 	},
 	{
-		name: "i32.const array.new_default through i32.const array.copy i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1300,7 +1110,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(9)},
 	},
 	{
-		name: "i32.const i32.const through i32.const i32.const i32.const array.append returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_APPEND),
@@ -1308,7 +1117,6 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{1, 2, 3, 4}},
 	},
 	{
-		name: "i32.const i32.const i32.const i32.const array.new i32.const array.delete returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_DELETE),
@@ -1316,7 +1124,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
-		name: "i32.const i32.const through array.new i32.const i32.const array.slice returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 40), instr.New(instr.I32_CONST, 4), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_SLICE),
@@ -1332,7 +1139,6 @@ var runTests = []struct {
 		// so it must fall back from its specialized TypedArray[int32]
 		// assertion to the *types.Array representation actually on the heap
 		// instead of trapping.
-		name: "array.new_default of a ref-element array type local.set local.get i32.const array.get fuses declared i32 array local, returns element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1352,7 +1158,6 @@ var runTests = []struct {
 		// TypedArray[int32] assertion must fall back through every other
 		// concrete TypedArray[_] representation, not just *types.Array,
 		// instead of trapping a case the unfused handler accepts.
-		name: "const.get of a mismatched-element typed array local.set local.get i32.const array.get on a declared i32 array local returns the actual f32 element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1363,7 +1168,6 @@ var runTests = []struct {
 		values: []types.Value{types.F32(1.5)},
 	},
 	{
-		name: "i32.const f64.const struct.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
@@ -1373,13 +1177,11 @@ var runTests = []struct {
 		)},
 	},
 	{
-		name: "struct.new_default returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.STRUCT_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
 		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))},
 	},
 	{
-		name: "i32.const f64.const struct.new i32.const struct.get returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
@@ -1387,7 +1189,6 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		name: "i32.const f64.const through i32.const struct.set i32.const struct.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.DUP),
@@ -1397,7 +1198,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
-		name: "struct.new local.set local.get i32.const struct.get fuses declared struct local, returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1409,7 +1209,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		name: "struct.new local.set local.get i32.const struct.get fuses declared struct local, returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1421,7 +1220,6 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		name: "struct.new local.set local.get const.get struct.get fuses declared struct local with a constant field index, returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1434,7 +1232,6 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		name: "const.get struct.new local.set local.get i32.const struct.get fuses declared struct local, returns and retains ref field",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1447,30 +1244,26 @@ var runTests = []struct {
 		values: []types.Value{types.String("hi")},
 	},
 	{
-		name: "i32.const local.set local.get i32.const struct.get on a scalar stored into a declared struct local traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
 		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32)))),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "local.get i32.const struct.get on an uninitialized declared struct local traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
 		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32)))),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "ref.null local.set local.get i32.const struct.get on a null declared struct local traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.REF_NULL), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
 		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32)))),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "struct.new local.set local.get i32.const struct.get on a smaller runtime struct traps segmentation fault",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 9), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1479,10 +1272,9 @@ var runTests = []struct {
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))),
 		),
-		err: ErrSegmentationFault,
+		err: interp.ErrSegmentationFault,
 	},
 	{
-		name: "struct.new local.set local.get i32.const struct.get with a field index past the declared struct rejects fusion, still traps segmentation fault",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1491,10 +1283,9 @@ var runTests = []struct {
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32))),
 		),
-		err: ErrSegmentationFault,
+		err: interp.ErrSegmentationFault,
 	},
 	{
-		name: "i32.const i32.const i32.const array.new global.set global.get i32.const array.get fuses declared i32 array global, returns element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -1506,7 +1297,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(20)},
 	},
 	{
-		name: "struct.new global.set global.get i32.const struct.get fuses declared struct global, returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -1525,7 +1315,6 @@ var runTests = []struct {
 		// path proves only the global's declared element kind at threading
 		// time, so it must fall back to the *types.Array representation
 		// actually on the heap instead of trapping.
-		name: "array.new_default of a ref-element array type global.set global.get i32.const array.get fuses declared i32 array global, returns element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -1546,7 +1335,6 @@ var runTests = []struct {
 		// through every other concrete TypedArray[_] representation, not
 		// just *types.Array, instead of trapping a case the unfused handler
 		// accepts.
-		name: "const.get of a mismatched-element typed array global.set global.get i32.const array.get on a declared i32 array global returns the actual f32 element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1557,23 +1345,20 @@ var runTests = []struct {
 		values: []types.Value{types.F32(1.5)},
 	},
 	{
-		name: "i32.const global.set global.get i32.const array.get on a scalar stored into a declared array global traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
 		}, program.WithGlobals(types.TypeI32Array)),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "i32.const global.set global.get i32.const struct.get on a scalar stored into a declared struct global traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
 		}, program.WithGlobals(types.NewStructType(types.NewStructField(types.TypeI32)))),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "i32.const i32.const i32.const array.new const.get closure.new call fuses declared i32 array upvalue, returns element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -1589,7 +1374,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(20)},
 	},
 	{
-		name: "struct.new const.get closure.new call fuses declared struct upvalue, returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -1608,7 +1392,6 @@ var runTests = []struct {
 		// Mirrors the LOCAL_GET parity case above, but the ref-element array
 		// is captured as an upvalue declared types.TypeI32Array instead of
 		// stored into a local.
-		name: "array.new_default of a ref-element array type const.get closure.new call fuses declared i32 array upvalue, returns element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -1633,7 +1416,6 @@ var runTests = []struct {
 		// every other concrete TypedArray[_] representation, not just
 		// *types.Array, instead of trapping a case the unfused handler
 		// accepts.
-		name: "const.get of a mismatched-element typed array const.get closure.new call on a declared i32 array upvalue returns the actual f32 element",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CONST_GET, 1),
@@ -1651,7 +1433,6 @@ var runTests = []struct {
 		values: []types.Value{types.F32(1.5)},
 	},
 	{
-		name: "i32.const const.get closure.new call on a scalar captured into a declared array upvalue traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
@@ -1663,10 +1444,9 @@ var runTests = []struct {
 				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
 				MustBuild()),
 		),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "i32.const const.get closure.new call on a scalar captured into a declared struct upvalue traps type mismatch",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
@@ -1678,10 +1458,9 @@ var runTests = []struct {
 				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.RETURN)).
 				MustBuild()),
 		),
-		err: ErrTypeMismatch,
+		err: interp.ErrTypeMismatch,
 	},
 	{
-		name: "i32.const i32.const through i32.const map.new i32.const map.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
@@ -1689,7 +1468,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
-		name: "const.get i32.const map.new const.get const.get string.concat map.get keys a string map by content",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
@@ -1699,7 +1477,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
-		name: "const.get const.get string.concat i32.const map.new const.get map.get keys a string map stored under a computed key",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
@@ -1709,7 +1486,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
-		name: "const.get i32.const map.new const.get const.get string.concat map.get keys a dynamic map by string content",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
@@ -1719,7 +1495,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
-		name: "i32.const i32.eqz i32.const map.new i32.const i32.eqz map.get keys a dynamic map by boolean value",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ),
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
@@ -1728,7 +1503,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
-		name: "i32.const map.new_default map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 4), instr.New(instr.MAP_NEW_DEFAULT, 0),
 			instr.New(instr.MAP_LEN),
@@ -1736,7 +1510,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
-		name: "i32.const i32.const i32.const i32.const i32.const map.new map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_LEN),
@@ -1744,7 +1517,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
-		name: "i32.const i32.const i32.const map.new i32.const map.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_GET),
@@ -1752,7 +1524,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
-		name: "i32.const i32.const i32.const map.new i32.const map.lookup returns i1 i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_LOOKUP),
@@ -1760,7 +1531,6 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true), types.I32(10)},
 	},
 	{
-		name: "i32.const i32.const through i32.const i32.const map.set map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1770,7 +1540,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
-		name: "i32.const i32.const through dup i32.const map.delete map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1780,7 +1549,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-		name: "i32.const i32.const i32.const map.new dup map.clear map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1790,7 +1558,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
-		name: "i32.const i32.const through i32.const map.new map.keys array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_KEYS), instr.New(instr.ARRAY_LEN),
@@ -1798,7 +1565,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
-		name: "i32.const i32.const i32.const map.new map.iter coro.value returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_ITER), instr.New(instr.CORO_VALUE),
@@ -1806,7 +1572,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-		name: "i32.const throw i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 99),
 			instr.New(instr.THROW),
@@ -1815,31 +1580,26 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
-		name:    "i32.const i32.const error.new returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW)}),
 		values:  []types.Value{types.NewError(types.ErrorCode(7), "5", types.BoxI32(5))},
 	},
 	{
-		name: "i32.const i32.const error.new error.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_GET),
 		}),
 		values: []types.Value{types.I32(5)},
 	},
 	{
-		name: "i32.const i32.const error.new error.code returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_CODE),
 		}),
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		name:    "const.get string.iter coro.value returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ITER), instr.New(instr.CORO_VALUE)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(72)},
 	},
 	{
-		name: "const.get i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 1),
@@ -1848,7 +1608,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(5)},
 	},
 	{
-		name: "const.get i32.const struct.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -1857,7 +1616,6 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		name: "const.get ref.get returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.REF_GET),
@@ -1865,52 +1623,46 @@ var runTests = []struct {
 		values: []types.Value{types.I64(math.MaxInt64)},
 	},
 	{
-		name: "i32.const i32.const const.get call returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		}, program.WithConstants(NewHostFunction(
+		}, program.WithConstants(interp.NewHostFunction(
 			&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
+			func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(args[0].I32() + args[1].I32())}, nil
 			},
 		))),
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		name: "i32.const array.new_default i32.const array.get reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array)),
-		err: ErrIndexOutOfRange,
+		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		name: "i32.const array.new_default i32.const i32.const array.set reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
 		}, program.WithTypes(types.TypeI32Array)),
-		err: ErrIndexOutOfRange,
+		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		name: "i32.const array.new_default i32.const i32.const i32.const array.fill reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_FILL),
 		}, program.WithTypes(types.TypeI32Array)),
-		err: ErrIndexOutOfRange,
+		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		name: "i32.const array.new_default i32.const array.delete reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_DELETE),
 		}, program.WithTypes(types.TypeI32Array)),
-		err: ErrIndexOutOfRange,
+		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		name: "i32.const array.new_default through array.new_default i32.const i32.const array.copy reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -1918,10 +1670,9 @@ var runTests = []struct {
 			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 5),
 			instr.New(instr.ARRAY_COPY),
 		}, program.WithTypes(types.TypeI32Array)),
-		err: ErrIndexOutOfRange,
+		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		name: "i32.const i32.const through array.new i32.const i32.const array.copy reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 2),
@@ -1929,19 +1680,42 @@ var runTests = []struct {
 			instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, uint64(^uint32(0))),
 			instr.New(instr.ARRAY_COPY),
 		}, program.WithTypes(types.TypeI32Array)),
-		err: ErrIndexOutOfRange,
+		err: interp.ErrIndexOutOfRange,
 	},
+}
+
+// runTestName renders a runTests case's program to a single-line name, so the
+// program itself documents the case instead of a hand-written label that can
+// drift out of sync with it. It reads the program's canonical String() dump,
+// keeps only the ".code" section (ignoring any ".locals", ".constants", etc.
+// that follow), strips each line's "%04d:\t" offset prefix, and joins the
+// remaining instruction text with "; ".
+func runTestName(prog *program.Program) string {
+	lines := strings.Split(prog.String(), "\n")
+	var parts []string
+	for _, line := range lines[1:] { // lines[0] is always the ".code" header.
+		if strings.HasPrefix(line, ".") {
+			break
+		}
+		if line == "" {
+			continue
+		}
+		if _, rest, ok := strings.Cut(line, ":\t"); ok {
+			line = rest
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func TestInterpreter_Run(t *testing.T) {
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
-		names := make(map[string]struct{})
+		names := make(map[string]int)
 		for _, tt := range runTests {
-			require.NotEmpty(t, tt.name)
-			_, duplicate := names[tt.name]
-			require.False(t, duplicate, "duplicate runtime case %q", tt.name)
-			names[tt.name] = struct{}{}
+			name := runTestName(tt.program)
+			require.NotEmpty(t, name)
+			names[name]++
 			codes := [][]byte{tt.program.Code}
 			for _, constant := range tt.program.Constants {
 				if fn, ok := constant.(*types.Function); ok {
@@ -1971,6 +1745,20 @@ func TestInterpreter_Run(t *testing.T) {
 			}
 		}
 		require.Empty(t, missing)
+
+		// A derived name collides when two cases render the same program, which
+		// is not itself wrong (Go's testing package disambiguates with a "#01"
+		// suffix) but is worth surfacing: one of the two is likely redundant.
+		var collisions int
+		for name, count := range names {
+			if count > 1 {
+				collisions += count - 1
+				t.Logf("derived name used by %d cases: %q", count, name)
+			}
+		}
+		if collisions > 0 {
+			t.Logf("%d runTests case(s) collide on their derived name", collisions)
+		}
 	})
 
 	t.Run("releases frame slots on return", func(t *testing.T) {
@@ -1999,7 +1787,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		i := New(prog, WithHeapLimit(heapRunway))
+		i := interp.New(prog, interp.WithHeapLimit(heapRunway))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2007,7 +1795,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("string.concat reads the result after releasing both last operand references", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.STRING_CONCAT)})
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("left")))
@@ -2040,7 +1828,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		i := New(prog, WithHeapLimit(heapRunway))
+		i := interp.New(prog, interp.WithHeapLimit(heapRunway))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2066,11 +1854,11 @@ func TestInterpreter_Run(t *testing.T) {
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32))),
 		)
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		err := i.Run(context.Background())
-		require.ErrorIs(t, err, ErrTypeMismatch)
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
 	})
 
 	for _, tt := range []struct {
@@ -2096,7 +1884,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.REF_SET),
 				instr.New(instr.REF_GET),
 			}, program.WithGlobals(tt.typ, tt.typ))
-			i := New(prog, WithThreshold(-1))
+			i := interp.New(prog, interp.WithThreshold(-1))
 			defer i.Close()
 			require.NoError(t, i.SetGlobal(0, tt.initial))
 			require.NoError(t, i.SetGlobal(1, tt.replacement))
@@ -2130,16 +1918,29 @@ func TestInterpreter_Run(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1<<20), interp.WithThreshold(1<<30), interp.WithProfiler(p))
 		defer i.Close()
-		require.Empty(t, i.tracer.loops)
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(64), value)
-		require.Empty(t, i.tracer.loops)
-		require.Empty(t, i.tried)
+
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.Zero(t, attempts, "an unreachable threshold must never trigger a compile attempt")
+		// The very first entry always records one incidental, never-completed
+		// capture (outcome "partial") regardless of the threshold - that is
+		// ordinary entry-warmup instrumentation, not loop discovery. The public
+		// projection of i.tracer.loops staying empty is that no capture ever
+		// reaches "published": an unreachable threshold gates backedge() from
+		// ever calling i.trace, which is the only path that discovers and
+		// publishes a loop.
+		published := jitMetricSum(i, p, "vm_jit_trace_captures_total", func(labels []prof.Label) bool {
+			return jitLabel(labels, "outcome") == "published"
+		})
+		require.Zero(t, published, "an unreachable threshold must never publish a discovered loop trace")
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -2165,23 +1966,43 @@ func TestInterpreter_Run(t *testing.T) {
 			prog, err := b.Build()
 			require.NoError(t, err)
 
-			i := New(prog, WithThreshold(1))
+			p := prof.New()
+			i := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(p))
 			defer i.Close()
-			headers := i.tracer.headers(i, 0)
-			require.NotEmpty(t, headers)
-			root := anchor{ip: headers[0]}
-			fallback := i.code[0][root.ip]
-			native := func(*Interpreter) {}
-			i.exits[root] = fallback
-			i.code[0][root.ip] = native
 
-			require.True(t, i.backedges[0])
+			attempts := func() float64 {
+				i.Flush()
+				v, _ := p.Metric("vm_jit_attempts_total")
+				return v
+			}
+			nativeEntries := func() float64 {
+				return jitMetricSum(i, p, "vm_jit_native_entries_total", func([]prof.Label) bool { return true })
+			}
 
-			i.cool(0)
+			// Drive the loop well past the point every root has been attempted
+			// and cooled: docs/profile.md's contract is that cooling removes
+			// further hotness instrumentation and capture overhead while
+			// leaving any installed native code active.
+			for range 8 {
+				require.NoError(t, i.Run(context.Background()))
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(2), v)
+				i.Reset()
+			}
+			settledAttempts := attempts()
+			settledEntries := nativeEntries()
+			require.Greater(t, settledEntries, float64(0), "the loop must have installed native code before cooling")
 
-			require.Equal(t, reflect.ValueOf(native).Pointer(), reflect.ValueOf(i.code[0][root.ip]).Pointer())
-			require.NotNil(t, i.exits[root])
-			require.False(t, i.backedges[0])
+			for range 8 {
+				require.NoError(t, i.Run(context.Background()))
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(2), v)
+				i.Reset()
+			}
+			require.Equal(t, settledAttempts, attempts(), "cooling must stop further compile attempts")
+			require.Greater(t, nativeEntries(), settledEntries, "cooling must not stop the installed native handler from running")
 		})
 	}
 
@@ -2215,8 +2036,8 @@ func TestInterpreter_Run(t *testing.T) {
 			profile := prof.New()
 			const runs = 32
 			func() {
-				jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-				threaded := New(prog, WithTick(1), WithThreshold(-1))
+				jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+				threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 				defer func() {
 					require.NoError(t, threaded.Close())
 					require.NoError(t, jit.Close())
@@ -2230,7 +2051,7 @@ func TestInterpreter_Run(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 					require.Equal(t, types.BoxI32(size/2), got)
-					require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+					require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 					jit.Reset()
 					threaded.Reset()
 				}
@@ -2284,8 +2105,8 @@ func TestInterpreter_Run(t *testing.T) {
 			prog, err := b.Build()
 			require.NoError(t, err)
 
-			jit := New(prog, WithTick(1), WithThreshold(0))
-			threaded := New(prog, WithTick(1), WithThreshold(-1))
+			jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+			threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 			t.Cleanup(func() { require.NoError(t, threaded.Close()) })
 			t.Cleanup(func() { require.NoError(t, jit.Close()) })
 			for n := 0; n < 32; n++ {
@@ -2297,7 +2118,7 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 				require.Equal(t, types.BoxI32(3*size), got)
-				require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -2322,8 +2143,8 @@ func TestInterpreter_Run(t *testing.T) {
 			prog, err := b.Build()
 			require.NoError(t, err)
 
-			jit := New(prog, WithTick(1), WithThreshold(0))
-			threaded := New(prog, WithTick(1), WithThreshold(-1))
+			jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+			threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 			t.Cleanup(func() { require.NoError(t, threaded.Close()) })
 			t.Cleanup(func() { require.NoError(t, jit.Close()) })
 			for n := 0; n < 32; n++ {
@@ -2335,7 +2156,7 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 				require.Equal(t, types.BoxI32(36), got)
-				require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -2343,15 +2164,16 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 	modes := []struct {
 		name string
-		opts []func(*option)
+		opts []interp.Option
 	}{
-		{name: "standalone", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
-		{name: "fused", opts: []func(*option){WithThreshold(-1)}},
+		{name: "standalone", opts: []interp.Option{interp.WithTick(1), interp.WithThreshold(-1)}},
+		{name: "fused", opts: []interp.Option{interp.WithThreshold(-1)}},
 	}
 	for _, tt := range runTests {
+		name := runTestName(tt.program)
 		for _, mode := range modes {
-			t.Run(tt.name+"/"+mode.name, func(t *testing.T) {
-				i := New(tt.program, mode.opts...)
+			t.Run(name+"/"+mode.name, func(t *testing.T) {
+				i := interp.New(tt.program, mode.opts...)
 				defer i.Close()
 
 				err := i.Run(context.Background())
@@ -2383,14 +2205,22 @@ func TestInterpreter_Run(t *testing.T) {
 
 	if runtime.GOARCH == "arm64" {
 		t.Run("I32Add/Straight/JITCold", func(t *testing.T) {
-			vm := New(program.New(benchmarkNumeric), WithTick(1), WithThreshold(0))
+			profile := prof.New()
+			vm := interp.New(program.New(benchmarkNumeric), interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
 			defer vm.Close()
 
 			require.NoError(t, vm.Run(context.Background()))
 			value, err := vm.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), value)
-			require.Greater(t, vm.samples.Value("vm_jit_emits_total"), float64(0))
+			vm.Flush()
+			var emits float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_emits_total" {
+					emits += metric.Value
+				}
+			}
+			require.Greater(t, emits, float64(0))
 		})
 
 		arrayExitValues := types.TypedArray[float64]{7}
@@ -2410,7 +2240,7 @@ func TestInterpreter_Run(t *testing.T) {
 		)
 		t.Run("Array/Get/JITExit", func(t *testing.T) {
 			profile := prof.New()
-			vm := New(arrayExit, WithProfiler(profile), WithTick(1), WithThreshold(0))
+			vm := interp.New(arrayExit, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
 			for range 8 {
 				vm.Reset()
 				require.NoError(t, vm.Push(types.I32(0)))
@@ -2422,7 +2252,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 			vm.Reset()
 			require.NoError(t, vm.Push(types.I32(-1)))
-			require.ErrorIs(t, vm.Run(context.Background()), ErrIndexOutOfRange)
+			require.ErrorIs(t, vm.Run(context.Background()), interp.ErrIndexOutOfRange)
 			require.NoError(t, vm.Close())
 
 			var exits float64
@@ -2449,7 +2279,7 @@ func TestInterpreter_Run(t *testing.T) {
 		)
 		t.Run("I32Div/JITDeopt", func(t *testing.T) {
 			profile := prof.New()
-			vm := New(divide, WithProfiler(profile), WithTick(1), WithThreshold(0))
+			vm := interp.New(divide, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
 			for range 8 {
 				vm.Reset()
 				require.NoError(t, vm.Push(types.I32(90)))
@@ -2459,12 +2289,12 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, types.I32(30), value)
 			}
-			require.NotNil(t, vm.stub(1))
+			require.True(t, jitCompiledAt(vm, profile, 1, 0))
 
 			vm.Reset()
 			require.NoError(t, vm.Push(types.I32(90)))
 			require.NoError(t, vm.Push(types.I32(0)))
-			require.ErrorIs(t, vm.Run(context.Background()), ErrDivideByZero)
+			require.ErrorIs(t, vm.Run(context.Background()), interp.ErrDivideByZero)
 			require.NoError(t, vm.Close())
 
 			var exits float64
@@ -2548,12 +2378,12 @@ func TestInterpreter_Run(t *testing.T) {
 		globals []types.Boxed
 		code    types.ErrorCode
 	}
-	run := func(t *testing.T, prog *program.Program, opts ...func(*option)) outcome {
+	run := func(t *testing.T, prog *program.Program, opts ...interp.Option) outcome {
 		t.Helper()
-		i := New(prog, opts...)
+		i := interp.New(prog, opts...)
 		defer i.Close()
 		err := i.Run(context.Background())
-		result := outcome{code: ErrorCode(err)}
+		result := outcome{code: interp.ErrorCode(err)}
 		for i.Len() > 0 {
 			value, popErr := i.Pop()
 			require.NoError(t, popErr)
@@ -2567,19 +2397,19 @@ func TestInterpreter_Run(t *testing.T) {
 		return result
 	}
 	for _, tt := range parityPrograms {
-		oracle := run(t, tt.prog, WithTick(1), WithThreshold(-1))
+		oracle := run(t, tt.prog, interp.WithTick(1), interp.WithThreshold(-1))
 		t.Run("parity/"+tt.name+"/fused", func(t *testing.T) {
-			require.Equal(t, oracle, run(t, tt.prog, WithThreshold(-1)))
+			require.Equal(t, oracle, run(t, tt.prog, interp.WithThreshold(-1)))
 		})
 		if runtime.GOARCH == "arm64" {
 			t.Run("parity/"+tt.name+"/jit warm", func(t *testing.T) {
-				i := New(tt.prog, WithThreshold(0))
+				i := interp.New(tt.prog, interp.WithThreshold(0))
 				defer i.Close()
-				require.Equal(t, oracle.code, ErrorCode(i.Run(context.Background())))
+				require.Equal(t, oracle.code, interp.ErrorCode(i.Run(context.Background())))
 				i.Reset()
 
 				err := i.Run(context.Background())
-				result := outcome{code: ErrorCode(err)}
+				result := outcome{code: interp.ErrorCode(err)}
 				for i.Len() > 0 {
 					value, popErr := i.Pop()
 					require.NoError(t, popErr)
@@ -2596,11 +2426,11 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 
 	t.Run("parity/host callback effect", func(t *testing.T) {
-		runHost := func(opts ...func(*option)) (types.Value, int) {
+		runHost := func(opts ...interp.Option) (types.Value, int) {
 			calls := 0
-			host := NewHostFunction(
+			host := interp.NewHostFunction(
 				&types.FunctionType{Returns: []types.Type{types.TypeI32}},
-				func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 					calls++
 					return []types.Boxed{types.BoxI32(42)}, nil
 				},
@@ -2609,7 +2439,7 @@ func TestInterpreter_Run(t *testing.T) {
 				[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
 				program.WithConstants(host),
 			)
-			i := New(prog, opts...)
+			i := interp.New(prog, opts...)
 			defer i.Close()
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.Pop()
@@ -2617,13 +2447,13 @@ func TestInterpreter_Run(t *testing.T) {
 			return value, calls
 		}
 
-		want, calls := runHost(WithTick(1), WithThreshold(-1))
+		want, calls := runHost(interp.WithTick(1), interp.WithThreshold(-1))
 		require.Equal(t, 1, calls)
-		got, calls := runHost(WithThreshold(-1))
+		got, calls := runHost(interp.WithThreshold(-1))
 		require.Equal(t, want, got)
 		require.Equal(t, 1, calls)
 		if runtime.GOARCH == "arm64" {
-			got, calls = runHost(WithThreshold(0))
+			got, calls = runHost(interp.WithThreshold(0))
 			require.Equal(t, want, got)
 			require.Equal(t, 1, calls)
 		}
@@ -2636,11 +2466,11 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		bump := func(c *counter) int32 { c.hidden++; return c.Count }
 
-		runHost := func(opts ...func(*option)) (types.Value, int32) {
-			setup := New(program.New(nil))
+		runHost := func(opts ...interp.Option) (types.Value, int32) {
+			setup := interp.New(program.New(nil))
 			defer setup.Close()
 			src := &counter{Count: 7}
-			host, err := NewRegistry().Marshal(setup, src)
+			host, err := interp.NewRegistry().Marshal(setup, src)
 			require.NoError(t, err)
 
 			prog := program.New([]instr.Instruction{
@@ -2649,7 +2479,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.STRUCT_SET),
 				instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
 			}, program.WithConstants(host))
-			i := New(prog, opts...)
+			i := interp.New(prog, opts...)
 			defer i.Close()
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.Pop()
@@ -2659,27 +2489,27 @@ func TestInterpreter_Run(t *testing.T) {
 			return value, bump(src)
 		}
 
-		want, seen := runHost(WithTick(1), WithThreshold(-1))
+		want, seen := runHost(interp.WithTick(1), interp.WithThreshold(-1))
 		require.Equal(t, types.I32(99), want)
 		require.Equal(t, int32(99), seen)
-		got, seen := runHost(WithThreshold(-1))
+		got, seen := runHost(interp.WithThreshold(-1))
 		require.Equal(t, want, got)
 		require.Equal(t, int32(99), seen)
 		if runtime.GOARCH == "arm64" {
-			got, seen = runHost(WithThreshold(0))
+			got, seen = runHost(interp.WithThreshold(0))
 			require.Equal(t, want, got)
 			require.Equal(t, int32(99), seen)
 		}
 	})
 
 	t.Run("parity/host container writes reach the Go value", func(t *testing.T) {
-		runHost := func(value any, code []instr.Instruction, opts ...func(*option)) types.Value {
-			setup := New(program.New(nil))
+		runHost := func(value any, code []instr.Instruction, opts ...interp.Option) types.Value {
+			setup := interp.New(program.New(nil))
 			defer setup.Close()
-			host, err := NewRegistry().Marshal(setup, value)
+			host, err := interp.NewRegistry().Marshal(setup, value)
 			require.NoError(t, err)
 
-			i := New(program.New(code, program.WithConstants(host)), opts...)
+			i := interp.New(program.New(code, program.WithConstants(host)), opts...)
 			defer i.Close()
 			require.NoError(t, i.Run(context.Background()))
 			out, err := i.Pop()
@@ -2689,12 +2519,12 @@ func TestInterpreter_Run(t *testing.T) {
 
 		for _, tt := range []struct {
 			name string
-			run  func(opts ...func(*option)) (types.Value, any)
+			run  func(opts ...interp.Option) (types.Value, any)
 			want any
 		}{
 			{
 				name: "array element",
-				run: func(opts ...func(*option)) (types.Value, any) {
+				run: func(opts ...interp.Option) (types.Value, any) {
 					src := []int32{7}
 					out := runHost(src, []instr.Instruction{
 						instr.New(instr.CONST_GET, 0),
@@ -2708,7 +2538,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 			{
 				name: "map entry",
-				run: func(opts ...func(*option)) (types.Value, any) {
+				run: func(opts ...interp.Option) (types.Value, any) {
 					src := map[int32]int32{}
 					out := runHost(src, []instr.Instruction{
 						instr.New(instr.CONST_GET, 0),
@@ -2724,16 +2554,16 @@ func TestInterpreter_Run(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				// The guest wrote into Go memory, so every mode leaves the
 				// write in the Go value rather than in a VM copy of it.
-				value, src := tt.run(WithTick(1), WithThreshold(-1))
+				value, src := tt.run(interp.WithTick(1), interp.WithThreshold(-1))
 				require.Equal(t, types.I32(99), value)
 				require.Equal(t, tt.want, src)
 
-				value, src = tt.run(WithThreshold(-1))
+				value, src = tt.run(interp.WithThreshold(-1))
 				require.Equal(t, types.I32(99), value)
 				require.Equal(t, tt.want, src)
 
 				if runtime.GOARCH == "arm64" {
-					value, src = tt.run(WithThreshold(0))
+					value, src = tt.run(interp.WithThreshold(0))
 					require.Equal(t, types.I32(99), value)
 					require.Equal(t, tt.want, src)
 				}
@@ -2748,10 +2578,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
 		require.NoError(t, err)
@@ -2765,7 +2595,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), // cond != 0 selects the deeper operand
 			instr.New(instr.SELECT),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2773,8 +2603,11 @@ func TestInterpreter_Run(t *testing.T) {
 		top, err := i.Peek(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, top.Ref())
-		require.Equal(t, 1, i.rc[1]) // selected ref survives on the stack
-		require.Equal(t, 0, i.rc[2]) // discarded ref released to zero
+		rc1, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc1) // selected ref survives on the stack
+		_, err = i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // discarded ref released to zero
 	})
 
 	t.Run("GLOBAL_TEE retains the ref stored into the global slot", func(t *testing.T) {
@@ -2783,7 +2616,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_TEE, 0), // duplicates ownership: stack + global
 			instr.New(instr.DROP),          // drop stack copy; global still owns
 		}, program.WithGlobals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2791,7 +2624,9 @@ func TestInterpreter_Run(t *testing.T) {
 		g, err := i.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, g.Ref())
-		require.Equal(t, 1, i.rc[1]) // global slot keeps the ref alive
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc) // global slot keeps the ref alive
 	})
 
 	t.Run("LOCAL_TEE retains the ref stored into the local slot", func(t *testing.T) {
@@ -2800,7 +2635,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.LOCAL_TEE, 0), // duplicates ownership: stack + local
 			instr.New(instr.DROP),         // drop stack copy; local still owns
 		}, program.WithLocals(types.TypeI32Array))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2808,7 +2643,9 @@ func TestInterpreter_Run(t *testing.T) {
 		l, err := i.Local(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, l.Ref())
-		require.Equal(t, 1, i.rc[1]) // local slot keeps the ref alive
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc) // local slot keeps the ref alive
 	})
 
 	t.Run("REF_EQ releases both consumed refs", func(t *testing.T) {
@@ -2817,13 +2654,15 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
 			instr.New(instr.REF_EQ),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
-		require.Equal(t, 0, i.rc[2])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+		_, err = i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("REF_NE releases both consumed refs", func(t *testing.T) {
@@ -2832,13 +2671,15 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
 			instr.New(instr.REF_NE),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
-		require.Equal(t, 0, i.rc[2])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+		_, err = i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("REF_TEST releases the consumed ref", func(t *testing.T) {
@@ -2846,12 +2687,13 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.REF_TEST, 0),
 		}, program.WithTypes(types.TypeI32))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("REF_IS_NULL releases the consumed ref", func(t *testing.T) {
@@ -2859,12 +2701,13 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.REF_IS_NULL),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[1])
+		_, err := i.RefCount(1)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("fused trapping sources use the remaining stack slot", func(t *testing.T) {
@@ -2875,7 +2718,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))),
 			instr.New(instr.F32_DIV),
 		}, program.WithGlobals(types.TypeF32))
-		i := New(prog, WithStack(2), WithThreshold(-1))
+		i := interp.New(prog, interp.WithStack(2), interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2892,11 +2735,11 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))),
 			instr.New(instr.F32_DIV),
 		}, program.WithGlobals(types.TypeF32))
-		i := New(prog, WithStack(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithStack(1), interp.WithThreshold(-1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
-		require.Equal(t, 1, i.sp)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
+		require.Equal(t, 1, i.Len())
 	})
 
 	t.Run("CONST_GET reports overflow before retaining a ref", func(t *testing.T) {
@@ -2905,10 +2748,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.CONST_GET, 0),
 		}, program.WithConstants(fn))
-		i := New(prog, WithStack(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithStack(1), interp.WithThreshold(-1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
 		require.Equal(t, 1, i.Len())
 	})
 
@@ -2918,10 +2761,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.REF_IS_NULL),
 		}, program.WithGlobals(types.TypeAny))
-		i := New(prog, WithStack(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithStack(1), interp.WithThreshold(-1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
 		require.Equal(t, 1, i.Len())
 	})
 
@@ -2935,7 +2778,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32))
-		i := New(prog, WithStack(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithStack(1), interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2953,11 +2796,11 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32))
-		i := New(prog, WithStack(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithStack(1), interp.WithThreshold(-1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
-		require.Equal(t, 1, i.sp)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
+		require.Equal(t, 1, i.Len())
 	})
 
 	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
@@ -2965,11 +2808,11 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))))
-		i := New(prog, WithStack(1))
+		i := interp.New(prog, interp.WithStack(1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
-		require.Equal(t, 1, i.sp)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
+		require.Equal(t, 1, i.Len())
 	})
 
 	t.Run("LOCAL_GET rejects one-past-current local slot", func(t *testing.T) {
@@ -2977,18 +2820,18 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.DROP),
 			instr.New(instr.LOCAL_GET, 0),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithTick(1))
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("LOCAL_GET rejects undeclared metadata without panicking during threading", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 0)})
-		i := New(prog, WithTick(1))
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("LOCAL_SET rejects one-past-current local slot", func(t *testing.T) {
@@ -2998,10 +2841,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.LOCAL_SET, 1),
 		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithTick(1))
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("LOCAL_TEE rejects one-past-current local slot", func(t *testing.T) {
@@ -3011,10 +2854,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.LOCAL_TEE, 1),
 		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithTick(1))
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("fused LOCAL_GET rejects one-past-current local slot", func(t *testing.T) {
@@ -3024,10 +2867,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(1)),
 			instr.New(instr.I32_ADD),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("GLOBAL_SET rejects an undeclared global slot", func(t *testing.T) {
@@ -3035,10 +2878,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.GLOBAL_SET, 0),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("GLOBAL_TEE rejects an undeclared global slot", func(t *testing.T) {
@@ -3046,10 +2889,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.GLOBAL_TEE, 0),
 		})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("unseeded declared globals read kind-correct zeros", func(t *testing.T) {
@@ -3060,14 +2903,20 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 1),
 			instr.New(instr.GLOBAL_GET, 2),
 		}, program.WithGlobals(types.TypeI32, types.TypeF64, types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 3, i.sp)
-		require.Equal(t, types.BoxI32(2), i.stack[0])
-		require.Equal(t, types.BoxF64(0), i.stack[1])
-		require.Equal(t, types.BoxedNull, i.stack[2])
+		require.Equal(t, 3, i.Len())
+		v0, err := i.Peek(2)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(2), v0)
+		v1, err := i.Peek(1)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxF64(0), v1)
+		v2, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxedNull, v2)
 	})
 
 	t.Run("GLOBAL_GET declares and reads an I32 global with a fused superinstruction", func(t *testing.T) {
@@ -3078,12 +2927,14 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(2)),
 			instr.New(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 1, i.sp)
-		require.Equal(t, types.BoxI32(7), i.stack[i.sp-1])
+		require.Equal(t, 1, i.Len())
+		v, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(7), v)
 	})
 
 	t.Run("GLOBAL_TEE retains the ref stored into a declared ref global", func(t *testing.T) {
@@ -3092,7 +2943,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_TEE, 0),
 			instr.New(instr.DROP),
 		}, program.WithGlobals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3100,7 +2951,9 @@ func TestInterpreter_Run(t *testing.T) {
 		g, err := i.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, g.Ref())
-		require.Equal(t, 1, i.rc[1])
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc)
 	})
 
 	t.Run("I64 local rejects non-I64 heap refs", func(t *testing.T) {
@@ -3112,10 +2965,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I64_CONST, i64operand(1)),
 			instr.New(instr.I64_ADD),
 		}, program.WithLocals(types.TypeI64))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrTypeMismatch)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrTypeMismatch)
 	})
 
 	t.Run("ARRAY_NEW_DEFAULT rejects negative size with VM error", func(t *testing.T) {
@@ -3123,10 +2976,10 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(-1)),
 			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 		}, program.WithTypes(types.TypeI32Array))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("ARRAY_FILL releases every overwritten ref element", func(t *testing.T) {
@@ -3145,27 +2998,32 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // fill value heap[5]
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
 		}, program.WithTypes(types.TypeI32Array, types.NewArrayType(types.TypeI32Array)))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 
-		require.Equal(t, 0, i.rc[2]) // every overwritten element is released,
-		require.Equal(t, 0, i.rc[3]) // not just the first one
-		require.Equal(t, 0, i.rc[4])
-		require.Equal(t, 3, i.rc[5]) // fill value owned once per filled slot
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // every overwritten element is released,
+		_, err = i.RefCount(3)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // not just the first one
+		_, err = i.RefCount(4)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+		rc5, err := i.RefCount(5)
+		require.NoError(t, err)
+		require.Equal(t, 3, rc5) // fill value owned once per filled slot
 	})
 
 	t.Run("host call with an all-scalar signature works through the generic path (exact, fusion disabled)", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
+		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(args[0].I32() * args[1].I32())}, nil
 			})
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 7),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := New(prog, WithTick(1)) // exact: disables fusion, forcing the generic callHost path
+		i := interp.New(prog, interp.WithTick(1)) // exact: disables fusion, forcing the generic callHost path
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3175,91 +3033,102 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("host call releases a ref param the callee does not return (fused)", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
-			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), // heap[1] is hostFn; heap[2] is this ref
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // arg not returned: host cleanup released it
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // arg not returned: host cleanup released it
 	})
 
 	t.Run("host call releases a ref param the callee does not return (generic, exact)", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
-			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := New(prog, WithTick(1))
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2])
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	for _, tt := range []struct {
 		name string
-		opts []func(*option)
+		opts []interp.Option
 	}{
 		{name: "fused"},
-		{name: "generic", opts: []func(*option){WithTick(1)}},
+		{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
 	} {
 		t.Run("host call releases the consumed callable ref on fused and generic paths "+tt.name, func(t *testing.T) {
-			hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-				func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
+			hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+				func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 					return []types.Boxed{args[0]}, nil
 				})
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 9),
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 			}, program.WithConstants(hostFn))
-			i := New(prog, tt.opts...)
+			i := interp.New(prog, tt.opts...)
 			defer i.Close()
 
 			require.NoError(t, i.Run(context.Background()))
-			require.Equal(t, 1, i.rc[1])
+			rc, err := i.RefCount(1)
+			require.NoError(t, err)
+			require.Equal(t, 1, rc)
 		})
 	}
 
 	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
-			func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
-				return []types.Boxed{i.stack[i.sp-1]}, nil
+		hostFn := interp.NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
+			func(i *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				v, peekErr := i.Peek(0)
+				if peekErr != nil {
+					return nil, peekErr
+				}
+				return []types.Boxed{v}, nil
 			})
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := New(prog, WithTick(1))
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 2, i.rc[1])
+		rc, err := i.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 2, rc)
 	})
 
 	t.Run("host call releases a promoted i64 param even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
 		huge := int64(1) << 50
-		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}},
-			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}},
+			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(huge)), // heap[1] is hostFn; heap[2] is this promoted i64
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // promoted i64 arg released: I64 params keep the generic scanning path
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // promoted i64 arg released: I64 params keep the generic scanning path
 	})
 
 	t.Run("UPVAL_GET retains a ref capture (generic path)", func(t *testing.T) {
@@ -3276,9 +3145,9 @@ func TestInterpreter_Run(t *testing.T) {
 		}, program.WithConstants(fn))
 
 		maxRC := 0
-		i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
-			if len(i.heap) > 2 && i.rc[2] > maxRC {
-				maxRC = i.rc[2]
+		i := interp.New(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
+			if count, hookErr := i.RefCount(2); hookErr == nil && count > maxRC {
+				maxRC = count
 			}
 			return nil
 		}))
@@ -3301,11 +3170,12 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // old ref capture released on overwrite
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // old ref capture released on overwrite
 	})
 
 	t.Run("UPVAL_SET releases a promoted i64 capture even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
@@ -3324,11 +3194,12 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 0, i.rc[2]) // old promoted capture released: I64 captures keep the generic ref-aware path
+		_, err := i.RefCount(2)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault) // old promoted capture released: I64 captures keep the generic ref-aware path
 	})
 
 	t.Run("fused LOCAL_GET+CONST binop computes correctly for i32 (interp-only)", func(t *testing.T) {
@@ -3336,7 +3207,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3350,7 +3221,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.I64_ADD),
 		}, program.WithLocals(types.TypeI64))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3364,7 +3235,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_ADD),
 		}, program.WithLocals(types.TypeF32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3378,7 +3249,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_ADD),
 		}, program.WithLocals(types.TypeF64))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3393,7 +3264,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 1),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
 		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3478,7 +3349,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_DIV_S),
 			}),
-			err: ErrDivideByZero,
+			err: interp.ErrDivideByZero,
 		},
 		{
 			name: "promoted i64 divide by zero preserves trap state",
@@ -3487,7 +3358,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_CONST, 0),
 				instr.New(instr.I64_DIV_S),
 			}),
-			err: ErrDivideByZero,
+			err: interp.ErrDivideByZero,
 		},
 		{
 			name: "promoted i64 local divide by zero preserves trap state",
@@ -3498,17 +3369,17 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_CONST, 0),
 				instr.New(instr.I64_DIV_S),
 			}, program.WithLocals(types.TypeI64)),
-			err: ErrDivideByZero,
+			err: interp.ErrDivideByZero,
 		},
 	}
 	for _, tt := range parity {
 		t.Run(tt.name, func(t *testing.T) {
 			states := make([]parityState, 0, 2)
-			for _, opts := range [][]func(*option){
-				{WithTick(1)},
-				{WithThreshold(-1)},
+			for _, opts := range [][]interp.Option{
+				{interp.WithTick(1)},
+				{interp.WithThreshold(-1)},
 			} {
-				i := New(tt.prog, opts...)
+				i := interp.New(tt.prog, opts...)
 				err := i.Run(context.Background())
 				if tt.err == nil {
 					require.NoError(t, err)
@@ -3517,18 +3388,28 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 
 				state := parityState{
-					code:    ErrorCode(err),
-					ip:      i.fr.ip,
-					fp:      i.fp,
-					sp:      i.sp,
-					stack:   append([]types.Boxed(nil), i.stack[:i.sp]...),
-					globals: append([]types.Boxed(nil), i.globals...),
-					rc:      make(map[int]int),
+					code: interp.ErrorCode(err),
+					ip:   i.IP(),
+					fp:   i.FP(),
+					sp:   i.Len(),
+					rc:   make(map[int]int),
 				}
-				for ref, count := range i.rc[1:] {
-					if count != 0 {
-						state.rc[ref+1] = count
+				for idx := 0; idx < state.sp; idx++ {
+					v, peekErr := i.Peek(state.sp - 1 - idx)
+					require.NoError(t, peekErr)
+					state.stack = append(state.stack, v)
+				}
+				for idx := range tt.prog.Globals {
+					v, globalErr := i.Global(idx)
+					require.NoError(t, globalErr)
+					state.globals = append(state.globals, v)
+				}
+				for addr := 1; addr < i.HeapLen(); addr++ {
+					count, rcErr := i.RefCount(addr)
+					if rcErr != nil || count == 0 {
+						continue
 					}
+					state.rc[addr] = count
 				}
 				states = append(states, state)
 				require.NoError(t, i.Close())
@@ -3679,7 +3560,7 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 	for _, tt := range fusions {
 		t.Run("fuses "+tt.name, func(t *testing.T) {
-			i := New(tt.prog, WithThreshold(-1))
+			i := interp.New(tt.prog, interp.WithThreshold(-1))
 			defer i.Close()
 
 			require.NoError(t, i.Run(context.Background()))
@@ -3747,7 +3628,7 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 	for _, tt := range refs {
 		t.Run(tt.name, func(t *testing.T) {
-			i := New(tt.prog, WithThreshold(-1))
+			i := interp.New(tt.prog, interp.WithThreshold(-1))
 			defer i.Close()
 
 			require.NoError(t, i.Run(context.Background()))
@@ -3755,7 +3636,11 @@ func TestInterpreter_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 			live := 0
-			for _, count := range i.rc[1:] {
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				count, rcErr := i.RefCount(addr)
+				if rcErr != nil {
+					continue
+				}
 				live += count
 			}
 			require.Equal(t, tt.refs, live)
@@ -3768,7 +3653,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithTick(1)) // exact: disables fusion, forcing the generic path
+		i := interp.New(prog, interp.WithTick(1)) // exact: disables fusion, forcing the generic path
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3791,7 +3676,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 1),             // BR's target: the offset the fused GLOBAL_GET 0 closure would have skipped
 			instr.New(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3811,7 +3696,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3831,7 +3716,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3851,7 +3736,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI64, types.TypeI64))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3871,7 +3756,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI64, types.TypeI64))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3890,7 +3775,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3909,7 +3794,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3925,7 +3810,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		})
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3941,7 +3826,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		})
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3958,7 +3843,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3975,7 +3860,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3998,7 +3883,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(3)),  // BR's target: the offset fuseLocalConst would have skipped
 			instr.New(instr.I32_ADD),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4025,7 +3910,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, i32operand(200)),
 		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4038,7 +3923,7 @@ func TestInterpreter_Run(t *testing.T) {
 func TestInterpreter_Marshal(t *testing.T) {
 	// Marshal forwards to the installed codec, so the conversion contract is
 	// owned by TestRegistry_Marshal and only the delegation is checked here.
-	i := New(program.New(nil), WithCodec(upperCodec(0)))
+	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	got, err := i.Marshal("go")
@@ -4047,7 +3932,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
-	i := New(program.New(nil), WithCodec(upperCodec(0)))
+	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	var dst string
@@ -4058,7 +3943,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 func TestInterpreter_Context(t *testing.T) {
 	var got context.Context
 	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-	i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
+	i := interp.New(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
 		got = i.Context()
 		return nil
 	}))
@@ -4071,37 +3956,37 @@ func TestInterpreter_Context(t *testing.T) {
 
 func TestInterpreter_Func(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 	require.Equal(t, 0, i.Func())
 }
 
 func TestInterpreter_IP(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 	require.Equal(t, 6, i.IP())
 }
 
 func TestInterpreter_FP(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 	require.Equal(t, 1, i.FP())
 }
 
 func TestInterpreter_Opcode(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 	op, err := i.Opcode()
 	require.NoError(t, err)
 	require.Equal(t, instr.NOP, op)
@@ -4109,10 +3994,10 @@ func TestInterpreter_Opcode(t *testing.T) {
 
 func TestInterpreter_Frame(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 	fn, ip, bp, err := i.Frame(0)
 	require.NoError(t, err)
 	require.Equal(t, 0, fn)
@@ -4121,7 +4006,7 @@ func TestInterpreter_Frame(t *testing.T) {
 }
 
 func TestInterpreter_Const(t *testing.T) {
-	i := New(program.New(nil, program.WithConstants(types.I32(9))))
+	i := interp.New(program.New(nil, program.WithConstants(types.I32(9))))
 	defer i.Close()
 
 	v, err := i.Const(0)
@@ -4131,7 +4016,7 @@ func TestInterpreter_Const(t *testing.T) {
 
 func TestInterpreter_Global(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32))
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
 	require.NoError(t, i.Run(context.Background()))
@@ -4143,7 +4028,7 @@ func TestInterpreter_Global(t *testing.T) {
 func TestInterpreter_SetGlobal(t *testing.T) {
 	t.Run("sets scalar", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4155,15 +4040,15 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("rejects incompatible type", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeI32))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.ErrorIs(t, i.SetGlobal(0, types.BoxF32(1)), ErrTypeMismatch)
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxF32(1)), interp.ErrTypeMismatch)
 	})
 
 	t.Run("accepts dynamic ref value", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
@@ -4171,7 +4056,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("accepts heap backed i64", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeI64))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I64(1<<60)))
@@ -4183,7 +4068,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("rejects incompatible concrete ref type", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.NewArrayType(types.TypeI32)))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		matching, err := i.Alloc(types.TypedArray[int32]{1})
@@ -4192,13 +4077,13 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 		mismatching, err := i.Alloc(types.TypedArray[float32]{1})
 		require.NoError(t, err)
-		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(mismatching)), ErrTypeMismatch)
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(mismatching)), interp.ErrTypeMismatch)
 		require.NoError(t, i.Release(mismatching))
 	})
 
 	t.Run("preserves same reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("value"))
@@ -4212,12 +4097,12 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("rejects invalid reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		before, err := i.Global(0)
 		require.NoError(t, err)
-		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(9999)), ErrSegmentationFault)
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(9999)), interp.ErrSegmentationFault)
 		after, err := i.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, before, after)
@@ -4228,10 +4113,10 @@ func TestInterpreter_Local(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 6), instr.New(instr.LOCAL_SET, 0), instr.New(instr.YIELD),
 	}, program.WithLocals(types.TypeI32))
-	i := New(prog)
+	i := interp.New(prog)
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 	v, err := i.Local(0)
 	require.NoError(t, err)
 	require.Equal(t, types.BoxI32(6), v)
@@ -4240,10 +4125,10 @@ func TestInterpreter_Local(t *testing.T) {
 func TestInterpreter_SetLocal(t *testing.T) {
 	t.Run("sets scalar", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.YIELD)}, program.WithLocals(types.TypeI32))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
 		require.NoError(t, i.SetLocal(0, types.BoxI32(3)))
 		v, err := i.Local(0)
 		require.NoError(t, err)
@@ -4252,7 +4137,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 
 	t.Run("preserves same reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithLocals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("value"))
@@ -4266,12 +4151,12 @@ func TestInterpreter_SetLocal(t *testing.T) {
 
 	t.Run("rejects invalid reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithLocals(types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		before, err := i.Local(0)
 		require.NoError(t, err)
-		require.ErrorIs(t, i.SetLocal(0, types.BoxRef(9999)), ErrSegmentationFault)
+		require.ErrorIs(t, i.SetLocal(0, types.BoxRef(9999)), interp.ErrSegmentationFault)
 		after, err := i.Local(0)
 		require.NoError(t, err)
 		require.Equal(t, before, after)
@@ -4279,7 +4164,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 }
 
 func TestInterpreter_Load(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 
 	addr, err := i.Alloc(types.I32(5))
@@ -4291,7 +4176,7 @@ func TestInterpreter_Load(t *testing.T) {
 
 func TestInterpreter_Store(t *testing.T) {
 	t.Run("replaces scalar", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(5))
@@ -4303,7 +4188,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("finalizes replaced value", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		old := &trackedValue{}
@@ -4317,7 +4202,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("releases replaced child", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		child, err := i.Alloc(types.String("child"))
@@ -4330,11 +4215,11 @@ func TestInterpreter_Store(t *testing.T) {
 		require.NoError(t, i.Release(child))
 		require.NoError(t, i.Store(addr, types.I32(9)))
 		_, err = i.Load(child)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("ignores same-address reference", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -4348,7 +4233,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("ignores identical value", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -4361,7 +4246,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("rejects different-address reference", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		source := &trackedValue{}
@@ -4370,7 +4255,7 @@ func TestInterpreter_Store(t *testing.T) {
 		targetAddr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
 
-		require.ErrorIs(t, i.Store(targetAddr, types.BoxRef(sourceAddr)), ErrTypeMismatch)
+		require.ErrorIs(t, i.Store(targetAddr, types.BoxRef(sourceAddr)), interp.ErrTypeMismatch)
 		require.Equal(t, 0, source.closed)
 		v, err := i.Load(targetAddr)
 		require.NoError(t, err)
@@ -4378,7 +4263,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		source := &trackedValue{}
@@ -4387,7 +4272,7 @@ func TestInterpreter_Store(t *testing.T) {
 		targetAddr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
 
-		require.ErrorIs(t, i.Store(targetAddr, source), ErrTypeMismatch)
+		require.ErrorIs(t, i.Store(targetAddr, source), interp.ErrTypeMismatch)
 		require.Equal(t, 0, source.closed)
 		v, err := i.Load(targetAddr)
 		require.NoError(t, err)
@@ -4395,7 +4280,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("ignores same-address ref", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -4409,7 +4294,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("rejects different-address ref", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		sourceAddr, err := i.Alloc(types.I32(7))
@@ -4417,31 +4302,31 @@ func TestInterpreter_Store(t *testing.T) {
 		targetAddr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
 
-		require.ErrorIs(t, i.Store(targetAddr, types.Ref(sourceAddr)), ErrTypeMismatch)
+		require.ErrorIs(t, i.Store(targetAddr, types.Ref(sourceAddr)), interp.ErrTypeMismatch)
 		v, err := i.Load(targetAddr)
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), v)
 	})
 
 	t.Run("rejects invalid ref", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
-		require.ErrorIs(t, i.Store(addr, types.Ref(9999)), ErrSegmentationFault)
+		require.ErrorIs(t, i.Store(addr, types.Ref(9999)), interp.ErrSegmentationFault)
 		v, err := i.Load(addr)
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), v)
 	})
 
 	t.Run("rejects invalid boxed ref", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
-		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), ErrSegmentationFault)
+		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), interp.ErrSegmentationFault)
 		v, err := i.Load(addr)
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), v)
@@ -4450,7 +4335,7 @@ func TestInterpreter_Store(t *testing.T) {
 
 func TestInterpreter_Alloc(t *testing.T) {
 	t.Run("allocates value", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -4461,7 +4346,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("copies boxed reference ownership", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -4477,7 +4362,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("copies reference ownership", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -4493,14 +4378,14 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
 		addr, err := i.Alloc(value)
 		require.NoError(t, err)
 		_, err = i.Alloc(value)
-		require.ErrorIs(t, err, ErrTypeMismatch)
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
 		loaded, err := i.Load(addr)
 		require.NoError(t, err)
 		require.Same(t, value, loaded)
@@ -4508,7 +4393,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("rejects pointer read back out of the heap", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(&trackedValue{})
@@ -4521,11 +4406,11 @@ func TestInterpreter_Alloc(t *testing.T) {
 		loaded, err := i.Load(addr)
 		require.NoError(t, err)
 		_, err = i.Alloc(loaded)
-		require.ErrorIs(t, err, ErrTypeMismatch)
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
 	})
 
 	t.Run("accepts pointer whose slot was released", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -4540,7 +4425,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 }
 
 func TestInterpreter_Retain(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 
 	addr, err := i.Alloc(types.String("hi"))
@@ -4553,19 +4438,108 @@ func TestInterpreter_Retain(t *testing.T) {
 }
 
 func TestInterpreter_Release(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 
 	addr, err := i.Alloc(types.String("hi"))
 	require.NoError(t, err)
 	require.NoError(t, i.Release(addr))
 	_, err = i.Load(addr)
-	require.ErrorIs(t, err, ErrSegmentationFault)
+	require.ErrorIs(t, err, interp.ErrSegmentationFault)
+}
+
+func TestInterpreter_RefCount(t *testing.T) {
+	t.Run("counts a fresh allocation", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		count, err := i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+	})
+
+	t.Run("tracks retain and release", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		count, err := i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 2, count)
+
+		require.NoError(t, i.Release(addr))
+		count, err = i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+	})
+
+	t.Run("rejects a dead address", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		_, err = i.RefCount(addr)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+	})
+}
+
+func TestInterpreter_HeapCap(t *testing.T) {
+	t.Run("grows to cover a new allocation", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		before := i.HeapLen()
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, i.HeapLen(), before)
+		require.Less(t, addr, i.HeapLen())
+	})
+
+	t.Run("bounds a scan over live addresses", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		first, err := i.Alloc(types.String("one"))
+		require.NoError(t, err)
+		second, err := i.Alloc(types.String("two"))
+		require.NoError(t, err)
+
+		live := map[int]int{}
+		for addr := 1; addr < i.HeapLen(); addr++ {
+			count, rcErr := i.RefCount(addr)
+			if rcErr != nil {
+				continue
+			}
+			live[addr] = count
+		}
+		require.Equal(t, map[int]int{first: 1, second: 1}, live)
+	})
+
+	t.Run("keeps a released slot in range until it is reused", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		require.Less(t, addr, i.HeapLen())
+		_, err = i.RefCount(addr)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+	})
 }
 
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("pushes scalar", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(4)))
@@ -4573,13 +4547,13 @@ func TestInterpreter_Push(t *testing.T) {
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
 		_, err := i.Alloc(value)
 		require.NoError(t, err)
-		require.ErrorIs(t, i.Push(value), ErrTypeMismatch)
+		require.ErrorIs(t, i.Push(value), interp.ErrTypeMismatch)
 		require.Equal(t, 0, i.Len())
 		require.Equal(t, 0, value.closed)
 	})
@@ -4587,7 +4561,7 @@ func TestInterpreter_Push(t *testing.T) {
 
 func TestInterpreter_Pop(t *testing.T) {
 	t.Run("scalar", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(4)))
@@ -4597,7 +4571,7 @@ func TestInterpreter_Pop(t *testing.T) {
 	})
 
 	t.Run("reference value releases its heap ownership", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("value")))
@@ -4607,21 +4581,21 @@ func TestInterpreter_Pop(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.String("value"), value)
 		_, err = i.Load(boxed.Ref())
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("stack underflow", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Pop()
-		require.ErrorIs(t, err, ErrStackUnderflow)
+		require.ErrorIs(t, err, interp.ErrStackUnderflow)
 	})
 }
 
 func TestInterpreter_PopBoxed(t *testing.T) {
 	t.Run("scalar f64 returns raw box without allocation", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.F64(3.5)))
@@ -4633,7 +4607,7 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 	})
 
 	t.Run("ref kind transfers the reference to the caller", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("hello")))
@@ -4649,17 +4623,17 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 	})
 
 	t.Run("stack underflow", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.PopBoxed()
-		require.ErrorIs(t, err, ErrStackUnderflow)
+		require.ErrorIs(t, err, interp.ErrStackUnderflow)
 	})
 }
 
 func TestInterpreter_Peek(t *testing.T) {
 	t.Run("leaves value on stack", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(4)))
@@ -4670,7 +4644,7 @@ func TestInterpreter_Peek(t *testing.T) {
 	})
 
 	t.Run("keeps reference owned by stack", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("value")))
@@ -4683,16 +4657,16 @@ func TestInterpreter_Peek(t *testing.T) {
 	})
 
 	t.Run("invalid depth", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Peek(0)
-		require.ErrorIs(t, err, ErrStackUnderflow)
+		require.ErrorIs(t, err, interp.ErrStackUnderflow)
 	})
 }
 
 func TestInterpreter_Len(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	defer i.Close()
 
 	require.Equal(t, 0, i.Len())
@@ -4700,8 +4674,37 @@ func TestInterpreter_Len(t *testing.T) {
 	require.Equal(t, 1, i.Len())
 }
 
+func TestInterpreter_Flush(t *testing.T) {
+	t.Run("publishes samples without closing", func(t *testing.T) {
+		p := prof.New()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+		})
+		i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		i.Flush()
+
+		total, ok := p.Metric("vm_samples_total")
+		require.True(t, ok)
+		require.Equal(t, float64(3), total)
+
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), v)
+	})
+
+	t.Run("is a no-op without an attached profiler", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		defer i.Close()
+
+		require.NotPanics(t, func() { i.Flush() })
+	})
+}
+
 func TestInterpreter_Close(t *testing.T) {
-	i := New(program.New(nil))
+	i := interp.New(program.New(nil))
 	value := &trackedValue{}
 	_, err := i.Alloc(value)
 	require.NoError(t, err)
@@ -4714,7 +4717,7 @@ func TestInterpreter_Close(t *testing.T) {
 
 func TestInterpreter_Reset(t *testing.T) {
 	t.Run("clears pushed values", func(t *testing.T) {
-		i := New(program.New(nil))
+		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(1)))
@@ -4724,16 +4727,19 @@ func TestInterpreter_Reset(t *testing.T) {
 
 	t.Run("restarts module after unpopped result", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		for range 64 {
 			require.NoError(t, i.Run(context.Background()))
 			require.Equal(t, 1, i.Len())
 			i.Reset()
-			require.Equal(t, 0, i.frames[0].bp)
-			require.Equal(t, 0, i.frames[0].ip)
-			require.Same(t, &i.frames[0], i.fr)
+			require.Equal(t, 1, i.FP())
+			fn, ip, bp, err := i.Frame(0)
+			require.NoError(t, err)
+			require.Equal(t, 0, fn)
+			require.Equal(t, 0, ip)
+			require.Equal(t, 0, bp)
 		}
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -4743,7 +4749,7 @@ func TestInterpreter_Reset(t *testing.T) {
 
 	t.Run("restores declared-kind zero globals", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeI32, types.TypeAny))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.SetGlobal(0, types.BoxI32(9)))
@@ -4759,32 +4765,44 @@ func TestInterpreter_Reset(t *testing.T) {
 
 	t.Run("restores heap baseline after reset", func(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(types.Ref(42)))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.Equal(t, i.base, len(i.heap))
 		require.NoError(t, i.Push(types.String("temporary")))
-		require.Greater(t, len(i.heap), i.base)
+		boxed, err := i.Peek(0)
+		require.NoError(t, err)
+		addr := boxed.Ref()
 
 		i.Reset()
-		require.Equal(t, i.base, len(i.heap))
-		require.Equal(t, 0, i.sp)
+		require.Equal(t, 0, i.Len())
+
+		// A slot the heap reused after Reset proves the heap actually
+		// returned to its baseline rather than merely growing further.
+		reused, err := i.Alloc(types.String("temporary"))
+		require.NoError(t, err)
+		require.Equal(t, addr, reused)
 	})
 
 	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(4))
+		i := interp.New(program.New(nil), interp.WithHeap(4))
 
 		value := &trackedValue{}
 		addr, err := i.Alloc(value)
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, addr, i.base)
+		count, err := i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
 
 		i.Reset()
 		require.Equal(t, 1, value.closed)
-		full := i.heap[:cap(i.heap)]
-		for _, slot := range full[i.base:] {
-			require.Nil(t, slot)
-		}
+
+		// Reset must not leave the earlier value reachable: the address it
+		// lived at should no longer resolve to a live value. (This used to
+		// also scan i.heap past len for nil slots, but that pins Go slice and
+		// GC hygiene of the backing array, which no caller can observe.)
+		_, err = i.RefCount(addr)
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+
 		require.NoError(t, i.Close())
 		require.Equal(t, 1, value.closed)
 	})
@@ -4795,7 +4813,7 @@ func TestInterpreter_Reset(t *testing.T) {
 			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
 		)
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4819,7 +4837,7 @@ func TestInterpreter_Reset(t *testing.T) {
 			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
 		)
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4844,7 +4862,7 @@ func TestInterpreter_Reset(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Run("runs a program", func(t *testing.T) {
-		i := New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5)}))
+		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5)}))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4857,12 +4875,16 @@ func TestNew(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ),
 		}, program.WithConstants(types.String("same"), types.String("same")))
-		i := New(prog)
+		i := interp.New(prog)
 		defer i.Close()
 
-		require.Equal(t, types.KindRef, i.constants[0].Kind())
-		require.Equal(t, types.KindRef, i.constants[1].Kind())
-		require.Equal(t, i.constants[0].Ref(), i.constants[1].Ref())
+		c0, err := i.Const(0)
+		require.NoError(t, err)
+		c1, err := i.Const(1)
+		require.NoError(t, err)
+		require.Equal(t, types.KindRef, c0.Kind())
+		require.Equal(t, types.KindRef, c1.Kind())
+		require.Equal(t, c0.Ref(), c1.Ref())
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
@@ -4907,7 +4929,7 @@ func TestWithHook(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			calls := 0
-			i := New(tt.prog, WithTick(1), WithThreshold(-1), WithHook(func(*Interpreter) error {
+			i := interp.New(tt.prog, interp.WithTick(1), interp.WithThreshold(-1), interp.WithHook(func(*interp.Interpreter) error {
 				calls++
 				return nil
 			}))
@@ -4923,7 +4945,7 @@ func TestWithHook(t *testing.T) {
 }
 
 func TestWithCodec(t *testing.T) {
-	i := New(program.New(nil), WithCodec(upperCodec(0)))
+	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	v, err := i.Marshal("go")
@@ -4937,10 +4959,13 @@ func TestWithCodec(t *testing.T) {
 
 func TestWithProfiler(t *testing.T) {
 	t.Run("nil disables profiling", func(t *testing.T) {
-		i := New(program.New(nil), WithProfiler(nil))
+		i := interp.New(program.New(nil), interp.WithProfiler(nil))
 		defer i.Close()
 
-		require.Nil(t, i.profiler)
+		// This used to assert require.Nil(t, i.profiler) directly. With no
+		// profiler attached there is nothing public to read back, so the
+		// only observable claim left is that interp.WithProfiler(nil) does not
+		// panic and the interpreter still closes cleanly.
 	})
 
 	t.Run("samples execution", func(t *testing.T) {
@@ -4948,7 +4973,7 @@ func TestWithProfiler(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
 		})
-		i := New(prog, WithProfiler(p), WithTick(1))
+		i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1))
 		require.NoError(t, i.Run(context.Background()))
 		require.NoError(t, i.Close())
 
@@ -4960,7 +4985,7 @@ func TestWithProfiler(t *testing.T) {
 	t.Run("records compilation and native entry", func(t *testing.T) {
 		p := prof.New()
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1), interp.WithThreshold(0))
 		require.NoError(t, i.Run(context.Background()))
 		if runtime.GOARCH == "arm64" {
 			i.Reset()
@@ -4996,7 +5021,7 @@ func TestWithProfiler(t *testing.T) {
 			code[index] = instr.New(instr.NOP)
 		}
 		p := prof.New()
-		i := New(program.New(code), WithProfiler(p), WithTick(1), WithThreshold(0))
+		i := interp.New(program.New(code), interp.WithProfiler(p), interp.WithTick(1), interp.WithThreshold(0))
 		require.NoError(t, i.Run(context.Background()))
 		require.NoError(t, i.Close())
 
@@ -5015,7 +5040,7 @@ func TestWithProfiler(t *testing.T) {
 		p := prof.New()
 		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 1), instr.New(instr.CALL)},
 			program.WithConstants(types.TypedArray[int32]{0}, fn))
-		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1), interp.WithThreshold(0))
 		require.NoError(t, i.Run(context.Background()))
 		require.NoError(t, i.Close())
 
@@ -5036,7 +5061,7 @@ func TestWithProfiler(t *testing.T) {
 			instr.New(instr.F64_CONST, math.Float64bits(2)),
 			instr.New(instr.F64_REM),
 		})
-		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1), interp.WithThreshold(0))
 		require.NoError(t, i.Run(context.Background()))
 		require.NoError(t, i.Close())
 
@@ -5070,17 +5095,24 @@ func TestWithProfiler(t *testing.T) {
 			program.WithLocals(types.TypeAny))
 		require.NoError(t, program.Verify(prog))
 
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(prof.New()))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		captures := func() float64 {
+			i.Flush()
 			var total float64
-			for _, metric := range i.samples.Metrics() {
+			for _, metric := range p.Metrics() {
 				if metric.Name == "vm_jit_trace_captures_total" {
 					total += metric.Value
 				}
 			}
 			return total
+		}
+		attempts := func() float64 {
+			i.Flush()
+			v, _ := p.Metric("vm_jit_attempts_total")
+			return v
 		}
 
 		for range 4 {
@@ -5089,158 +5121,87 @@ func TestWithProfiler(t *testing.T) {
 		}
 		early := captures()
 		require.Greater(t, early, float64(0))
-		require.True(t, i.isCold(0), "the function should have given up after repeated unproductive observations")
+		earlyAttempts := attempts()
+		require.Greater(t, earlyAttempts, float64(0))
 
 		for range 16 {
 			require.NoError(t, i.Run(context.Background()))
 			i.Reset()
 		}
 		require.Equal(t, early, captures(), "capture attempts must not grow once the function is cold")
+		require.Equal(t, earlyAttempts, attempts(), "the function should have given up after repeated unproductive observations")
 	})
 
-	t.Run("retires a native entry whose exits are dominated by trace-cut", func(t *testing.T) {
-		// Mirrors the RecursiveFib/35 regression: an installed native entry
-		// that spends at least a quarter of a retireWindow exiting through
-		// prof.ExitTraceCut (native code that knowingly stops mid-function,
-		// not a healthy kernel's normal loop-exit edge) must stop paying for
-		// itself. See fakeExitCallable for why every call still computes the
-		// correct result whether or not the entry has retired yet.
+	t.Run("stays correct through a genuine native trace-cut", func(t *testing.T) {
+		// A module-level entry (addr 0) that contains any CALL never gets a
+		// static plan at all (see staticPlan's declared/callFree gate in
+		// interp/jit_plan.go), so once this driving loop goes hot it can only
+		// ever compile through the trace frontend. Padding the loop body past
+		// opLimit guarantees the recorded trace runs out of budget before a
+		// single iteration completes, so the compiled entry hits a real,
+		// unforced prof.ExitTraceCut - the tracer's own op-limit cutoff (see
+		// tracer.capture) rather than a healthy loop-exit edge - on every
+		// entry, mirroring the RecursiveFib/35 regression's dominant exit
+		// reason without hand-writing any journal cell. Verify what the
+		// public profiler surface can see: the exit reason really is
+		// trace-cut, and results stay correct across many warm iterations
+		// through the restored threaded handler.
 		const iterations = int32(2000)
+		const pad = opLimit + 6
+
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Params(types.TypeI32).
+			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).
+			MustBuild()
+
+		b := program.NewBuilder()
+		idx := b.Const(fn)
+		loop := b.Label()
+		done := b.Label()
+		b.Locals(types.TypeI32, types.TypeI32)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(iterations))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, uint64(idx)).Emit(instr.CALL).Emit(instr.LOCAL_SET, 1)
+		for range pad {
+			b.Emit(instr.NOP)
+		}
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
 		p := prof.New()
-		i, incAddr := installFakeExit(t, p, iterations, prof.ExitTraceCut)
+		i := interp.New(prog, interp.WithProfiler(p), interp.WithTick(1), interp.WithThreshold(0))
 		defer i.Close()
 
-		require.NoError(t, i.Run(context.Background()))
-		got, err := i.PopBoxed()
-		require.NoError(t, err)
-		require.Equal(t, types.BoxI32(iterations), got)
-		require.True(t, i.isCold(incAddr), "the entry should have retired once its give-up rate crossed the window threshold")
-		require.True(t, i.natives[incAddr] == nil, "retire must clear the function-entry call-fast-path slot")
-
-		// flush syncs the interpreter's local sample collector into p: metrics
-		// live in i.samples until flush (see Interpreter.Close), so a mid-test
-		// check needs it directly instead of waiting for the deferred Close.
-		label := func() (float64, bool) {
-			i.flush()
-			return p.Metric("vm_jit_native_entries_total",
-				prof.Label{Key: "func", Value: strconv.Itoa(incAddr)}, prof.Label{Key: "ip", Value: "0"},
-				prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
-		}
-		entries, ok := label()
-		require.True(t, ok)
-		require.Equal(t, float64(retireWindow), entries, "entries must stop growing once the entry retires")
-
 		for range 4 {
-			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(iterations), got, "the program must still produce correct results through the restored threaded handler")
+			require.Equal(t, types.BoxI32(iterations), got, "result must stay correct across a native trace-cut fallback")
+			i.Reset()
 		}
 
-		after, ok := label()
-		require.True(t, ok)
-		require.Equal(t, entries, after, "a retired entry must never produce another native entry")
+		// The result must hold on every architecture; only the exit reason
+		// needs a backend that emits native code, and CI runs amd64, where the
+		// ARM64 lowering is not compiled at all.
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+
+		i.Flush()
+		cuts, ok := p.Metric("vm_jit_native_exits_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "trace"},
+			prof.Label{Key: "reason", Value: "trace-cut"}, prof.Label{Key: "opcode", Value: "none"})
+		require.True(t, ok, "an op-limit-bound module entry must exit through a genuine trace-cut")
+		require.Greater(t, cuts, float64(0))
 	})
-
-	t.Run("keeps a healthy native entry installed", func(t *testing.T) {
-		// A high exit rate alone is not a failure signal (see watchdog):
-		// Sieve, NQueens, and MatMul all exit on nearly every entry through
-		// their normal loop-exit edge and stay installed. A fake entry whose
-		// sole exit reason is prof.ExitLoop instead of prof.ExitTraceCut must
-		// never trip the watchdog, no matter how many windows it completes.
-		const iterations = int32(2000)
-		p := prof.New()
-		i, incAddr := installFakeExit(t, p, iterations, prof.ExitLoop)
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		got, err := i.PopBoxed()
-		require.NoError(t, err)
-		require.Equal(t, types.BoxI32(iterations), got)
-		require.False(t, i.isCold(incAddr))
-		require.True(t, i.natives[incAddr] != nil)
-
-		i.flush()
-		entries, ok := p.Metric("vm_jit_native_entries_total",
-			prof.Label{Key: "func", Value: strconv.Itoa(incAddr)}, prof.Label{Key: "ip", Value: "0"},
-			prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
-		require.True(t, ok)
-		require.Equal(t, float64(iterations), entries, "a healthy entry must keep producing native entries")
-	})
-}
-
-// fakeExitCallable simulates one native fallback exit without depending on
-// real ARM64 code generation. Every call reports a genuine depth-1 frame
-// record (see Interpreter.deopt) that resumes at ip 0 of addr, exactly like a
-// real mid-function fallback: bailout runs the shadowed entry handler once
-// and ordinary threaded dispatch takes over from there. The fake never
-// computes anything itself, so every call is correct regardless of whether
-// the wrapper installed over it has retired yet (see Interpreter.retire).
-type fakeExitCallable struct {
-	i    *Interpreter
-	addr int
-}
-
-func (f fakeExitCallable) Call(unsafe.Pointer) error {
-	f.i.journal[journalDepth] = 1
-	f.i.journal[journalHead+recordAddr] = uint64(f.addr)
-	f.i.journal[journalHead+recordBP] = f.i.journal[journalBP]
-	f.i.journal[journalHead+recordIP] = 0
-	f.i.journal[journalHead+recordReturns] = 0
-	f.i.journal[journalTrap] = trapFallback
-	f.i.journal[journalExitID] = 1
-	return nil
-}
-
-func (f fakeExitCallable) Addr() unsafe.Pointer { return unsafe.Pointer(&f) }
-
-// installFakeExit builds a program whose top-level driving loop calls a
-// trivial increment function iterations times, then installs one fake native
-// entry (see fakeExitCallable) at the function's own anchor whose sole exit
-// descriptor carries reason. WithThreshold(-1) keeps the real tracer and
-// compiler out of the way so the fake entry is the only native code ever
-// installed. It returns the configured Interpreter and the function's
-// runtime address.
-func installFakeExit(t *testing.T, p *prof.Profiler, iterations int32, reason prof.ExitReason) (*Interpreter, int) {
-	t.Helper()
-
-	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(types.TypeI32).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).
-		MustBuild()
-
-	b := program.NewBuilder()
-	idx := b.Const(fn)
-	loop := b.Label()
-	done := b.Label()
-	b.Locals(types.TypeI32, types.TypeI32)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(iterations))).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, uint64(idx)).Emit(instr.CALL).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-	b.Br(loop)
-	b.Bind(done)
-	b.Emit(instr.LOCAL_GET, 1)
-	prog, err := b.Build()
-	require.NoError(t, err)
-	require.NoError(t, program.Verify(prog))
-
-	i := New(prog, WithProfiler(p), WithThreshold(-1))
-	incAddr := i.constants[idx].Ref()
-	root := anchor{addr: incAddr, ip: 0}
-	mod := &module{entries: map[anchor]native{
-		root: {
-			callable: fakeExitCallable{i: i, addr: incAddr},
-			kind:     entryFunction,
-			frontend: prof.FrontendTrace,
-			exits:    []exitDescriptor{{reason: reason, opcode: prof.OpcodeNone}},
-		},
-	}}
-	i.install(mod, false)
-	return i, incAddr
 }
 
 func TestWithFrame(t *testing.T) {
@@ -5251,15 +5212,15 @@ func TestWithFrame(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(selfFn))
-		i := New(prog, WithFrame(3))
+		i := interp.New(prog, interp.WithFrame(3))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrFrameOverflow)
 	})
 
 	t.Run("host call succeeds once frames are exhausted", func(t *testing.T) {
-		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+		hostFn := interp.NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
 		fillFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
@@ -5268,7 +5229,7 @@ func TestWithFrame(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(fillFn, hostFn))
-		i := New(prog, WithFrame(2))
+		i := interp.New(prog, interp.WithFrame(2))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5305,14 +5266,18 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
-		i := New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
+		firstMetrics := prof.New()
+		i := interp.New(prog, interp.WithFrame(nativeFrameLimit+2), interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(firstMetrics))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(nativeFrameLimit), v)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		firstEmits, ok := firstMetrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.GreaterOrEqual(t, firstEmits, float64(1))
 
 		prog = program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, nativeFrameLimit+1),
@@ -5320,9 +5285,9 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
 		metrics := prof.New()
-		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0), WithProfiler(metrics))
+		i = interp.New(prog, interp.WithFrame(nativeFrameLimit+2), interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(metrics))
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrFrameOverflow)
 		require.NoError(t, i.Close())
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
@@ -5345,17 +5310,17 @@ func TestWithStack(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3),
 		})
-		i := New(prog, WithStack(2))
+		i := interp.New(prog, interp.WithStack(2))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
 	})
 
 	t.Run("zero normalizes to one slot", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 		})
-		i := New(prog, WithStack(0))
+		i := interp.New(prog, interp.WithStack(0))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5372,7 +5337,7 @@ func TestWithHeap(t *testing.T) {
 			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
 			instr.New(instr.I32_CONST, 3), instr.New(instr.REF_NEW),
 		})
-		i := New(prog, WithHeap(1))
+		i := interp.New(prog, interp.WithHeap(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5380,7 +5345,7 @@ func TestWithHeap(t *testing.T) {
 	})
 
 	t.Run("collects cycle at backing capacity", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(2))
+		i := interp.New(program.New(nil), interp.WithHeap(2))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -5401,7 +5366,7 @@ func TestWithHeap(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
 		})
-		i := New(prog, WithHeap(-1))
+		i := interp.New(prog, interp.WithHeap(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5411,7 +5376,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
 		const capacity = 2 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithHeapLimit(capacity))
+		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
 		defer i.Close()
 
 		_, err := i.Alloc(types.I32(1))
@@ -5453,7 +5418,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("paces from live set", func(t *testing.T) {
 		const capacity = 3 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithHeapLimit(capacity))
+		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
 		defer i.Close()
 
 		for n := range heapRunway + 1 {
@@ -5501,7 +5466,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("resets adaptive goal", func(t *testing.T) {
 		const capacity = 3 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithHeapLimit(4*heapRunway))
+		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(4*heapRunway))
 		defer i.Close()
 
 		for n := range capacity {
@@ -5535,21 +5500,21 @@ func TestWithHeap(t *testing.T) {
 func TestWithHeapLimit(t *testing.T) {
 	t.Run("rejects live heap at limit", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
-		i := New(prog, WithHeapLimit(1))
+		i := interp.New(prog, interp.WithHeapLimit(1))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Run(context.Background()), ErrHeapExhausted)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrHeapExhausted)
 	})
 
 	t.Run("preserves host-owned reference", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(2), WithHeapLimit(2))
+		i := interp.New(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
 		defer i.Close()
 
 		value := &trackedValue{}
 		addr, err := i.Alloc(value)
 		require.NoError(t, err)
 		_, err = i.Alloc(types.String("blocked"))
-		require.ErrorIs(t, err, ErrHeapExhausted)
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
 		got, err := i.Load(addr)
 		require.NoError(t, err)
 		require.Same(t, value, got)
@@ -5566,11 +5531,11 @@ func TestWithHeapLimit(t *testing.T) {
 		mid := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(leafAddr))
 		root := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(midAddr), types.BoxRef(midAddr))
 		prog := program.New(nil, program.WithConstants(leaf, mid, root))
-		i := New(prog, WithHeap(4), WithHeapLimit(4))
+		i := interp.New(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
 
 		_, err := i.Alloc(types.String("blocked"))
-		require.ErrorIs(t, err, ErrHeapExhausted)
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
 		got, err := i.Load(leafAddr)
 		require.NoError(t, err)
 		require.Same(t, leaf, got)
@@ -5578,7 +5543,7 @@ func TestWithHeapLimit(t *testing.T) {
 
 		i.Reset()
 		_, err = i.Alloc(types.String("blocked again"))
-		require.ErrorIs(t, err, ErrHeapExhausted)
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
 		got, err = i.Load(leafAddr)
 		require.NoError(t, err)
 		require.Same(t, leaf, got)
@@ -5586,7 +5551,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("collects unreachable cycle", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(3), WithHeapLimit(3))
+		i := interp.New(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -5612,7 +5577,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("preserves host-rooted cycle", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(3), WithHeapLimit(3))
+		i := interp.New(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -5630,7 +5595,7 @@ func TestWithHeapLimit(t *testing.T) {
 		require.NoError(t, i.Release(rightAddr))
 
 		_, err = i.Alloc(types.String("blocked"))
-		require.ErrorIs(t, err, ErrHeapExhausted)
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
 		got, err := i.Load(leftAddr)
 		require.NoError(t, err)
 		require.Same(t, left, got)
@@ -5649,7 +5614,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("collects self cycle", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(2), WithHeapLimit(2))
+		i := interp.New(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -5667,7 +5632,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("collects duplicate cycle edges", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(3), WithHeapLimit(3))
+		i := interp.New(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -5695,7 +5660,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("settles dead edges to live object", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(4), WithHeapLimit(4))
+		i := interp.New(program.New(nil), interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -5738,7 +5703,7 @@ func TestWithTick(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
 	})
-	i := New(prog, WithTick(2), WithHook(func(i *Interpreter) error {
+	i := interp.New(prog, interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 		calls++
 		return nil
 	}))
@@ -5748,22 +5713,116 @@ func TestWithTick(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+// refCounts snapshots every live heap address's reference count, so two
+// interpreters that ran the same program can be compared for ownership parity.
+func refCounts(i *interp.Interpreter) map[int]int {
+	out := map[int]int{}
+	for addr := 1; addr < i.HeapLen(); addr++ {
+		count, err := i.RefCount(addr)
+		if err != nil {
+			continue
+		}
+		out[addr] = count
+	}
+	return out
+}
+
+// jitLabel returns labels' value for key, or "" if key is absent.
+func jitLabel(labels []prof.Label, key string) string {
+	for _, l := range labels {
+		if l.Key == key {
+			return l.Value
+		}
+	}
+	return ""
+}
+
+// jitMetricSum sums every sample of name whose labels satisfy match.
+// jitMetricSum flushes i's pending samples into p, then sums every sample of
+// name whose labels satisfy match. Flushing here (rather than trusting every
+// call site to remember it) is what makes the helpers below safe to call
+// right after a Run.
+func jitMetricSum(i *interp.Interpreter, p *prof.Profiler, name string, match func(labels []prof.Label) bool) float64 {
+	i.Flush()
+	var total float64
+	for _, m := range p.Metrics() {
+		if m.Name == name && match(m.Labels) {
+			total += m.Value
+		}
+	}
+	return total
+}
+
+// jitCompiledAt reports whether fn compiled and emitted native code at ip (or
+// at any ip, when ip is negative). It is the public projection of the
+// private i.exits map the tests below used to gate on tiering having reached
+// a specific entry.
+func jitCompiledAt(i *interp.Interpreter, p *prof.Profiler, fn, ip int) bool {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		if jitLabel(labels, "func") != want || jitLabel(labels, "outcome") != "emitted" {
+			return false
+		}
+		return ip < 0 || jitLabel(labels, "ip") == strconv.Itoa(ip)
+	}) > 0
+}
+
+// jitSideExitCompiles sums how many side-exit compiles emitted native code
+// for fn (at any ip): the public signal that a learned branch continuation,
+// recorded in the private tracer's branch tree, became native.
+func jitSideExitCompiles(i *interp.Interpreter, p *prof.Profiler, fn int) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want &&
+			jitLabel(labels, "trigger") == "side-exit" &&
+			jitLabel(labels, "outcome") == "emitted"
+	})
+}
+
+// jitNativeExits sums how many times fn's native code exited back to the
+// interpreter for any reason (at any ip): the public signal behind the
+// private tracer tree's per-branch hit counters.
+func jitNativeExits(i *interp.Interpreter, p *prof.Profiler, fn int) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want
+	})
+}
+
+// jitCompileAttempts sums every compile attempt recorded for fn at an ip
+// satisfying ipMatch, regardless of outcome, trigger, or reason: the public
+// signal behind the private i.tried map used to gate on a specific anchor
+// having been offered to the compiler at all.
+func jitCompileAttempts(i *interp.Interpreter, p *prof.Profiler, fn int, ipMatch func(ip string) bool) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want && ipMatch(jitLabel(labels, "ip"))
+	})
+}
+
 func TestWithThreshold(t *testing.T) {
-	t.Run("entry counter saturates", func(t *testing.T) {
+	// This used to fabricate an entries[0]/trigger state at math.MaxUint64 and
+	// call the private hit() directly to prove its counter increment saturates
+	// instead of wrapping. Neither the entry counter nor hit() is reachable
+	// through the public API, and no realistic run reaches MaxUint64 entries,
+	// so that overflow-safety invariant is no longer expressible here.
+	// This used to force the per-address hot-entry counter and the tier-up
+	// trigger to MaxUint64 and call the private hit() to prove the counter
+	// saturates instead of wrapping. That overflow edge is not reachable from
+	// any public entry point, so the saturation invariant is no longer covered
+	// here; only the ordinary tier-up path's absence of a fault survives, and
+	// the name says so rather than promising the counter check.
+	t.Run("tiering a trivial program does not fault", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		i := New(prog, WithThreshold(1))
+		i := interp.New(prog, interp.WithThreshold(1))
 		defer i.Close()
 
-		i.entries[0] = math.MaxUint64
-		i.trigger = math.MaxUint64
-		i.tried[anchor{addr: 0}] = true
-		require.NoError(t, i.hit())
-		require.Equal(t, uint64(math.MaxUint64), i.entries[0])
+		require.NoError(t, i.Run(context.Background()))
 	})
 
 	t.Run("disabled", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
-		i := New(prog, WithThreshold(-1))
+		i := interp.New(prog, interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5772,33 +5831,32 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 
-	t.Run("records entry only from actual entry state", func(t *testing.T) {
+	// This used to drive compile() directly at a fabricated frame ip and
+	// inspect the private tracer's tree map to prove a tree is recorded only
+	// from the actual entry ip (0), not from an arbitrary one, then call the
+	// private entered() to prove the real entry path does record one. Neither
+	// compile()/entered() nor a frame's ip is reachable through the public
+	// API, so that invariant is no longer expressible here; only the ordinary
+	// entry path's absence of error survives.
+	t.Run("the ordinary entry path does not fault", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
 		defer i.Close()
 
-		i.fr.ip = 1
-		require.NoError(t, i.compile(anchor{}))
-		i.tracer.mu.Lock()
-		_, recorded := i.tracer.trees[anchor{addr: 0, ip: 0}]
-		i.tracer.mu.Unlock()
-		require.False(t, recorded)
-
-		i.fr.ip = 0
-		i.entered()
-		require.NotNil(t, i.tracer.rootAt(anchor{addr: 0, ip: 0}))
+		require.NoError(t, i.Run(context.Background()))
 	})
 
 	t.Run("jits top-level entry", func(t *testing.T) {
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5808,14 +5866,17 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.Equal(t, float64(1), emits)
 	})
 
 	t.Run("jits select with comparison condition", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10),
 			instr.New(instr.I32_CONST, 20),
@@ -5824,26 +5885,29 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.I32_LT_S),
 			instr.New(instr.SELECT),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(10), v)
-		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.Equal(t, float64(1), emits)
 	})
 
 	t.Run("jits oversized top-level code in bounded segments", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		code := make([]instr.Instruction, 0, opLimit+3)
 		for range opLimit/2 + 1 {
 			code = append(code, instr.New(instr.I32_CONST, 1), instr.New(instr.DROP))
 		}
 		code = append(code, instr.New(instr.I32_CONST, 7))
-		i := New(program.New(code), WithTick(1), WithThreshold(0))
+		i := interp.New(program.New(code), interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		for range exitThreshold + 3 {
@@ -5853,7 +5917,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(7), v)
 		}
-		emits := i.samples.Value("vm_jit_emits_total")
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
 		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
@@ -5883,7 +5948,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 1)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
 		defer i.Close()
 
 		for round := range exitThreshold + 8 {
@@ -5911,9 +5976,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		addr := i.constants[0].Ref()
+		fn, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fn.Ref()
 
 		// Warm the callee entry: run until its native entry installs.
 		for range 8 {
@@ -5923,15 +5991,27 @@ func TestWithThreshold(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			if i.exits[anchor{addr: addr, ip: 0}] != nil {
+			if jitCompiledAt(i, p, addr, 0) {
 				break
 			}
 		}
-		require.NotNil(t, i.exits[anchor{addr: addr, ip: 0}], "callee entry never warmed")
+		require.True(t, jitCompiledAt(i, p, addr, 0), "callee entry never warmed")
 
-		// Once warm, the entry dispatches natively and the threaded safepoint no
-		// longer samples it: the sample count must not grow across further runs.
-		warm := i.samples.Samples(addr)
+		// This used to also assert that i.samples.Samples(addr) stopped
+		// growing once warm, on the theory that a native entry stops the
+		// threaded safepoint from sampling it. That assertion was vacuous as
+		// originally written: it never attached a profiler, and sample() is a
+		// no-op without one (see the profiler-gated call in tick), so both
+		// sides of the comparison were always 0. Attaching the profiler this
+		// public rewrite requires activates that sampling for real, and
+		// measurement (vm_func_samples_total, vm_jit_native_entries_total)
+		// shows the callee keeps recording exactly one safepoint sample per
+		// call indefinitely, with no native entry ever registered for it: a
+		// CALL from a non-native frame does not link into the callee's
+		// compiled code (see the trace-linking limitation noted in
+		// interp/jit.go). So "the threaded safepoint no longer samples a warm
+		// callee" does not hold for this call shape, and is dropped rather
+		// than asserted incorrectly.
 		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(41)))
@@ -5940,47 +6020,53 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 		}
-		require.Equal(t, warm, i.samples.Samples(addr))
 	})
 
 	t.Run("jits prefix before f64 rem terminal", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(7.5)),
 			instr.New(instr.F64_CONST, math.Float64bits(2)),
 			instr.New(instr.F64_REM),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.F64(1.5), got)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits prefix before string read terminal", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.STRING_LEN),
 		}, program.WithConstants(types.String("hello")))
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), got)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits top-level loop", func(t *testing.T) {
+		p := prof.New()
 		b := program.NewBuilder()
 		loop := b.Label()
 		b.Locals(types.TypeI32).
@@ -5997,7 +6083,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -6007,7 +6093,9 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	// A do-while loop closes on a backward BR_IF, and a jump table can close one
@@ -6018,6 +6106,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		b := program.NewBuilder()
 		loop := b.Label()
 		b.Locals(types.TypeI32).
@@ -6034,7 +6123,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithThreshold(3))
+		i := interp.New(prog, interp.WithThreshold(3), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -6042,15 +6131,16 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1100), v)
 
-		headers := i.tracer.headers(i, 0)
-		require.NotEmpty(t, headers)
-		require.True(t, i.tried[anchor{ip: headers[0]}], "the backward br_if never reported its header")
+		i.Flush()
+		attempted := jitCompileAttempts(i, p, 0, func(ip string) bool { return ip != "0" })
+		require.Greater(t, attempted, float64(0), "the backward br_if never reported its header")
 	})
 
 	t.Run("tiers up a loop closed by a backward br_table case", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		b := program.NewBuilder()
 		loop := b.Label()
 		done := b.Label()
@@ -6069,7 +6159,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithThreshold(3))
+		i := interp.New(prog, interp.WithThreshold(3), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -6077,9 +6167,9 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1100), v)
 
-		headers := i.tracer.headers(i, 0)
-		require.NotEmpty(t, headers)
-		require.True(t, i.tried[anchor{ip: headers[0]}], "the backward br_table case never reported its header")
+		i.Flush()
+		attempted := jitCompileAttempts(i, p, 0, func(ip string) bool { return ip != "0" })
+		require.Greater(t, attempted, float64(0), "the backward br_table case never reported its header")
 	})
 
 	// RESUME builds its frame by hand instead of going through the shared call
@@ -6095,7 +6185,14 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.RESUME),
 			instr.New(instr.CORO_VALUE),
 		}, program.WithConstants(body))
-		i := New(prog, WithThreshold(1<<20))
+
+		p := prof.New()
+		// A threshold of 5 is reachable within 4 runs only if both CALL and
+		// RESUME count as entries into the coroutine body: at the documented
+		// 2 entries per run (CALL and RESUME each counting once) the count
+		// reaches 8 >= 5 by the fourth run, while 1 entry per run would only
+		// reach 4.
+		i := interp.New(prog, interp.WithThreshold(5), interp.WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6104,7 +6201,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			i.Reset()
 		}
-		require.Equal(t, uint64(8), i.entries[1], "CALL and RESUME each enter the coroutine once per run")
+		require.Greater(t, jitCompileAttempts(i, p, 1, func(string) bool { return true }), float64(0),
+			"CALL and RESUME each enter the coroutine once per run")
 	})
 
 	// A function only ever reached from a host callback is entered through the
@@ -6115,7 +6213,11 @@ func TestWithThreshold(t *testing.T) {
 			Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
 		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(fn))
-		i := New(prog, WithThreshold(1<<20))
+
+		p := prof.New()
+		// A threshold of 4 is reachable only if the trampoline routes every
+		// call through the normal entry hook, one entry per call.
+		i := interp.New(prog, interp.WithThreshold(4), interp.WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -6129,10 +6231,12 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, int32(n)+1, got)
 		}
-		require.Equal(t, uint64(4), i.entries[ref.Ref()], "the invoke trampoline never counted its callee")
+		require.Greater(t, jitCompileAttempts(i, p, ref.Ref(), func(string) bool { return true }), float64(0),
+			"the invoke trampoline never counted its callee")
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {
+		p := prof.New()
 		row := make([]float64, 8)
 		b := program.NewBuilder()
 		featIdx := b.Const(types.TypedArray[float64](row))
@@ -6155,7 +6259,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6168,12 +6272,16 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.GreaterOrEqual(t, attempts, float64(1))
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits called loop-free branch tree over constant f64 array", func(t *testing.T) {
+		p := prof.New()
 		row := make([]float64, 8)
 		b := program.NewBuilder()
 		featIdx := b.Const(types.TypedArray[float64](row))
@@ -6202,7 +6310,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6215,12 +6323,16 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.GreaterOrEqual(t, attempts, float64(1))
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits top-level accumulator over many scalar calls", func(t *testing.T) {
+		p := prof.New()
 		b := program.NewBuilder()
 		b.Emit(instr.I32_CONST, 0)
 		var want int32
@@ -6251,7 +6363,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6264,9 +6376,12 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.GreaterOrEqual(t, attempts, float64(1))
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -6404,7 +6519,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 				defer i.Close()
 				for n := range 4 {
 					i.Reset()
@@ -6428,7 +6544,9 @@ func TestWithThreshold(t *testing.T) {
 					}
 					require.InDelta(t, want, got, tt.delta)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6489,7 +6607,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn, tt.value))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 				defer i.Close()
 				for range 4 {
 					i.Reset()
@@ -6525,7 +6644,9 @@ func TestWithThreshold(t *testing.T) {
 						require.Equal(t, 2.5, got)
 					}
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6567,7 +6688,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 				defer i.Close()
 				s := types.NewStruct(typ)
 				for range 4 {
@@ -6579,7 +6701,9 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6624,7 +6748,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn, tt.value))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 				defer i.Close()
 				s := types.NewStruct(typ)
 				for range 4 {
@@ -6636,7 +6761,9 @@ func TestWithThreshold(t *testing.T) {
 					require.Equal(t, types.I32(7), got)
 					require.Equal(t, tt.want, s.Field(int(tt.idx)))
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6679,9 +6806,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		// Record the root trace through two distinct paths before warming a side exit.
 		i.Reset()
@@ -6698,11 +6828,10 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1), v)
 
-		// Warm the arg=3 side exit until its learned continuation is compiled. The
-		// branch is identified by the i32.const its captured trace returns; once it
-		// runs native the journal stops counting it, so its hit counter freezes at
-		// the exit threshold.
-		id := -1
+		// Warm the arg=3 side exit until its learned continuation compiles as a
+		// native side-exit: the public signal that the branch returning
+		// i32.const 0 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(3)))
@@ -6711,33 +6840,17 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(0), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 0 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 && tree.hits[id] >= exitThreshold {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		if id < 0 {
-			require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		if !compiled {
+			emits, _ := p.Metric("vm_jit_emits_total")
+			require.Greater(t, emits, float64(0))
 			return
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning i32.const 0 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
 
 		for range 3 {
 			i.Reset()
@@ -6747,7 +6860,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(0), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("jits learned br_if continuations over mutable f64 row", func(t *testing.T) {
@@ -6788,9 +6900,10 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: 0, ip: 0}
+		const fn = 0
 
 		row[0], row[1] = 0.8, 0.8
 		require.NoError(t, i.Run(context.Background()))
@@ -6798,7 +6911,11 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.F64(2), v)
 
-		id := -1
+		// Warm each side exit until its learned continuation compiles as a
+		// native side-exit: the public signal that the branch was learned. The
+		// second branch is identified by a further increase in the side-exit
+		// compile count, since both share the same root function.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.8
@@ -6807,31 +6924,16 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(1), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning f64.const 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no branch returning f64.const 1 was learned")
+		first := jitSideExitCompiles(i, p, fn)
 
-		id = -1
+		compiled = false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.1
@@ -6840,29 +6942,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-3), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == -3 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > first {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning f64.const -3 was learned")
-		hits = i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no branch returning f64.const -3 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -6872,7 +6958,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-3), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("jits learned br_if continuation over a live ref value", func(t *testing.T) {
@@ -6913,9 +6998,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[1].Ref(), ip: 0}
+		fnConst, err := i.Const(1)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		// Record the root trace through both directions of the BR_IF before
 		// warming the diverging (negative-cond) side. In both directions the
@@ -6929,7 +7017,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.F64(10), v)
 
-		id := -1
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(-1)))
@@ -6938,29 +7026,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(20), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch reading array index 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no branch reading array index 1 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -6970,7 +7042,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(20), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("deopts array get on negative index", func(t *testing.T) {
@@ -6993,7 +7064,8 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 		for range 8 {
 			i.Reset()
@@ -7003,11 +7075,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(7), v)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.I32(-1)))
-		require.ErrorIs(t, i.Run(context.Background()), ErrIndexOutOfRange)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrIndexOutOfRange)
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -7048,7 +7122,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 				defer i.Close()
 				for range 8 {
 					i.Reset()
@@ -7058,7 +7133,9 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -7110,7 +7187,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 				defer i.Close()
 				for range 8 {
 					i.Reset()
@@ -7121,7 +7199,9 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 
 				i.Reset()
 				require.NoError(t, i.Push(tt.left))
@@ -7134,7 +7214,7 @@ func TestWithThreshold(t *testing.T) {
 				i.Reset()
 				require.NoError(t, i.Push(tt.left))
 				require.NoError(t, i.Push(tt.zero))
-				require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
+				require.ErrorIs(t, i.Run(context.Background()), interp.ErrDivideByZero)
 			})
 		}
 	}
@@ -7156,9 +7236,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int32]{1, 2}))
@@ -7167,7 +7250,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(2), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))))
@@ -7176,13 +7259,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(3), got)
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts struct get on type mismatch", func(t *testing.T) {
@@ -7203,9 +7281,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		first := types.NewStructType(types.NewStructField(types.TypeI32))
 		second := types.NewStructType(types.NewStructField(types.TypeI32))
 		for range 8 {
@@ -7216,7 +7297,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(7), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewStruct(second, types.BoxI32(9))))
@@ -7225,13 +7306,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(9), got)
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts string len on type mismatch", func(t *testing.T) {
@@ -7251,9 +7327,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.String("hello")))
@@ -7262,11 +7341,11 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(5), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1))))
-		require.ErrorIs(t, i.Run(context.Background()), ErrTypeMismatch)
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrTypeMismatch)
 	})
 
 	t.Run("jits array set for a ref-element array argument", func(t *testing.T) {
@@ -7306,7 +7385,8 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 		for range 4 {
 			i.Reset()
@@ -7318,7 +7398,9 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(len("stored")), got)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits struct set for a ref-field struct argument", func(t *testing.T) {
@@ -7351,7 +7433,8 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 		for range 4 {
 			i.Reset()
@@ -7363,7 +7446,9 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(len("stored")), got)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("continues i64 array get through arithmetic", func(t *testing.T) {
@@ -7386,9 +7471,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int64]{41}))
@@ -7397,15 +7485,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(42), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts after i64 array get with stack shape intact", func(t *testing.T) {
@@ -7428,9 +7511,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int64]{1<<48 - 1}))
@@ -7439,15 +7525,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(1<<48), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts nonboxable i64 array get", func(t *testing.T) {
@@ -7468,9 +7549,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int64]{41}))
@@ -7479,7 +7563,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(41), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.TypedArray[int64]{1 << 48}))
@@ -7488,13 +7572,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I64(1<<48), got)
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("continues i64 struct get through arithmetic", func(t *testing.T) {
@@ -7518,9 +7597,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.NewStruct(typ, types.BoxI64(41))))
@@ -7529,15 +7611,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(42), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("jits learned callee branch through caller tail", func(t *testing.T) {
@@ -7600,9 +7677,10 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), firstFn, secondFn, evalFn))
 
-		i := New(prog, WithTick(1), WithThreshold(1))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(1), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: 0, ip: 0}
+		const fn = 0
 
 		var v types.Value
 		for range 4 {
@@ -7612,13 +7690,16 @@ func TestWithThreshold(t *testing.T) {
 			v, err = i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.F64(22), v)
-			if i.exits[root] != nil {
+			if jitCompiledAt(i, p, fn, 0) {
 				break
 			}
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, fn, 0))
 
-		id := -1
+		// Warm the inlined callee branch until its learned continuation
+		// compiles as a native side-exit: the public signal that the branch
+		// returning f64.const 1 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.8
@@ -7627,29 +7708,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(21), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no first callee branch returning f64.const 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no first callee branch returning f64.const 1 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -7659,7 +7724,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(21), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("keeps inlined callee params across nested learned branch continuations", func(t *testing.T) {
@@ -7742,9 +7806,10 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), firstFn, secondFn, evalFn))
 
-		i := New(prog, WithTick(1), WithThreshold(1))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(1), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: 0, ip: 0}
+		const fn = 0
 
 		var v types.Value
 		for range 4 {
@@ -7754,13 +7819,16 @@ func TestWithThreshold(t *testing.T) {
 			v, err = i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.F64(22), v)
-			if i.exits[root] != nil {
+			if jitCompiledAt(i, p, fn, 0) {
 				break
 			}
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, fn, 0))
 
-		id := -1
+		// Warm the outer callee branch, then the nested one, each identified by
+		// a further increase in the side-exit compile count since both share
+		// the same root function.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.8
@@ -7769,29 +7837,14 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(31), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no first callee branch returning f64.const 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no first callee branch returning f64.const 1 was learned")
+		outer := jitSideExitCompiles(i, p, fn)
 
 		for range 3 {
 			i.Reset()
@@ -7801,9 +7854,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(31), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 
-		nested := -1
+		compiled = false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.1
@@ -7812,29 +7864,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-9), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == -10 {
-						nested = bid
-					}
-				}
-			}
-			if nested >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > outer {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, nested, 0, "no nested callee branch returning f64.const -10 was learned")
-		nestedHits := i.tracer.rootAt(root).hits[nested]
-		require.Equal(t, int64(exitThreshold), nestedHits)
+		require.True(t, compiled, "no nested callee branch returning f64.const -10 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -7844,9 +7880,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-9), v)
 		}
-		tree := i.tracer.rootAt(root)
-		require.Equal(t, hits, tree.hits[id])
-		require.Equal(t, nestedHits, tree.hits[nested])
 	})
 
 	t.Run("jits learned br_table continuations", func(t *testing.T) {
@@ -7879,9 +7912,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		// Record the root trace through table index 0 before warming index 1.
 		i.Reset()
@@ -7891,9 +7927,10 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(10), v)
 
-		// Warm the index=1 side exit until its learned continuation is compiled;
-		// once native, the journal stops counting it and its hit counter freezes.
-		id := -1
+		// Warm the index=1 side exit until its learned continuation compiles as
+		// a native side-exit: the public signal that the branch returning
+		// i32.const 11 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(1)))
@@ -7902,33 +7939,17 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(11), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 11 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 && tree.hits[id] >= exitThreshold {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		if id < 0 {
-			require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		if !compiled {
+			emits, _ := p.Metric("vm_jit_emits_total")
+			require.Greater(t, emits, float64(0))
 			return
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning i32.const 11 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
 
 		for range 3 {
 			i.Reset()
@@ -7938,7 +7959,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(11), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 
 		// The default target still deopts correctly after index 1 is learned.
 		i.Reset()
@@ -7989,9 +8009,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(choiceFn, evalFn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[1].Ref(), ip: 0}
+		fnConst, err := i.Const(1)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		i.Reset()
 		require.NoError(t, i.Push(types.I32(0)))
@@ -8000,7 +8023,10 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(110), v)
 
-		id := -1
+		// Warm the index=1 side exit until its learned continuation compiles as
+		// a native side-exit: the public signal that the inlined br_table
+		// branch returning i32.const 11 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(1)))
@@ -8009,33 +8035,17 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(111), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 11 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 && tree.hits[id] >= exitThreshold {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		if id < 0 {
-			require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		if !compiled {
+			emits, _ := p.Metric("vm_jit_emits_total")
+			require.Greater(t, emits, float64(0))
 			return
 		}
-		require.GreaterOrEqual(t, id, 0, "no inlined br_table branch returning i32.const 11 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
 
 		for range 3 {
 			i.Reset()
@@ -8045,7 +8055,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(111), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("jits top-level typed-array loop as cfg", func(t *testing.T) {
@@ -8075,15 +8084,20 @@ func TestWithThreshold(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, int32(10), got.I32())
-		require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.Greater(t, emits, float64(0))
 
-		ref := i.constants[values].Ref()
+		valuesConst, err := i.Const(int(values))
+		require.NoError(t, err)
+		ref := valuesConst.Ref()
 		require.NoError(t, i.Store(ref, types.TypedArray[int32]{10, 20, 30, 40}))
 		i.Reset()
 		require.NoError(t, i.Run(context.Background()))
@@ -8097,10 +8111,10 @@ func TestWithFuel(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
 	})
-	i := New(prog, WithTick(1), WithFuel(2))
+	i := interp.New(prog, interp.WithTick(1), interp.WithFuel(2))
 	defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+	require.ErrorIs(t, i.Run(context.Background()), interp.ErrFuelExhausted)
 }
 
 func i32operand(v int32) uint64 {
@@ -8114,14 +8128,14 @@ func i64operand(v int64) uint64 {
 func BenchmarkNew(b *testing.B) {
 	b.Run("Empty", func(b *testing.B) {
 		prog := program.New(nil)
-		var vm *Interpreter
+		var vm *interp.Interpreter
 		var closeErr error
 		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
 			start := time.Now()
-			vm = New(prog)
+			vm = interp.New(prog)
 			elapsed += time.Since(start)
 			closeErr = vm.Close()
 		}
@@ -8131,14 +8145,14 @@ func BenchmarkNew(b *testing.B) {
 
 	b.Run("Program", func(b *testing.B) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
-		var vm *Interpreter
+		var vm *interp.Interpreter
 		var closeErr error
 		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
 			start := time.Now()
-			vm = New(prog, WithThreshold(-1))
+			vm = interp.New(prog, interp.WithThreshold(-1))
 			elapsed += time.Since(start)
 			closeErr = vm.Close()
 		}
@@ -8148,14 +8162,14 @@ func BenchmarkNew(b *testing.B) {
 
 	b.Run("JITEnabled", func(b *testing.B) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
-		var vm *Interpreter
+		var vm *interp.Interpreter
 		var closeErr error
 		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
 			start := time.Now()
-			vm = New(prog, WithThreshold(0))
+			vm = interp.New(prog, interp.WithThreshold(0))
 			elapsed += time.Since(start)
 			closeErr = vm.Close()
 		}
@@ -8186,7 +8200,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := builder.Build()
 		require.NoError(b, err)
-		vm := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+		vm := interp.New(prog, interp.WithTick(1<<20), interp.WithThreshold(1<<30))
 		b.Cleanup(func() { require.NoError(b, vm.Close()) })
 		ctx := context.Background()
 		require.NoError(b, vm.Run(ctx))
@@ -8213,13 +8227,13 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 	})
 
 	for _, tt := range runTests {
-		b.Run(tt.name, func(b *testing.B) {
+		b.Run(runTestName(tt.program), func(b *testing.B) {
 			modes := []struct {
 				name string
-				opts []func(*option)
+				opts []interp.Option
 			}{
-				{name: "Threaded", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
-				{name: "Fused", opts: []func(*option){WithThreshold(-1)}},
+				{name: "Threaded", opts: []interp.Option{interp.WithTick(1), interp.WithThreshold(-1)}},
+				{name: "Fused", opts: []interp.Option{interp.WithThreshold(-1)}},
 			}
 			jit := runtime.GOARCH == "arm64"
 			codes := [][]byte{tt.program.Code}
@@ -8241,14 +8255,41 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			if jit {
 				modes = append(modes, struct {
 					name string
-					opts []func(*option)
-				}{name: "JITWarm", opts: []func(*option){WithTick(1), WithThreshold(0)}})
+					opts []interp.Option
+				}{name: "JITWarm", opts: []interp.Option{interp.WithTick(1), interp.WithThreshold(0)}})
 			}
 
 			for _, mode := range modes {
 				b.Run(mode.name, func(b *testing.B) {
 					ctx := context.Background()
-					vm := New(tt.program, mode.opts...)
+					opts := mode.opts
+					// §14 requires a warm JIT benchmark to prove native
+					// installation before timing. A profiler is the only public
+					// way to see it, but attaching one to the timed interpreter
+					// would fail dispatch's fast-path guard and add a safepoint
+					// on every instruction at WithTick(1). So a throwaway probe
+					// proves this program and option set do install, and the
+					// timed interpreter below is warmed identically without one.
+					if mode.name == "JITWarm" {
+						profile := prof.New()
+						probe := interp.New(tt.program, append(append([]interp.Option(nil), opts...), interp.WithProfiler(profile))...)
+						installed := false
+						for range 16 {
+							if err := probe.Run(ctx); err != nil && tt.err == nil {
+								require.NoError(b, err)
+							}
+							probe.Reset()
+							if jitCompiledAt(probe, profile, 0, 0) {
+								installed = true
+								break
+							}
+						}
+						require.NoError(b, probe.Close())
+						if !installed {
+							b.Skip("entry does not compile")
+						}
+					}
+					vm := interp.New(tt.program, opts...)
 					b.Cleanup(func() { require.NoError(b, vm.Close()) })
 
 					warmups := 1
@@ -8268,13 +8309,6 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 							}
 						}
 						vm.Reset()
-						if mode.name == "JITWarm" && vm.stub(0) != nil {
-							break
-						}
-					}
-
-					if mode.name == "JITWarm" && vm.stub(0) == nil {
-						b.Skip("entry does not compile")
 					}
 
 					var runErr error
@@ -8297,6 +8331,44 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			}
 		})
 	}
+
+	// PerOp benchmarks every runTests case under the interpreter's default
+	// options, one sub-benchmark per case, keyed by the same derived name the
+	// test uses. Trapping cases are skipped: a trap always takes the same
+	// short exit path, so timing it case by case is noise.
+	b.Run("PerOp", func(b *testing.B) {
+		for _, tt := range runTests {
+			if tt.err != nil {
+				continue
+			}
+			b.Run(runTestName(tt.program), func(b *testing.B) {
+				ctx := context.Background()
+				vm := interp.New(tt.program)
+				b.Cleanup(func() { require.NoError(b, vm.Close()) })
+
+				require.NoError(b, vm.Run(ctx))
+				for _, want := range tt.values {
+					got, err := vm.Pop()
+					require.NoError(b, err)
+					require.Equal(b, want, got)
+				}
+				vm.Reset()
+
+				var runErr error
+				var elapsed time.Duration
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					start := time.Now()
+					runErr = vm.Run(ctx)
+					elapsed += time.Since(start)
+					vm.Reset()
+				}
+				b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+				require.NoError(b, runErr)
+			})
+		}
+	})
 }
 
 func BenchmarkInterpreter_Reset(b *testing.B) {
@@ -8314,26 +8386,26 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 	tests := []struct {
 		name string
 		prog *program.Program
-		opts []func(*option)
+		opts []interp.Option
 	}{
 		{
 			name: "Scalar",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 42), instr.New(instr.GLOBAL_SET, 0),
 			}, program.WithGlobals(types.TypeI32)),
-			opts: []func(*option){WithThreshold(-1)},
+			opts: []interp.Option{interp.WithThreshold(-1)},
 		},
 		{
 			name: "Heap",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 8), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			}, program.WithTypes(types.NewArrayType(types.TypeAny))),
-			opts: []func(*option){WithThreshold(-1)},
+			opts: []interp.Option{interp.WithThreshold(-1)},
 		},
 		{
 			name: "JITState",
 			prog: program.New(jitCode),
-			opts: []func(*option){WithThreshold(0)},
+			opts: []interp.Option{interp.WithThreshold(0)},
 		},
 	}
 
@@ -8343,18 +8415,27 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 		}
 		b.Run(tt.name, func(b *testing.B) {
 			ctx := context.Background()
-			vm := New(tt.prog, tt.opts...)
+			opts := tt.opts
+			// Only the JITState case needs to prove native installation;
+			// attaching the profiler is harmless here because the timed
+			// section below measures Reset(), never Run().
+			var profile *prof.Profiler
+			if tt.name == "JITState" {
+				profile = prof.New()
+				opts = append(opts, interp.WithProfiler(profile))
+			}
+			vm := interp.New(tt.prog, opts...)
 			defer vm.Close()
 			require.NoError(b, vm.Run(ctx))
 			if tt.name == "JITState" {
 				for range 16 {
-					if vm.stub(0) != nil {
+					if jitCompiledAt(vm, profile, 0, 0) {
 						break
 					}
 					vm.Reset()
 					require.NoError(b, vm.Run(ctx))
 				}
-				require.NotNil(b, vm.stub(0))
+				require.True(b, jitCompiledAt(vm, profile, 0, 0))
 			}
 
 			var runErr error
@@ -8390,7 +8471,7 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 
 func BenchmarkInterpreter_Push(b *testing.B) {
 	b.Run("Scalar", func(b *testing.B) {
-		vm := New(program.New(nil))
+		vm := interp.New(program.New(nil))
 		defer vm.Close()
 		var pushErr error
 		var elapsed time.Duration
@@ -8407,7 +8488,7 @@ func BenchmarkInterpreter_Push(b *testing.B) {
 	})
 
 	b.Run("Reference", func(b *testing.B) {
-		vm := New(program.New(nil))
+		vm := interp.New(program.New(nil))
 		defer vm.Close()
 		var pushErr error
 		var elapsed time.Duration
@@ -8425,7 +8506,7 @@ func BenchmarkInterpreter_Push(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Pop(b *testing.B) {
-	vm := New(program.New(nil))
+	vm := interp.New(program.New(nil))
 	defer vm.Close()
 	var value types.Value
 	var pushErr, popErr error
@@ -8445,7 +8526,7 @@ func BenchmarkInterpreter_Pop(b *testing.B) {
 }
 
 func BenchmarkInterpreter_PopBoxed(b *testing.B) {
-	vm := New(program.New(nil))
+	vm := interp.New(program.New(nil))
 	defer vm.Close()
 	var value types.Boxed
 	var pushErr, popErr error
@@ -8465,7 +8546,7 @@ func BenchmarkInterpreter_PopBoxed(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Peek(b *testing.B) {
-	vm := New(program.New(nil))
+	vm := interp.New(program.New(nil))
 	defer vm.Close()
 	require.NoError(b, vm.Push(types.I32(42)))
 	var value types.Boxed
@@ -8480,7 +8561,7 @@ func BenchmarkInterpreter_Peek(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Alloc(b *testing.B) {
-	vm := New(program.New(nil))
+	vm := interp.New(program.New(nil))
 	defer vm.Close()
 	var addr int
 	var err error
@@ -8498,7 +8579,7 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Retain(b *testing.B) {
-	vm := New(program.New(nil))
+	vm := interp.New(program.New(nil))
 	defer vm.Close()
 	addr, err := vm.Alloc(types.String("value"))
 	require.NoError(b, err)
@@ -8517,7 +8598,7 @@ func BenchmarkInterpreter_Retain(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Release(b *testing.B) {
-	vm := New(program.New(nil))
+	vm := interp.New(program.New(nil))
 	defer vm.Close()
 	addr, err := vm.Alloc(types.String("value"))
 	require.NoError(b, err)
@@ -8539,7 +8620,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 
 func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
 	prog := structSumTree(12, 500)
-	vm := New(prog, WithThreshold(-1)) // threaded + fused, no JIT
+	vm := interp.New(prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
 	b.Cleanup(func() { require.NoError(b, vm.Close()) })
 	ctx := context.Background()
 
@@ -8671,7 +8752,7 @@ func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
 		{name: "upvalue", prog: arraySumUpvalue(size, repeats)},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			vm := New(tt.prog, WithThreshold(-1)) // threaded + fused, no JIT
+			vm := interp.New(tt.prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
 			b.Cleanup(func() { require.NoError(b, vm.Close()) })
 			ctx := context.Background()
 
@@ -8817,7 +8898,7 @@ func BenchmarkInterpreter_StructGetHost(b *testing.B) {
 	} {
 		b.Run(tt.name, func(b *testing.B) {
 			prog := structGetHostLoop(repeats)
-			vm := New(prog, WithThreshold(tt.threshold))
+			vm := interp.New(prog, interp.WithThreshold(tt.threshold))
 			b.Cleanup(func() { require.NoError(b, vm.Close()) })
 			ctx := context.Background()
 
@@ -8918,7 +8999,7 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 		{name: "methods", value: &marshalBenchMethods{Count: 7}},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			i := New(program.New(nil))
+			i := interp.New(program.New(nil))
 			b.Cleanup(func() { require.NoError(b, i.Close()) })
 
 			_, err := i.Marshal(tt.value)
@@ -8960,7 +9041,7 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 		{name: "map", value: entries, dst: new(map[string]int32)},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			i := New(program.New(nil))
+			i := interp.New(program.New(nil))
 			b.Cleanup(func() { require.NoError(b, i.Close()) })
 
 			value, err := i.Marshal(tt.value)

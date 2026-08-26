@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/asm/arm64"
+	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/stretchr/testify/require"
 )
 
@@ -233,73 +233,71 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, [3]uint64{3, 4, 7}, values)
 	})
 
-	t.Run("relaxes out-of-range branches", func(t *testing.T) {
-		// Each case emits a branch whose target is pushed past its +-1MB
-		// imm19 range by over 1MB of filler, forcing Build to relax it.
-		branches := []struct {
-			name string
-			emit func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label)
-		}{
-			{"CBZ", func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label) {
-				assembler.Emit(arm64.CBZLabel(flag, zero))
-			}},
-			{"B.cond", func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label) {
-				assembler.Emit(arm64.CMPI(flag, 0))
-				assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, zero))
-			}},
-		}
-		for _, tt := range branches {
-			t.Run(tt.name, func(t *testing.T) {
-				arch := arm64.New()
+	// Each case emits a branch whose target is pushed past its +-1MB imm19
+	// range by over 1MB of filler, forcing Build to relax it.
+	branches := []struct {
+		name string
+		emit func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label)
+	}{
+		{"relaxes an out-of-range CBZ branch", func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label) {
+			assembler.Emit(arm64.CBZLabel(flag, zero))
+		}},
+		{"relaxes an out-of-range B.cond branch", func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label) {
+			assembler.Emit(arm64.CMPI(flag, 0))
+			assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, zero))
+		}},
+	}
+	for _, tt := range branches {
+		t.Run(tt.name, func(t *testing.T) {
+			arch := arm64.New()
 
-				assembler := asm.New(arch)
-				ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-				flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
-				filler := assembler.Reg(asm.RegTypeInt, asm.Width64)
-				result := assembler.Reg(asm.RegTypeInt, asm.Width64)
-				require.NoError(t, assembler.Pin(ctx, arm64.X0))
+			assembler := asm.New(arch)
+			ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			filler := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			result := assembler.Reg(asm.RegTypeInt, asm.Width64)
+			require.NoError(t, assembler.Pin(ctx, arm64.X0))
 
-				zero := assembler.Label()
+			zero := assembler.Label()
 
-				assembler.Emit(arm64.LDR(flag, ctx, 0))
-				tt.emit(assembler, flag, zero)
+			assembler.Emit(arm64.LDR(flag, ctx, 0))
+			tt.emit(assembler, flag, zero)
 
-				const fillerCount = 1 << 18
-				assembler.Emit(arm64.LDI(filler, 1)...)
-				for i := 0; i < fillerCount; i++ {
-					assembler.Emit(arm64.ADDI(filler, filler, 1))
-				}
+			const fillerCount = 1 << 18
+			assembler.Emit(arm64.LDI(filler, 1)...)
+			for i := 0; i < fillerCount; i++ {
+				assembler.Emit(arm64.ADDI(filler, filler, 1))
+			}
 
-				assembler.Emit(arm64.LDI(result, 1)...)
-				assembler.Emit(arm64.STR(result, ctx, 8))
-				assembler.Emit(arm64.RET())
+			assembler.Emit(arm64.LDI(result, 1)...)
+			assembler.Emit(arm64.STR(result, ctx, 8))
+			assembler.Emit(arm64.RET())
 
-				assembler.Bind(zero)
-				assembler.Emit(arm64.LDI(result, 0)...)
-				assembler.Emit(arm64.STR(result, ctx, 8))
-				assembler.Emit(arm64.RET())
+			assembler.Bind(zero)
+			assembler.Emit(arm64.LDI(result, 0)...)
+			assembler.Emit(arm64.STR(result, ctx, 8))
+			assembler.Emit(arm64.RET())
 
-				code, err := assembler.Build()
-				require.NoError(t, err)
-				require.Greater(t, len(code), 1<<20)
+			code, err := assembler.Build()
+			require.NoError(t, err)
+			require.Greater(t, len(code), 1<<20)
 
-				buffer, err := asm.NewBuffer(len(code) + 4096)
-				require.NoError(t, err)
-				defer func() { require.NoError(t, buffer.Free()) }()
+			buffer, err := asm.NewBuffer(len(code) + 4096)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, buffer.Free()) }()
 
-				callable, err := asm.Link(buffer, arch.ABI(), code)
-				require.NoError(t, err)
+			callable, err := asm.Link(buffer, arch.ABI(), code)
+			require.NoError(t, err)
 
-				notTaken := []uint64{1, 0xFF}
-				require.NoError(t, callable.Call(unsafe.Pointer(&notTaken[0])))
-				require.Equal(t, uint64(1), notTaken[1])
+			notTaken := []uint64{1, 0xFF}
+			require.NoError(t, callable.Call(unsafe.Pointer(&notTaken[0])))
+			require.Equal(t, uint64(1), notTaken[1])
 
-				taken := []uint64{0, 0xFF}
-				require.NoError(t, callable.Call(unsafe.Pointer(&taken[0])))
-				require.Equal(t, uint64(0), taken[1])
-			})
-		}
-	})
+			taken := []uint64{0, 0xFF}
+			require.NoError(t, callable.Call(unsafe.Pointer(&taken[0])))
+			require.Equal(t, uint64(0), taken[1])
+		})
+	}
 
 	t.Run("spills under register pressure", func(t *testing.T) {
 		// Hold far more values live at once than the integer bank has

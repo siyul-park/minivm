@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/siyul-park/minivm/asm"
-	arm64 "github.com/siyul-park/minivm/asm/arm64"
+	"github.com/siyul-park/minivm/internal/asm"
+	arm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/stretchr/testify/require"
 )
 

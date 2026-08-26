@@ -3,7 +3,7 @@ package arm64
 import (
 	"unsafe"
 
-	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/internal/asm"
 )
 
 // abi implements asm.ABI for AArch64 context-pointer invocation.
