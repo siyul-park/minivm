@@ -1,24 +1,30 @@
-package interp
+package interp_test
 
 import (
 	"context"
 	"math"
-	"os"
-	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/siyul-park/minivm/interp"
+
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/asm"
-	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+// refCountAt reads one address's reference count through the public API. The
+// callers below assert on an address they just observed live, so a lookup
+// error is a test failure rather than a case to handle.
+func refCountAt(t *testing.T, i *interp.Interpreter, addr int) int {
+	t.Helper()
+	count, err := i.RefCount(addr)
+	require.NoError(t, err)
+	return count
+}
 
 // ArraySetAfterNestedCalls protects compiled stack materialization across
 // a SIGSEGV in generated ARM64 code: an outer row loop whose body inlines
@@ -90,7 +96,7 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	prog, err := b.Build()
 	require.NoError(t, err)
 
-	i := New(prog, WithTick(1), WithThreshold(1))
+	i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(1))
 	defer i.Close()
 
 	for n := 0; n < 256; n++ {
@@ -106,7 +112,7 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	jitOut := make([]float64, len(out))
 	copy(jitOut, out)
 
-	ref := New(prog, WithTick(1), WithThreshold(-1))
+	ref := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 	defer ref.Close()
 	for n := 0; n < 256; n++ {
 		for idx := range row {
@@ -118,71 +124,6 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	require.Equal(t, jitOut, out)
 }
 
-func TestARM64_Backedge(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native JIT is only available on arm64")
-	}
-
-	tests := []struct {
-		name      string
-		limit     int32
-		threshold int
-		attempted []bool
-		installed bool
-	}{
-		{name: "compiles module loop", limit: 64, threshold: 8, attempted: []bool{true}, installed: true},
-		{name: "warms loop across runs", limit: 4, threshold: 3, attempted: []bool{false, true}},
-		{name: "keeps hot threshold", limit: 4, threshold: 64, attempted: []bool{false, false}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := program.NewBuilder()
-			loop := b.Label()
-			done := b.Label()
-			b.Locals(types.TypeI32)
-			b.Emit(instr.I32_CONST, 0).
-				Emit(instr.LOCAL_SET, 0).
-				Bind(loop).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, uint64(uint32(tt.limit))).
-				Emit(instr.I32_GE_S).
-				BrIf(done).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.I32_ADD).
-				Emit(instr.LOCAL_SET, 0).
-				Br(loop).
-				Bind(done).
-				Emit(instr.LOCAL_GET, 0)
-			prog, err := b.Build()
-			require.NoError(t, err)
-
-			i := New(prog, WithTick(1<<20), WithThreshold(tt.threshold))
-			defer i.Close()
-			headers := i.tracer.headers(i, 0)
-			require.NotEmpty(t, headers)
-			root := anchor{ip: headers[0]}
-
-			for run, attempted := range tt.attempted {
-				require.NoError(t, i.Run(context.Background()))
-				value, err := i.PopBoxed()
-				require.NoError(t, err)
-				require.Equal(t, types.BoxI32(tt.limit), value)
-				require.Equal(t, attempted, i.tried[root])
-				if run+1 < len(tt.attempted) {
-					i.Reset()
-				}
-			}
-			if tt.installed {
-				require.NotEmpty(t, i.exits)
-			}
-		})
-	}
-}
-
-// LoopCarriedLocals protects write-back scalar locals in native loops. Hot
-// backedges keep their slots stale; every side exit and safepoint yield must
-// commit current registers before threaded execution observes the frame.
 func TestARM64_LoopCarriedLocals(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
@@ -211,8 +152,8 @@ func TestARM64_LoopCarriedLocals(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for iteration := 0; iteration < 32; iteration++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -238,7 +179,13 @@ func TestARM64_LoopCarriedLocals(t *testing.T) {
 	})
 
 	t.Run("yield commits before WithTick one safepoint", func(t *testing.T) {
-		const limit = int32(loopBudget + 3)
+		// loopSafepointBudget mirrors the native loop back-edge budget interp
+		// spends between safepoints. The loop must run past it for a native
+		// yield to be observable, and the budget is not exported, so raising
+		// it in interp without raising this copy silently stops covering the
+		// safepoint commit.
+		const loopSafepointBudget = 1 << 13
+		const limit = int32(loopSafepointBudget + 3)
 		b := program.NewBuilder()
 		b.Locals(types.TypeI32)
 		loop := b.Label()
@@ -252,7 +199,7 @@ func TestARM64_LoopCarriedLocals(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
 		for iteration := 0; iteration < 12; iteration++ {
 			require.NoError(t, jit.Run(context.Background()))
 			got, err := jit.PopBoxed()
@@ -270,33 +217,6 @@ func TestARM64_LoopCarriedLocals(t *testing.T) {
 		}
 		require.Greater(t, yields, float64(0))
 	})
-}
-
-// Flush protects the hot-backedge invariant directly: a dirty carried local
-// remains register-authoritative and emits no VM-slot materialization.
-func TestARM64_Flush(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native JIT is only available on arm64")
-	}
-
-	assembler := asm.New(arm64.New())
-	reg := assembler.Reg(asm.RegTypeInt, asm.Width64)
-	local := value{reg: reg, kind: types.KindI32, raw: true}
-	ctx := &lowering{
-		assembler: assembler,
-		frames: []activation{{
-			kinds:  []types.Kind{types.KindI32},
-			locals: []value{local},
-			state:  []localState{localLoaded | localDirty},
-		}},
-		carried: []carriedLocal{{value: local}},
-	}
-
-	require.True(t, (arm64Lowerer{}).flush(ctx, flushCommit))
-	code, err := assembler.Build()
-	require.NoError(t, err)
-	require.Empty(t, code)
-	require.Equal(t, localLoaded|localDirty, ctx.frames[0].state[0])
 }
 
 // AbortedSideExitDoesNotComplete protects partial unsupported traces from
@@ -353,9 +273,9 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 		}
 	}
 
-	jit := New(prog, WithTick(1), WithThreshold(1))
+	jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(1))
 	defer jit.Close()
-	threaded := New(prog, WithTick(1), WithThreshold(-1))
+	threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 	defer threaded.Close()
 	for _, input := range inputs {
 		require.NoError(t, jit.SetGlobal(0, types.BoxI32(input)))
@@ -370,761 +290,6 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 		jit.Reset()
 		threaded.Reset()
 	}
-}
-
-// TestNativeStackReserve verifies the arithmetic invariant tying three
-// hand-synced constants together: asm.MaxSpillSlots (spill capacity),
-// nativeFrameLimit (native call-depth cap), and the arm64 invoke
-// trampoline's hard-coded stack reserve in abi_arm64.s. If any one of them
-// is edited without the others, this test fails instead of the mismatch
-// surfacing as a corrupted native stack at runtime. See docs/jit-internals.md
-// for the full explanation.
-func TestARM64_StackReserve(t *testing.T) {
-	const (
-		spillSlotBytes  = 8 // one 64-bit value per spill slot
-		frameRecordSize = journalStride * 8
-		saveAreaBytes   = 80 // R19-R26 callee-saved save area (4 STP pairs, 16-byte aligned)
-	)
-	spillBytes := asm.MaxSpillSlots * spillSlotBytes
-	callBytes := nativeFrameLimit * frameRecordSize
-	reserve := spillBytes + callBytes
-
-	_, thisFile, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	abiFile := filepath.Join(filepath.Dir(thisFile), "..", "internal", "asm", "arm64", "abi_arm64.s")
-	src, err := os.ReadFile(abiFile)
-	require.NoError(t, err)
-
-	reserveLiteral := regexp.MustCompile(`ADD\s+\$(\d+),\s*RSP`).FindSubmatch(src)
-	require.NotNil(t, reserveLiteral, "expected an ADD $N, RSP reserve instruction in %s", abiFile)
-	reserveVal, err := strconv.Atoi(string(reserveLiteral[1]))
-	require.NoError(t, err)
-	require.Equal(t, reserveVal, reserve,
-		"asm.MaxSpillSlots*%d + nativeFrameLimit*journalStride*8 must equal the trampoline's ADD $N, RSP reserve", spillSlotBytes)
-
-	frameLiteral := regexp.MustCompile(`TEXT ·invoke\(SB\), \$(\d+)-`).FindSubmatch(src)
-	require.NotNil(t, frameLiteral, "expected a TEXT ·invoke(SB), $N-M frame size in %s", abiFile)
-	frameVal, err := strconv.Atoi(string(frameLiteral[1]))
-	require.NoError(t, err)
-	require.Equal(t, frameVal, reserve+saveAreaBytes,
-		"the trampoline's TEXT frame size must equal the reserve plus the callee-saved save area")
-}
-
-// TestCompiler_Compile covers compiler-selected static plans and verifies that
-// their native entries match threaded execution.
-func TestCompiler_Compile(t *testing.T) {
-	if runtime.GOARCH == "arm64" {
-		t.Run("guard value", func(t *testing.T) {
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_DIV_S),
-			}, program.WithGlobals(types.TypeI32, types.TypeI32))
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
-			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-
-			root := anchor{}
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardValue, opcode: int(instr.I32_DIV_S)}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("guard shape", func(t *testing.T) {
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.ARRAY_LEN),
-			}, program.WithConstants(types.TypedArray[int32]{1}, types.TypedArray[float64]{2}),
-				program.WithGlobals(types.TypeAny))
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			{
-				value := i.constants[0]
-				i.retain(value.Ref())
-				require.NoError(t, i.SetGlobal(0, value))
-			}
-			root := anchor{}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			{
-				value := i.constants[1]
-				i.retain(value.Ref())
-				require.NoError(t, i.SetGlobal(0, value))
-			}
-
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardShape, opcode: int(instr.ARRAY_LEN)}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("guard bounds", func(t *testing.T) {
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			{
-				value := i.constants[0]
-				i.retain(value.Ref())
-				require.NoError(t, i.SetGlobal(0, value))
-			}
-			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			root := anchor{}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardBounds, opcode: int(instr.ARRAY_GET)}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("primitive array set loop", func(t *testing.T) {
-			array := make(types.TypedArray[int32], 64)
-			b := program.NewBuilder()
-			loop := b.Label()
-			done := b.Label()
-			b.Locals(types.TypeI32)
-			b.Const(array)
-			b.Emit(instr.I32_CONST, 0).
-				Emit(instr.LOCAL_SET, 0).
-				Bind(loop).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 64).
-				Emit(instr.I32_GE_S).
-				BrIf(done).
-				ConstGet(array).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.ARRAY_SET).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.I32_ADD).
-				Emit(instr.LOCAL_SET, 0).
-				Br(loop).
-				Bind(done).
-				ConstGet(array).
-				Emit(instr.I32_CONST, 0).
-				Emit(instr.ARRAY_GET)
-			prog, err := b.Build()
-			require.NoError(t, err)
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-
-			// Module code owning a loop compiles at the loop root, not at its
-			// entry: the entry runs once per execution while the loop carries
-			// the work, so the planner leaves that anchor to the loop.
-			headers := i.tracer.headers(i, 0)
-			require.NotEmpty(t, headers)
-			compiled := compiler.Compile(i, anchor{ip: headers[0]})
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			i.install(compiled.module, false)
-			require.NoError(t, i.Run(context.Background()))
-			value, err := i.PopBoxed()
-			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(1), value)
-		})
-
-		t.Run("primitive array set branch", func(t *testing.T) {
-			array := make(types.TypedArray[int32], 16)
-			b := program.NewBuilder()
-			loop := b.Label()
-			skip := b.Label()
-			done := b.Label()
-			b.Locals(types.TypeI32)
-			b.Const(array)
-			b.Emit(instr.I32_CONST, 0).
-				Emit(instr.LOCAL_SET, 0).
-				Bind(loop).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 16).
-				Emit(instr.I32_GE_S).
-				BrIf(done).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.I32_AND).
-				BrIf(skip).
-				ConstGet(array).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.I32_ADD).
-				Emit(instr.ARRAY_SET).
-				Bind(skip).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.I32_ADD).
-				Emit(instr.LOCAL_SET, 0).
-				Br(loop).
-				Bind(done).
-				ConstGet(array).
-				Emit(instr.I32_CONST, 0).
-				Emit(instr.ARRAY_GET).
-				ConstGet(array).
-				Emit(instr.I32_CONST, 2).
-				Emit(instr.ARRAY_GET).
-				Emit(instr.I32_ADD)
-			prog, err := b.Build()
-			require.NoError(t, err)
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-
-			compiled := compiler.Compile(i, anchor{})
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			i.install(compiled.module, false)
-
-			require.NoError(t, i.Run(context.Background()))
-			value, err := i.PopBoxed()
-			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(4), value)
-		})
-
-		t.Run("primitive array set continues", func(t *testing.T) {
-			array := types.TypedArray[int32]{1}
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.ARRAY_SET),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(array))
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-
-			compiled := compiler.Compile(i, anchor{})
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			i.install(compiled.module, false)
-
-			require.NoError(t, i.Run(context.Background()))
-			value, err := i.PopBoxed()
-			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(2), value)
-			require.Equal(t, int32(2), array[0])
-		})
-
-		t.Run("array get value guard", func(t *testing.T) {
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			value := i.constants[0]
-			i.retain(value.Ref())
-			require.NoError(t, i.SetGlobal(0, value))
-			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			root := anchor{}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-
-			for _, exit := range entry.exits {
-				if exit.reason == prof.ExitGuardValue && exit.opcode == int(instr.ARRAY_GET) {
-					return
-				}
-			}
-			require.Fail(t, "missing array.get guard-value exit")
-		})
-
-		t.Run("guard kind", func(t *testing.T) {
-			typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))
-			value := types.NewStruct(typ, types.BoxI32(1), types.BoxF64(2))
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.STRUCT_GET),
-			}, program.WithConstants(value), program.WithGlobals(types.TypeAny, types.TypeI32))
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			{
-				value := i.constants[0]
-				i.retain(value.Ref())
-				require.NoError(t, i.SetGlobal(0, value))
-			}
-			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			root := anchor{}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
-
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardKind, opcode: int(instr.STRUCT_GET)}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("cold branch", func(t *testing.T) {
-			b := program.NewBuilder()
-			cold := b.Label()
-			done := b.Label()
-			b.Globals(types.TypeI32).
-				Emit(instr.GLOBAL_GET, 0).
-				BrIf(cold).
-				Emit(instr.I32_CONST, 1).
-				Br(done).
-				Bind(cold).
-				Emit(instr.I32_CONST, 2).
-				Bind(done)
-			prog, err := b.Build()
-			require.NoError(t, err)
-			i := New(prog, WithThreshold(-1))
-			defer i.Close()
-			require.NoError(t, i.SetGlobal(0, types.BoxI32(0)))
-			root := anchor{}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
-
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitColdBranch, opcode: int(instr.BR_IF)}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("trace cut", func(t *testing.T) {
-			instructions := make([]instr.Instruction, opLimit+1)
-			for idx := range instructions {
-				instructions[idx] = instr.New(instr.NOP)
-			}
-			i := New(program.New(instructions), WithThreshold(-1))
-			defer i.Close()
-			root := anchor{}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitTraceCut, opcode: prof.OpcodeNone}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("terminal", func(t *testing.T) {
-			i := New(program.New([]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(5.5)),
-				instr.New(instr.F64_CONST, math.Float64bits(2)),
-				instr.New(instr.F64_REM),
-			}), WithThreshold(-1))
-			defer i.Close()
-			root := anchor{}
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitTerminalOp, opcode: int(instr.F64_REM)}, entry.exits[id])
-			require.Equal(t, uint64(id+1), encoded)
-		})
-
-		t.Run("loop exit", func(t *testing.T) {
-			b := types.NewFunctionBuilder(nil).Locals(types.TypeI32)
-			loop := b.Label()
-			b.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
-				Bind(loop).
-				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
-					instr.New(instr.LOCAL_TEE, 0), instr.New(instr.I32_CONST, loopBudget+2), instr.New(instr.I32_LT_S)).
-				BrIf(loop).
-				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
-			fn, err := b.Build()
-			require.NoError(t, err)
-			prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
-			local := prof.NewCollector()
-			i := New(prog, WithThreshold(-1))
-			i.samples = local
-			i.profiler = prof.New()
-			defer i.Close()
-			addr := i.constants[0].Ref()
-			i.fr.addr = addr
-			i.fr.ref = addr
-			i.fr.code = i.code[addr]
-			i.fr.ip = 0
-			i.fr.bp = 0
-			i.sp = 1
-			i.stack[0] = types.BoxI32(0)
-			header := -1
-			for ip := 0; ip < len(fn.Code); {
-				inst := instr.Instruction(fn.Code[ip:])
-				if inst.Opcode() == instr.BR_IF {
-					header = instr.Targets(fn.Code, ip)[0]
-					break
-				}
-				ip += inst.Width()
-			}
-			require.Greater(t, header, 0)
-			for i.fr.ip < header {
-				i.fr.code[i.fr.ip](i)
-			}
-			root := anchor{addr: addr, ip: header}
-			addrLabel := strconv.Itoa(addr)
-			headerLabel := strconv.Itoa(header)
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			require.Equal(t, entryLoop, entry.kind)
-			metrics := i.counters(root, entry)
-
-			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
-			i.fr.ip = header
-			i.loop(root, entry, metrics, newWatchdog(entry))(i)
-			encoded := i.journal[journalExitID]
-			require.NotZero(t, encoded)
-			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitLoop, opcode: int(instr.BR_IF)}, entry.exits[id])
-			exits, ok := local.Metric("vm_jit_native_exits_total",
-				prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: headerLabel},
-				prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"},
-				prof.Label{Key: "reason", Value: "loop-exit"}, prof.Label{Key: "opcode", Value: "br_if"})
-			require.True(t, ok)
-			require.Equal(t, float64(1), exits)
-		})
-
-		t.Run("yield", func(t *testing.T) {
-			fn := types.NewFunctionBuilder(nil).
-				Emit(instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)).
-				MustBuild()
-			local := prof.NewCollector()
-			i := New(program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn)),
-				WithThreshold(-1))
-			i.samples = local
-			i.profiler = prof.New()
-			defer i.Close()
-			addr := i.constants[0].Ref()
-			i.fr.addr = addr
-			i.fr.ref = addr
-			i.fr.code = i.code[addr]
-			i.fr.ip = 0
-			i.fr.bp = 0
-			i.sp = 0
-			root := anchor{addr: addr}
-			capture := i.tracer.capture(i, root)
-			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
-			compiler, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			compiled := compiler.Compile(i, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
-			require.True(t, ok)
-			require.Equal(t, entryFunction, entry.kind)
-
-			i.call(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
-			require.Equal(t, uint64(trapYield), i.journal[journalTrap])
-			require.Zero(t, i.journal[journalExitID])
-			yields, ok := local.Metric("vm_jit_native_yields_total",
-				prof.Label{Key: "func", Value: strconv.Itoa(addr)}, prof.Label{Key: "ip", Value: "0"},
-				prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
-			require.True(t, ok)
-			require.Equal(t, float64(1), yields)
-			for _, metric := range local.Metrics() {
-				require.NotEqual(t, "vm_jit_native_exits_total", metric.Name)
-			}
-		})
-	}
-
-	t.Run("attributes concrete guard exits to their opcode", func(t *testing.T) {
-		if runtime.GOARCH != "arm64" {
-			t.Skip("native JIT is only available on arm64")
-		}
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 8), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_DIV_S),
-		}, program.WithLocals(types.TypeI32))
-		i := New(prog, WithThreshold(-1))
-		defer i.Close()
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-
-		result := c.Compile(i, anchor{})
-		require.NoError(t, result.err)
-		require.NotNil(t, result.module)
-		for _, exit := range result.module.entries[anchor{}].exits {
-			if exit.reason == prof.ExitGuardValue {
-				require.Equal(t, int(instr.I32_DIV_S), exit.opcode)
-				return
-			}
-		}
-		require.Fail(t, "missing guard-value exit")
-	})
-
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native JIT is only available on arm64")
-	}
-
-	t.Run("straight-line arithmetic function compiles and matches threaded execution", func(t *testing.T) {
-		// (a + b) * 2, exercising I32_ADD, I32_CONST, and I32_MUL — all within
-		// the shared plan lowerer's scalar coverage — inside a single RETURN-terminated block.
-		callee := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32, types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.LOCAL_GET, 1),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_MUL),
-			instr.New(instr.RETURN),
-		).MustBuild()
-
-		b := program.NewBuilder()
-		b.Globals(types.TypeI32)
-		idx := b.Const(callee)
-		// CALL pops the callee off the top of the stack, so the ref goes last:
-		// args first (in declared param order), then CONST_GET of the function.
-		b.Emit(instr.I32_CONST, 3).
-			Emit(instr.I32_CONST, 4).
-			Emit(instr.CONST_GET, uint64(idx)).
-			Emit(instr.CALL).
-			Emit(instr.GLOBAL_SET, 0)
-		prog, err := b.Build()
-		require.NoError(t, err)
-
-		i := New(prog, WithThreshold(-1))
-		defer i.Close()
-
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-
-		addr := int(i.constants[idx].Ref())
-		result := c.Compile(i, anchor{addr: addr})
-		require.NoError(t, result.err)
-		mod := result.module
-		require.NotEmpty(t, mod.entries)
-		i.install(mod, false)
-
-		require.NoError(t, i.Run(context.Background()))
-		got, err := i.Global(0)
-		require.NoError(t, err)
-		require.Equal(t, int32(14), got.I32())
-	})
-
-	t.Run("multi-block function compiles", func(t *testing.T) {
-		b := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		})
-		alt := b.Label()
-		b.Emit(instr.New(instr.LOCAL_GET, 0)).
-			BrIf(alt).
-			Emit(instr.New(instr.I32_CONST, 1)).
-			Emit(instr.New(instr.RETURN)).
-			Bind(alt).
-			Emit(instr.New(instr.I32_CONST, 2)).
-			Emit(instr.New(instr.RETURN))
-		fn := b.MustBuild()
-
-		i := New(program.New(nil))
-		defer i.Close()
-
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
-		require.NoError(t, err)
-		require.NotEmpty(t, plans)
-	})
-
-	t.Run("branches and loops match threaded execution", func(t *testing.T) {
-		calleeBuilder := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Locals(types.TypeI32)
-		loop := calleeBuilder.Label()
-		done := calleeBuilder.Label()
-		calleeBuilder.Emit(instr.New(instr.I32_CONST, 0)).
-			Emit(instr.New(instr.LOCAL_SET, 1)).
-			Bind(loop).
-			Emit(instr.New(instr.LOCAL_GET, 0)).
-			Emit(instr.New(instr.I32_EQZ)).
-			BrIf(done).
-			Emit(instr.New(instr.LOCAL_GET, 1)).
-			Emit(instr.New(instr.LOCAL_GET, 0)).
-			Emit(instr.New(instr.I32_ADD)).
-			Emit(instr.New(instr.LOCAL_SET, 1)).
-			Emit(instr.New(instr.LOCAL_GET, 0)).
-			Emit(instr.New(instr.I32_CONST, 1)).
-			Emit(instr.New(instr.I32_SUB)).
-			Emit(instr.New(instr.LOCAL_SET, 0)).
-			Br(loop).
-			Bind(done).
-			Emit(instr.New(instr.LOCAL_GET, 1)).
-			Emit(instr.New(instr.RETURN))
-		callee := calleeBuilder.MustBuild()
-
-		b := program.NewBuilder()
-		b.Globals(types.TypeI32)
-		idx := b.Const(callee)
-		b.Emit(instr.I32_CONST, 5).
-			Emit(instr.CONST_GET, uint64(idx)).
-			Emit(instr.CALL).
-			Emit(instr.GLOBAL_SET, 0)
-		prog, err := b.Build()
-		require.NoError(t, err)
-
-		threaded := New(prog, WithThreshold(-1))
-		defer threaded.Close()
-		require.NoError(t, threaded.Run(context.Background()))
-		want, err := threaded.Global(0)
-		require.NoError(t, err)
-
-		jit := New(prog, WithThreshold(-1))
-		defer jit.Close()
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-		addr := int(jit.constants[idx].Ref())
-		result := c.Compile(jit, anchor{addr: addr})
-		require.NoError(t, result.err)
-		mod := result.module
-		require.NotEmpty(t, mod.entries)
-		jit.install(mod, false)
-		require.NoError(t, jit.Run(context.Background()))
-		got, err := jit.Global(0)
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	})
-
-	t.Run("unsupported opcode compiles an exact fallback", func(t *testing.T) {
-		// I32_DIV_S needs runtime trap semantics the baseline lowerer does not
-		// duplicate, so the plan exits at that opcode and threaded dispatch owns it.
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32, types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.LOCAL_GET, 1),
-			instr.New(instr.I32_DIV_S),
-			instr.New(instr.RETURN),
-		).MustBuild()
-
-		i := New(program.New(nil))
-		defer i.Close()
-
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
-		require.NoError(t, err)
-		require.NotEmpty(t, plans)
-	})
 }
 
 // TestARM64_SelfCallFromInlinedFrame protects selfCall's live-frame
@@ -1207,8 +372,8 @@ func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
 			program.WithConstants(aFn, bFn),
 		)
 
-		jit := New(prog, WithThreshold(0), WithTick(1))
-		threaded := New(prog, WithThreshold(-1))
+		jit := interp.New(prog, interp.WithThreshold(0), interp.WithTick(1))
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		for iter := 0; iter < 125; iter++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -1217,7 +382,7 @@ func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
 			require.Equal(t, want, got, "depth %d iteration %d", depth, iter)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "depth %d iteration %d", depth, iter)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "depth %d iteration %d", depth, iter)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -1251,8 +416,8 @@ func TestARM64_CalleeLocals(t *testing.T) {
 	runParity := func(t *testing.T, prog *program.Program) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithProfiler(profile))
-		threaded := New(prog, WithThreshold(-1))
+		jit := interp.New(prog, interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		for n := 0; n < 64; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -1261,7 +426,7 @@ func TestARM64_CalleeLocals(t *testing.T) {
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -1384,8 +549,8 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 	)
 
 	profile := prof.New()
-	jit := New(prog, WithProfiler(profile))
-	threaded := New(prog, WithThreshold(-1))
+	jit := interp.New(prog, interp.WithProfiler(profile))
+	threaded := interp.New(prog, interp.WithThreshold(-1))
 
 	for range 64 {
 		require.NoError(t, jit.Run(context.Background()))
@@ -1463,8 +628,8 @@ func TestARM64_SelfCallFrameLocals(t *testing.T) {
 	)
 
 	profile := prof.New()
-	jit := New(prog, WithProfiler(profile), WithTick(1))
-	threaded := New(prog, WithThreshold(-1))
+	jit := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1))
+	threaded := interp.New(prog, interp.WithThreshold(-1))
 	for n := range 16 {
 		require.NoError(t, jit.Run(context.Background()), "iteration %d", n)
 		require.NoError(t, threaded.Run(context.Background()))
@@ -1473,7 +638,7 @@ func TestARM64_SelfCallFrameLocals(t *testing.T) {
 		want, err := threaded.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-		require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+		require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 		jit.Reset()
 		threaded.Reset()
 	}
@@ -1524,8 +689,8 @@ func TestARM64_MutualEntries(t *testing.T) {
 	)
 
 	profile := prof.New()
-	jit := New(prog, WithProfiler(profile), WithTick(1), WithThreshold(1))
-	threaded := New(prog, WithThreshold(-1))
+	jit := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(1))
+	threaded := interp.New(prog, interp.WithThreshold(-1))
 	for range 16 {
 		require.NoError(t, jit.Run(context.Background()))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -1535,7 +700,7 @@ func TestARM64_MutualEntries(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 		require.Equal(t, types.BoxI32(0), got)
-		require.Equal(t, threaded.rc[1:], jit.rc[1:])
+		require.Equal(t, refCounts(threaded), refCounts(jit))
 		jit.Reset()
 		threaded.Reset()
 	}
@@ -1580,8 +745,8 @@ func TestARM64_RefReturn(t *testing.T) {
 	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithProfiler(profile))
-		threaded := New(prog, WithThreshold(-1))
+		jit := interp.New(prog, interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		for n := 0; n < 64; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -1591,7 +756,7 @@ func TestARM64_RefReturn(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, want, got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -1753,8 +918,8 @@ func TestARM64_DirectSelfCall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			prog := build(tc.n)
 			profile := prof.New()
-			jit := New(prog, WithProfiler(profile))
-			threaded := New(prog, WithThreshold(-1))
+			jit := interp.New(prog, interp.WithProfiler(profile))
+			threaded := interp.New(prog, interp.WithThreshold(-1))
 
 			for range 8 {
 				require.NoError(t, jit.Run(context.Background()))
@@ -1832,8 +997,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		jit := New(prog, WithTick(1), WithThreshold(0))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -1843,7 +1008,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(1), got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -1884,8 +1049,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		var ref int
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
@@ -1900,8 +1065,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			l, err := i.Local(0)
 			require.NoError(t, err)
 			ref = l.Ref()
-			require.Equal(t, 1, i.rc[ref]) // the local slot's own retain, never doubled or dropped
-			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, 1, refCountAt(t, i, ref)) // the local slot's own retain, never doubled or dropped
+			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
 			threaded.Reset()
 		}
@@ -1948,8 +1113,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -1962,8 +1127,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 
 			g, err := i.Global(0)
 			require.NoError(t, err)
-			require.Equal(t, 1, i.rc[g.Ref()]) // the global slot's own retain, never doubled or dropped
-			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, 1, refCountAt(t, i, g.Ref())) // the global slot's own retain, never doubled or dropped
+			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
 			threaded.Reset()
 		}
@@ -2016,8 +1181,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2027,7 +1192,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(3*size), v)
-			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
 			threaded.Reset()
 		}
@@ -2070,8 +1235,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2086,8 +1251,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			wantLocal, err := threaded.Local(0)
 			require.NoError(t, err)
-			require.Equal(t, threaded.rc[wantLocal.Ref()], i.rc[l.Ref()])
-			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCountAt(t, threaded, wantLocal.Ref()), refCountAt(t, i, l.Ref()))
+			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
 			threaded.Reset()
 		}
@@ -2133,8 +1298,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2149,8 +1314,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			wantLocal, err := threaded.Local(1)
 			require.NoError(t, err)
-			require.Equal(t, threaded.rc[wantLocal.Ref()], i.rc[l.Ref()])
-			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCountAt(t, threaded, wantLocal.Ref()), refCountAt(t, i, l.Ref()))
+			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
 			threaded.Reset()
 		}
@@ -2177,8 +1342,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 	requireRefParity := func(t *testing.T, prog *program.Program) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		ref := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		ref := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 48; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, ref.Run(context.Background()))
@@ -2187,7 +1352,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			want, err := ref.PopBoxed()
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, ref.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(ref), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			ref.Reset()
 		}
@@ -2427,8 +1592,8 @@ func TestARM64_StaticLoopEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	profile := prof.New()
-	jit := New(prog, WithProfiler(profile))
-	threaded := New(prog, WithThreshold(-1))
+	jit := interp.New(prog, interp.WithProfiler(profile))
+	threaded := interp.New(prog, interp.WithThreshold(-1))
 	for n := 0; n < 16; n++ {
 		require.NoError(t, jit.Run(context.Background()))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -2438,7 +1603,7 @@ func TestARM64_StaticLoopEntry(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 		require.Equal(t, types.BoxI32(size), got)
-		require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+		require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 		jit.Reset()
 		threaded.Reset()
 	}
@@ -2510,8 +1675,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2521,7 +1686,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(size), got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -2597,8 +1762,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2607,7 +1772,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -2653,15 +1818,15 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		jit := New(prog, WithTick(1), WithThreshold(0))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			gotErr := jit.Run(context.Background())
 			wantErr := threaded.Run(context.Background())
 			require.Error(t, wantErr)
 			require.Error(t, gotErr)
 			require.Equal(t, wantErr.Error(), gotErr.Error(), "error diverged from threaded on iteration %d", n)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -2696,8 +1861,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		jit := New(prog, WithTick(1), WithThreshold(0))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2706,7 +1871,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -2746,8 +1911,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		jit := New(prog, WithTick(1), WithThreshold(0))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2757,7 +1922,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(3*size), got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -2778,8 +1943,8 @@ func TestARM64_StructSetLoop(t *testing.T) {
 	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) *prof.Profiler {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		closed := false
 		t.Cleanup(func() {
 			if !closed {
@@ -2796,7 +1961,7 @@ func TestARM64_StructSetLoop(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, want, got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -3015,8 +2180,8 @@ func TestARM64_RefEqLoop(t *testing.T) {
 	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		closed := false
 		t.Cleanup(func() {
 			if !closed {
@@ -3033,7 +2198,7 @@ func TestARM64_RefEqLoop(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, want, got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -3115,8 +2280,8 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		closed := false
 		t.Cleanup(func() {
 			if !closed {
@@ -3133,7 +2298,7 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, want, got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -3339,8 +2504,8 @@ func TestARM64_RefContainerStore(t *testing.T) {
 			prog := build(t, depth)
 			want := types.BoxI32(int32(1)<<uint(depth+1) - 1)
 
-			jit := New(prog, WithTick(1), WithThreshold(0))
-			threaded := New(prog, WithTick(1), WithThreshold(-1))
+			jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+			threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 			for n := 0; n < 8; n++ {
 				require.NoError(t, jit.Run(context.Background()))
 				require.NoError(t, threaded.Run(context.Background()))
@@ -3350,7 +2515,7 @@ func TestARM64_RefContainerStore(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, ref, got, "result diverged from threaded at depth %d iteration %d", depth, n)
 				require.Equal(t, want, got, "result diverged from expected node count at depth %d", depth)
-				require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded at depth %d iteration %d", depth, n)
+				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded at depth %d iteration %d", depth, n)
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -3438,8 +2603,8 @@ func TestARM64_RefContainerStore(t *testing.T) {
 			prog := build(t, depth)
 			want := types.BoxI32(int32(1)<<uint(depth+1) - 1)
 
-			jit := New(prog, WithTick(1), WithThreshold(0))
-			threaded := New(prog, WithTick(1), WithThreshold(-1))
+			jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
+			threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 			for n := 0; n < 8; n++ {
 				require.NoError(t, jit.Run(context.Background()))
 				require.NoError(t, threaded.Run(context.Background()))
@@ -3449,7 +2614,7 @@ func TestARM64_RefContainerStore(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, ref, got, "result diverged from threaded at depth %d iteration %d", depth, n)
 				require.Equal(t, want, got, "result diverged from expected node count at depth %d", depth)
-				require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded at depth %d iteration %d", depth, n)
+				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded at depth %d iteration %d", depth, n)
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -3471,8 +2636,8 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 	runStatic := func(t *testing.T, prog *program.Program, want types.Boxed) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		closed := false
 		t.Cleanup(func() {
 			if !closed {
@@ -3489,7 +2654,7 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, want, got)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -3582,8 +2747,8 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 	runParity := func(t *testing.T, prog *program.Program) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		closed := false
 		t.Cleanup(func() {
 			if !closed {
@@ -3599,7 +2764,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 			require.NoError(t, gotErr)
 			require.NoError(t, wantErr)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -3621,8 +2786,8 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 	runParityErr := func(t *testing.T, prog *program.Program) {
 		t.Helper()
 		profile := prof.New()
-		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
-		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		closed := false
 		t.Cleanup(func() {
 			if !closed {
@@ -3636,7 +2801,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 			require.Error(t, wantErr)
 			require.Error(t, gotErr)
 			require.Equal(t, wantErr.Error(), gotErr.Error(), "error diverged from threaded on iteration %d", n)
-			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -4025,12 +3190,12 @@ func TestARM64_HostStructLoop(t *testing.T) {
 	// run marshals its own copy of seed, so a JIT run and a threaded run each
 	// own the Go memory they write and the comparison between them stays
 	// honest. body runs once per iteration and tail leaves the result.
-	run := func(t *testing.T, locals []types.Type, body, tail []instr.Instruction, opts ...Option) (types.Value, hostLoopFields, float64) {
+	run := func(t *testing.T, locals []types.Type, body, tail []instr.Instruction, opts ...interp.Option) (types.Value, hostLoopFields, float64) {
 		t.Helper()
-		setup := New(program.New(nil))
+		setup := interp.New(program.New(nil))
 		defer func() { require.NoError(t, setup.Close()) }()
 		src := seed
-		host, err := NewRegistry().Marshal(setup, &src)
+		host, err := interp.NewRegistry().Marshal(setup, &src)
 		require.NoError(t, err)
 
 		b := program.NewBuilder()
@@ -4053,7 +3218,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		require.NoError(t, err)
 
 		profile := prof.New()
-		i := New(prog, append(opts, WithProfiler(profile))...)
+		i := interp.New(prog, append(opts, interp.WithProfiler(profile))...)
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
@@ -4101,10 +3266,10 @@ func TestARM64_HostStructLoop(t *testing.T) {
 				}
 				tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
 
-				want, _, _ := run(t, locals, body, tail, WithTick(1), WithThreshold(-1))
+				want, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
 				require.Equal(t, tt.want, want)
 
-				got, _, entries := run(t, locals, body, tail, WithTick(1), WithThreshold(0))
+				got, _, entries := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
 				require.Equal(t, want, got)
 				require.Greater(t, entries, float64(0), "expected a native entry")
 				require.Less(t, entries, float64(size), "the read exits the native loop")
@@ -4134,9 +3299,9 @@ func TestARM64_HostStructLoop(t *testing.T) {
 				}
 				tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
 
-				want, _, _ := run(t, locals, body, tail, WithTick(1), WithThreshold(-1))
+				want, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
 				require.Equal(t, tt.want, want)
-				got, _, _ := run(t, locals, body, tail, WithTick(1), WithThreshold(0))
+				got, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
 				require.Equal(t, want, got)
 			})
 		}
@@ -4210,11 +3375,11 @@ func TestARM64_HostStructLoop(t *testing.T) {
 					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at), instr.New(instr.STRUCT_GET),
 				}
 
-				want, threaded, _ := run(t, nil, body, tail, WithTick(1), WithThreshold(-1))
+				want, threaded, _ := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
 				require.Equal(t, tt.want, want)
 				tt.check(t, threaded)
 
-				got, jit, entries := run(t, nil, body, tail, WithTick(1), WithThreshold(0))
+				got, jit, entries := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(0))
 				require.Equal(t, want, got)
 				require.Equal(t, threaded, jit, "the Go value diverged from the threaded run")
 				require.Greater(t, entries, float64(0), "expected a native entry")
@@ -4227,15 +3392,15 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		// An int16 field is narrower than the i32 slot the guest writes, so
 		// the store can overflow and the interpreter is the one that says so.
 		for _, threshold := range []int{-1, 0} {
-			setup := New(program.New(nil))
+			setup := interp.New(program.New(nil))
 			src := seed
-			host, err := NewRegistry().Marshal(setup, &src)
+			host, err := interp.NewRegistry().Marshal(setup, &src)
 			require.NoError(t, err)
-			i := New(program.New([]instr.Instruction{
+			i := interp.New(program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 70000), instr.New(instr.STRUCT_SET),
-			}, program.WithConstants(host)), WithTick(1), WithThreshold(threshold))
-			require.ErrorIs(t, i.Run(context.Background()), ErrValueOverflow)
+			}, program.WithConstants(host)), interp.WithTick(1), interp.WithThreshold(threshold))
+			require.ErrorIs(t, i.Run(context.Background()), interp.ErrValueOverflow)
 			require.Equal(t, int16(-300), src.I16, "the rejected write left the Go field alone")
 			require.NoError(t, i.Close())
 			require.NoError(t, setup.Close())
@@ -4263,7 +3428,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 
 		read := func(threshold int) (types.Value, types.Value, float64) {
 			profile := prof.New()
-			i := New(prog, WithTick(1), WithThreshold(threshold), WithProfiler(profile))
+			i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(threshold), interp.WithProfiler(profile))
 			pass := func(value any) types.Value {
 				host, err := i.Marshal(value)
 				require.NoError(t, err)
@@ -4317,12 +3482,12 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, threshold := range []int{-1, 0} {
-			i := New(prog, WithTick(1), WithThreshold(threshold))
+			i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(threshold))
 			src := seed
 			host, err := i.Marshal(&src)
 			require.NoError(t, err)
 			require.NoError(t, i.Push(host))
-			require.ErrorIs(t, i.Run(context.Background()), ErrValueOverflow)
+			require.ErrorIs(t, i.Run(context.Background()), interp.ErrValueOverflow)
 			// 200+55 is the last value a uint8 holds, so the field stops
 			// there instead of wrapping to what a raw byte store would leave.
 			require.Equal(t, uint8(255), src.U8)
@@ -4334,15 +3499,15 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		// An int16 field is narrower than the i32 slot the guest writes, so
 		// the store can overflow and the interpreter is the one that says so.
 		for _, threshold := range []int{-1, 0} {
-			setup := New(program.New(nil))
+			setup := interp.New(program.New(nil))
 			src := seed
-			host, err := NewRegistry().Marshal(setup, &src)
+			host, err := interp.NewRegistry().Marshal(setup, &src)
 			require.NoError(t, err)
-			i := New(program.New([]instr.Instruction{
+			i := interp.New(program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 70000), instr.New(instr.STRUCT_SET),
-			}, program.WithConstants(host)), WithTick(1), WithThreshold(threshold))
-			require.ErrorIs(t, i.Run(context.Background()), ErrValueOverflow)
+			}, program.WithConstants(host)), interp.WithTick(1), interp.WithThreshold(threshold))
+			require.ErrorIs(t, i.Run(context.Background()), interp.ErrValueOverflow)
 			require.Equal(t, int16(-300), src.I16, "the rejected write left the Go field alone")
 			require.NoError(t, i.Close())
 			require.NoError(t, setup.Close())
@@ -4354,9 +3519,9 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		// STRUCT_GET alternating between them keeps the same VM kind while
 		// changing the load width. Only the kind guard separates them.
 		build := func() *program.Program {
-			setup := New(program.New(nil))
+			setup := interp.New(program.New(nil))
 			defer func() { require.NoError(t, setup.Close()) }()
-			registry := NewRegistry()
+			registry := interp.NewRegistry()
 			narrow, err := registry.Marshal(setup, &hostNarrowField{V: -300})
 			require.NoError(t, err)
 			wide, err := registry.Marshal(setup, &hostWideField{V: -70000})
@@ -4387,7 +3552,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 
 		read := func(threshold int) (types.Value, float64) {
 			profile := prof.New()
-			i := New(build(), WithTick(1), WithThreshold(threshold), WithProfiler(profile))
+			i := interp.New(build(), interp.WithTick(1), interp.WithThreshold(threshold), interp.WithProfiler(profile))
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
 			require.NoError(t, err)
@@ -4409,14 +3574,14 @@ func TestARM64_HostStructLoop(t *testing.T) {
 
 	t.Run("an index past the layout faults the same way", func(t *testing.T) {
 		for _, threshold := range []int{-1, 0} {
-			setup := New(program.New(nil))
+			setup := interp.New(program.New(nil))
 			src := seed
-			host, err := NewRegistry().Marshal(setup, &src)
+			host, err := interp.NewRegistry().Marshal(setup, &src)
 			require.NoError(t, err)
-			i := New(program.New([]instr.Instruction{
+			i := interp.New(program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.STRUCT_GET),
-			}, program.WithConstants(host)), WithTick(1), WithThreshold(threshold))
-			require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+			}, program.WithConstants(host)), interp.WithTick(1), interp.WithThreshold(threshold))
+			require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 			require.NoError(t, i.Close())
 			require.NoError(t, setup.Close())
 		}
