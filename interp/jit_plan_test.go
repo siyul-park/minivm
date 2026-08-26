@@ -340,7 +340,7 @@ func TestTracePlan(t *testing.T) {
 			exits:    map[anchor]int{{addr: 1, ip: 12}: 0},
 		}
 		input := &compileInput{
-			tracer:   tracer,
+			traces:   tracer,
 			address:  1,
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
@@ -381,7 +381,7 @@ func TestTracePlan(t *testing.T) {
 			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
 		}
 		input := &compileInput{
-			tracer:   tracer,
+			traces:   tracer,
 			address:  1,
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
@@ -419,7 +419,7 @@ func TestTracePlan(t *testing.T) {
 			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
 		}
 		input := &compileInput{
-			tracer:   tracer,
+			traces:   tracer,
 			address:  1,
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
@@ -458,7 +458,7 @@ func TestTracePlan(t *testing.T) {
 			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
 		}
 		input := &compileInput{
-			tracer:   tracer,
+			traces:   tracer,
 			address:  1,
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
@@ -499,7 +499,7 @@ func TestTracePlan(t *testing.T) {
 			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
 		}
 		input := &compileInput{
-			tracer:   tracer,
+			traces:   tracer,
 			address:  1,
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}
@@ -532,7 +532,7 @@ func TestTracePlan(t *testing.T) {
 			exits:    map[anchor]int{{addr: 1, ip: 2}: 0, {addr: 1, ip: 40}: 1},
 		}
 		input := &compileInput{
-			tracer:   tracer,
+			traces:   tracer,
 			address:  1,
 			function: &types.Function{Code: []byte{byte(instr.NOP)}},
 		}

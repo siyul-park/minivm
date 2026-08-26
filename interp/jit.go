@@ -331,12 +331,10 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
-// Compile selects and lowers the first frontend that emits native code.
-func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
-	input, ok := input(i, root.addr)
-	if !ok {
-		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
-	}
+// Compile selects and lowers the first frontend that emits native code. The
+// caller supplies the compile-time snapshot: producing one is the
+// interpreter's job (see Interpreter.compileSnapshot), not the compiler's.
+func (c *compiler) Compile(input *compileInput, root anchor) compileResult {
 	// Entry roots go to the static frontend first: it plans the whole function
 	// deterministically and covers opcodes no trace can record. Loop roots go
 	// to the trace frontend first, because a recorded loop specializes its

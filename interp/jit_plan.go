@@ -3,7 +3,6 @@ package interp
 import (
 	"reflect"
 	"sort"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
@@ -44,7 +43,7 @@ type step struct {
 }
 
 type compileInput struct {
-	tracer    *tracer
+	traces    recordedTraces
 	address   int
 	function  *types.Function
 	module    *types.Function
@@ -56,6 +55,17 @@ type compileInput struct {
 	decl      []types.Type
 	layout    layout
 	installed bool
+}
+
+// recordedTraces is the compile-time-stable trace data tracePlan reads: the
+// anchors recorded for one function and the published tree rooted at one of
+// them. *tracer satisfies it, but tracePlan must depend on this narrow read
+// view rather than the live recorder itself — the recorder clones the whole
+// Interpreter and single-steps threaded closures, a facility that belongs to
+// interp alone and can never follow the portable planner out of it.
+type recordedTraces interface {
+	anchors(addr int) []int
+	rootAt(a anchor) *tree
 }
 
 type plan struct {
@@ -151,38 +161,6 @@ const (
 	maxHoistSlot = 4095
 	maxCarried   = 7
 )
-
-func input(i *Interpreter, addr int) (*compileInput, bool) {
-	fn, ok := i.function(addr)
-	if !ok || fn == nil || len(fn.Code) == 0 {
-		return nil, false
-	}
-	return &compileInput{
-		tracer:    i.tracer,
-		address:   addr,
-		function:  fn,
-		module:    i.module,
-		constants: i.constants,
-		globals:   i.globalKinds(),
-		heap:      i.heap,
-		decl:      i.types,
-		// layout is computed here, in architecture-neutral code where
-		// HostStruct, field, conversion, and coroutine are visible, so an
-		// architecture backend consuming compileInput never has to import
-		// them (see layout).
-		layout: layout{
-			hostFields:      int(unsafe.Offsetof(HostStruct{}.fields)),
-			hostPtr:         int(unsafe.Offsetof(HostStruct{}.ptr)),
-			hostFieldOffset: int(unsafe.Offsetof(field{}.offset)),
-			hostFieldConv:   int(unsafe.Offsetof(field{}.conversion)),
-			hostFieldSize:   int(unsafe.Sizeof(field{})),
-			hostConvKind:    int(unsafe.Offsetof(conversion{}.kind)),
-			coroValue:       int(unsafe.Offsetof(coroutine{}.value)),
-			coroDone:        int(unsafe.Offsetof(coroutine{}.done)),
-		},
-		installed: i.stub(addr) != nil,
-	}, true
-}
 
 func (kind entryKind) profile() prof.EntryKind {
 	switch kind {
@@ -544,13 +522,13 @@ func bridgeable(op instr.Opcode) bool {
 }
 
 func tracePlan(input *compileInput) ([]plan, error) {
-	if input == nil || input.tracer == nil || input.function == nil {
+	if input == nil || input.traces == nil || input.function == nil {
 		return nil, nil
 	}
 	var plans []plan
-	for _, ip := range input.tracer.anchors(input.address) {
+	for _, ip := range input.traces.anchors(input.address) {
 		a := anchor{addr: input.address, ip: ip}
-		tree := input.tracer.rootAt(a)
+		tree := input.traces.rootAt(a)
 		if tree == nil || tree.root == nil {
 			continue
 		}

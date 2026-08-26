@@ -1015,10 +1015,60 @@ func (i *Interpreter) compile(root anchor) error {
 	return nil
 }
 
+// compileSnapshot builds the compile-time-stable view of addr's function that
+// the architecture-neutral JIT driver plans and lowers against: building it
+// is the interpreter's job, because it is the only side that holds the
+// private state (function bodies, constants, globals, heap, declared types,
+// recorded traces) a snapshot copies out of. It reports false when addr names
+// no compilable function.
+func (i *Interpreter) compileSnapshot(addr int) (*compileInput, bool) {
+	fn, ok := i.function(addr)
+	if !ok || fn == nil || len(fn.Code) == 0 {
+		return nil, false
+	}
+	input := &compileInput{
+		address:   addr,
+		function:  fn,
+		module:    i.module,
+		constants: i.constants,
+		globals:   i.globalKinds(),
+		heap:      i.heap,
+		decl:      i.types,
+		// layout is computed here, in architecture-neutral code where
+		// HostStruct, field, conversion, and coroutine are visible, so an
+		// architecture backend consuming compileInput never has to import
+		// them (see layout).
+		layout: layout{
+			hostFields:      int(unsafe.Offsetof(HostStruct{}.fields)),
+			hostPtr:         int(unsafe.Offsetof(HostStruct{}.ptr)),
+			hostFieldOffset: int(unsafe.Offsetof(field{}.offset)),
+			hostFieldConv:   int(unsafe.Offsetof(field{}.conversion)),
+			hostFieldSize:   int(unsafe.Sizeof(field{})),
+			hostConvKind:    int(unsafe.Offsetof(conversion{}.kind)),
+			coroValue:       int(unsafe.Offsetof(coroutine{}.value)),
+			coroDone:        int(unsafe.Offsetof(coroutine{}.done)),
+		},
+		installed: i.stub(addr) != nil,
+	}
+	// i.tracer is nil only for a speculative clone (see tracer.clone), which
+	// never compiles; widening a nil *tracer into the traces interface would
+	// produce a non-nil interface holding a nil pointer, so tracePlan's own
+	// nil check would stop seeing "no recorder" the way it did before this
+	// value lived behind an interface.
+	if i.tracer != nil {
+		input.traces = i.tracer
+	}
+	return input, true
+}
+
 // attempt runs one Compile, records the outcome under trigger, and counts any
 // compile error. Acquisition and delivery of the result stay with the caller.
 func (i *Interpreter) attempt(c *compiler, root anchor, trigger prof.Trigger) compileResult {
-	result := c.Compile(i, root)
+	input, ok := i.compileSnapshot(root.addr)
+	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
+	if ok {
+		result = c.Compile(input, root)
+	}
 	i.recordCompile(trigger, result)
 	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
