@@ -185,7 +185,7 @@ In a loop plan, a partial leg whose cut lands on the plan's own header (same fun
 
 ## Backend
 
-`jit.go` is architecture-neutral. Build-tagged `lower(*lowering, plan)` implementations consume the normalized plan directly; unsupported architectures never construct a compiler.
+`jit.go` is architecture-neutral: `compiler` picks the arch, builds the assembler, and hands both to a build-tagged `machine` through the `machine.Lower(a *asm.Assembler, input *compileInput, p plan, nativeLoop bool) ([]exitDescriptor, bool)` seam. All lowering state — `lowering`, the symbolic `value` stack, inlined `activation`s, deferred `work`, and queued `sideExit`s — lives on the machine's side of that seam; unsupported architectures' `newMachine` stub is never called because `newCompiler` never constructs a compiler there.
 
 `jit_arm64.go` owns all ARM64 lowering: orchestration, the single opcode dispatcher, control flow, numeric operations, calls, frames, deoptimization, heap access, and reference ownership.
 
