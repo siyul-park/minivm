@@ -16,6 +16,23 @@ type compiler struct {
 	scratchRegs []asm.PReg
 }
 
+// layout is the set of runtime struct offsets a lowerer needs to reach into
+// interp's private types (HostStruct, field, conversion, coroutine) without
+// naming them. input computes it once, in architecture-neutral code where
+// those types are visible, and lowering carries the copy from compileInput to
+// every lowering site — the same offsets a future package boundary would hand
+// across unchanged once the backend that consumes them moves out of interp.
+type layout struct {
+	hostFields      int
+	hostPtr         int
+	hostFieldOffset int
+	hostFieldConv   int
+	hostFieldSize   int
+	hostConvKind    int
+	coroValue       int
+	coroDone        int
+}
+
 type module struct {
 	entries map[anchor]native
 	bytes   int
@@ -78,6 +95,7 @@ type lowering struct {
 	globals   []types.Kind
 	heap      []types.Value
 	scratch   []asm.PReg
+	layout    layout
 	head      asm.Label
 	back      asm.Label
 	budget    asm.VReg
@@ -577,6 +595,7 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 		globals:   input.globals,
 		heap:      input.heap,
 		scratch:   c.scratchRegs[:scratchCount],
+		layout:    input.layout,
 		head:      asmb.Label(),
 		addr:      input.address,
 	}

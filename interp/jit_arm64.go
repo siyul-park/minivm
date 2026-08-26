@@ -31,23 +31,15 @@ const (
 )
 
 const (
-	sliceData       = 0
-	sliceLen        = 8
-	structTyp       = int(unsafe.Offsetof(types.Struct{}.Typ))
-	structData      = int(unsafe.Offsetof(types.Struct{}.Data))
-	closureUpvs     = int(unsafe.Offsetof(types.Closure{}.Upvals))
-	fieldsSlice     = int(unsafe.Offsetof(types.StructType{}.Fields))
-	fieldKind       = int(unsafe.Offsetof(types.StructField{}.Kind))
-	fieldSize       = int(unsafe.Sizeof(types.StructField{}))
-	hostFields      = int(unsafe.Offsetof(HostStruct{}.fields))
-	hostPtr         = int(unsafe.Offsetof(HostStruct{}.ptr))
-	hostFieldOffset = int(unsafe.Offsetof(field{}.offset))
-	hostFieldConv   = int(unsafe.Offsetof(field{}.conversion))
-	hostFieldSize   = int(unsafe.Sizeof(field{}))
-	hostConvKind    = int(unsafe.Offsetof(conversion{}.kind))
-	errorValue      = types.ErrorValueOffset
-	coroValue       = int(unsafe.Offsetof(coroutine{}.value))
-	coroDone        = int(unsafe.Offsetof(coroutine{}.done))
+	sliceData   = 0
+	sliceLen    = 8
+	structTyp   = int(unsafe.Offsetof(types.Struct{}.Typ))
+	structData  = int(unsafe.Offsetof(types.Struct{}.Data))
+	closureUpvs = int(unsafe.Offsetof(types.Closure{}.Upvals))
+	fieldsSlice = int(unsafe.Offsetof(types.StructType{}.Fields))
+	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
+	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
+	errorValue  = types.ErrorValueOffset
 )
 
 const branchTableLimit = 32
@@ -3589,23 +3581,23 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 // caller's load or store is the one that kind compiled to.
 func (l arm64Lowerer) hostEntry(ctx *lowering, data, idx asm.VReg, kind reflect.Kind, bounds, kindFail asm.Label) asm.VReg {
 	a := ctx.assembler
-	fields, n := l.sliceHeader(ctx, data, int16(hostFields))
+	fields, n := l.sliceHeader(ctx, data, int16(ctx.layout.hostFields))
 	l.guardIndex(ctx, idx, n, bounds)
 
 	stride := a.Reg(asm.RegTypeInt, asm.Width64)
 	entry := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(stride, uint64(hostFieldSize))...)
+	a.Emit(arm64.LDI(stride, uint64(ctx.layout.hostFieldSize))...)
 	a.Emit(arm64.MUL(stride, idx, stride), arm64.ADD(entry, fields, stride))
 
 	conv := a.Reg(asm.RegTypeInt, asm.Width64)
 	got := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(conv, entry, int16(hostFieldConv)), arm64.LDRB(got, conv, int16(hostConvKind)))
+	a.Emit(arm64.LDR(conv, entry, int16(ctx.layout.hostFieldConv)), arm64.LDRB(got, conv, int16(ctx.layout.hostConvKind)))
 	a.Emit(arm64.CMPI(got, uint16(kind)), arm64.BCondLabel(arm64.OpBNE, kindFail))
 
 	offset := a.Reg(asm.RegTypeInt, asm.Width64)
 	base := a.Reg(asm.RegTypeInt, asm.Width64)
 	target := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(offset, entry, int16(hostFieldOffset)), arm64.LDR(base, data, int16(hostPtr)), arm64.ADD(target, base, offset))
+	a.Emit(arm64.LDR(offset, entry, int16(ctx.layout.hostFieldOffset)), arm64.LDR(base, data, int16(ctx.layout.hostPtr)), arm64.ADD(target, base, offset))
 	return target
 }
 
@@ -3963,7 +3955,7 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 	l.guardItab(ctx, itab, heapCoroutine, fail)
 
 	done := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDRB(done, data, int16(coroDone)))
+	ctx.assembler.Emit(arm64.LDRB(done, data, int16(ctx.layout.coroDone)))
 	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI1, raw: true})
 	return true
 }
@@ -3973,7 +3965,7 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 // The stored field is a full Boxed, so its representation matches a global
 // slot (see globalGet) — scalars push raw, refs stay boxed.
 func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
-	return l.payloadGet(ctx, op, heapCoroutine, int16(coroValue))
+	return l.payloadGet(ctx, op, heapCoroutine, int16(ctx.layout.coroValue))
 }
 
 // guardI64 deopts when v is a heap-promoted i64.

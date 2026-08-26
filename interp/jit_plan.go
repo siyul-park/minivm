@@ -3,6 +3,7 @@ package interp
 import (
 	"reflect"
 	"sort"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
@@ -53,6 +54,7 @@ type compileInput struct {
 	// decl is the program's declared-type table, indexed by the type operand
 	// of STRUCT_NEW and REF_CAST (see program.WithTypes).
 	decl      []types.Type
+	layout    layout
 	installed bool
 }
 
@@ -164,6 +166,20 @@ func input(i *Interpreter, addr int) (*compileInput, bool) {
 		globals:   i.globalKinds(),
 		heap:      i.heap,
 		decl:      i.types,
+		// layout is computed here, in architecture-neutral code where
+		// HostStruct, field, conversion, and coroutine are visible, so an
+		// architecture backend consuming compileInput never has to import
+		// them (see layout).
+		layout: layout{
+			hostFields:      int(unsafe.Offsetof(HostStruct{}.fields)),
+			hostPtr:         int(unsafe.Offsetof(HostStruct{}.ptr)),
+			hostFieldOffset: int(unsafe.Offsetof(field{}.offset)),
+			hostFieldConv:   int(unsafe.Offsetof(field{}.conversion)),
+			hostFieldSize:   int(unsafe.Sizeof(field{})),
+			hostConvKind:    int(unsafe.Offsetof(conversion{}.kind)),
+			coroValue:       int(unsafe.Offsetof(coroutine{}.value)),
+			coroDone:        int(unsafe.Offsetof(coroutine{}.done)),
+		},
 		installed: i.stub(addr) != nil,
 	}, true
 }
