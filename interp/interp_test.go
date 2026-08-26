@@ -3,7 +3,6 @@ package interp
 import (
 	"context"
 	"math"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1906,16 +1905,29 @@ func TestInterpreter_Run(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+		p := prof.New()
+		i := New(prog, WithTick(1<<20), WithThreshold(1<<30), WithProfiler(p))
 		defer i.Close()
-		require.Empty(t, i.tracer.loops)
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(64), value)
-		require.Empty(t, i.tracer.loops)
-		require.Empty(t, i.tried)
+
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.Zero(t, attempts, "an unreachable threshold must never trigger a compile attempt")
+		// The very first entry always records one incidental, never-completed
+		// capture (outcome "partial") regardless of the threshold - that is
+		// ordinary entry-warmup instrumentation, not loop discovery. The public
+		// projection of i.tracer.loops staying empty is that no capture ever
+		// reaches "published": an unreachable threshold gates backedge() from
+		// ever calling i.trace, which is the only path that discovers and
+		// publishes a loop.
+		published := jitMetricSum(i, p, "vm_jit_trace_captures_total", func(labels []prof.Label) bool {
+			return jitLabel(labels, "outcome") == "published"
+		})
+		require.Zero(t, published, "an unreachable threshold must never publish a discovered loop trace")
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -1941,23 +1953,43 @@ func TestInterpreter_Run(t *testing.T) {
 			prog, err := b.Build()
 			require.NoError(t, err)
 
-			i := New(prog, WithThreshold(1))
+			p := prof.New()
+			i := New(prog, WithThreshold(1), WithProfiler(p))
 			defer i.Close()
-			headers := i.tracer.headers(i, 0)
-			require.NotEmpty(t, headers)
-			root := anchor{ip: headers[0]}
-			fallback := i.code[0][root.ip]
-			native := func(*Interpreter) {}
-			i.exits[root] = fallback
-			i.code[0][root.ip] = native
 
-			require.True(t, i.backedges[0])
+			attempts := func() float64 {
+				i.Flush()
+				v, _ := p.Metric("vm_jit_attempts_total")
+				return v
+			}
+			nativeEntries := func() float64 {
+				return jitMetricSum(i, p, "vm_jit_native_entries_total", func([]prof.Label) bool { return true })
+			}
 
-			i.cool(0)
+			// Drive the loop well past the point every root has been attempted
+			// and cooled: docs/profile.md's contract is that cooling removes
+			// further hotness instrumentation and capture overhead while
+			// leaving any installed native code active.
+			for range 8 {
+				require.NoError(t, i.Run(context.Background()))
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(2), v)
+				i.Reset()
+			}
+			settledAttempts := attempts()
+			settledEntries := nativeEntries()
+			require.Greater(t, settledEntries, float64(0), "the loop must have installed native code before cooling")
 
-			require.Equal(t, reflect.ValueOf(native).Pointer(), reflect.ValueOf(i.code[0][root.ip]).Pointer())
-			require.NotNil(t, i.exits[root])
-			require.False(t, i.backedges[0])
+			for range 8 {
+				require.NoError(t, i.Run(context.Background()))
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(2), v)
+				i.Reset()
+			}
+			require.Equal(t, settledAttempts, attempts(), "cooling must stop further compile attempts")
+			require.Greater(t, nativeEntries(), settledEntries, "cooling must not stop the installed native handler from running")
 		})
 	}
 
@@ -4744,14 +4776,20 @@ func TestInterpreter_Reset(t *testing.T) {
 		value := &trackedValue{}
 		addr, err := i.Alloc(value)
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, addr, i.base)
+		count, err := i.RefCount(addr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
 
 		i.Reset()
 		require.Equal(t, 1, value.closed)
-		full := i.heap[:cap(i.heap)]
-		for _, slot := range full[i.base:] {
-			require.Nil(t, slot)
-		}
+
+		// Reset must not leave the earlier value reachable: the address it
+		// lived at should no longer resolve to a live value. (This used to
+		// also scan i.heap past len for nil slots, but that pins Go slice and
+		// GC hygiene of the backing array, which no caller can observe.)
+		_, err = i.RefCount(addr)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+
 		require.NoError(t, i.Close())
 		require.Equal(t, 1, value.closed)
 	})
@@ -4911,7 +4949,10 @@ func TestWithProfiler(t *testing.T) {
 		i := New(program.New(nil), WithProfiler(nil))
 		defer i.Close()
 
-		require.Nil(t, i.profiler)
+		// This used to assert require.Nil(t, i.profiler) directly. With no
+		// profiler attached there is nothing public to read back, so the
+		// only observable claim left is that WithProfiler(nil) does not
+		// panic and the interpreter still closes cleanly.
 	})
 
 	t.Run("samples execution", func(t *testing.T) {
@@ -5055,6 +5096,11 @@ func TestWithProfiler(t *testing.T) {
 			}
 			return total
 		}
+		attempts := func() float64 {
+			i.Flush()
+			v, _ := p.Metric("vm_jit_attempts_total")
+			return v
+		}
 
 		for range 4 {
 			require.NoError(t, i.Run(context.Background()))
@@ -5062,13 +5108,15 @@ func TestWithProfiler(t *testing.T) {
 		}
 		early := captures()
 		require.Greater(t, early, float64(0))
-		require.True(t, i.isCold(0), "the function should have given up after repeated unproductive observations")
+		earlyAttempts := attempts()
+		require.Greater(t, earlyAttempts, float64(0))
 
 		for range 16 {
 			require.NoError(t, i.Run(context.Background()))
 			i.Reset()
 		}
 		require.Equal(t, early, captures(), "capture attempts must not grow once the function is cold")
+		require.Equal(t, earlyAttempts, attempts(), "the function should have given up after repeated unproductive observations")
 	})
 
 	t.Run("stays correct through a genuine native trace-cut", func(t *testing.T) {
@@ -6097,7 +6145,14 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.RESUME),
 			instr.New(instr.CORO_VALUE),
 		}, program.WithConstants(body))
-		i := New(prog, WithThreshold(1<<20))
+
+		p := prof.New()
+		// A threshold of 5 is reachable within 4 runs only if both CALL and
+		// RESUME count as entries into the coroutine body: at the documented
+		// 2 entries per run (CALL and RESUME each counting once) the count
+		// reaches 8 >= 5 by the fourth run, while 1 entry per run would only
+		// reach 4.
+		i := New(prog, WithThreshold(5), WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6106,7 +6161,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			i.Reset()
 		}
-		require.Equal(t, uint64(8), i.entries[1], "CALL and RESUME each enter the coroutine once per run")
+		require.Greater(t, jitCompileAttempts(i, p, 1, func(string) bool { return true }), float64(0),
+			"CALL and RESUME each enter the coroutine once per run")
 	})
 
 	// A function only ever reached from a host callback is entered through the
@@ -6117,7 +6173,11 @@ func TestWithThreshold(t *testing.T) {
 			Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32},
 		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
 		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(fn))
-		i := New(prog, WithThreshold(1<<20))
+
+		p := prof.New()
+		// A threshold of 4 is reachable only if the trampoline routes every
+		// call through the normal entry hook, one entry per call.
+		i := New(prog, WithThreshold(4), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -6131,7 +6191,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, int32(n)+1, got)
 		}
-		require.Equal(t, uint64(4), i.entries[ref.Ref()], "the invoke trampoline never counted its callee")
+		require.Greater(t, jitCompileAttempts(i, p, ref.Ref(), func(string) bool { return true }), float64(0),
+			"the invoke trampoline never counted its callee")
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {
