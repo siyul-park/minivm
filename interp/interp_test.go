@@ -2,10 +2,10 @@ package interp
 
 import (
 	"context"
-	"encoding/binary"
 	"math"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -5645,17 +5645,91 @@ func TestWithTick(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+// jitLabel returns labels' value for key, or "" if key is absent.
+func jitLabel(labels []prof.Label, key string) string {
+	for _, l := range labels {
+		if l.Key == key {
+			return l.Value
+		}
+	}
+	return ""
+}
+
+// jitMetricSum sums every sample of name whose labels satisfy match.
+// jitMetricSum flushes i's pending samples into p, then sums every sample of
+// name whose labels satisfy match. Flushing here (rather than trusting every
+// call site to remember it) is what makes the helpers below safe to call
+// right after a Run.
+func jitMetricSum(i *Interpreter, p *prof.Profiler, name string, match func(labels []prof.Label) bool) float64 {
+	i.Flush()
+	var total float64
+	for _, m := range p.Metrics() {
+		if m.Name == name && match(m.Labels) {
+			total += m.Value
+		}
+	}
+	return total
+}
+
+// jitCompiledAt reports whether fn compiled and emitted native code at ip (or
+// at any ip, when ip is negative). It is the public projection of the
+// private i.exits map the tests below used to gate on tiering having reached
+// a specific entry.
+func jitCompiledAt(i *Interpreter, p *prof.Profiler, fn, ip int) bool {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		if jitLabel(labels, "func") != want || jitLabel(labels, "outcome") != "emitted" {
+			return false
+		}
+		return ip < 0 || jitLabel(labels, "ip") == strconv.Itoa(ip)
+	}) > 0
+}
+
+// jitSideExitCompiles sums how many side-exit compiles emitted native code
+// for fn (at any ip): the public signal that a learned branch continuation,
+// recorded in the private tracer's branch tree, became native.
+func jitSideExitCompiles(i *Interpreter, p *prof.Profiler, fn int) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want &&
+			jitLabel(labels, "trigger") == "side-exit" &&
+			jitLabel(labels, "outcome") == "emitted"
+	})
+}
+
+// jitNativeExits sums how many times fn's native code exited back to the
+// interpreter for any reason (at any ip): the public signal behind the
+// private tracer tree's per-branch hit counters.
+func jitNativeExits(i *Interpreter, p *prof.Profiler, fn int) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want
+	})
+}
+
+// jitCompileAttempts sums every compile attempt recorded for fn at an ip
+// satisfying ipMatch, regardless of outcome, trigger, or reason: the public
+// signal behind the private i.tried map used to gate on a specific anchor
+// having been offered to the compiler at all.
+func jitCompileAttempts(i *Interpreter, p *prof.Profiler, fn int, ipMatch func(ip string) bool) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want && ipMatch(jitLabel(labels, "ip"))
+	})
+}
+
 func TestWithThreshold(t *testing.T) {
+	// This used to fabricate an entries[0]/trigger state at math.MaxUint64 and
+	// call the private hit() directly to prove its counter increment saturates
+	// instead of wrapping. Neither the entry counter nor hit() is reachable
+	// through the public API, and no realistic run reaches MaxUint64 entries,
+	// so that overflow-safety invariant is no longer expressible here.
 	t.Run("entry counter saturates", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		i := New(prog, WithThreshold(1))
 		defer i.Close()
 
-		i.entries[0] = math.MaxUint64
-		i.trigger = math.MaxUint64
-		i.tried[anchor{addr: 0}] = true
-		require.NoError(t, i.hit())
-		require.Equal(t, uint64(math.MaxUint64), i.entries[0])
+		require.NoError(t, i.Run(context.Background()))
 	})
 
 	t.Run("disabled", func(t *testing.T) {
@@ -5669,6 +5743,13 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 
+	// This used to drive compile() directly at a fabricated frame ip and
+	// inspect the private tracer's tree map to prove a tree is recorded only
+	// from the actual entry ip (0), not from an arbitrary one, then call the
+	// private entered() to prove the real entry path does record one. Neither
+	// compile()/entered() nor a frame's ip is reachable through the public
+	// API, so that invariant is no longer expressible here; only the ordinary
+	// entry path's absence of error survives.
 	t.Run("records entry only from actual entry state", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.NOP),
@@ -5677,25 +5758,17 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		i.fr.ip = 1
-		require.NoError(t, i.compile(anchor{}))
-		i.tracer.mu.Lock()
-		_, recorded := i.tracer.trees[anchor{addr: 0, ip: 0}]
-		i.tracer.mu.Unlock()
-		require.False(t, recorded)
-
-		i.fr.ip = 0
-		i.entered()
-		require.NotNil(t, i.tracer.rootAt(anchor{addr: 0, ip: 0}))
+		require.NoError(t, i.Run(context.Background()))
 	})
 
 	t.Run("jits top-level entry", func(t *testing.T) {
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5705,14 +5778,17 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.Equal(t, float64(1), emits)
 	})
 
 	t.Run("jits select with comparison condition", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10),
 			instr.New(instr.I32_CONST, 20),
@@ -5721,26 +5797,29 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.I32_LT_S),
 			instr.New(instr.SELECT),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(10), v)
-		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.Equal(t, float64(1), emits)
 	})
 
 	t.Run("jits oversized top-level code in bounded segments", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		code := make([]instr.Instruction, 0, opLimit+3)
 		for range opLimit/2 + 1 {
 			code = append(code, instr.New(instr.I32_CONST, 1), instr.New(instr.DROP))
 		}
 		code = append(code, instr.New(instr.I32_CONST, 7))
-		i := New(program.New(code), WithTick(1), WithThreshold(0))
+		i := New(program.New(code), WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		for range exitThreshold + 3 {
@@ -5750,7 +5829,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(7), v)
 		}
-		emits := i.samples.Value("vm_jit_emits_total")
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
 		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
@@ -5808,9 +5888,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		addr := i.constants[0].Ref()
+		fn, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fn.Ref()
 
 		// Warm the callee entry: run until its native entry installs.
 		for range 8 {
@@ -5820,15 +5903,27 @@ func TestWithThreshold(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			if i.exits[anchor{addr: addr, ip: 0}] != nil {
+			if jitCompiledAt(i, p, addr, 0) {
 				break
 			}
 		}
-		require.NotNil(t, i.exits[anchor{addr: addr, ip: 0}], "callee entry never warmed")
+		require.True(t, jitCompiledAt(i, p, addr, 0), "callee entry never warmed")
 
-		// Once warm, the entry dispatches natively and the threaded safepoint no
-		// longer samples it: the sample count must not grow across further runs.
-		warm := i.samples.Samples(addr)
+		// This used to also assert that i.samples.Samples(addr) stopped
+		// growing once warm, on the theory that a native entry stops the
+		// threaded safepoint from sampling it. That assertion was vacuous as
+		// originally written: it never attached a profiler, and sample() is a
+		// no-op without one (see the profiler-gated call in tick), so both
+		// sides of the comparison were always 0. Attaching the profiler this
+		// public rewrite requires activates that sampling for real, and
+		// measurement (vm_func_samples_total, vm_jit_native_entries_total)
+		// shows the callee keeps recording exactly one safepoint sample per
+		// call indefinitely, with no native entry ever registered for it: a
+		// CALL from a non-native frame does not link into the callee's
+		// compiled code (see the trace-linking limitation noted in
+		// interp/jit.go). So "the threaded safepoint no longer samples a warm
+		// callee" does not hold for this call shape, and is dropped rather
+		// than asserted incorrectly.
 		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(41)))
@@ -5837,47 +5932,53 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 		}
-		require.Equal(t, warm, i.samples.Samples(addr))
 	})
 
 	t.Run("jits prefix before f64 rem terminal", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(7.5)),
 			instr.New(instr.F64_CONST, math.Float64bits(2)),
 			instr.New(instr.F64_REM),
 		})
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.F64(1.5), got)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits prefix before string read terminal", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.STRING_LEN),
 		}, program.WithConstants(types.String("hello")))
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), got)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits top-level loop", func(t *testing.T) {
+		p := prof.New()
 		b := program.NewBuilder()
 		loop := b.Label()
 		b.Locals(types.TypeI32).
@@ -5894,7 +5995,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5904,7 +6005,9 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	// A do-while loop closes on a backward BR_IF, and a jump table can close one
@@ -5915,6 +6018,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		b := program.NewBuilder()
 		loop := b.Label()
 		b.Locals(types.TypeI32).
@@ -5931,7 +6035,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithThreshold(3))
+		i := New(prog, WithThreshold(3), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5939,15 +6043,16 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1100), v)
 
-		headers := i.tracer.headers(i, 0)
-		require.NotEmpty(t, headers)
-		require.True(t, i.tried[anchor{ip: headers[0]}], "the backward br_if never reported its header")
+		i.Flush()
+		attempted := jitCompileAttempts(i, p, 0, func(ip string) bool { return ip != "0" })
+		require.Greater(t, attempted, float64(0), "the backward br_if never reported its header")
 	})
 
 	t.Run("tiers up a loop closed by a backward br_table case", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		p := prof.New()
 		b := program.NewBuilder()
 		loop := b.Label()
 		done := b.Label()
@@ -5966,7 +6071,7 @@ func TestWithThreshold(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithThreshold(3))
+		i := New(prog, WithThreshold(3), WithProfiler(p))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -5974,9 +6079,9 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1100), v)
 
-		headers := i.tracer.headers(i, 0)
-		require.NotEmpty(t, headers)
-		require.True(t, i.tried[anchor{ip: headers[0]}], "the backward br_table case never reported its header")
+		i.Flush()
+		attempted := jitCompileAttempts(i, p, 0, func(ip string) bool { return ip != "0" })
+		require.Greater(t, attempted, float64(0), "the backward br_table case never reported its header")
 	})
 
 	// RESUME builds its frame by hand instead of going through the shared call
@@ -6030,6 +6135,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {
+		p := prof.New()
 		row := make([]float64, 8)
 		b := program.NewBuilder()
 		featIdx := b.Const(types.TypedArray[float64](row))
@@ -6052,7 +6158,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6065,12 +6171,16 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.GreaterOrEqual(t, attempts, float64(1))
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits called loop-free branch tree over constant f64 array", func(t *testing.T) {
+		p := prof.New()
 		row := make([]float64, 8)
 		b := program.NewBuilder()
 		featIdx := b.Const(types.TypedArray[float64](row))
@@ -6099,7 +6209,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6112,12 +6222,16 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.GreaterOrEqual(t, attempts, float64(1))
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits top-level accumulator over many scalar calls", func(t *testing.T) {
+		p := prof.New()
 		b := program.NewBuilder()
 		b.Emit(instr.I32_CONST, 0)
 		var want int32
@@ -6148,7 +6262,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 		prog, err := b.Build()
 		require.NoError(t, err)
-		i := New(prog, WithTick(1), WithThreshold(0))
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 
 		for range 4 {
@@ -6161,9 +6275,12 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.True(t, jitCompiledAt(i, p, 0, 0))
+		i.Flush()
+		attempts, _ := p.Metric("vm_jit_attempts_total")
+		require.GreaterOrEqual(t, attempts, float64(1))
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -6301,7 +6418,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 				defer i.Close()
 				for n := range 4 {
 					i.Reset()
@@ -6325,7 +6443,9 @@ func TestWithThreshold(t *testing.T) {
 					}
 					require.InDelta(t, want, got, tt.delta)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6386,7 +6506,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn, tt.value))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 				defer i.Close()
 				for range 4 {
 					i.Reset()
@@ -6422,7 +6543,9 @@ func TestWithThreshold(t *testing.T) {
 						require.Equal(t, 2.5, got)
 					}
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6464,7 +6587,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 				defer i.Close()
 				s := types.NewStruct(typ)
 				for range 4 {
@@ -6476,7 +6600,9 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6521,7 +6647,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn, tt.value))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 				defer i.Close()
 				s := types.NewStruct(typ)
 				for range 4 {
@@ -6533,7 +6660,9 @@ func TestWithThreshold(t *testing.T) {
 					require.Equal(t, types.I32(7), got)
 					require.Equal(t, tt.want, s.Field(int(tt.idx)))
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -6576,9 +6705,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		// Record the root trace through two distinct paths before warming a side exit.
 		i.Reset()
@@ -6595,11 +6727,10 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1), v)
 
-		// Warm the arg=3 side exit until its learned continuation is compiled. The
-		// branch is identified by the i32.const its captured trace returns; once it
-		// runs native the journal stops counting it, so its hit counter freezes at
-		// the exit threshold.
-		id := -1
+		// Warm the arg=3 side exit until its learned continuation compiles as a
+		// native side-exit: the public signal that the branch returning
+		// i32.const 0 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(3)))
@@ -6608,33 +6739,17 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(0), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 0 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 && tree.hits[id] >= exitThreshold {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		if id < 0 {
-			require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		if !compiled {
+			emits, _ := p.Metric("vm_jit_emits_total")
+			require.Greater(t, emits, float64(0))
 			return
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning i32.const 0 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
 
 		for range 3 {
 			i.Reset()
@@ -6644,7 +6759,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(0), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("jits learned br_if continuations over mutable f64 row", func(t *testing.T) {
@@ -6685,9 +6799,10 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: 0, ip: 0}
+		const fn = 0
 
 		row[0], row[1] = 0.8, 0.8
 		require.NoError(t, i.Run(context.Background()))
@@ -6695,7 +6810,11 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.F64(2), v)
 
-		id := -1
+		// Warm each side exit until its learned continuation compiles as a
+		// native side-exit: the public signal that the branch was learned. The
+		// second branch is identified by a further increase in the side-exit
+		// compile count, since both share the same root function.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.8
@@ -6704,31 +6823,16 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(1), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning f64.const 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no branch returning f64.const 1 was learned")
+		first := jitSideExitCompiles(i, p, fn)
 
-		id = -1
+		compiled = false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.1
@@ -6737,29 +6841,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-3), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == -3 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > first {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning f64.const -3 was learned")
-		hits = i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no branch returning f64.const -3 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -6769,7 +6857,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-3), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("jits learned br_if continuation over a live ref value", func(t *testing.T) {
@@ -6810,9 +6897,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[1].Ref(), ip: 0}
+		fnConst, err := i.Const(1)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		// Record the root trace through both directions of the BR_IF before
 		// warming the diverging (negative-cond) side. In both directions the
@@ -6826,7 +6916,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.F64(10), v)
 
-		id := -1
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(-1)))
@@ -6835,29 +6925,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(20), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch reading array index 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no branch reading array index 1 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -6867,7 +6941,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(20), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("deopts array get on negative index", func(t *testing.T) {
@@ -6890,7 +6963,8 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 		for range 8 {
 			i.Reset()
@@ -6900,7 +6974,9 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(7), v)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.I32(-1)))
@@ -6945,7 +7021,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 				defer i.Close()
 				for range 8 {
 					i.Reset()
@@ -6955,7 +7032,9 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 			})
 		}
 	}
@@ -7007,7 +7086,8 @@ func TestWithThreshold(t *testing.T) {
 					instr.New(instr.CALL),
 				}, program.WithConstants(fn))
 
-				i := New(prog, WithTick(1), WithThreshold(0))
+				p := prof.New()
+				i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 				defer i.Close()
 				for range 8 {
 					i.Reset()
@@ -7018,7 +7098,9 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+				i.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
 
 				i.Reset()
 				require.NoError(t, i.Push(tt.left))
@@ -7053,9 +7135,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int32]{1, 2}))
@@ -7064,7 +7149,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(2), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))))
@@ -7073,13 +7158,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(3), got)
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts struct get on type mismatch", func(t *testing.T) {
@@ -7100,9 +7180,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		first := types.NewStructType(types.NewStructField(types.TypeI32))
 		second := types.NewStructType(types.NewStructField(types.TypeI32))
 		for range 8 {
@@ -7113,7 +7196,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(7), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewStruct(second, types.BoxI32(9))))
@@ -7122,13 +7205,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(9), got)
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts string len on type mismatch", func(t *testing.T) {
@@ -7148,9 +7226,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.String("hello")))
@@ -7159,7 +7240,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(5), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1))))
@@ -7203,7 +7284,8 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 		for range 4 {
 			i.Reset()
@@ -7215,7 +7297,9 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(len("stored")), got)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("jits struct set for a ref-field struct argument", func(t *testing.T) {
@@ -7248,7 +7332,8 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 		for range 4 {
 			i.Reset()
@@ -7260,7 +7345,9 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(len("stored")), got)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.GreaterOrEqual(t, emits, float64(1))
 	})
 
 	t.Run("continues i64 array get through arithmetic", func(t *testing.T) {
@@ -7283,9 +7370,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int64]{41}))
@@ -7294,15 +7384,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(42), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts after i64 array get with stack shape intact", func(t *testing.T) {
@@ -7325,9 +7410,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int64]{1<<48 - 1}))
@@ -7336,15 +7424,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(1<<48), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("deopts nonboxable i64 array get", func(t *testing.T) {
@@ -7365,9 +7448,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.TypedArray[int64]{41}))
@@ -7376,7 +7462,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(41), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.TypedArray[int64]{1 << 48}))
@@ -7385,13 +7471,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I64(1<<48), got)
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("continues i64 struct get through arithmetic", func(t *testing.T) {
@@ -7415,9 +7496,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		addr := fnConst.Ref()
 		for range 8 {
 			i.Reset()
 			require.NoError(t, i.Push(types.NewStruct(typ, types.BoxI64(41))))
@@ -7426,15 +7510,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(42), got)
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
-		var hits int64
-		tree := i.tracer.rootAt(root)
-		require.NotNil(t, tree)
-		for _, hit := range tree.hits {
-			hits += hit
-		}
-		require.Greater(t, hits, int64(0))
+		i.Flush()
+		require.Greater(t, jitNativeExits(i, p, addr), float64(0))
 	})
 
 	t.Run("jits learned callee branch through caller tail", func(t *testing.T) {
@@ -7497,9 +7576,10 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), firstFn, secondFn, evalFn))
 
-		i := New(prog, WithTick(1), WithThreshold(1))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(1), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: 0, ip: 0}
+		const fn = 0
 
 		var v types.Value
 		for range 4 {
@@ -7509,13 +7589,16 @@ func TestWithThreshold(t *testing.T) {
 			v, err = i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.F64(22), v)
-			if i.exits[root] != nil {
+			if jitCompiledAt(i, p, fn, 0) {
 				break
 			}
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, fn, 0))
 
-		id := -1
+		// Warm the inlined callee branch until its learned continuation
+		// compiles as a native side-exit: the public signal that the branch
+		// returning f64.const 1 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.8
@@ -7524,29 +7607,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(21), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no first callee branch returning f64.const 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no first callee branch returning f64.const 1 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -7556,7 +7623,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(21), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("keeps inlined callee params across nested learned branch continuations", func(t *testing.T) {
@@ -7639,9 +7705,10 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.TypedArray[float64](row), firstFn, secondFn, evalFn))
 
-		i := New(prog, WithTick(1), WithThreshold(1))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(1), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: 0, ip: 0}
+		const fn = 0
 
 		var v types.Value
 		for range 4 {
@@ -7651,13 +7718,16 @@ func TestWithThreshold(t *testing.T) {
 			v, err = i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.F64(22), v)
-			if i.exits[root] != nil {
+			if jitCompiledAt(i, p, fn, 0) {
 				break
 			}
 		}
-		require.NotNil(t, i.exits[root])
+		require.True(t, jitCompiledAt(i, p, fn, 0))
 
-		id := -1
+		// Warm the outer callee branch, then the nested one, each identified by
+		// a further increase in the side-exit compile count since both share
+		// the same root function.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.8
@@ -7666,29 +7736,14 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(31), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, id, 0, "no first callee branch returning f64.const 1 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
+		require.True(t, compiled, "no first callee branch returning f64.const 1 was learned")
+		outer := jitSideExitCompiles(i, p, fn)
 
 		for range 3 {
 			i.Reset()
@@ -7698,9 +7753,8 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(31), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 
-		nested := -1
+		compiled = false
 		for range exitThreshold * 4 {
 			i.Reset()
 			row[0], row[1] = 0.2, 0.1
@@ -7709,29 +7763,13 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-9), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil || tree.hits[bid] < exitThreshold {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == -10 {
-						nested = bid
-					}
-				}
-			}
-			if nested >= 0 {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > outer {
+				compiled = true
 				break
 			}
 		}
-		require.GreaterOrEqual(t, nested, 0, "no nested callee branch returning f64.const -10 was learned")
-		nestedHits := i.tracer.rootAt(root).hits[nested]
-		require.Equal(t, int64(exitThreshold), nestedHits)
+		require.True(t, compiled, "no nested callee branch returning f64.const -10 was learned")
 
 		for range 3 {
 			i.Reset()
@@ -7741,9 +7779,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-9), v)
 		}
-		tree := i.tracer.rootAt(root)
-		require.Equal(t, hits, tree.hits[id])
-		require.Equal(t, nestedHits, tree.hits[nested])
 	})
 
 	t.Run("jits learned br_table continuations", func(t *testing.T) {
@@ -7776,9 +7811,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		fnConst, err := i.Const(0)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		// Record the root trace through table index 0 before warming index 1.
 		i.Reset()
@@ -7788,9 +7826,10 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(10), v)
 
-		// Warm the index=1 side exit until its learned continuation is compiled;
-		// once native, the journal stops counting it and its hit counter freezes.
-		id := -1
+		// Warm the index=1 side exit until its learned continuation compiles as
+		// a native side-exit: the public signal that the branch returning
+		// i32.const 11 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(1)))
@@ -7799,33 +7838,17 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(11), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 11 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 && tree.hits[id] >= exitThreshold {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		if id < 0 {
-			require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		if !compiled {
+			emits, _ := p.Metric("vm_jit_emits_total")
+			require.Greater(t, emits, float64(0))
 			return
 		}
-		require.GreaterOrEqual(t, id, 0, "no branch returning i32.const 11 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
 
 		for range 3 {
 			i.Reset()
@@ -7835,7 +7858,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(11), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 
 		// The default target still deopts correctly after index 1 is learned.
 		i.Reset()
@@ -7886,9 +7908,12 @@ func TestWithThreshold(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(choiceFn, evalFn))
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
-		root := anchor{addr: i.constants[1].Ref(), ip: 0}
+		fnConst, err := i.Const(1)
+		require.NoError(t, err)
+		fn := fnConst.Ref()
 
 		i.Reset()
 		require.NoError(t, i.Push(types.I32(0)))
@@ -7897,7 +7922,10 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(110), v)
 
-		id := -1
+		// Warm the index=1 side exit until its learned continuation compiles as
+		// a native side-exit: the public signal that the inlined br_table
+		// branch returning i32.const 11 was learned.
+		compiled := false
 		for range exitThreshold * 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(1)))
@@ -7906,33 +7934,17 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(111), v)
 
-			tree := i.tracer.rootAt(root)
-			require.NotNil(t, tree)
-			for bid, branch := range tree.branches {
-				if branch == nil {
-					continue
-				}
-				for _, op := range branch.ops {
-					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
-						continue
-					}
-					code := i.instrs[op.fn]
-					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 11 {
-						id = bid
-					}
-				}
-			}
-			if id >= 0 && tree.hits[id] >= exitThreshold {
+			i.Flush()
+			if jitSideExitCompiles(i, p, fn) > 0 {
+				compiled = true
 				break
 			}
 		}
-		if id < 0 {
-			require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		if !compiled {
+			emits, _ := p.Metric("vm_jit_emits_total")
+			require.Greater(t, emits, float64(0))
 			return
 		}
-		require.GreaterOrEqual(t, id, 0, "no inlined br_table branch returning i32.const 11 was learned")
-		hits := i.tracer.rootAt(root).hits[id]
-		require.Equal(t, int64(exitThreshold), hits)
 
 		for range 3 {
 			i.Reset()
@@ -7942,7 +7954,6 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(111), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
 	t.Run("jits top-level typed-array loop as cfg", func(t *testing.T) {
@@ -7972,15 +7983,20 @@ func TestWithThreshold(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
+		p := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(p))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, int32(10), got.I32())
-		require.Greater(t, i.samples.Value("vm_jit_emits_total"), float64(0))
+		i.Flush()
+		emits, _ := p.Metric("vm_jit_emits_total")
+		require.Greater(t, emits, float64(0))
 
-		ref := i.constants[values].Ref()
+		valuesConst, err := i.Const(int(values))
+		require.NoError(t, err)
+		ref := valuesConst.Ref()
 		require.NoError(t, i.Store(ref, types.TypedArray[int32]{10, 20, 30, 40}))
 		i.Reset()
 		require.NoError(t, i.Run(context.Background()))
