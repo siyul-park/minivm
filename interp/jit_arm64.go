@@ -8,6 +8,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
+	"github.com/siyul-park/minivm/internal/jit/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
@@ -367,12 +368,12 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	a := ctx.assembler
 	a.Emit(
 		arm64.MOV(ctx.scratch[scratchCtrl], arm64.X0),
-		arm64.LDP(ctx.scratch[scratchStack], ctx.scratch[scratchGlobals], ctx.scratch[scratchCtrl], int16(journalStack*8)),
-		arm64.LDP(ctx.scratch[scratchBP], ctx.scratch[scratchSP], ctx.scratch[scratchCtrl], int16(journalBP*8)),
+		arm64.LDP(ctx.scratch[scratchStack], ctx.scratch[scratchGlobals], ctx.scratch[scratchCtrl], int16(journal.CellStack*8)),
+		arm64.LDP(ctx.scratch[scratchBP], ctx.scratch[scratchSP], ctx.scratch[scratchCtrl], int16(journal.CellBP*8)),
 	)
 	vCtrl := ctx.pin(scratchCtrl)
 	active := ctx.pinTo(arm64.X15)
-	a.Emit(arm64.LDR(active, vCtrl, int16(journalActive*8)))
+	a.Emit(arm64.LDR(active, vCtrl, int16(journal.CellActive*8)))
 	l.dispatch(ctx, vCtrl)
 	a.Bind(ctx.head)
 	l.zeroLocals(ctx)
@@ -397,7 +398,7 @@ func (l arm64Lowerer) dispatch(ctx *lowering, vCtrl asm.VReg) {
 	}
 	a := ctx.assembler
 	entry := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(entry, vCtrl, int16(journalEntry*8)))
+	a.Emit(arm64.LDR(entry, vCtrl, int16(journal.CellEntry*8)))
 	done := a.Label()
 	a.Emit(arm64.CMPI(entry, 0), arm64.BCondLabel(arm64.OpBEQ, done))
 	for _, id := range resumable {
@@ -427,7 +428,7 @@ func (l arm64Lowerer) emitExits(ctx *lowering) bool {
 		ctx.frames = exit.frames
 		ctx.assembler.Bind(exit.label)
 		if ctx.budget.Width() != asm.WidthUndefined {
-			ctx.assembler.Emit(arm64.STR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
+			ctx.assembler.Emit(arm64.STR(ctx.budget, ctx.pin(scratchCtrl), int16(journal.CellBudget*8)))
 		}
 		if !l.commitCarried(ctx) {
 			return false
@@ -459,7 +460,7 @@ func (l arm64Lowerer) emitExits(ctx *lowering) bool {
 				if rcBase.Width() == asm.WidthUndefined {
 					rcBase = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 				}
-				ctx.assembler.Emit(arm64.LDR(rcBase, ctx.pin(scratchCtrl), int16(journalRC*8)))
+				ctx.assembler.Emit(arm64.LDR(rcBase, ctx.pin(scratchCtrl), int16(journal.CellRC*8)))
 				if rc.Width() == asm.WidthUndefined {
 					rc = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 				}
@@ -468,7 +469,7 @@ func (l arm64Lowerer) emitExits(ctx *lowering) bool {
 				ctx.assembler.Emit(arm64.STRR(rc, rcBase, refAddr))
 			}
 		}
-		l.trapFlushed(ctx, trapFallback, exit.resume, exit.id)
+		l.trapFlushed(ctx, journal.TrapFallback, exit.resume, exit.id)
 	}
 	return true
 }
@@ -1504,7 +1505,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 
 	a := ctx.assembler
 	heap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journal.CellHeap*8)))
 	off := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(off, uint64(constant))...)
 	a.Emit(arm64.LSLI(off, off, 4))
@@ -1614,20 +1615,20 @@ func (l arm64Lowerer) back(ctx *lowering, label asm.Label, resume int) bool {
 	budget := ctx.budget
 	if budget.Width() == asm.WidthUndefined {
 		budget = a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
+		a.Emit(arm64.LDR(budget, vCtrl, int16(journal.CellBudget*8)))
 	}
 	a.Emit(arm64.SUBI(budget, budget, 1))
 	if ctx.budget.Width() == asm.WidthUndefined {
-		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+		a.Emit(arm64.STR(budget, vCtrl, int16(journal.CellBudget*8)))
 	}
 	a.Emit(arm64.CBNZLabel(budget, label))
 	if ctx.budget.Width() != asm.WidthUndefined {
-		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+		a.Emit(arm64.STR(budget, vCtrl, int16(journal.CellBudget*8)))
 	}
 	if !l.commitCarried(ctx) {
 		return false
 	}
-	l.trapFlushed(ctx, trapYield, resume, -1)
+	l.trapFlushed(ctx, journal.TrapYield, resume, -1)
 	return true
 }
 
@@ -1734,7 +1735,7 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	natives := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(natives, vCtrl, int16(journalNatives*8)))
+	a.Emit(arm64.LDR(natives, vCtrl, int16(journal.CellNatives*8)))
 	callee := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(callee, natives, int16(op.callee*8)))
 	ready := a.Label()
@@ -1764,14 +1765,14 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 
 	active := ctx.pinTo(arm64.X15)
 	limit := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(limit, vCtrl, int16(journalCap*8)))
+	a.Emit(arm64.LDR(limit, vCtrl, int16(journal.CellCap*8)))
 	a.Emit(arm64.CMP(active, limit))
 	hasFrame := a.Label()
 	a.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame))
 	l.overflow(ctx, op)
 	a.Bind(hasFrame)
 	a.Emit(arm64.ADDI(active, active, 1))
-	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+	a.Emit(arm64.STR(active, vCtrl, int16(journal.CellActive*8)))
 
 	vBP := ctx.pin(scratchBP)
 	nextSP := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -1804,8 +1805,8 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	}
 	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
 	a.Emit(
-		arm64.STR(calleeBP, vCtrl, int16(journalBP*8)),
-		arm64.STR(calleeSP, vCtrl, int16(journalSP*8)),
+		arm64.STR(calleeBP, vCtrl, int16(journal.CellBP*8)),
+		arm64.STR(calleeSP, vCtrl, int16(journal.CellSP*8)),
 		arm64.MOV(arm64.X0, vCtrl),
 		arm64.BLR(callee),
 	)
@@ -1813,7 +1814,7 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 
 	vCtrl = ctx.pin(scratchCtrl)
 	trap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(trap, vCtrl, int16(journalTrap*8)))
+	a.Emit(arm64.LDR(trap, vCtrl, int16(journal.CellTrap*8)))
 	normal := a.Label()
 	a.Emit(arm64.CBZLabel(trap, normal), arm64.LDR(oldBP, arm64.SP, 0))
 	l.unwind(ctx, vCtrl, op.ip+1)
@@ -1826,11 +1827,11 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 
 	active = ctx.pinTo(arm64.X15)
 	a.Emit(arm64.SUBI(active, active, 1))
-	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+	a.Emit(arm64.STR(active, vCtrl, int16(journal.CellActive*8)))
 	a.Emit(
 		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
-		arm64.STR(oldBP, vCtrl, int16(journalBP*8)),
-		arm64.STR(oldSP, vCtrl, int16(journalSP*8)),
+		arm64.STR(oldBP, vCtrl, int16(journal.CellBP*8)),
+		arm64.STR(oldSP, vCtrl, int16(journal.CellSP*8)),
 		arm64.LDR(arm64.LR, arm64.SP, 16),
 		arm64.ADDI(arm64.SP, arm64.SP, 32),
 	)
@@ -2705,7 +2706,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	vCtrl := ctx.pin(scratchCtrl)
 	active := ctx.pinTo(arm64.X15)
 	budget := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(budget, vCtrl, int16(journalCap*8)))
+	a.Emit(arm64.LDR(budget, vCtrl, int16(journal.CellCap*8)))
 	a.Emit(arm64.CMP(active, budget))
 	hasFrame := a.Label()
 	a.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame))
@@ -2714,7 +2715,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 
 	a.Emit(
 		arm64.ADDI(active, active, 1),
-		arm64.STR(active, vCtrl, int16(journalActive*8)),
+		arm64.STR(active, vCtrl, int16(journal.CellActive*8)),
 	)
 
 	vBP := ctx.pin(scratchBP)
@@ -2745,7 +2746,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	// bp, append the live frame chain inner-to-outer, and keep unwinding.
 	vCtrl = ctx.pin(scratchCtrl)
 	trap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(trap, vCtrl, int16(journalTrap*8)))
+	a.Emit(arm64.LDR(trap, vCtrl, int16(journal.CellTrap*8)))
 	normal := a.Label()
 	a.Emit(
 		arm64.CBZLabel(trap, normal),
@@ -2761,7 +2762,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 
 	active = ctx.pinTo(arm64.X15)
 	a.Emit(arm64.SUBI(active, active, 1))
-	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+	a.Emit(arm64.STR(active, vCtrl, int16(journal.CellActive*8)))
 	a.Emit(
 		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
 		arm64.LDR(arm64.LR, arm64.SP, 16),
@@ -2815,7 +2816,7 @@ func (l arm64Lowerer) checkReturns(target *types.Function) bool {
 // back-edge: the new arguments become the anchor entry frame's params, the
 // other locals reset, everything commits to the VM stack, and iterate branches
 // to the head (or yields when the safepoint budget runs out). Constant stack
-// depth — no BL, no journalActive — so self/mutual tail recursion never grows.
+// depth — no BL, no journal.CellActive — so self/mutual tail recursion never grows.
 func (l arm64Lowerer) tailLoop(ctx *lowering, op step) bool {
 	target, params, ok := l.tailTarget(ctx, op)
 	if !ok {
@@ -3182,7 +3183,7 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 	if !l.commitCarried(ctx) {
 		return false
 	}
-	// The wrapper preserves this top-level operand stack on trapNone (see
+	// The wrapper preserves this top-level operand stack on journal.TrapNone (see
 	// start()), and the interpreter adopts each stack ref as owned, so a
 	// deferred ref left on the stack at module end must re-take its retain.
 	l.retainDeferred(ctx)
@@ -3191,8 +3192,8 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 	vBP := ctx.pin(scratchBP)
 	sp := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
-	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
-	l.report(ctx, vCtrl, trapNone, ctx.frame().end)
+	a.Emit(arm64.STR(sp, vCtrl, int16(journal.CellSP*8)))
+	l.report(ctx, vCtrl, journal.TrapNone, ctx.frame().end)
 	a.Emit(
 		arm64.RET(),
 	)
@@ -3200,18 +3201,18 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 }
 
 // iterate spends one unit of the safepoint budget at a loop back-edge:
-// decrement journalBudget and branch to the loop head while budget remains,
+// decrement journal.CellBudget and branch to the loop head while budget remains,
 // otherwise yield to the safepoint at the header. The caller has already
 // committed loop-carried locals to the VM stack.
 func (l arm64Lowerer) iterate(ctx *lowering, header int) bool {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	budget := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
+	a.Emit(arm64.LDR(budget, vCtrl, int16(journal.CellBudget*8)))
 	a.Emit(arm64.SUBI(budget, budget, 1))
-	a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+	a.Emit(arm64.STR(budget, vCtrl, int16(journal.CellBudget*8)))
 	a.Emit(arm64.CBNZLabel(budget, ctx.back))
-	return l.trap(ctx, trapYield, header, prof.ExitNone, prof.OpcodeNone)
+	return l.trap(ctx, journal.TrapYield, header, prof.ExitNone, prof.OpcodeNone)
 }
 
 // overflow surfaces a frame-budget overflow: the consumed callee marker
@@ -3231,9 +3232,9 @@ func (l arm64Lowerer) overflow(ctx *lowering, op step) {
 	vBP := ctx.pin(scratchBP)
 	sp := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp()+1)))
-	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
+	a.Emit(arm64.STR(sp, vCtrl, int16(journal.CellSP*8)))
 	l.unwind(ctx, vCtrl, op.ip)
-	l.report(ctx, vCtrl, trapOverflow, op.ip)
+	l.report(ctx, vCtrl, journal.TrapOverflow, op.ip)
 	a.Emit(
 		arm64.RET(),
 	)
@@ -3362,7 +3363,7 @@ func (l arm64Lowerer) upvalBase(ctx *lowering) asm.VReg {
 	f := ctx.frame()
 	if f.upvalRef > 0 {
 		heap := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+		ctx.assembler.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journal.CellHeap*8)))
 		off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDI(off, uint64(f.upvalRef))...)
 		ctx.assembler.Emit(arm64.LSLI(off, off, 4))
@@ -3375,7 +3376,7 @@ func (l arm64Lowerer) upvalBase(ctx *lowering) asm.VReg {
 		return base
 	}
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalUpvals*8)))
+	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journal.CellUpvals*8)))
 	return base
 }
 
@@ -4277,16 +4278,16 @@ func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
 // exit deopts to the threaded interpreter: flush every live value boxed,
 // publish sp, record the live frame chain, and report a fallback at resume.
 func (l arm64Lowerer) exit(ctx *lowering, resume int, reason prof.ExitReason, opcode int) bool {
-	return l.trap(ctx, trapFallback, resume, reason, opcode)
+	return l.trap(ctx, journal.TrapFallback, resume, reason, opcode)
 }
 
 // trap unwinds the inlined native state into the journal and returns to the Go
 // wrapper: every live value is flushed boxed, sp is published, the frame chain
-// is recorded resuming at resume, and the trap kind is reported. trapFallback
-// resumes threaded dispatch; trapYield re-enters native after a safepoint;
-// trapBridge hands exactly one opcode to the threaded interpreter and resumes
+// is recorded resuming at resume, and the trap kind is reported. journal.TrapFallback
+// resumes threaded dispatch; journal.TrapYield re-enters native after a safepoint;
+// journal.TrapBridge hands exactly one opcode to the threaded interpreter and resumes
 // native afterward (see Interpreter.bridge).
-func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReason, opcode int) bool {
+func (l arm64Lowerer) trap(ctx *lowering, kind journal.Trap, resume int, reason prof.ExitReason, opcode int) bool {
 	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
@@ -4294,16 +4295,16 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReas
 		return false
 	}
 	id := -1
-	if kind == trapFallback || kind == trapBridge {
+	if kind == journal.TrapFallback || kind == journal.TrapBridge {
 		// Both hand the flushed operand stack to code that adopts it as owned —
-		// the threaded interpreter on trapFallback, the one bridged closure on
-		// trapBridge — which releases each stack ref it pops. Re-take every
-		// deferred ref's retain from its backing slot first. trapYield never
+		// the threaded interpreter on journal.TrapFallback, the one bridged closure on
+		// journal.TrapBridge — which releases each stack ref it pops. Re-take every
+		// deferred ref's retain from its backing slot first. journal.TrapYield never
 		// reaches here with a deferred live: its only caller commits first, and
 		// a committing flush rejects deferred refs (see flush).
 		l.retainDeferred(ctx)
 	}
-	if kind == trapFallback {
+	if kind == journal.TrapFallback {
 		id = len(ctx.descriptors)
 		ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
 	}
@@ -4318,20 +4319,20 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReas
 // trace-cut (see watchdog) — and the block that follows it in the plan needs
 // no branch here: it is reached only through a fresh external entry.
 func (l arm64Lowerer) bridge(ctx *lowering, ip int) bool {
-	return l.trap(ctx, trapBridge, ip, prof.ExitNone, prof.OpcodeNone)
+	return l.trap(ctx, journal.TrapBridge, ip, prof.ExitNone, prof.OpcodeNone)
 }
 
-func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
+func (l arm64Lowerer) trapFlushed(ctx *lowering, kind journal.Trap, resume, exitID int) {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	vBP := ctx.pin(scratchBP)
 	sp := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
-	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
+	a.Emit(arm64.STR(sp, vCtrl, int16(journal.CellSP*8)))
 	l.unwind(ctx, vCtrl, resume)
 	vExit := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(vExit, uint64(exitID+1))...)
-	a.Emit(arm64.STR(vExit, vCtrl, int16(journalExitID*8)))
+	a.Emit(arm64.STR(vExit, vCtrl, int16(journal.CellExitID*8)))
 	l.report(ctx, vCtrl, kind, resume)
 	a.Emit(
 		arm64.RET(),
@@ -4341,7 +4342,7 @@ func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
 // retainDeferred re-takes the deferred retain for every operand in the current
 // snapshot whose ref was flushed to its VM stack slot without one. A cold path
 // that hands the flushed operand stack to the threaded interpreter (a
-// trapFallback terminal exit, module completion) needs this: the interpreter
+// journal.TrapFallback terminal exit, module completion) needs this: the interpreter
 // adopts each stack ref as owned and later releases it, so a deferred ref
 // flushed without a retain would be freed once too often. The caller must have
 // flushed the operands first — the slot is authoritative — and must NOT change
@@ -4386,7 +4387,7 @@ func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.
 	addr := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ANDI(addr, ref, maskI32))
 	heap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journal.CellHeap*8)))
 	off := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LSLI(off, addr, 4))
 	cell := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -4437,10 +4438,12 @@ func (l arm64Lowerer) unwind(ctx *lowering, vCtrl asm.VReg, resume int) {
 func (l arm64Lowerer) save(ctx *lowering, vCtrl asm.VReg, f *activation, ip int) {
 	a := ctx.assembler
 	depth := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(depth, vCtrl, int16(journalDepth*8)))
+	a.Emit(arm64.LDR(depth, vCtrl, int16(journal.CellDepth*8)))
 	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, depth, 5))
+	a.Emit(arm64.LSLI(off, depth, journal.Shift))
 	base := a.Reg(asm.RegTypeInt, asm.Width64)
+	// base is record depth's first cell; the STP immediates below add each
+	// field's offset within record 0, matching journal.At(0, field).
 	a.Emit(arm64.ADD(base, vCtrl, off))
 
 	vAddr := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -4451,26 +4454,26 @@ func (l arm64Lowerer) save(ctx *lowering, vCtrl asm.VReg, f *activation, ip int)
 		a.Emit(arm64.ADDI(shifted, bp, uint16(f.base)))
 		bp = shifted
 	}
-	a.Emit(arm64.STP(vAddr, bp, base, int16((journalHead+recordAddr)*8)))
+	a.Emit(arm64.STP(vAddr, bp, base, int16(journal.At(0, journal.RecordAddr)*8)))
 
 	vIP := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(vIP, uint64(ip))...)
 	vReturns := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(vReturns, uint64(f.returns))...)
-	a.Emit(arm64.STP(vIP, vReturns, base, int16((journalHead+recordIP)*8)))
+	a.Emit(arm64.STP(vIP, vReturns, base, int16(journal.At(0, journal.RecordIP)*8)))
 
 	a.Emit(arm64.ADDI(depth, depth, 1))
-	a.Emit(arm64.STR(depth, vCtrl, int16(journalDepth*8)))
+	a.Emit(arm64.STR(depth, vCtrl, int16(journal.CellDepth*8)))
 }
 
-func (l arm64Lowerer) report(ctx *lowering, vCtrl asm.VReg, trap, nextIP int) {
+func (l arm64Lowerer) report(ctx *lowering, vCtrl asm.VReg, trap journal.Trap, nextIP int) {
 	a := ctx.assembler
 	vTrap := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(vTrap, uint64(trap))...)
-	a.Emit(arm64.STR(vTrap, vCtrl, int16(journalTrap*8)))
+	a.Emit(arm64.STR(vTrap, vCtrl, int16(journal.CellTrap*8)))
 	vIP := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(vIP, uint64(nextIP))...)
-	a.Emit(arm64.STR(vIP, vCtrl, int16(journalNextIP*8)))
+	a.Emit(arm64.STR(vIP, vCtrl, int16(journal.CellNextIP*8)))
 }
 
 // releaseOverwritten drops the retain a slot held before it is overwritten.
@@ -4827,7 +4830,7 @@ func (l arm64Lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
 func (l arm64Lowerer) retain(ctx *lowering, fn int) {
 	a := ctx.assembler
 	base := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
+	a.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journal.CellRC*8)))
 	slot := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(slot, uint64(fn))...)
 	rc := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -4863,7 +4866,7 @@ func (l arm64Lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
 
 func (l arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
+	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journal.CellRC*8)))
 	return base
 }
 
@@ -4935,7 +4938,7 @@ func (l arm64Lowerer) lower(ctx *lowering, plan plan) bool {
 	ctx.back = ctx.labels[root]
 	if ctx.nativeLoop && ctx.leaf {
 		ctx.budget = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
+		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journal.CellBudget*8)))
 	}
 	if len(plan.carried) > 0 && !l.carry(ctx, plan.carried, plan.anchor.ip) {
 		return false

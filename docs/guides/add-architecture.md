@@ -13,6 +13,7 @@ Use this guide when adding a new JIT backend. For the runtime model, journal lay
 | Generic native-code interfaces | `internal/asm/` |
 | ARM64 reference backend | `internal/asm/arm64/`, `interp/jit_arm64.go` |
 | Architecture-neutral JIT driver | `interp/jit.go` |
+| Frame-journal layout | `internal/jit/journal/` |
 | Trace recording | `interp/trace.go` |
 | Platform and CGO support | `docs/compatibility.md` |
 | JIT contracts | `docs/jit-internals.md` |
@@ -53,8 +54,8 @@ Lowering rules:
 - return `false` without mutating published state when an opcode, kind, or observed heap shape is unsupported
 - load the context journal into pinned scratch registers before entering the trace body
 - materialize live symbolic state on guard exits
-- write `journalSP`, `journalNextIP`, and frame records before returning to Go
-- handle entry-frame `RETURN` by writing boxed returns and returning with `trapNone`
+- write `journal.CellSP`, `journal.CellNextIP`, and frame records before returning to Go
+- handle entry-frame `RETURN` by writing boxed returns and returning with `journal.TrapNone`
 - stitch inlined callee returns into the caller's symbolic stack
 - lower `CALL` only when the target, frame budget, refs, host behavior, stack bounds, and write-barrier constraints are safe
 

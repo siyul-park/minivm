@@ -13,6 +13,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/jit/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -294,7 +295,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:       map[anchor]bool{},
 		dynamic:     map[int]bool{},
-		journal:     make([]uint64, journalHead+journalStride*opt.frame),
+		journal:     make([]uint64, journal.Len(opt.frame)),
 		frames:      make([]frame, opt.frame),
 		stack:       make([]types.Boxed, opt.stack),
 		heap:        make([]types.Value, 0, opt.heap),
@@ -1398,18 +1399,18 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 			stats.enter()
 			wd.enter()
 			ctx := i.journalPtr()
-			i.journal[journalEntry] = resume
+			i.journal[journal.CellEntry] = resume
 			i.fr.code = nil
 			i.fr.upvals = nil
 			// Refresh the back-edge budget like loop does: an entry trace can carry a
 			// self tail-call back-edge (see tailLoop) that polls the safepoint every
 			// loopBudget iterations, re-entering native here after each yield.
-			i.journal[journalBudget] = loopBudget
+			i.journal[journal.CellBudget] = loopBudget
 			if err := entry.callable.Call(ctx); err != nil {
 				panic(err)
 			}
 
-			if i.journal[journalTrap] == trapNone {
+			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
 				i.popFrame()
 				break
 			}
@@ -1417,9 +1418,9 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 			// A trap rebuilt the native call chain into real VM frames; resume the
 			// innermost in the interpreter, surface a frame overflow, or service a
 			// loop safepoint.
-			i.sp = int(i.journal[journalSP])
+			i.sp = int(i.journal[journal.CellSP])
 			i.deopt()
-			if i.journal[journalTrap] == trapBridge {
+			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapBridge {
 				next, ok := i.bridge(root, entry, wd, cycles)
 				if !ok {
 					break
@@ -1427,10 +1428,10 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 				resume = next
 				continue
 			}
-			switch i.journal[journalTrap] {
-			case trapOverflow:
+			switch journal.Trap(i.journal[journal.CellTrap]) {
+			case journal.TrapOverflow:
 				panic(ErrFrameOverflow)
-			case trapYield:
+			case journal.TrapYield:
 				stats.yield()
 				// A loop back-edge spent its budget. deopt left i.fr at the loop header;
 				// report it and run coordination, then let the threaded Run loop
@@ -1439,8 +1440,8 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 					panic(err)
 				}
 			default:
-				stats.exit(i.journal[journalExitID])
-				wd.exit(i.journal[journalExitID])
+				stats.exit(i.journal[journal.CellExitID])
+				wd.exit(i.journal[journal.CellExitID])
 				i.bailout(root)
 			}
 			break
@@ -1509,22 +1510,22 @@ func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watch
 			stats.enter()
 			wd.enter()
 			ctx := i.journalPtr()
-			i.journal[journalEntry] = resume
+			i.journal[journal.CellEntry] = resume
 			i.fr.code = nil
 			i.fr.upvals = nil
-			i.journal[journalBudget] = loopBudget
+			i.journal[journal.CellBudget] = loopBudget
 			if err := entry.callable.Call(ctx); err != nil {
 				panic(err)
 			}
 
-			i.sp = int(i.journal[journalSP])
-			if i.journal[journalTrap] == trapNone {
+			i.sp = int(i.journal[journal.CellSP])
+			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
 				i.complete()
 				break
 			}
 
 			i.deopt()
-			if i.journal[journalTrap] == trapBridge {
+			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapBridge {
 				next, ok := i.bridge(root, entry, wd, cycles)
 				if !ok {
 					break
@@ -1532,17 +1533,17 @@ func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watch
 				resume = next
 				continue
 			}
-			switch i.journal[journalTrap] {
-			case trapOverflow:
+			switch journal.Trap(i.journal[journal.CellTrap]) {
+			case journal.TrapOverflow:
 				panic(ErrFrameOverflow)
-			case trapYield:
+			case journal.TrapYield:
 				stats.yield()
 				if err := i.yielded(); err != nil {
 					panic(err)
 				}
 			default:
-				stats.exit(i.journal[journalExitID])
-				wd.exit(i.journal[journalExitID])
+				stats.exit(i.journal[journal.CellExitID])
+				wd.exit(i.journal[journal.CellExitID])
 				i.bailout(root)
 			}
 			break
@@ -1565,17 +1566,17 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 			stats.enter()
 			wd.enter()
 			ctx := i.journalPtr()
-			i.journal[journalEntry] = resume
+			i.journal[journal.CellEntry] = resume
 			// Decouple the loop's safepoint cadence from tick: a native iteration does
 			// the work of a whole loop body, so yielding every tick (1 under exact
 			// dispatch) would drown the loop in deopt/re-enter churn. Run many
 			// iterations natively between safepoints instead.
-			i.journal[journalBudget] = loopBudget
+			i.journal[journal.CellBudget] = loopBudget
 			if err := entry.callable.Call(ctx); err != nil {
 				panic(err)
 			}
-			i.sp = int(i.journal[journalSP])
-			if i.journal[journalTrap] == trapNone {
+			i.sp = int(i.journal[journal.CellSP])
+			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
 				if root.addr == 0 {
 					i.complete()
 				} else {
@@ -1584,7 +1585,7 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 				break
 			}
 			i.deopt()
-			if i.journal[journalTrap] == trapBridge {
+			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapBridge {
 				next, ok := i.bridge(root, entry, wd, cycles)
 				if !ok {
 					break
@@ -1592,17 +1593,17 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 				resume = next
 				continue
 			}
-			switch i.journal[journalTrap] {
-			case trapOverflow:
+			switch journal.Trap(i.journal[journal.CellTrap]) {
+			case journal.TrapOverflow:
 				panic(ErrFrameOverflow)
-			case trapYield:
+			case journal.TrapYield:
 				stats.yield()
 				if err := i.yielded(); err != nil {
 					panic(err)
 				}
-			case trapFallback:
-				stats.exit(i.journal[journalExitID])
-				wd.exit(i.journal[journalExitID])
+			case journal.TrapFallback:
+				stats.exit(i.journal[journal.CellExitID])
+				wd.exit(i.journal[journal.CellExitID])
 				// Record the exit as a branch so the tracer captures the leg and a
 				// hot in-loop branch recompiles the tree with the leg folded in.
 				i.exit(root)
@@ -1876,7 +1877,7 @@ func (i *Interpreter) isCold(addr int) bool {
 // frames in reverse order, matching generated fused direct calls (ref
 // unretained, code/upvals restored).
 func (i *Interpreter) deopt() {
-	depth := int(i.journal[journalDepth])
+	depth := int(i.journal[journal.CellDepth])
 	if depth == 0 {
 		return
 	}
@@ -1909,8 +1910,10 @@ func (i *Interpreter) deopt() {
 
 // unpack reads frame record n from the native journal.
 func (i *Interpreter) unpack(n int) (addr, bp, ip, returns int) {
-	row := i.journal[journalHead+n*journalStride:]
-	return int(row[recordAddr]), int(row[recordBP]), int(row[recordIP]), int(row[recordReturns])
+	return int(i.journal[journal.At(n, journal.RecordAddr)]),
+		int(i.journal[journal.At(n, journal.RecordBP)]),
+		int(i.journal[journal.At(n, journal.RecordIP)]),
+		int(i.journal[journal.At(n, journal.RecordReturns)])
 }
 
 func (i *Interpreter) restore(f *frame, addr int) {
@@ -1938,41 +1941,41 @@ func (i *Interpreter) restore(f *frame, addr int) {
 // pointers, current frame BP/SP, pointer cells for native fast paths, and the
 // per-call frame budget. It returns &journal[0], passed to native code in X0.
 func (i *Interpreter) journalPtr() unsafe.Pointer {
-	i.journal[journalStack] = 0
+	i.journal[journal.CellStack] = 0
 	if len(i.stack) > 0 {
-		i.journal[journalStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
+		i.journal[journal.CellStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
 	}
-	i.journal[journalGlobals] = 0
+	i.journal[journal.CellGlobals] = 0
 	if len(i.globals) > 0 {
-		i.journal[journalGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
+		i.journal[journal.CellGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
 	}
-	i.journal[journalBP] = uint64(i.fr.bp)
-	i.journal[journalSP] = uint64(i.sp)
+	i.journal[journal.CellBP] = uint64(i.fr.bp)
+	i.journal[journal.CellSP] = uint64(i.sp)
 
-	i.journal[journalRC] = 0
+	i.journal[journal.CellRC] = 0
 	if len(i.rc) > 0 {
-		i.journal[journalRC] = uint64(uintptr(unsafe.Pointer(&i.rc[0])))
+		i.journal[journal.CellRC] = uint64(uintptr(unsafe.Pointer(&i.rc[0])))
 	}
-	i.journal[journalUpvals] = 0
+	i.journal[journal.CellUpvals] = 0
 	if len(i.fr.upvals) > 0 {
-		i.journal[journalUpvals] = uint64(uintptr(unsafe.Pointer(&i.fr.upvals[0])))
+		i.journal[journal.CellUpvals] = uint64(uintptr(unsafe.Pointer(&i.fr.upvals[0])))
 	}
-	i.journal[journalHeap] = 0
+	i.journal[journal.CellHeap] = 0
 	if len(i.heap) > 0 {
-		i.journal[journalHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
+		i.journal[journal.CellHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
 	}
-	i.journal[journalNatives] = 0
+	i.journal[journal.CellNatives] = 0
 	if len(i.natives) > 0 {
-		i.journal[journalNatives] = uint64(uintptr(unsafe.Pointer(&i.natives[0])))
+		i.journal[journal.CellNatives] = uint64(uintptr(unsafe.Pointer(&i.natives[0])))
 	}
 
-	i.journal[journalDepth] = 0
-	i.journal[journalCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
-	i.journal[journalTrap] = trapNone
-	i.journal[journalExitID] = 0
-	i.journal[journalEntry] = 0
-	i.journal[journalBudget] = uint64(i.tick)
-	i.journal[journalActive] = 0
+	i.journal[journal.CellDepth] = 0
+	i.journal[journal.CellCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
+	i.journal[journal.CellTrap] = uint64(journal.TrapNone)
+	i.journal[journal.CellExitID] = 0
+	i.journal[journal.CellEntry] = 0
+	i.journal[journal.CellBudget] = uint64(i.tick)
+	i.journal[journal.CellActive] = 0
 	return unsafe.Pointer(&i.journal[0])
 }
 

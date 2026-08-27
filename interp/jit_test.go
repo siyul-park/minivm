@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
+	"github.com/siyul-park/minivm/internal/jit/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -61,7 +62,7 @@ func TestARM64_Flush(t *testing.T) {
 func TestARM64_StackReserve(t *testing.T) {
 	const (
 		spillSlotBytes  = 8 // one 64-bit value per spill slot
-		frameRecordSize = journalStride * 8
+		frameRecordSize = 1 << journal.Shift
 		saveAreaBytes   = 80 // R19-R26 callee-saved save area (4 STP pairs, 16-byte aligned)
 	)
 	spillBytes := asm.MaxSpillSlots * spillSlotBytes
@@ -79,7 +80,7 @@ func TestARM64_StackReserve(t *testing.T) {
 	reserveVal, err := strconv.Atoi(string(reserveLiteral[1]))
 	require.NoError(t, err)
 	require.Equal(t, reserveVal, reserve,
-		"asm.MaxSpillSlots*%d + nativeFrameLimit*journalStride*8 must equal the trampoline's ADD $N, RSP reserve", spillSlotBytes)
+		"asm.MaxSpillSlots*%d + nativeFrameLimit*(1<<journal.Shift) must equal the trampoline's ADD $N, RSP reserve", spillSlotBytes)
 
 	frameLiteral := regexp.MustCompile(`TEXT ·invoke\(SB\), \$(\d+)-`).FindSubmatch(src)
 	require.NotNil(t, frameLiteral, "expected a TEXT ·invoke(SB), $N-M frame size in %s", abiFile)
@@ -120,8 +121,8 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -162,8 +163,8 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -199,8 +200,8 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -421,8 +422,8 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
 
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -464,8 +465,8 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
 
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -496,8 +497,8 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -525,8 +526,8 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 
 			require.NoError(t, entry.callable.Call(i.journalPtr()))
-			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-			encoded := i.journal[journalExitID]
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -594,7 +595,7 @@ func TestCompiler_Compile(t *testing.T) {
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
 			i.fr.ip = header
 			i.loop(root, entry, metrics, newWatchdog(entry))(i)
-			encoded := i.journal[journalExitID]
+			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.exits))
@@ -641,8 +642,8 @@ func TestCompiler_Compile(t *testing.T) {
 			require.Equal(t, entryFunction, entry.kind)
 
 			i.call(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
-			require.Equal(t, uint64(trapYield), i.journal[journalTrap])
-			require.Zero(t, i.journal[journalExitID])
+			require.Equal(t, uint64(journal.TrapYield), i.journal[journal.CellTrap])
+			require.Zero(t, i.journal[journal.CellExitID])
 			yields, ok := local.Metric("vm_jit_native_yields_total",
 				prof.Label{Key: "func", Value: strconv.Itoa(addr)}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})

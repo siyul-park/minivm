@@ -98,51 +98,6 @@ type elemShape struct {
 	raw   bool
 }
 
-// Frame-journal layout. X0 carries &journal[0] to native code, which mirrors the
-// first cells into pinned scratch registers (X10-X14) on external entry. Header
-// cells precede a stack of fixed-stride frame records; each record mirrors the
-// int fields the threaded interpreter needs to resume a frame.
-const (
-	journalStack   = iota // &i.stack[0]; external entry in
-	journalGlobals        // &i.globals[0]; external entry in
-	journalBP             // current frame bp; external entry in
-	journalSP             // interpreter sp; external entry in/out
-	journalEntry          // bridge resume IP in; zero starts at the anchor
-	journalDepth          // trap-time frame records written; native read/write
-	journalCap            // frame budget capped by nativeFrameLimit; read-only
-	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield | trapBridge
-	journalNextIP         // resume/fallback IP out for the single-frame path
-	journalBudget         // back-edges remaining before the next safepoint; native read/write
-	journalActive         // active native call depth for frame-budget checks
-	journalRC             // &i.rc[0]; read/write for guarded native refcount fast paths
-	journalUpvals         // &i.fr.upvals[0] or 0; read/write for closure body fast paths
-	journalHeap           // &i.heap[0]; read-only for heap object fast paths
-	journalNatives        // &i.natives[0]; atomic per-function entry slots
-	journalExitID         // fallback descriptor ID + 1; zero means none
-	journalHead           // first frame record cell
-)
-
-const journalStride = 4
-
-const (
-	recordAddr = iota
-	recordBP
-	recordIP
-	recordReturns
-)
-
-const (
-	trapNone = iota
-	trapFallback
-	trapOverflow
-	trapYield
-	// trapBridge reports the IP of one opcode the backend cannot lower.
-	// journalNextIP carries that opcode's own IP; the Go wrapper runs its
-	// threaded closure exactly once and re-enters the same callable at the
-	// closure's new IP (see Interpreter.bridge and arm64Lowerer.dispatch).
-	trapBridge
-)
-
 // arrayElems is where a ref array's elements begin. It sits here with the
 // shape table rather than with the lowering offsets because the portable
 // planner reads it through elemShapes.

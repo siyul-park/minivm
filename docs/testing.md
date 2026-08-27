@@ -44,7 +44,7 @@ condition that removes it (`docs/coding-patterns.md` §1.1).
 
 | File | Why it is white-box | Removal condition |
 |---|---|---|
-| `interp/jit_test.go` | Drives `compiler.Compile` and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journalTrap`, `journalExitID`, `exitDescriptor`); also splices frame state to force a specific exit, and reads install bookkeeping (`tried`, `exits`) that no metric separates from "not attempted". | Moves to `internal/jit` and `internal/jit/arm64` with the compiler, where the same contracts are that package's own public surface. |
+| `interp/jit_test.go` | Drives `compiler.Compile` and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `exitDescriptor`); also splices frame state to force a specific exit, and reads install bookkeeping (`tried`, `exits`) that no metric separates from "not attempted". | Moves to `internal/jit` and `internal/jit/arm64` with the compiler, where the same contracts are that package's own public surface. |
 | `interp/jit_plan_test.go` | Every symbol it exercises (`plan`, `block`, `edge`, `slot`, `staticPlan`, `tracePlan`, `carried`, `hoistable`) is compiler-graph representation with no runtime projection. | Moves to `internal/jit` with the plan model. |
 | `interp/trace_test.go` | Calls `tracer.capture` without `Run`, which is the only way to prove speculative capture snapshots a container instead of mutating the live heap. Any public path runs the real instructions too, so the isolation claim is unobservable by construction. | None known. The recorder stays in `interp`, and the claim is only provable from inside it. |
 

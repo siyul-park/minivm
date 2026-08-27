@@ -18,6 +18,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | architecture-neutral compiler | `interp/jit.go`, `interp/jit_plan.go` |
 | runtime tier-up and retirement policy | `interp/tier.go` |
 | ARM64 lowering | `interp/jit_arm64.go` |
+| frame-journal layout | `internal/jit/journal/` |
 | callable ABI | `internal/asm/` |
 | value layout | `docs/value-representation.md` |
 | heap ownership | `docs/memory-model.md` |
@@ -228,7 +229,7 @@ inside memory covered by Go's stack-growth check. X26 is the stable spill-frame
 base, so a native self-call may move SP without changing spill addresses. Keep
 the allocator limit, native frame limit, and `internal/asm/arm64/abi_arm64.s` reserve in
 sync: `interp.TestNativeStackReserve` (`interp/jit_arm64_test.go`) asserts
-`asm.MaxSpillSlots*8 + nativeFrameLimit*journalStride*8` equals the reserve
+`asm.MaxSpillSlots*8 + nativeFrameLimit*(1<<journal.Shift)` equals the reserve
 literal parsed out of `abi_arm64.s`, and that the reserve plus the 80-byte
 callee-saved save area equals the trampoline's total Go frame size, so an
 edit to any one constant without the others fails a test instead of
@@ -247,28 +248,28 @@ Native code does not marshal parameters or returns. It writes results and trap s
 
 ## Frame Journal
 
-`i.journal` is owned by `Interpreter`. It is both input context for native entry and output state for deoptimization.
+`i.journal` is owned by `Interpreter`. It is both input context for native entry and output state for deoptimization. `internal/jit/journal` owns the cell, record, and trap layout: `journal.Cell` indexes a header cell, `journal.Record` indexes a field within a frame record, and `journal.Trap` is the exit kind stored at `journal.CellTrap`.
 
-Header cells come before fixed-stride frame records.
+Header cells come before fixed-stride frame records (`journal.Stride` cells wide, indexed by `journal.Record`).
 
 | Cell | Purpose |
 |---|---|
-| `journalStack` | stack base pointer |
-| `journalGlobals` | globals base pointer |
-| `journalBP` | current frame base |
-| `journalSP` | stack pointer |
-| `journalDepth` | number of written frame records |
-| `journalCap` | available frame record capacity, capped at 128 |
-| `journalTrap` | trap state |
-| `journalNextIP` | fallback or resume IP |
-| `journalBudget` | native loop back-edge budget |
-| `journalActive` | active native call depth |
-| `journalRC` | refcount base pointer |
-| `journalUpvals` | closure upvalue base pointer |
-| `journalHeap` | heap base pointer |
-| `journalNatives` | fixed per-function native-entry slot base |
-| `journalExitID` | fallback descriptor ID plus one; zero means no descriptor |
-| `journalHead...` | frame records `{addr, bp, ip, returns}` |
+| `journal.CellStack` | stack base pointer |
+| `journal.CellGlobals` | globals base pointer |
+| `journal.CellBP` | current frame base |
+| `journal.CellSP` | stack pointer |
+| `journal.CellDepth` | number of written frame records |
+| `journal.CellCap` | available frame record capacity, capped at 128 |
+| `journal.CellTrap` | trap state (`journal.Trap`) |
+| `journal.CellNextIP` | fallback or resume IP |
+| `journal.CellBudget` | native loop back-edge budget |
+| `journal.CellActive` | active native call depth |
+| `journal.CellRC` | refcount base pointer |
+| `journal.CellUpvals` | closure upvalue base pointer |
+| `journal.CellHeap` | heap base pointer |
+| `journal.CellNatives` | fixed per-function native-entry slot base |
+| `journal.CellExitID` | fallback descriptor ID plus one; zero means no descriptor |
+| `journal.CellHead...` | frame records `{journal.RecordAddr, journal.RecordBP, journal.RecordIP, journal.RecordReturns}` |
 
 On guard failure, native code writes live stack state, appends frame records, sets trap state, sets the resume IP, and returns to Go.
 
@@ -288,9 +289,9 @@ not construct labels.
 Every fallback creation site assigns a descriptor with a stable reason. It uses
 the concrete source opcode when the fallback is attributable to one; synthetic
 boundaries such as an `opLimit` trace cut use `none`. Generated code writes
-`descriptor ID + 1` to `journalExitID` before returning with `trapFallback`. The
+`descriptor ID + 1` to `journal.CellExitID` before returning with `journal.TrapFallback`. The
 Go wrapper resolves that ID and counts the exact exit row. Zero means no
-descriptor. `trapYield` counts only a yield, and native frame overflow counts
+descriptor. `journal.TrapYield` counts only a yield, and native frame overflow counts
 neither an exit nor a yield.
 
 Compile and emission ownership follows compilation ownership: a solo compiler
@@ -325,7 +326,7 @@ A call whose callee is the function being compiled uses the native self-call pat
 
 A callee frame's non-parameter locals are cleared by the callee, in the entry prologue at `ctx.head` (`zeroLocals`), not by its callers. Every entry path arrives there with `bp` already pointing at the new frame — the Go wrapper, `directCall`'s `BLR`, and `selfCall`'s `BL` — so one clear covers all three, and it matches what threaded `CALL` does before transferring control. Only a whole-function entry may do this: a loop plan re-enters a frame whose locals are live, and module code has no caller that would have cleared them. Skipping it hands the callee stale boxed words from whatever frame last occupied that stack region, so its first `LOCAL_SET` releases a ref it never owned and `RETURN` teardown releases the rest. `TestARM64_CalleeLocals` covers both native call paths; a function with no non-parameter local cannot expose it, which is the shape every earlier self-call test used.
 
-Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, publishes the callee BP/SP into the journal, enters the callee trace, and restores the caller state and journal frame on normal return. The journal publication is required because every native entry prologue reloads BP/SP from `journalBP`/`journalSP`; without it, nested native entries inherit the outer caller's frame and mutual recursion can keep reusing the wrong argument slot until frame overflow. A trap leaves the callee's journal state intact for deoptimization, while the normal path restores the caller before continuing. `TestARM64_MutualEntries` covers two independently installed native entries calling each other.
+Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, publishes the callee BP/SP into the journal, enters the callee trace, and restores the caller state and journal frame on normal return. The journal publication is required because every native entry prologue reloads BP/SP from `journal.CellBP`/`journal.CellSP`; without it, nested native entries inherit the outer caller's frame and mutual recursion can keep reusing the wrong argument slot until frame overflow. A trap leaves the callee's journal state intact for deoptimization, while the normal path restores the caller before continuing. `TestARM64_MutualEntries` covers two independently installed native entries calling each other.
 
 A native call invalidates the caller's cached local registers: the callee owns every allocatable register, so the call sites clear `activation.state` on return, and the committing flush before the call leaves the VM stack slot authoritative. `activation.locals` still names the register each value was last materialized into, so `activation.isLoadedAt` is the one test for whether that name is still good. `guardFrame` reads every ref local for the frame teardown; boxing an unloaded one releases whatever the callee left in that register, which faults inside the Go runtime rather than diverging quietly. `TestARM64_SelfCallFrameLocals` pins it.
 
@@ -351,7 +352,7 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. The loop wrapper records every fallback exit as a branch, so loop anchors recompile through the same side-exit machinery as entries. Loop roots are never folded as ordinary continuations: a leg that rejoins this plan's header folds into the native back-edge (see Trace Snapshots), while a leg that is another loop's root deoptimizes and uses that loop's standalone entry, which preserves back-edge and safepoint semantics.
 
-A loop callable normally exits through a trap, but a folded depth-0 `RETURN` leg emits `ret()` and a folded completed leg emits `complete()`, both returning with `trapNone`. The loop wrapper handles this like the entry wrappers: a function loop performs the threaded `RETURN` frame teardown, and a module loop marks the frame exhausted.
+A loop callable normally exits through a trap, but a folded depth-0 `RETURN` leg emits `ret()` and a folded completed leg emits `complete()`, both returning with `journal.TrapNone`. The loop wrapper handles this like the entry wrappers: a function loop performs the threaded `RETURN` frame teardown, and a module loop marks the frame exhausted.
 
 Pending blocks reload from VM stack slots, run through a FIFO worklist, and stop at a bounded pending cap. The trace frontend orders learned roots once; the backend does not repeatedly sort pending work.
 
@@ -425,7 +426,7 @@ Result kinds must match the interpreter:
 
 Scalar slots load and store raw values directly.
 
-A ref slot store releases the overwritten ref and transfers the stored ref, both guarded through `journalRC`. A ref `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` instead pushes a deferred operand and takes no retain (see Reference Ownership).
+A ref slot store releases the overwritten ref and transfers the stored ref, both guarded through `journal.CellRC`. A ref `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` instead pushes a deferred operand and takes no retain (see Reference Ownership).
 
 If a release may free the object (`rc == 1`), native code deoptimizes before the release. The interpreter owns recursive release and cleanup.
 
@@ -487,7 +488,7 @@ A bridge deopts one opcode the backend cannot lower to the threaded interpreter 
 
 The static planner (`staticPlan`) is the frontend that acts on `bridgeable`: walking a function's bytecode, an opcode it names ends the current plan block with a `terminateBridge` terminator instead of becoming an ordinary step, and the remaining source instructions continue into a fresh block anchored right after it, marked `block.bridge`, carrying the post-op dataflow state so lowering reloads it exactly like any other state-backed block. `applyStep` must still be able to model the opcode's stack effect for the plan to proceed: fixed-arity opcodes use `instr.TypeOf`'s `Pop`/`Push` directly; the dynamic-arity ones (`STRUCT_NEW`, `MAP_NEW`, `CLOSURE_NEW`, `ARRAY_NEW`, `ARRAY_APPEND`) derive their count from the instruction's own operand, a known compile-time constant on the stack (`slot.valKnown`), or a statically resolved callee, matching how `program/verify.go`'s `flow()` computes the same opcodes' effects for verification; when none of these resolve the effect, the plan is rejected exactly as before. A pushed slot produced by a bridged opcode's own effect (a fresh allocation, a resolved element/field value) must be a new `backingStack` slot, never a mutated copy of an operand that existed before the bridge: after the bridge, `retainDeferred` has already taken a real retain for every deferred operand handed to the threaded closure, so continuing to mark a survivor as deferred (`backingLocal`/`backingGlobal`/`backingUpval`/`backingConst`) makes a later consumer elide a release that must run, leaking the retain (see Reference Ownership). `REF_CAST` (identity pass-through: pop, then push the same kind, narrowing `styp` when the declared target is a struct type) and `ARRAY_APPEND` (its array operand is never popped, so it survives on the stack) both learned this the hard way and construct a fresh slot instead of reusing the pre-bridge one.
 
-`arm64Lowerer.dispatch`, emitted once per callable, reads the journal's entry-IP cell at the top of the callable and, when it names a `block.bridge` anchor, branches directly to that block's label instead of falling into the normal anchor start; zero (every ordinary `Call`'s value) falls through unchanged. `arm64Lowerer.bridge` (`l.term`'s `terminateBridge` case) traps with `trapBridge` and the opcode's own IP, sharing `trapFallback`'s flush and `retainDeferred` handoff but carrying no exit descriptor — a bridge is productive continuation, not a give-up (see Retirement), and `watchdog.bridge` counts it on a separate counter so it can never inflate the give-up rate. `Interpreter.bridge` (`interp/interp.go`) is the Go-side half: it runs `i.code[f.addr][ip](i)` — the bridged opcode's own threaded closure — exactly once, then reports the IP native execution may resume at, or `ok=false` when it must not (the closure moved frame/function, made no forward progress, spent the wrapper's `loopBudget` of bridge cycles, or the new IP is not one the callable's `resumable` list carries an entry-dispatch label for). If the bridged opcode's own IP is 0 — the function's very first instruction — `i.code[f.addr][0]` is the native wrapper this call is already running inside (`install` overwrites only the anchor slot), so `Interpreter.bridge` runs the shadowed threaded handler (`i.stub`) instead of that wrapper, exactly as a `trapFallback` resuming at 0 already did (see the Loops section's header note).
+`arm64Lowerer.dispatch`, emitted once per callable, reads the journal's entry-IP cell at the top of the callable and, when it names a `block.bridge` anchor, branches directly to that block's label instead of falling into the normal anchor start; zero (every ordinary `Call`'s value) falls through unchanged. `arm64Lowerer.bridge` (`l.term`'s `terminateBridge` case) traps with `journal.TrapBridge` and the opcode's own IP, sharing `journal.TrapFallback`'s flush and `retainDeferred` handoff but carrying no exit descriptor — a bridge is productive continuation, not a give-up (see Retirement), and `watchdog.bridge` counts it on a separate counter so it can never inflate the give-up rate. `Interpreter.bridge` (`interp/interp.go`) is the Go-side half: it runs `i.code[f.addr][ip](i)` — the bridged opcode's own threaded closure — exactly once, then reports the IP native execution may resume at, or `ok=false` when it must not (the closure moved frame/function, made no forward progress, spent the wrapper's `loopBudget` of bridge cycles, or the new IP is not one the callable's `resumable` list carries an entry-dispatch label for). If the bridged opcode's own IP is 0 — the function's very first instruction — `i.code[f.addr][0]` is the native wrapper this call is already running inside (`install` overwrites only the anchor slot), so `Interpreter.bridge` runs the shadowed threaded handler (`i.stub`) instead of that wrapper, exactly as a `journal.TrapFallback` resuming at 0 already did (see the Loops section's header note).
 
 A bridge cycle re-enters through a fresh external `Call`, which never runs the loop-carry prologue (see `arm64Lowerer.dispatch` above): a carried register would be uninitialized garbage on such a resume. A bridge a plan can reach therefore keeps every local slot-backed instead of loop-carried. The scope is the plan, not the function: each loop plan carries only the blocks its own root reaches (see Static Frontend), so a bridge this header cannot reach is not compiled into this callable, has no resume label here, and does not disable carrying. A bridge that the header does reach but that sits outside the loop's own back-edge range still disables it; narrowing that residual case to "a bridge inside the loop body" is unimplemented follow-up work, tracked because it would need the carry-load prologue to run on every re-entry path, not just the callable's own head.
 
@@ -559,7 +560,7 @@ When changing JIT internals:
 - prefer one simple terminal fallback over duplicated semantics
 - keep architecture-neutral code in `jit.go`
 - keep ARM64 lowering in `interp/jit_arm64.go`
-- keep journal layout explicit and stable
+- keep the frame-journal cell, record, and trap layout in `internal/jit/journal`, explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
 - keep shared cache, tracer, and coroutine state private behind `Pool` and `Interpreter`
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`

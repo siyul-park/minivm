@@ -39,7 +39,8 @@ program → instr, types
 prof    → instr
 internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
-interp  → program, instr, types, internal/asm, internal/asm/arm64, pass, analysis, prof
+internal/jit/journal → (leaf)
+interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit/journal, pass, analysis, prof
 debug   → interp
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -61,6 +62,7 @@ cmd/minivm → cli
 | `internal/asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
 | `internal/asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
+| `internal/jit/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `pass/` | generic analysis and transform infrastructure |
 | `analysis/` | reusable static analyses |
 | `transform/` | optimization transforms |

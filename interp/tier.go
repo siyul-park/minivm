@@ -97,7 +97,7 @@ func (w *watchdog) enter() {
 	w.entries++
 }
 
-// exit counts one give-up fallback exit. encoded is i.journal[journalExitID]
+// exit counts one give-up fallback exit. encoded is i.journal[journal.CellExitID]
 // exactly as counters.exit consumes it: the exit descriptor ID plus one, zero
 // meaning no descriptor.
 func (w *watchdog) exit(encoded uint64) {
