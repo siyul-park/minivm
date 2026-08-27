@@ -13,6 +13,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -31,10 +32,10 @@ type Interpreter struct {
 	cache    *cache
 	profiler *prof.Profiler
 	samples  *prof.Collector
-	exits    map[anchor]func(*Interpreter)
+	exits    map[jit.Anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
-	tried    map[anchor]bool
+	tried    map[jit.Anchor]bool
 	journal  []uint64
 
 	types       []types.Type
@@ -290,10 +291,10 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		misses:      make([]uint8, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
 		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
-		exits:       map[anchor]func(*Interpreter){},
+		exits:       map[jit.Anchor]func(*Interpreter){},
 		stubs:       make([]func(*Interpreter), len(prog.Constants)+1),
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
-		tried:       map[anchor]bool{},
+		tried:       map[jit.Anchor]bool{},
 		dynamic:     map[int]bool{},
 		journal:     make([]uint64, journal.Len(opt.frame)),
 		frames:      make([]frame, opt.frame),
@@ -990,7 +991,7 @@ func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
 // native entries. Recording belongs to the hot-event hooks and side-exit
 // handling because only those paths hold the exact runtime state for their
 // anchor.
-func (i *Interpreter) compile(root anchor) error {
+func (i *Interpreter) compile(root jit.Anchor) error {
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	if i.compiler == nil {
 		compiler, err := newCompiler()
@@ -1022,50 +1023,56 @@ func (i *Interpreter) compile(root anchor) error {
 // private state (function bodies, constants, globals, heap, declared types,
 // recorded traces) a snapshot copies out of. It reports false when addr names
 // no compilable function.
-func (i *Interpreter) compileSnapshot(addr int) (*compileInput, bool) {
+func (i *Interpreter) compileSnapshot(addr int) (*jit.Input, bool) {
 	fn, ok := i.function(addr)
 	if !ok || fn == nil || len(fn.Code) == 0 {
 		return nil, false
 	}
-	input := &compileInput{
-		address:   addr,
-		function:  fn,
-		module:    i.module,
-		constants: i.constants,
-		globals:   i.globalKinds(),
-		heap:      i.heap,
-		decl:      i.types,
-		// layout is computed here, in architecture-neutral code where
+	input := &jit.Input{
+		Address:   addr,
+		Function:  fn,
+		Module:    i.module,
+		Constants: i.constants,
+		Globals:   i.globalKinds(),
+		Heap:      i.heap,
+		Decl:      i.types,
+		// Layout is computed here, in architecture-neutral code where
 		// HostStruct, field, conversion, and coroutine are visible, so an
-		// architecture backend consuming compileInput never has to import
-		// them (see layout).
-		layout: layout{
-			hostFields:      int(unsafe.Offsetof(HostStruct{}.fields)),
-			hostPtr:         int(unsafe.Offsetof(HostStruct{}.ptr)),
-			hostFieldOffset: int(unsafe.Offsetof(field{}.offset)),
-			hostFieldConv:   int(unsafe.Offsetof(field{}.conversion)),
-			hostFieldSize:   int(unsafe.Sizeof(field{})),
-			hostConvKind:    int(unsafe.Offsetof(conversion{}.kind)),
-			coroValue:       int(unsafe.Offsetof(coroutine{}.value)),
-			coroDone:        int(unsafe.Offsetof(coroutine{}.done)),
+		// architecture backend consuming jit.Input never has to import
+		// them (see jit.Layout). HostStructItab and CoroutineItab are the
+		// same treatment applied to the two heap type identities a backend
+		// guards against: jit.Itab only needs the types.Value interface, so
+		// interp computes them here rather than exporting the concrete
+		// types.
+		Layout: jit.Layout{
+			HostFields:      int(unsafe.Offsetof(HostStruct{}.fields)),
+			HostPtr:         int(unsafe.Offsetof(HostStruct{}.ptr)),
+			HostFieldOffset: int(unsafe.Offsetof(field{}.offset)),
+			HostFieldConv:   int(unsafe.Offsetof(field{}.conversion)),
+			HostFieldSize:   int(unsafe.Sizeof(field{})),
+			HostConvKind:    int(unsafe.Offsetof(conversion{}.kind)),
+			CoroValue:       int(unsafe.Offsetof(coroutine{}.value)),
+			CoroDone:        int(unsafe.Offsetof(coroutine{}.done)),
+			HostStructItab:  jit.Itab((*HostStruct)(nil)),
+			CoroutineItab:   jit.Itab((*coroutine)(nil)),
 		},
-		installed: i.stub(addr) != nil,
+		Installed: i.stub(addr) != nil,
 	}
 	// i.tracer is nil only for a speculative clone (see tracer.clone), which
-	// never compiles; widening a nil *tracer into the traces interface would
-	// produce a non-nil interface holding a nil pointer, so tracePlan's own
-	// nil check would stop seeing "no recorder" the way it did before this
-	// value lived behind an interface.
+	// never compiles; widening a nil *tracer into the RecordedTraces
+	// interface would produce a non-nil interface holding a nil pointer, so
+	// jit.TracePlan's own nil check would stop seeing "no recorder" the way
+	// it did before this value lived behind an interface.
 	if i.tracer != nil {
-		input.traces = i.tracer
+		input.Traces = i.tracer
 	}
 	return input, true
 }
 
 // attempt runs one Compile, records the outcome under trigger, and counts any
 // compile error. Acquisition and delivery of the result stay with the caller.
-func (i *Interpreter) attempt(c *compiler, root anchor, trigger prof.Trigger) compileResult {
-	input, ok := i.compileSnapshot(root.addr)
+func (i *Interpreter) attempt(c *compiler, root jit.Anchor, trigger prof.Trigger) compileResult {
+	input, ok := i.compileSnapshot(root.Addr)
 	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
 	if ok {
 		result = c.Compile(input, root)
@@ -1085,15 +1092,15 @@ func (i *Interpreter) install(mod *module, account bool) {
 		i.account(mod)
 	}
 	for a, entry := range mod.entries {
-		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || entry.callable == nil {
+		if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) || entry.callable == nil {
 			continue
 		}
 		// A peer's publish can land on a function this interpreter already
 		// cooled (see cool); installing native code for it makes further
 		// instrumentation useful again, so resume it.
-		if a.addr < len(i.cold) && i.cold[a.addr] {
-			i.cold[a.addr] = false
-			i.misses[a.addr] = 0
+		if a.Addr < len(i.cold) && i.cold[a.Addr] {
+			i.cold[a.Addr] = false
+			i.misses[a.Addr] = 0
 		}
 		// Save the original threaded handler once so deopt always resumes in the
 		// interpreter, but reinstall the latest native callable on every publish:
@@ -1102,16 +1109,16 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// entry root (ip 0) compiles the whole function and tears down the frame
 		// on return; a loop root re-enters mid-function and never unwinds it.
 		if i.exits[a] == nil {
-			i.exits[a] = i.code[a.addr][a.ip]
-			if a.ip == 0 {
-				i.stubs[a.addr] = i.exits[a]
+			i.exits[a] = i.code[a.Addr][a.IP]
+			if a.IP == 0 {
+				i.stubs[a.Addr] = i.exits[a]
 			}
 		}
 		// natives keeps its New-time size: growing it in bind could dangle the
 		// journal base cached by a native frame suspended across a trap
 		// fallback, so dynamically bound functions never get a natives slot.
-		if entry.kind == entryFunction && a.addr < len(i.natives) {
-			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
+		if entry.kind == jit.EntryFunction && a.Addr < len(i.natives) {
+			atomic.StorePointer(&i.natives[a.Addr], entry.callable.Addr())
 		}
 		// A module loop root owns the hot body far better than the whole-module
 		// entry plan that also contains it, and an installed entry answers
@@ -1119,8 +1126,8 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// would never be dispatched. Retire the entry in favour of the loop.
 		// Only module code: its entry runs once per execution, while a
 		// function entry carries the call path and must stay.
-		if entry.kind == entryLoop && a.addr == 0 {
-			if shadowed := i.exits[anchor{addr: 0}]; shadowed != nil {
+		if entry.kind == jit.EntryLoop && a.Addr == 0 {
+			if shadowed := i.exits[jit.Anchor{Addr: 0}]; shadowed != nil {
 				i.code[0][0] = shadowed
 			}
 		}
@@ -1129,12 +1136,12 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
-		if entry.kind == entryLoop {
-			i.code[a.addr][a.ip] = i.loop(a, entry, stats, wd)
-		} else if entry.kind == entryModule {
-			i.code[a.addr][a.ip] = i.start(a, entry, stats, wd)
+		if entry.kind == jit.EntryLoop {
+			i.code[a.Addr][a.IP] = i.loop(a, entry, stats, wd)
+		} else if entry.kind == jit.EntryModule {
+			i.code[a.Addr][a.IP] = i.start(a, entry, stats, wd)
 		} else {
-			i.code[a.addr][a.ip] = i.call(a, entry, stats, wd)
+			i.code[a.Addr][a.IP] = i.call(a, entry, stats, wd)
 		}
 	}
 }
@@ -1252,7 +1259,7 @@ func (i *Interpreter) warm(addr int, hits uint64) error {
 	if i.isCold(addr) {
 		return nil
 	}
-	root := anchor{addr: addr}
+	root := jit.Anchor{Addr: addr}
 	if hits <= entryWarmup && i.fr.ip == 0 {
 		i.tracer.capture(i, root)
 	}
@@ -1280,7 +1287,7 @@ func (i *Interpreter) settled(addr int, hits uint64) bool {
 	}
 	for _, header := range i.tracer.headers(i, addr) {
 		// A header at ip 0 is this very root, not a separate one to wait for.
-		if header != 0 && !i.tried[anchor{addr: addr, ip: header}] {
+		if header != 0 && !i.tried[jit.Anchor{Addr: addr, IP: header}] {
 			return false
 		}
 	}
@@ -1299,12 +1306,12 @@ func (i *Interpreter) settled(addr int, hits uint64) bool {
 // function that installed native code pays that overhead in the tier that
 // wins, and its installed entries keep running. checkRetire, not this, is what
 // reacts to native code that turned out not to pay for itself.
-func (i *Interpreter) checkCool(addr int, root anchor) {
+func (i *Interpreter) checkCool(addr int, root jit.Anchor) {
 	if !i.tried[root] {
 		return
 	}
 	for _, header := range i.tracer.headers(i, addr) {
-		if !i.tried[anchor{addr: addr, ip: header}] {
+		if !i.tried[jit.Anchor{Addr: addr, IP: header}] {
 			return
 		}
 	}
@@ -1343,7 +1350,7 @@ func (i *Interpreter) backedge(f *frame) error {
 		return nil
 	}
 	err := i.trace(f)
-	i.checkCool(f.addr, anchor{addr: f.addr})
+	i.checkCool(f.addr, jit.Anchor{Addr: f.addr})
 	return err
 }
 
@@ -1356,7 +1363,7 @@ func (i *Interpreter) yielded() error {
 }
 
 func (i *Interpreter) trace(f *frame) error {
-	root := anchor{addr: f.addr, ip: f.ip}
+	root := jit.Anchor{Addr: f.addr, IP: f.ip}
 	if i.exits[root] != nil || i.tried[root] {
 		return nil
 	}
@@ -1379,7 +1386,7 @@ func (i *Interpreter) trace(f *frame) error {
 	// record again; tracer.attemptLimit bounds the retries. A recording that
 	// completed and still planned nothing is a real answer about this header, not
 	// bad luck, and retrying only spends clones to reach the same plan.
-	if root.ip != 0 && i.exits[root] == nil && result.outcome == prof.CaptureOutcomePartial {
+	if root.IP != 0 && i.exits[root] == nil && result.outcome == prof.CaptureOutcomePartial {
 		i.tracer.forget(root)
 		delete(i.tried, root)
 	}
@@ -1392,7 +1399,7 @@ func (i *Interpreter) trace(f *frame) error {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) call(root jit.Anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -1466,10 +1473,10 @@ func (i *Interpreter) call(root anchor, entry native, stats counters, wd *watchd
 // arm64Lowerer.dispatch), or this dispatch has already bridged its budget of
 // cycles — that last case keeps a bridge-dense function reaching the Run
 // loop's safepoints instead of cycling here indefinitely.
-func (i *Interpreter) bridge(root anchor, entry native, wd *watchdog, cycles int) (uint64, bool) {
+func (i *Interpreter) bridge(root jit.Anchor, entry native, wd *watchdog, cycles int) (uint64, bool) {
 	wd.bridge()
 	f := i.fr
-	if cycles >= loopBudget || f.addr != root.addr {
+	if cycles >= loopBudget || f.addr != root.Addr {
 		return 0, false
 	}
 	ip := f.ip
@@ -1484,14 +1491,14 @@ func (i *Interpreter) bridge(root anchor, entry native, wd *watchdog, cycles int
 	// reuse. i.exits keeps the shadowed threaded closure for exactly this
 	// case, the same one bailout uses when a fallback resumes on an anchor.
 	closure := i.code[f.addr][ip]
-	if shadowed, installed := i.exits[anchor{addr: f.addr, ip: ip}]; installed {
+	if shadowed, installed := i.exits[jit.Anchor{Addr: f.addr, IP: ip}]; installed {
 		if shadowed == nil {
 			return 0, false
 		}
 		closure = shadowed
 	}
 	closure(i)
-	if i.fr != f || f.addr != root.addr || f.ip <= ip {
+	if i.fr != f || f.addr != root.Addr || f.ip <= ip {
 		return 0, false
 	}
 	if !slices.Contains(entry.resumable, f.ip) {
@@ -1503,7 +1510,7 @@ func (i *Interpreter) bridge(root anchor, entry native, wd *watchdog, cycles int
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) start(root jit.Anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -1559,7 +1566,7 @@ func (i *Interpreter) start(root anchor, entry native, stats counters, wd *watch
 // A spent budget yields to the safepoint and the Run loop re-enters native at
 // the header; a guarded side exit or the loop-exit edge leaves deopt with
 // i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) loop(root jit.Anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -1577,7 +1584,7 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 			}
 			i.sp = int(i.journal[journal.CellSP])
 			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
-				if root.addr == 0 {
+				if root.Addr == 0 {
 					i.complete()
 				} else {
 					i.popFrame()
@@ -1611,7 +1618,7 @@ func (i *Interpreter) loop(root anchor, entry native, stats counters, wd *watchd
 				// header slot holds this native stub, so dispatching it again would
 				// livelock (the hoist prologue's shape guard exits here). Run the
 				// shadowed threaded handler once so the interpreter advances.
-				if i.fr.addr == root.addr && i.fr.ip == root.ip {
+				if i.fr.addr == root.Addr && i.fr.ip == root.IP {
 					if fn := i.exits[root]; fn != nil {
 						fn(i)
 					}
@@ -1639,8 +1646,8 @@ func (i *Interpreter) complete() {
 	i.fr.code = i.code[i.fr.addr]
 }
 
-func (i *Interpreter) exit(root anchor) {
-	hits := i.tracer.branch(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
+func (i *Interpreter) exit(root jit.Anchor) {
+	hits := i.tracer.branch(i, root, jit.Anchor{Addr: i.fr.addr, IP: i.fr.ip})
 	if i.cache != nil {
 		if hits < exitThreshold || hits%exitThreshold != 0 {
 			return
@@ -1665,7 +1672,7 @@ func (i *Interpreter) exit(root anchor) {
 	}
 }
 
-func (i *Interpreter) bailout(root anchor) {
+func (i *Interpreter) bailout(root jit.Anchor) {
 	i.exit(root)
 	if i.fr.ip == 0 {
 		if fn := i.stub(i.fr.addr); fn != nil {
@@ -1674,8 +1681,8 @@ func (i *Interpreter) bailout(root anchor) {
 	}
 }
 
-func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
-	addr := root.addr
+func (i *Interpreter) shared(root jit.Anchor, trigger prof.Trigger) error {
+	addr := root.Addr
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	compiler, err := newCompiler()
 	if err != nil {
@@ -1712,18 +1719,18 @@ func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 	return nil
 }
 
-func (i *Interpreter) counters(a anchor, entry native) counters {
+func (i *Interpreter) counters(a jit.Anchor, entry native) counters {
 	if i.profiler == nil {
 		return counters{}
 	}
-	kind := entry.kind.profile()
+	kind := entry.kind.Profile()
 	stats := counters{
-		entry:  i.samples.RegisterEntry(a.addr, a.ip, kind, entry.frontend),
-		yields: i.samples.RegisterYield(a.addr, a.ip, kind, entry.frontend),
+		entry:  i.samples.RegisterEntry(a.Addr, a.IP, kind, entry.frontend),
+		yields: i.samples.RegisterYield(a.Addr, a.IP, kind, entry.frontend),
 		exits:  make([]*prof.Counter, len(entry.exits)),
 	}
 	for id, exit := range entry.exits {
-		stats.exits[id] = i.samples.RegisterExit(a.addr, a.ip, kind, entry.frontend, exit.reason, exit.opcode)
+		stats.exits[id] = i.samples.RegisterExit(a.Addr, a.IP, kind, entry.frontend, exit.reason, exit.opcode)
 	}
 	return stats
 }
@@ -1735,13 +1742,13 @@ func (i *Interpreter) account(mod *module) {
 		return
 	}
 	for a, entry := range mod.entries {
-		i.samples.RecordEmit(a.addr, a.ip, entry.kind.profile(), entry.frontend, entry.bytes)
+		i.samples.RecordEmit(a.Addr, a.IP, entry.kind.Profile(), entry.frontend, entry.bytes)
 	}
 }
 
 func (i *Interpreter) recordCompile(trigger prof.Trigger, result compileResult) {
 	if i.profiler != nil {
-		i.samples.RecordCompile(result.anchor.addr, result.anchor.ip, trigger, result.frontend, result.outcome, result.reason)
+		i.samples.RecordCompile(result.anchor.Addr, result.anchor.IP, trigger, result.frontend, result.outcome, result.reason)
 	}
 }
 
@@ -1794,7 +1801,7 @@ func (i *Interpreter) cool(addr int) {
 // a's installed entry here never skips a step the interpreter owed the
 // program. clearNatives is true only for a function-entry anchor (see
 // Interpreter.retire).
-func (i *Interpreter) checkRetire(a anchor, wd *watchdog, clearNatives bool) {
+func (i *Interpreter) checkRetire(a jit.Anchor, wd *watchdog, clearNatives bool) {
 	if wd.failed() {
 		i.retire(a, clearNatives)
 	}
@@ -1814,17 +1821,17 @@ func (i *Interpreter) checkRetire(a anchor, wd *watchdog, clearNatives bool) {
 // sync). It is safe to call from inside the very wrapper closure it replaces:
 // the caller is already done making this dispatch's progress and is about to
 // return to the Run loop.
-func (i *Interpreter) retire(a anchor, clearNatives bool) {
-	if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) {
+func (i *Interpreter) retire(a jit.Anchor, clearNatives bool) {
+	if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) {
 		return
 	}
 	if fn := i.exits[a]; fn != nil {
-		i.code[a.addr][a.ip] = fn
+		i.code[a.Addr][a.IP] = fn
 	}
-	if clearNatives && a.addr < len(i.natives) {
-		atomic.StorePointer(&i.natives[a.addr], nil)
+	if clearNatives && a.Addr < len(i.natives) {
+		atomic.StorePointer(&i.natives[a.Addr], nil)
 	}
-	i.cool(a.addr)
+	i.cool(a.Addr)
 }
 
 // rethread rebuilds addr's dispatch table for the given back-edge mode: true
@@ -1846,14 +1853,14 @@ func (i *Interpreter) rethread(addr int, backedge bool) {
 	// Rethreading replaces only interpreted handlers. Installed native entries
 	// stay live while their saved fallbacks advance to the rebuilt table.
 	for root := range i.exits {
-		if root.addr != addr || root.ip < 0 || root.ip >= len(compiled) || root.ip >= len(installed) {
+		if root.Addr != addr || root.IP < 0 || root.IP >= len(compiled) || root.IP >= len(installed) {
 			continue
 		}
-		i.exits[root] = compiled[root.ip]
-		if root.ip == 0 {
-			i.stubs[addr] = compiled[root.ip]
+		i.exits[root] = compiled[root.IP]
+		if root.IP == 0 {
+			i.stubs[addr] = compiled[root.IP]
 		}
-		compiled[root.ip] = installed[root.ip]
+		compiled[root.IP] = installed[root.IP]
 	}
 	copy(installed, compiled)
 	i.backedges[addr] = backedge
@@ -2962,12 +2969,12 @@ func (i *Interpreter) remove(addr int) {
 	i.handlers[addr] = nil
 	i.coros[addr] = false
 	for a := range i.exits {
-		if a.addr == addr {
+		if a.Addr == addr {
 			delete(i.exits, a)
 		}
 	}
 	for a := range i.tried {
-		if a.addr == addr {
+		if a.Addr == addr {
 			delete(i.tried, a)
 		}
 	}

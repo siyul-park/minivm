@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 )
@@ -28,7 +29,7 @@ type cache struct {
 }
 
 type request struct {
-	root    anchor
+	root    jit.Anchor
 	trigger prof.Trigger
 }
 
@@ -93,7 +94,7 @@ func (c *cache) claim(addr int, threshold int64) (request, bool) {
 	if c.state[addr].Load() != cacheCold {
 		return request{}, false
 	}
-	next := request{root: anchor{addr: addr}, trigger: prof.TriggerHot}
+	next := request{root: jit.Anchor{Addr: addr}, trigger: prof.TriggerHot}
 	if len(c.pending[addr]) > 0 {
 		next = c.pending[addr][0]
 		c.pending[addr] = c.pending[addr][1:]
@@ -104,7 +105,7 @@ func (c *cache) claim(addr int, threshold int64) (request, bool) {
 }
 
 func (c *cache) request(next request) {
-	addr := next.root.addr
+	addr := next.root.Addr
 	if addr < 0 || addr >= len(c.state) {
 		return
 	}
@@ -167,9 +168,9 @@ func (c *cache) publish(addr int, mod *module, buf *asm.Buffer) {
 		next = append(next, mod)
 		c.modules.Store(&next)
 		for target := range mod.entries {
-			if target.addr >= 0 && target.addr < len(c.state) && target.addr != addr &&
-				c.state[target.addr].Load() == cacheCold && len(c.pending[target.addr]) == 0 {
-				c.state[target.addr].Store(cacheReady)
+			if target.Addr >= 0 && target.Addr < len(c.state) && target.Addr != addr &&
+				c.state[target.Addr].Load() == cacheCold && len(c.pending[target.Addr]) == 0 {
+				c.state[target.Addr].Store(cacheReady)
 			}
 		}
 	}

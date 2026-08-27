@@ -38,14 +38,13 @@ than widening production APIs for test access.
 
 ### White-Box Test Files
 
-Three test files still declare `package interp` because the contracts they
+Two test files still declare `package interp` because the contracts they
 assert have no external-package expression yet. Each is recorded with the
 condition that removes it (`docs/coding-patterns.md` §1.1).
 
 | File | Why it is white-box | Removal condition |
 |---|---|---|
 | `interp/jit_test.go` | Drives `compiler.Compile` and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `exitDescriptor`); also splices frame state to force a specific exit, and reads install bookkeeping (`tried`, `exits`) that no metric separates from "not attempted". | Moves to `internal/jit` and `internal/jit/arm64` with the compiler, where the same contracts are that package's own public surface. |
-| `interp/jit_plan_test.go` | Every symbol it exercises (`plan`, `block`, `edge`, `slot`, `staticPlan`, `tracePlan`, `carried`, `hoistable`) is compiler-graph representation with no runtime projection. | Moves to `internal/jit` with the plan model. |
 | `interp/trace_test.go` | Calls `tracer.capture` without `Run`, which is the only way to prove speculative capture snapshots a container instead of mutating the live heap. Any public path runs the real instructions too, so the isolation claim is unobservable by construction. | None known. The recorder stays in `interp`, and the claim is only provable from inside it. |
 
 ### Known Coverage Gaps
@@ -59,6 +58,8 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 | `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold` in `interp/tier.go`; `checkRetire` in `interp/interp.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
 | Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
+| Dataflow fact widening at a control-flow join (`mergeSlot` in `internal/jit`) | A slot's `refKnown`/`calleeKnown` facts are planning-internal: the backend never reads them, so nothing exports them. Their only external effect is which plans a frontend produces or rejects, which no fixture isolates from the rest of planning. |
+| Loop-invariant container selection (`hoistable` in `internal/jit`) | Reachable only through `TracePlan`, so asserting it needs a hand-built recorded trace that survives every other planning check. The recorder that produces real traces lives in `interp` and cannot be called without running the program. Covered end to end by `interp.TestARM64_HoistedContainerLoop`; the selection rule itself has no isolated public expression. |
 
 Closing the first one needs either a public signal that an anchor was retired,
 or a workload that makes retirement observable through existing metrics.

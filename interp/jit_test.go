@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
+	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -109,11 +110,11 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 
-			root := anchor{}
+			root := jit.Anchor{}
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -142,14 +143,14 @@ func TestCompiler_Compile(t *testing.T) {
 				i.retain(value.Ref())
 				require.NoError(t, i.SetGlobal(0, value))
 			}
-			root := anchor{}
+			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -184,14 +185,14 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			root := anchor{}
+			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -257,7 +258,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotEmpty(t, headers)
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
-			compiled := compiler.Compile(input, anchor{ip: headers[0]})
+			compiled := compiler.Compile(input, jit.Anchor{IP: headers[0]})
 			require.NoError(t, compiled.err)
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			i.install(compiled.module, false)
@@ -316,7 +317,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
-			compiled := compiler.Compile(input, anchor{})
+			compiled := compiler.Compile(input, jit.Anchor{})
 			require.NoError(t, compiled.err)
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			i.install(compiled.module, false)
@@ -346,7 +347,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
-			compiled := compiler.Compile(input, anchor{})
+			compiled := compiler.Compile(input, jit.Anchor{})
 			require.NoError(t, compiled.err)
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			i.install(compiled.module, false)
@@ -368,14 +369,14 @@ func TestCompiler_Compile(t *testing.T) {
 			i.retain(value.Ref())
 			require.NoError(t, i.SetGlobal(0, value))
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			root := anchor{}
+			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -405,14 +406,14 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			root := anchor{}
+			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -448,14 +449,14 @@ func TestCompiler_Compile(t *testing.T) {
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(0)))
-			root := anchor{}
+			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -481,14 +482,14 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 			i := New(program.New(instructions), WithThreshold(-1))
 			defer i.Close()
-			root := anchor{}
+			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -513,11 +514,11 @@ func TestCompiler_Compile(t *testing.T) {
 				instr.New(instr.F64_REM),
 			}), WithThreshold(-1))
 			defer i.Close()
-			root := anchor{}
+			root := jit.Anchor{}
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
@@ -573,23 +574,23 @@ func TestCompiler_Compile(t *testing.T) {
 			for i.fr.ip < header {
 				i.fr.code[i.fr.ip](i)
 			}
-			root := anchor{addr: addr, ip: header}
+			root := jit.Anchor{Addr: addr, IP: header}
 			addrLabel := strconv.Itoa(addr)
 			headerLabel := strconv.Itoa(header)
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
-			require.Equal(t, entryLoop, entry.kind)
+			require.Equal(t, jit.EntryLoop, entry.kind)
 			metrics := i.counters(root, entry)
 
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
@@ -625,21 +626,21 @@ func TestCompiler_Compile(t *testing.T) {
 			i.fr.ip = 0
 			i.fr.bp = 0
 			i.sp = 0
-			root := anchor{addr: addr}
+			root := jit.Anchor{Addr: addr}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.addr] = i.code[root.addr][0]
+			i.stubs[root.Addr] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
-			input, ok := i.compileSnapshot(root.addr)
+			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
 			require.NoError(t, compiled.err)
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
-			require.Equal(t, entryFunction, entry.kind)
+			require.Equal(t, jit.EntryFunction, entry.kind)
 
 			i.call(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
 			require.Equal(t, uint64(journal.TrapYield), i.journal[journal.CellTrap])
@@ -670,10 +671,10 @@ func TestCompiler_Compile(t *testing.T) {
 
 		input, ok := i.compileSnapshot(0)
 		require.True(t, ok)
-		result := c.Compile(input, anchor{})
+		result := c.Compile(input, jit.Anchor{})
 		require.NoError(t, result.err)
 		require.NotNil(t, result.module)
-		for _, exit := range result.module.entries[anchor{}].exits {
+		for _, exit := range result.module.entries[jit.Anchor{}].exits {
 			if exit.reason == prof.ExitGuardValue {
 				require.Equal(t, int(instr.I32_DIV_S), exit.opcode)
 				return
@@ -724,7 +725,7 @@ func TestCompiler_Compile(t *testing.T) {
 		addr := int(i.constants[idx].Ref())
 		input, ok := i.compileSnapshot(addr)
 		require.True(t, ok)
-		result := c.Compile(input, anchor{addr: addr})
+		result := c.Compile(input, jit.Anchor{Addr: addr})
 		require.NoError(t, result.err)
 		mod := result.module
 		require.NotEmpty(t, mod.entries)
@@ -758,7 +759,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
@@ -806,21 +807,21 @@ func TestCompiler_Compile(t *testing.T) {
 		want, err := threaded.Global(0)
 		require.NoError(t, err)
 
-		jit := New(prog, WithThreshold(-1))
-		defer jit.Close()
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
 		c, err := newCompiler()
 		require.NoError(t, err)
 		defer c.Close()
-		addr := int(jit.constants[idx].Ref())
-		input, ok := jit.compileSnapshot(addr)
+		addr := int(native.constants[idx].Ref())
+		input, ok := native.compileSnapshot(addr)
 		require.True(t, ok)
-		result := c.Compile(input, anchor{addr: addr})
+		result := c.Compile(input, jit.Anchor{Addr: addr})
 		require.NoError(t, result.err)
 		mod := result.module
 		require.NotEmpty(t, mod.entries)
-		jit.install(mod, false)
-		require.NoError(t, jit.Run(context.Background()))
-		got, err := jit.Global(0)
+		native.install(mod, false)
+		require.NoError(t, native.Run(context.Background()))
+		got, err := native.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	})
@@ -845,7 +846,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
@@ -904,7 +905,7 @@ func TestARM64_Backedge(t *testing.T) {
 			defer i.Close()
 			headers := i.tracer.headers(i, 0)
 			require.NotEmpty(t, headers)
-			root := anchor{ip: headers[0]}
+			root := jit.Anchor{IP: headers[0]}
 
 			for run, attempted := range tt.attempted {
 				require.NoError(t, i.Run(context.Background()))

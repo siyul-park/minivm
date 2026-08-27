@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -59,22 +60,22 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		result := tracer.capture(i, jit.Anchor{Addr: i.fr.addr, IP: 0})
 		require.NotNil(t, result.trace)
 		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
 		require.Equal(t, prof.CaptureReasonNone, result.reason)
-		published := tracer.rootAt(anchor{addr: i.fr.addr, ip: 0})
+		published := tracer.RootAt(jit.Anchor{Addr: i.fr.addr, IP: 0})
 		require.NotNil(t, published)
-		require.Same(t, result.trace, published.root)
+		require.Same(t, result.trace, published.Root)
 		tr := result.trace
-		require.Equal(t, completed, tr.status)
-		require.NotEmpty(t, tr.ops)
-		require.Equal(t, instr.I32_CONST, tr.ops[len(tr.ops)-1].op)
+		require.Equal(t, jit.StatusCompleted, tr.Status)
+		require.NotEmpty(t, tr.Ops)
+		require.Equal(t, instr.I32_CONST, tr.Ops[len(tr.Ops)-1].Op)
 	})
 
 	t.Run("records yield as a terminal deopt boundary", func(t *testing.T) {
 		// YIELD is a suspension point: capture records it as the trace's terminal
-		// (status=returned) instead of aborting, so the JIT can lower it to a deopt.
+		// (status=jit.StatusReturned) instead of aborting, so the JIT can lower it to a deopt.
 		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
@@ -83,17 +84,17 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		result := tracer.capture(i, jit.Anchor{Addr: i.fr.addr, IP: 0})
 		require.NotNil(t, result.trace)
 		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
 		require.Equal(t, prof.CaptureReasonNone, result.reason)
-		published := tracer.rootAt(anchor{addr: i.fr.addr, ip: 0})
+		published := tracer.RootAt(jit.Anchor{Addr: i.fr.addr, IP: 0})
 		require.NotNil(t, published)
-		require.Same(t, result.trace, published.root)
+		require.Same(t, result.trace, published.Root)
 		tr := result.trace
-		require.Equal(t, returned, tr.status)
-		require.NotEmpty(t, tr.ops)
-		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
+		require.Equal(t, jit.StatusReturned, tr.Status)
+		require.NotEmpty(t, tr.Ops)
+		require.Equal(t, instr.YIELD, tr.Ops[len(tr.Ops)-1].Op)
 	})
 
 	t.Run("continues after primitive array set", func(t *testing.T) {
@@ -109,10 +110,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{})
+		result := tracer.capture(i, jit.Anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, completed, result.trace.status)
-		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
+		require.Equal(t, jit.StatusCompleted, result.trace.Status)
+		require.Equal(t, instr.I32_CONST, result.trace.Ops[len(result.trace.Ops)-1].Op)
 	})
 
 	t.Run("continues after scalar struct set", func(t *testing.T) {
@@ -131,10 +132,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{})
+		result := tracer.capture(i, jit.Anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, completed, result.trace.status)
-		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
+		require.Equal(t, jit.StatusCompleted, result.trace.Status)
+		require.Equal(t, instr.I32_CONST, result.trace.Ops[len(result.trace.Ops)-1].Op)
 	})
 
 	t.Run("ends at a ref-field struct set", func(t *testing.T) {
@@ -153,12 +154,12 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{})
+		result := tracer.capture(i, jit.Anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, returned, result.trace.status)
-		last := result.trace.ops[len(result.trace.ops)-1]
-		require.Equal(t, instr.STRUCT_SET, last.op)
-		require.True(t, last.terminal)
+		require.Equal(t, jit.StatusReturned, result.trace.Status)
+		last := result.trace.Ops[len(result.trace.Ops)-1]
+		require.Equal(t, instr.STRUCT_SET, last.Op)
+		require.True(t, last.Terminal)
 	})
 
 	t.Run("records bulk mutation as a terminal deopt boundary", func(t *testing.T) {
@@ -175,10 +176,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{})
+		result := tracer.capture(i, jit.Anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, returned, result.trace.status)
-		require.Equal(t, instr.ARRAY_FILL, result.trace.ops[len(result.trace.ops)-1].op)
+		require.Equal(t, jit.StatusReturned, result.trace.Status)
+		require.Equal(t, instr.ARRAY_FILL, result.trace.Ops[len(result.trace.Ops)-1].Op)
 	})
 
 	t.Run("still aborts at allocation", func(t *testing.T) {
@@ -190,35 +191,35 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{})
+		result := tracer.capture(i, jit.Anchor{})
 		require.Nil(t, result.trace)
 		require.Equal(t, prof.CaptureOutcomeRejected, result.outcome)
 		require.Equal(t, prof.CaptureReasonUnsupportedOp, result.reason)
-		require.Nil(t, tracer.rootAt(anchor{}))
+		require.Nil(t, tracer.RootAt(jit.Anchor{}))
 	})
 
 	t.Run("publishes fallback and loop statuses", func(t *testing.T) {
 		for _, tt := range []struct {
 			name   string
-			status status
+			status jit.Status
 		}{
-			{name: "fallback", status: fallback},
-			{name: "loop", status: loop},
+			{name: "fallback", status: jit.StatusFallback},
+			{name: "loop", status: jit.StatusLoop},
 		} {
 			tracer := newTracer()
-			root := anchor{addr: 1, ip: 4}
+			root := jit.Anchor{Addr: 1, IP: 4}
 			tree := tracer.tree(root)
-			tr := &trace{anchor: root}
+			tr := &jit.Trace{Anchor: root}
 
 			result := tracer.publish(root, tree, tr, tt.status, prof.CaptureReasonNone)
 
 			require.Same(t, tr, result.trace, tt.name)
-			require.Equal(t, tt.status, tr.status, tt.name)
+			require.Equal(t, tt.status, tr.Status, tt.name)
 			require.Equal(t, prof.CaptureOutcomePublished, result.outcome, tt.name)
 			require.Equal(t, prof.CaptureReasonNone, result.reason, tt.name)
-			published := tracer.rootAt(root)
+			published := tracer.RootAt(root)
 			require.NotNil(t, published, tt.name)
-			require.Same(t, tr, published.root, tt.name)
+			require.Same(t, tr, published.Root, tt.name)
 		}
 	})
 
@@ -250,7 +251,7 @@ func TestTracer_Capture(t *testing.T) {
 			i := New(prog, withTracer(tracer), WithThreshold(-1))
 			defer i.Close()
 
-			tracer.capture(i, anchor{})
+			tracer.capture(i, jit.Anchor{})
 			require.Equal(t, types.BoxI32(1), tt.read())
 		})
 	}
@@ -283,9 +284,9 @@ func TestTracer_Capture(t *testing.T) {
 			i := New(prog, withTracer(tracer), WithThreshold(-1))
 			defer i.Close()
 
-			result := tracer.capture(i, anchor{})
+			result := tracer.capture(i, jit.Anchor{})
 			require.NotNil(t, result.trace)
-			require.Equal(t, types.BoxI32(1), result.trace.ops[len(result.trace.ops)-1].seen)
+			require.Equal(t, types.BoxI32(1), result.trace.Ops[len(result.trace.Ops)-1].Seen)
 			require.Zero(t, tt.original())
 		})
 	}
@@ -299,18 +300,18 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(program.New(code), withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{addr: 0, ip: 0})
+		result := tracer.capture(i, jit.Anchor{Addr: 0, IP: 0})
 		require.NotNil(t, result.trace)
 		require.Equal(t, prof.CaptureOutcomePartial, result.outcome)
 		require.Equal(t, prof.CaptureReasonOpLimit, result.reason)
-		published := tracer.rootAt(anchor{})
+		published := tracer.RootAt(jit.Anchor{})
 		require.NotNil(t, published)
-		require.Same(t, result.trace, published.root)
+		require.Same(t, result.trace, published.Root)
 		tr := result.trace
-		require.Equal(t, partial, tr.status)
-		require.Len(t, tr.ops, opLimit+1)
-		require.True(t, tr.ops[len(tr.ops)-1].cut)
-		require.Equal(t, opLimit, tr.ops[len(tr.ops)-1].target)
+		require.Equal(t, jit.StatusPartial, tr.Status)
+		require.Len(t, tr.Ops, opLimit+1)
+		require.True(t, tr.Ops[len(tr.Ops)-1].Cut)
+		require.Equal(t, opLimit, tr.Ops[len(tr.Ops)-1].Target)
 	})
 
 	t.Run("cuts a non-anchor back edge at its loop header", func(t *testing.T) {
@@ -327,14 +328,14 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result := tracer.capture(i, anchor{addr: 0, ip: 0})
+		result := tracer.capture(i, jit.Anchor{Addr: 0, IP: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
-		require.Equal(t, partial, tr.status)
-		require.Len(t, tr.ops, 5)
-		require.Equal(t, instr.BR, tr.ops[len(tr.ops)-2].op)
-		require.True(t, tr.ops[len(tr.ops)-1].cut)
-		require.Equal(t, 1, tr.ops[len(tr.ops)-1].target)
+		require.Equal(t, jit.StatusPartial, tr.Status)
+		require.Len(t, tr.Ops, 5)
+		require.Equal(t, instr.BR, tr.Ops[len(tr.Ops)-2].Op)
+		require.True(t, tr.Ops[len(tr.Ops)-1].Cut)
+		require.Equal(t, 1, tr.Ops[len(tr.Ops)-1].Target)
 	})
 
 	t.Run("records one entry concurrently", func(t *testing.T) {
@@ -351,7 +352,7 @@ func TestTracer_Capture(t *testing.T) {
 		done := make(chan struct{}, workers)
 		interpreters[0] = New(prog, withTracer(tracer), WithThreshold(-1))
 		go func() {
-			tracer.capture(interpreters[0], anchor{})
+			tracer.capture(interpreters[0], jit.Anchor{})
 			done <- struct{}{}
 		}()
 		<-iter.entered
@@ -362,7 +363,7 @@ func TestTracer_Capture(t *testing.T) {
 			interpreters[idx] = i
 			go func() {
 				started <- struct{}{}
-				tracer.capture(i, anchor{})
+				tracer.capture(i, jit.Anchor{})
 				done <- struct{}{}
 			}()
 		}
@@ -378,7 +379,7 @@ func TestTracer_Capture(t *testing.T) {
 			require.NoError(t, i.Close())
 		}
 		tracer.mu.Lock()
-		attempts := tracer.trees[anchor{}].attempts
+		attempts := tracer.trees[jit.Anchor{}].Attempts
 		tracer.mu.Unlock()
 		require.Equal(t, 1, attempts)
 	})
@@ -397,13 +398,13 @@ func TestTracer_Capture(t *testing.T) {
 		addr := i.alloc(iter)
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
-		root := anchor{}
+		root := jit.Anchor{}
 		tree := tracer.tree(root)
-		tree.root = &trace{anchor: root, status: completed}
+		tree.Root = &jit.Trace{Anchor: root, Status: jit.StatusCompleted}
 
 		done := make(chan struct{}, 1)
 		go func() {
-			tracer.branch(i, root, anchor{addr: 0, ip: 1})
+			tracer.branch(i, root, jit.Anchor{Addr: 0, IP: 1})
 			done <- struct{}{}
 		}()
 		<-iter.entered
@@ -411,8 +412,8 @@ func TestTracer_Capture(t *testing.T) {
 		close(release)
 		<-done
 
-		require.Empty(t, tree.branches)
-		require.Nil(t, tracer.rootAt(root))
+		require.Empty(t, tree.Branches)
+		require.Nil(t, tracer.RootAt(root))
 	})
 
 	t.Run("isolates function reclamation", func(t *testing.T) {
@@ -427,15 +428,15 @@ func TestTracer_Capture(t *testing.T) {
 		fn := &types.Function{Code: []byte{byte(instr.NOP)}}
 		addr := i.alloc(fn)
 		i.bind(addr, fn, true)
-		root := anchor{addr: addr}
-		tracer.trees[root] = &tree{root: &trace{anchor: root, status: completed}}
+		root := jit.Anchor{Addr: addr}
+		tracer.trees[root] = &jit.Tree{Root: &jit.Trace{Anchor: root, Status: jit.StatusCompleted}}
 		require.NotEmpty(t, tracer.exactCodes(i)[addr])
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 
 		done := make(chan struct{}, 1)
 		go func() {
-			tracer.capture(i, anchor{})
+			tracer.capture(i, jit.Anchor{})
 			done <- struct{}{}
 		}()
 
@@ -444,8 +445,8 @@ func TestTracer_Capture(t *testing.T) {
 		case <-time.After(time.Second):
 			require.Fail(t, "capture deadlocked while reclaiming a function")
 		}
-		require.NotNil(t, tracer.rootAt(anchor{}))
-		require.NotNil(t, tracer.rootAt(root))
+		require.NotNil(t, tracer.RootAt(jit.Anchor{}))
+		require.NotNil(t, tracer.RootAt(root))
 		require.NotEmpty(t, i.instrs[addr])
 		require.NotEmpty(t, tracer.exactCodes(i)[addr])
 		require.True(t, i.dynamic[addr])
@@ -465,7 +466,7 @@ func TestTracer_Capture(t *testing.T) {
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 
-		tracer.capture(i, anchor{})
+		tracer.capture(i, jit.Anchor{})
 		require.Zero(t, value.closed)
 	})
 
@@ -479,15 +480,15 @@ func TestTracer_Capture(t *testing.T) {
 		defer i.Close()
 
 		for range attemptLimit + 1 {
-			tr := tracer.capture(i, anchor{})
+			tr := tracer.capture(i, jit.Anchor{})
 			require.Nil(t, tr.trace)
 		}
 
 		tracer.mu.Lock()
-		attempts := tracer.trees[anchor{}].attempts
+		attempts := tracer.trees[jit.Anchor{}].Attempts
 		tracer.mu.Unlock()
 		require.Equal(t, attemptLimit, attempts)
-		require.Nil(t, tracer.rootAt(anchor{}))
+		require.Nil(t, tracer.RootAt(jit.Anchor{}))
 	})
 
 }
@@ -497,14 +498,14 @@ func TestTracer_OrdersAnchors(t *testing.T) {
 		tracer := newTracer()
 		const count = 64
 		for ip := count - 1; ip >= 0; ip-- {
-			tracer.trees[anchor{addr: 1, ip: ip}] = &tree{root: &trace{anchor: anchor{addr: 1, ip: ip}, status: completed}}
+			tracer.trees[jit.Anchor{Addr: 1, IP: ip}] = &jit.Tree{Root: &jit.Trace{Anchor: jit.Anchor{Addr: 1, IP: ip}, Status: jit.StatusCompleted}}
 		}
 
 		want := make([]int, count)
 		for ip := range count {
 			want[ip] = ip
 		}
-		require.Equal(t, want, tracer.anchors(1))
+		require.Equal(t, want, tracer.Anchors(1))
 	})
 }
 

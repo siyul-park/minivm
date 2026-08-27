@@ -1,7 +1,6 @@
 package interp
 
 import (
-	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -9,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -21,56 +21,17 @@ type tracer struct {
 	prog  *program.Program
 	exact [][]func(*Interpreter)
 	loops map[int][]int
-	trees map[anchor]*tree
+	trees map[jit.Anchor]*jit.Tree
 
 	recordMu sync.Mutex
 	mu       sync.Mutex
 }
 
-type iface struct {
-	itab uintptr
-	_    uintptr
-}
-
-type status int
-
-type record struct {
-	step
-	cut    bool
-	target int
-	taken  bool
-}
-
-type trace struct {
-	anchor  anchor
-	ops     []record
-	status  status
-	carried bool
-}
-
 type captureResult struct {
-	trace   *trace
+	trace   *jit.Trace
 	outcome prof.CaptureOutcome
 	reason  prof.CaptureReason
 }
-
-type tree struct {
-	root     *trace
-	branches map[int]*trace
-	hits     []int64
-	exits    map[anchor]int
-
-	attempts int
-}
-
-const (
-	fallback status = iota
-	loop
-	returned
-	completed
-	partial
-	aborted
-)
 
 const opLimit = 1024
 
@@ -81,7 +42,7 @@ const attemptLimit = 8
 func newTracer() *tracer {
 	return &tracer{
 		loops: map[int][]int{},
-		trees: map[anchor]*tree{},
+		trees: map[jit.Anchor]*jit.Tree{},
 	}
 }
 
@@ -94,97 +55,97 @@ func (t *tracer) bind(prog *program.Program) bool {
 	return t.prog == prog
 }
 
-func (t *tracer) branch(i *Interpreter, root anchor, target anchor) int64 {
+func (t *tracer) branch(i *Interpreter, root jit.Anchor, target jit.Anchor) int64 {
 	t.mu.Lock()
 	tree := t.tree(root)
-	id, ok := tree.exits[target]
+	id, ok := tree.Exits[target]
 	if !ok {
-		id = len(tree.hits)
-		tree.exits[target] = id
-		tree.hits = append(tree.hits, 0)
+		id = len(tree.Hits)
+		tree.Exits[target] = id
+		tree.Hits = append(tree.Hits, 0)
 	}
-	tree.hits[id]++
-	hits := tree.hits[id]
-	if branch := tree.branches[id]; branch != nil {
+	tree.Hits[id]++
+	hits := tree.Hits[id]
+	if branch := tree.Branches[id]; branch != nil {
 		t.mu.Unlock()
 		// The first hot exit publishes the standalone loop entry. Later exits
 		// cannot be folded into the parent trace, so recompiling that parent
 		// would only publish the same pair again.
-		if branch.status == loop && hits != exitThreshold {
+		if branch.Status == jit.StatusLoop && hits != exitThreshold {
 			return 0
 		}
 		return hits
 	}
 	t.mu.Unlock()
 
-	result := t.capture(i, anchor{addr: target.addr, ip: target.ip})
+	result := t.capture(i, jit.Anchor{Addr: target.Addr, IP: target.IP})
 	t.mu.Lock()
 	if t.trees[root] == tree {
-		tree.branches[id] = result.trace
+		tree.Branches[id] = result.trace
 	}
 	t.mu.Unlock()
 	return hits
 }
 
-func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
+func (t *tracer) capture(i *Interpreter, a jit.Anchor) (result captureResult) {
 	t.recordMu.Lock()
 	defer t.recordMu.Unlock()
 	defer func() {
 		if i.profiler != nil && result.outcome != prof.CaptureOutcomeNone {
-			i.samples.RecordCapture(a.addr, a.ip, result.outcome, result.reason)
+			i.samples.RecordCapture(a.Addr, a.IP, result.outcome, result.reason)
 		}
 	}()
 
 	t.mu.Lock()
 	tree := t.trees[a]
-	if tree != nil && tree.root != nil {
-		tr := tree.root
+	if tree != nil && tree.Root != nil {
+		tr := tree.Root
 		t.mu.Unlock()
 		return captureResult{trace: tr}
 	}
 	if tree == nil {
 		tree = t.tree(a)
 	}
-	if tree.attempts >= attemptLimit {
+	if tree.Attempts >= attemptLimit {
 		t.mu.Unlock()
 		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}
 	}
-	// A mis-anchored entry (a.ip==0 but the live frame isn't there) counts
-	// against tree.attempts like every other rejection, so it stops being
+	// A mis-anchored entry (a.IP==0 but the live frame isn't there) counts
+	// against tree.Attempts like every other rejection, so it stops being
 	// retried after attemptLimit instead of costing a fresh clone-and-walk on
 	// every observation forever.
-	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
-		tree.attempts++
+	if a.IP == 0 && (i.fr == nil || i.fr.addr != a.Addr || i.fr.ip != 0) {
+		tree.Attempts++
 		t.mu.Unlock()
 		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
-	tree.attempts++
+	tree.Attempts++
 	t.mu.Unlock()
 
-	if a.addr < 0 || a.addr >= len(i.instrs) || a.ip < 0 || a.ip >= len(i.instrs[a.addr]) {
+	if a.Addr < 0 || a.Addr >= len(i.instrs) || a.IP < 0 || a.IP >= len(i.instrs[a.Addr]) {
 		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
 
 	clone := t.clone(i)
 	clone.fr = &clone.frames[i.fp-1]
-	clone.fr.ip = a.ip
+	clone.fr.ip = a.IP
 
-	fn, _ := clone.function(a.addr)
+	fn, _ := clone.function(a.Addr)
 	carried := fn != nil && clone.sp > clone.fr.bp+len(fn.Slots())
-	tr := &trace{anchor: a, carried: carried}
+	tr := &jit.Trace{Anchor: a, Carried: carried}
 	startFP := clone.fp
 	hasCall := false
 	var cloned map[int]bool
-	for len(tr.ops) < opLimit {
+	for len(tr.Ops) < opLimit {
 		f := clone.fr
 		if f.addr < 0 || f.addr >= len(clone.instrs) || f.ip < 0 || f.ip >= len(clone.instrs[f.addr]) {
-			return t.publish(a, tree, tr, aborted, prof.CaptureReasonUnsupportedOp)
+			return t.publish(a, tree, tr, jit.StatusAborted, prof.CaptureReasonUnsupportedOp)
 		}
 
 		code := clone.instrs[f.addr]
 		op := instr.Opcode(code[f.ip])
 		if reason := t.reason(&clone, op); reason != prof.CaptureReasonNone {
-			return t.publish(a, tree, tr, aborted, reason)
+			return t.publish(a, tree, tr, jit.StatusAborted, reason)
 		}
 
 		st := t.op(&clone, op, startFP)
@@ -196,51 +157,51 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 			continuable := cloneTarget(&clone, cloned)
 			terminalMutation = hasCall || !continuable
 		}
-		st.terminal = terminalMutation
+		st.Terminal = terminalMutation
 		if op == instr.CALL && t.callsAnchor(&clone, a) {
-			if a.ip != 0 {
-				st.target = f.ip
-				st.cut = true
-				tr.ops = append(tr.ops, st)
-				return t.publish(a, tree, tr, partial, prof.CaptureReasonNone)
+			if a.IP != 0 {
+				st.Target = f.ip
+				st.Cut = true
+				tr.Ops = append(tr.Ops, st)
+				return t.publish(a, tree, tr, jit.StatusPartial, prof.CaptureReasonNone)
 			}
-			t.skipCall(&clone, a.addr)
-			st.callee = a.addr
-			tr.ops = append(tr.ops, st)
+			t.skipCall(&clone, a.Addr)
+			st.Callee = a.Addr
+			tr.Ops = append(tr.Ops, st)
 			hasCall = true
 			continue
 		}
 		// A tail call back to the entry anchor closes the trace as a native loop
 		// back-edge: record it as the entry trace's terminal op without stepping
 		// into the reused frame, so it compiles like a loop without tripping the
-		// ip-0 loop ban (the trace stays status=returned).
-		if op == instr.RETURN_CALL && a.ip == 0 && t.callsAnchor(&clone, a) {
-			st.callee = a.addr
-			tr.ops = append(tr.ops, st)
-			return t.publish(a, tree, tr, returned, prof.CaptureReasonNone)
+		// ip-0 loop ban (the trace stays status=StatusReturned).
+		if op == instr.RETURN_CALL && a.IP == 0 && t.callsAnchor(&clone, a) {
+			st.Callee = a.Addr
+			tr.Ops = append(tr.Ops, st)
+			return t.publish(a, tree, tr, jit.StatusReturned, prof.CaptureReasonNone)
 		}
 		// YIELD/RESUME, exception-producing ops, and bulk mutations have side
 		// effects a trace cannot represent. In the anchor frame, record the op
-		// as the terminal and store status=returned WITHOUT stepping the clone;
-		// the JIT lowers this to an unconditional deopt so the threaded handler
-		// performs the real work, and the compiled prefix still runs native.
-		// Abort rather than miscompile when the op sits in an inlined frame
-		// whose runtime-only state may not survive journal deopt.
+		// as the terminal and store status=StatusReturned WITHOUT stepping the
+		// clone; the JIT lowers this to an unconditional deopt so the threaded
+		// handler performs the real work, and the compiled prefix still runs
+		// native. Abort rather than miscompile when the op sits in an inlined
+		// frame whose runtime-only state may not survive journal deopt.
 		switch op {
 		case instr.YIELD, instr.RESUME, instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW,
 			instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET:
 			if clone.fp != startFP {
-				return t.publish(a, tree, tr, aborted, prof.CaptureReasonNestedTerminal)
+				return t.publish(a, tree, tr, jit.StatusAborted, prof.CaptureReasonNestedTerminal)
 			}
-			tr.ops = append(tr.ops, st)
-			return t.publish(a, tree, tr, returned, prof.CaptureReasonNone)
+			tr.Ops = append(tr.Ops, st)
+			return t.publish(a, tree, tr, jit.StatusReturned, prof.CaptureReasonNone)
 		}
 		if !t.step(&clone, f.addr, f.ip) {
-			return t.publish(a, tree, tr, aborted, prof.CaptureReasonStepTrap)
+			return t.publish(a, tree, tr, jit.StatusAborted, prof.CaptureReasonStepTrap)
 		}
 
 		t.finish(&clone, &st, op)
-		tr.ops = append(tr.ops, st)
+		tr.Ops = append(tr.Ops, st)
 		if instr.IsCall(op) {
 			hasCall = true
 		}
@@ -249,14 +210,14 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		// to opLimit; threaded execution will make that header hot and compile it
 		// with the native back-edge and safepoint budget intact.
 		if (op == instr.BR || op == instr.BR_IF) &&
-			clone.fr.addr == st.fn && clone.fr.ip <= st.ip &&
-			(clone.fr.addr != a.addr || clone.fr.ip != a.ip) {
-			tr.ops = append(tr.ops, record{
-				step:   step{fn: clone.fr.addr, depth: clone.fp - startFP},
-				target: clone.fr.ip,
-				cut:    true,
+			clone.fr.addr == st.Fn && clone.fr.ip <= st.IP &&
+			(clone.fr.addr != a.Addr || clone.fr.ip != a.IP) {
+			tr.Ops = append(tr.Ops, jit.Record{
+				Step:   jit.Step{Fn: clone.fr.addr, Depth: clone.fp - startFP},
+				Target: clone.fr.ip,
+				Cut:    true,
 			})
-			return t.publish(a, tree, tr, partial, prof.CaptureReasonNone)
+			return t.publish(a, tree, tr, jit.StatusPartial, prof.CaptureReasonNone)
 		}
 		// Boxed-array writes and ref-field struct writes remain terminal native
 		// fast paths. Primitive array writes and scalar struct-field writes can
@@ -264,29 +225,29 @@ func (t *tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		// post-store deopt point.
 		if terminalMutation {
 			if clone.fp != startFP {
-				return t.publish(a, tree, tr, aborted, prof.CaptureReasonNestedTerminal)
+				return t.publish(a, tree, tr, jit.StatusAborted, prof.CaptureReasonNestedTerminal)
 			}
-			return t.publish(a, tree, tr, returned, prof.CaptureReasonNone)
+			return t.publish(a, tree, tr, jit.StatusReturned, prof.CaptureReasonNone)
 		}
 		switch {
-		case op == instr.RETURN && st.depth == 0:
-			return t.publish(a, tree, tr, returned, prof.CaptureReasonNone)
+		case op == instr.RETURN && st.Depth == 0:
+			return t.publish(a, tree, tr, jit.StatusReturned, prof.CaptureReasonNone)
 		case clone.fr.addr >= 0 && clone.fr.addr < len(clone.instrs) && clone.fr.ip >= len(clone.instrs[clone.fr.addr]):
 			if clone.fr.addr == 0 {
-				return t.publish(a, tree, tr, completed, prof.CaptureReasonNone)
+				return t.publish(a, tree, tr, jit.StatusCompleted, prof.CaptureReasonNone)
 			}
-			return t.publish(a, tree, tr, fallback, prof.CaptureReasonNone)
-		case clone.fr.addr == a.addr && clone.fr.ip == a.ip:
-			return t.publish(a, tree, tr, loop, prof.CaptureReasonNone)
+			return t.publish(a, tree, tr, jit.StatusFallback, prof.CaptureReasonNone)
+		case clone.fr.addr == a.Addr && clone.fr.ip == a.IP:
+			return t.publish(a, tree, tr, jit.StatusLoop, prof.CaptureReasonNone)
 		case clone.fp < startFP:
-			return t.publish(a, tree, tr, returned, prof.CaptureReasonNone)
+			return t.publish(a, tree, tr, jit.StatusReturned, prof.CaptureReasonNone)
 		}
 	}
 	// Preserve the bounded prefix. Its synthetic cut lowers through the same
 	// side-exit path as a guard, so a hot remainder becomes a continuation.
 	f := clone.fr
-	tr.ops = append(tr.ops, record{step: step{fn: f.addr, depth: clone.fp - startFP}, target: f.ip, cut: true})
-	return t.publish(a, tree, tr, partial, prof.CaptureReasonOpLimit)
+	tr.Ops = append(tr.Ops, jit.Record{Step: jit.Step{Fn: f.addr, Depth: clone.fp - startFP}, Target: f.ip, Cut: true})
+	return t.publish(a, tree, tr, jit.StatusPartial, prof.CaptureReasonOpLimit)
 }
 
 func (t *tracer) clone(i *Interpreter) Interpreter {
@@ -309,9 +270,9 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.instrs = slices.Clone(i.instrs)
 	out.code = slices.Clone(t.exactCodes(i))
 	out.backedges = make([]bool, len(i.backedges))
-	out.exits = map[anchor]func(*Interpreter){}
+	out.exits = map[jit.Anchor]func(*Interpreter){}
 	out.stubs = make([]func(*Interpreter), len(out.code))
-	out.tried = map[anchor]bool{}
+	out.tried = map[jit.Anchor]bool{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)
 	out.handlers = slices.Clone(i.handlers)
@@ -508,14 +469,14 @@ func (t *tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 	return t.exact
 }
 
-func (t *tracer) op(i *Interpreter, op instr.Opcode, startFP int) record {
+func (t *tracer) op(i *Interpreter, op instr.Opcode, startFP int) jit.Record {
 	f := i.fr
-	st := record{step: step{
-		op:    op,
-		args:  args(instr.Instruction(i.instrs[f.addr][f.ip:])),
-		fn:    f.addr,
-		ip:    f.ip,
-		depth: i.fp - startFP,
+	st := jit.Record{Step: jit.Step{
+		Op:    op,
+		Args:  jit.Args(instr.Instruction(i.instrs[f.addr][f.ip:])),
+		Fn:    f.addr,
+		IP:    f.ip,
+		Depth: i.fp - startFP,
 	}}
 	switch op {
 	case instr.I32_DIV_S,
@@ -534,67 +495,67 @@ func (t *tracer) op(i *Interpreter, op instr.Opcode, startFP int) record {
 		instr.I64_SHR_U,
 		instr.BR_TABLE:
 		if i.sp > 0 {
-			st.arg = i.stack[i.sp-1]
+			st.Arg = i.stack[i.sp-1]
 		}
 	case instr.ARRAY_LEN, instr.REF_GET, instr.ERROR_GET, instr.CORO_DONE, instr.CORO_VALUE:
 		if i.sp > 0 {
-			st.arg = i.stack[i.sp-1]
-			st.shape = t.shape(i, i.stack[i.sp-1])
+			st.Arg = i.stack[i.sp-1]
+			st.Shape = t.shape(i, i.stack[i.sp-1])
 		}
 	case instr.ARRAY_GET, instr.STRUCT_GET:
 		if i.sp > 0 {
-			st.arg = i.stack[i.sp-1]
+			st.Arg = i.stack[i.sp-1]
 		}
 		if i.sp > 1 {
-			st.shape = t.shape(i, i.stack[i.sp-2])
+			st.Shape = t.shape(i, i.stack[i.sp-2])
 			if op == instr.STRUCT_GET {
-				st.shape.field = t.field(i, i.stack[i.sp-2], st.arg)
+				st.Shape.Field = t.field(i, i.stack[i.sp-2], st.Arg)
 			}
 		}
 	case instr.ARRAY_SET, instr.STRUCT_SET:
 		if i.sp > 2 {
-			st.arg = i.stack[i.sp-2]
-			st.shape = t.shape(i, i.stack[i.sp-3])
+			st.Arg = i.stack[i.sp-2]
+			st.Shape = t.shape(i, i.stack[i.sp-3])
 			if op == instr.STRUCT_SET {
-				st.shape.field = t.field(i, i.stack[i.sp-3], st.arg)
+				st.Shape.Field = t.field(i, i.stack[i.sp-3], st.Arg)
 			}
 		}
 	case instr.BR, instr.BR_IF:
-		st.target = f.ip + instr.ParseI16(i.instrs[f.addr], f.ip+1) + 3
+		st.Target = f.ip + instr.ParseI16(i.instrs[f.addr], f.ip+1) + 3
 		if op == instr.BR_IF && i.sp > 0 {
-			st.arg = i.stack[i.sp-1]
+			st.Arg = i.stack[i.sp-1]
 		}
 	case instr.CALL, instr.RETURN_CALL:
 		if i.sp > 0 {
-			st.seen = i.stack[i.sp-1]
+			st.Seen = i.stack[i.sp-1]
 		}
 	}
 	return st
 }
 
-func (t *tracer) shape(i *Interpreter, v types.Boxed) shape {
+func (t *tracer) shape(i *Interpreter, v types.Boxed) jit.Shape {
 	if v.Kind() != types.KindRef {
-		return shape{}
+		return jit.Shape{}
 	}
 	addr := v.Ref()
 	if addr < 0 || addr >= len(i.heap) {
-		return shape{}
+		return jit.Shape{}
 	}
 	val := i.heap[addr]
 	if val == nil {
-		return shape{}
+		return jit.Shape{}
 	}
-	out := shape{itab: itab(val)}
+	out := jit.Shape{Itab: jit.Itab(val)}
 	if s, ok := val.(*types.Struct); ok && s.Typ != nil {
-		out.typ = uintptr(unsafe.Pointer(s.Typ))
+		out.Typ = uintptr(unsafe.Pointer(s.Typ))
 	}
 	return out
 }
 
 // field reports the Go kind the *HostStruct at container holds its at'th field
 // in. A host field is read and written through that kind rather than through a
-// VM word, so it is what the lowerer needs to pick a load and a store; see
-// shape.field. Anything else records reflect.Invalid, which has no row.
+// VM word, so it is what a backend needs to pick a load and a store; see
+// jit.Shape.Field. Anything else records reflect.Invalid, which has no row.
 func (t *tracer) field(i *Interpreter, container, at types.Boxed) reflect.Kind {
 	if container.Kind() != types.KindRef {
 		return reflect.Invalid
@@ -614,31 +575,31 @@ func (t *tracer) field(i *Interpreter, container, at types.Boxed) reflect.Kind {
 	return host.fields[idx].conversion.kind
 }
 
-func (t *tracer) finish(i *Interpreter, st *record, op instr.Opcode) {
+func (t *tracer) finish(i *Interpreter, st *jit.Record, op instr.Opcode) {
 	switch op {
 	case instr.BR_IF:
-		if i.fr.addr == st.fn && i.fr.ip == st.target {
-			st.taken = true
+		if i.fr.addr == st.Fn && i.fr.ip == st.Target {
+			st.Taken = true
 		}
 	case instr.BR_TABLE:
-		st.target = i.fr.ip
+		st.Target = i.fr.ip
 	case instr.CALL, instr.RETURN_CALL:
-		st.callee = i.fr.addr
+		st.Callee = i.fr.addr
 	case instr.REF_GET, instr.ARRAY_GET, instr.STRUCT_GET, instr.CORO_VALUE, instr.ERROR_GET:
 		if i.sp > 0 {
-			st.seen = i.stack[i.sp-1]
+			st.Seen = i.stack[i.sp-1]
 		}
 	}
 }
 
 // callsAnchor reports whether the next call targets the trace anchor through a
 // plain function reference on top of the stack.
-func (t *tracer) callsAnchor(i *Interpreter, a anchor) bool {
+func (t *tracer) callsAnchor(i *Interpreter, a jit.Anchor) bool {
 	if i.sp == 0 || i.stack[i.sp-1].Kind() != types.KindRef {
 		return false
 	}
 	addr := i.stack[i.sp-1].Ref()
-	if addr != a.addr || addr < 0 || addr >= len(i.heap) {
+	if addr != a.Addr || addr < 0 || addr >= len(i.heap) {
 		return false
 	}
 	_, ok := i.heap[addr].(*types.Function)
@@ -663,17 +624,17 @@ func (t *tracer) step(i *Interpreter, addr, ip int) (ok bool) {
 	return true
 }
 
-func (t *tracer) publish(a anchor, tree *tree, tr *trace, next status, reason prof.CaptureReason) captureResult {
-	tr.status = next
+func (t *tracer) publish(a jit.Anchor, tree *jit.Tree, tr *jit.Trace, next jit.Status, reason prof.CaptureReason) captureResult {
+	tr.Status = next
 	result := captureResult{trace: tr, reason: reason}
 	switch next {
-	case aborted:
+	case jit.StatusAborted:
 		result.trace = nil
 		result.outcome = prof.CaptureOutcomeRejected
 		return result
-	case partial:
+	case jit.StatusPartial:
 		result.outcome = prof.CaptureOutcomePartial
-	case fallback, loop, returned, completed:
+	case jit.StatusFallback, jit.StatusLoop, jit.StatusReturned, jit.StatusCompleted:
 		result.outcome = prof.CaptureOutcomePublished
 	default:
 		result.trace = nil
@@ -683,7 +644,7 @@ func (t *tracer) publish(a anchor, tree *tree, tr *trace, next status, reason pr
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.trees[a] == tree {
-		tree.root = tr
+		tree.Root = tr
 	}
 	return result
 }
@@ -691,11 +652,11 @@ func (t *tracer) publish(a anchor, tree *tree, tr *trace, next status, reason pr
 // forget drops one anchor's recorded trace so a later arrival records it again.
 // The attempt count is deliberately kept, because that count is what bounds how
 // many times one anchor may be re-recorded.
-func (t *tracer) forget(a anchor) {
+func (t *tracer) forget(a jit.Anchor) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if tree := t.trees[a]; tree != nil {
-		tree.root = nil
+		tree.Root = nil
 	}
 }
 
@@ -703,7 +664,7 @@ func (t *tracer) remove(addr int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for a := range t.trees {
-		if a.addr == addr {
+		if a.Addr == addr {
 			delete(t.trees, a)
 		}
 	}
@@ -711,41 +672,44 @@ func (t *tracer) remove(addr int) {
 	t.exact = nil
 }
 
-func (t *tracer) tree(a anchor) *tree {
+func (t *tracer) tree(a jit.Anchor) *jit.Tree {
 	tr := t.trees[a]
 	if tr == nil {
-		tr = &tree{
-			branches: map[int]*trace{},
-			exits:    map[anchor]int{},
+		tr = &jit.Tree{
+			Branches: map[int]*jit.Trace{},
+			Exits:    map[jit.Anchor]int{},
 		}
 		t.trees[a] = tr
 	}
 	return tr
 }
 
-func (t *tracer) anchors(addr int) []int {
+// Anchors reports the IPs, within addr, that carry a published recorded
+// trace. It satisfies jit.RecordedTraces.
+func (t *tracer) Anchors(addr int) []int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := make([]int, 0, len(t.trees))
 	for anchor, tree := range t.trees {
-		if anchor.addr == addr && tree.root != nil {
-			out = append(out, anchor.ip)
+		if anchor.Addr == addr && tree.Root != nil {
+			out = append(out, anchor.IP)
 		}
 	}
 	sort.Ints(out)
 	return out
 }
 
-// rootAt returns the published tree anchored exactly at a, or nil when none is
-// recorded. Published roots are always usable.
-func (t *tracer) rootAt(a anchor) *tree {
+// RootAt returns the published tree anchored exactly at a, or nil when none
+// is recorded. Published roots are always usable. It satisfies
+// jit.RecordedTraces.
+func (t *tracer) RootAt(a jit.Anchor) *jit.Tree {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	tr := t.trees[a]
-	if tr == nil || tr.root == nil {
+	if tr == nil || tr.Root == nil {
 		return nil
 	}
-	return tr.snapshot()
+	return tr.Snapshot()
 }
 
 // headers returns the loop-header IPs of the function at addr: the targets of
@@ -843,21 +807,4 @@ func (t *tracer) reason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
 		return prof.CaptureReasonUnsupportedOp
 	}
 	return prof.CaptureReasonNone
-}
-
-// snapshot returns a compile-time-stable copy of the fields readers consume off
-// a tree (root pointer, branches, hits). Published *trace values are immutable,
-// so sharing the pointers is safe; copying the container lets the trace compiler
-// lower a root without holding t.mu while the recorder keeps mutating the live
-// tree under lock — the concurrent map read/write that races a pooled tracer.
-func (tr *tree) snapshot() *tree {
-	return &tree{
-		root:     tr.root,
-		branches: maps.Clone(tr.branches),
-		hits:     slices.Clone(tr.hits),
-	}
-}
-
-func itab(v types.Value) uintptr {
-	return (*iface)(unsafe.Pointer(&v)).itab
 }
