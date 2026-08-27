@@ -16,6 +16,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | threaded behavior | `interp/threaded.go` |
 | trace recording | `interp/trace.go` |
 | architecture-neutral compiler | `interp/jit.go`, `interp/jit_plan.go` |
+| runtime tier-up and retirement policy | `interp/tier.go` |
 | ARM64 lowering | `interp/jit_arm64.go` |
 | callable ABI | `internal/asm/` |
 | value layout | `docs/value-representation.md` |

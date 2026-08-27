@@ -56,7 +56,7 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 
 | Uncovered | Why it cannot be reached publicly |
 |---|---|
-| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold`, `checkRetire` in `interp/jit.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
+| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold` in `interp/tier.go`; `checkRetire` in `interp/interp.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
 | Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
 
