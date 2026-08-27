@@ -3,6 +3,7 @@ package asm
 import (
 	"errors"
 	"fmt"
+	"sort"
 )
 
 // rewriter transforms an instruction list whose operands reference virtual
@@ -23,6 +24,11 @@ import (
 type rewriter struct {
 	frame Frame
 
+	// crossings holds every bound label position, ascending. A value whose
+	// live range spans one of them cannot be spilled: its store would sit on
+	// one path into the label while the reload after it runs on all of them.
+	crossings []int
+
 	regs   []vreg
 	owners [2][bankSize]int32
 
@@ -40,6 +46,7 @@ type vreg struct {
 	pin PReg
 	reg PReg
 
+	first int
 	last  int
 	guard int
 	slot  int
@@ -90,7 +97,7 @@ func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int,
 		},
 	}
 	for i := range r.regs {
-		r.regs[i] = vreg{last: -1, guard: -1, slot: -1}
+		r.regs[i] = vreg{first: -1, last: -1, guard: -1, slot: -1}
 	}
 	for i := range r.owners {
 		for slot := range r.owners[i] {
@@ -134,8 +141,8 @@ func (r *rewriter) scan(insts []Instruction) error {
 	return nil
 }
 
-// note records that the instruction at at references v, keeping the highest
-// index and the width v declares first.
+// note records that the instruction at at references v, keeping the lowest
+// and highest indices that reference it and the width v declares first.
 func (r *rewriter) note(v VReg, at int) error {
 	if err := r.check(v.ID()); err != nil {
 		return err
@@ -144,6 +151,9 @@ func (r *rewriter) note(v VReg, at int) error {
 		return fmt.Errorf("%w: virtual register %d type %d", ErrInvalidOperand, v.ID(), v.Type())
 	}
 	s := &r.regs[v.ID()]
+	if s.first < 0 {
+		s.first = at
+	}
 	s.last = at
 	if s.width == WidthUndefined {
 		s.width = v.Width()
@@ -166,6 +176,7 @@ func (r *rewriter) run(insts []Instruction, labels map[Label]int) ([]Instruction
 	if backEdge(insts, labels) {
 		r.frame = nil
 	}
+	r.crossings = bounds(labels)
 
 	moved := make([]int, len(insts)+1)
 	for i, inst := range insts {
@@ -294,8 +305,9 @@ func (r *rewriter) alloc(v VReg) (PReg, bool) {
 }
 
 // victim selects the bound integer vreg whose last use lies farthest ahead
-// — the value least likely to be needed soon. Pinned registers, and every
-// register the instruction at at touches, are never chosen.
+// — the value least likely to be needed soon. Pinned registers, every
+// register the instruction at at touches, and every value live across a
+// label are never chosen.
 func (r *rewriter) victim(at int) (int32, bool) {
 	best := int32(-1)
 	last := -1
@@ -304,7 +316,7 @@ func (r *rewriter) victim(at int) (int32, bool) {
 			continue
 		}
 		s := &r.regs[id]
-		if s.pinned || s.guard == at || s.last <= last {
+		if s.pinned || s.guard == at || s.last <= last || r.crosses(s) {
 			continue
 		}
 		last = s.last
@@ -481,6 +493,28 @@ func (r *rewriter) inject(labels map[Label]int, moved []int) ([]Instruction, map
 // Linear-scan lifetimes only describe a forward-only stream: a value live
 // across a loop would be spilled at what merely looks like its last use, so
 // code with a back-edge runs without a spill frame instead.
+// crosses reports whether a label is bound strictly inside s's live range.
+// Spilling such a value is unsound: the allocator places its store where
+// register pressure was observed, which may sit on only one path into the
+// label, while the reload after the label runs on every path.
+func (r *rewriter) crosses(s *vreg) bool {
+	if s.first < 0 || s.last <= s.first {
+		return false
+	}
+	n := sort.SearchInts(r.crossings, s.first+1)
+	return n < len(r.crossings) && r.crossings[n] < s.last
+}
+
+// bounds collects every bound label position in ascending order.
+func bounds(labels map[Label]int) []int {
+	out := make([]int, 0, len(labels))
+	for _, at := range labels {
+		out = append(out, at)
+	}
+	sort.Ints(out)
+	return out
+}
+
 func backEdge(insts []Instruction, labels map[Label]int) bool {
 	for i, inst := range insts {
 		lbl, ok := inst.Src2.(LabelOperand)

@@ -336,10 +336,7 @@ func TestAssembler_Build(t *testing.T) {
 		callable, err := asm.Link(buffer, arch.ABI(), code)
 		require.NoError(t, err)
 
-		want := uint64(0)
-		for i := 0; i < 256; i++ {
-			want += uint64(i*7 + 1)
-		}
+		want := wideSum(256)
 		// Run on a fresh goroutine each time so the spill frame is exercised
 		// against a stack the Go runtime may still grow and relocate.
 		for range 64 {
@@ -351,6 +348,104 @@ func TestAssembler_Build(t *testing.T) {
 			require.NoError(t, <-done)
 			require.Equal(t, want, values[0])
 		}
+	})
+
+	t.Run("spills a value live across a forward branch", func(t *testing.T) {
+		// backEdge only disables the spill frame for a branch whose target
+		// is at or before the branch itself; it says nothing about a
+		// forward branch. This diamond has no back-edge, so the frame
+		// stays available, and the linear-scan liveness model
+		// (rewriter.scan records only the highest instruction index
+		// referencing a vreg, with no notion of which branch arm an
+		// instruction belongs to) has no special handling for a value live
+		// across the two arms either. The question this proves the answer
+		// to: is that combination sound?
+		//
+		// v is defined before the branch, so it is live on both arms.
+		// Register pressure inside the fall-through arm forces the
+		// allocator to spill it there; the reload sits at the merge point,
+		// unconditionally, on both arms. If the allocator is unsound, the
+		// taken arm — which never runs the fall-through arm's code,
+		// including v's spill store — reaches that reload having never
+		// written v's slot on this call.
+		//
+		// poison manufactures a deterministic value in that exact slot
+		// without relying on any external memory state: poison is spilled
+		// and reloaded before the branch (so every call runs this
+		// unconditionally), which frees its slot back to the allocator's
+		// LIFO free list. v's own spill inside the fall-through arm is the
+		// very next spill after that, so it reuses poison's slot. On the
+		// taken arm, if the reload after merge reads poison's value
+		// instead of v's, the store the reload depends on never dominated
+		// it.
+		arch := arm64.New()
+
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+
+		const pressure = 17 // one past the 17 auto-allocatable integer registers.
+		const poison = 0xBADC0FFEE0DDF00D
+		const magic = 0x1234567890ABCDEF
+
+		poisonReg := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(poisonReg, poison)...)
+		poisonSum := emitWideSum(assembler, pressure)
+		discard := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.ADD(discard, poisonSum, poisonReg))
+
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, magic)...)
+		armZero := assembler.Reg(asm.RegTypeInt, asm.Width64)
+
+		flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDR(flag, ctx, 0))
+
+		taken := assembler.Label()
+		merge := assembler.Label()
+		assembler.Emit(arm64.CBZLabel(flag, taken))
+
+		fallSum := emitWideSum(assembler, pressure)
+		assembler.Emit(arm64.SUBI(armZero, fallSum, uint16(wideSum(pressure))))
+		assembler.Emit(arm64.BLabel(merge))
+
+		assembler.Bind(taken)
+		assembler.Emit(arm64.LDI(armZero, 0)...)
+
+		assembler.Bind(merge)
+		result := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.ADD(result, armZero, v))
+		assembler.Emit(arm64.STR(result, ctx, 8))
+		assembler.Emit(arm64.RET())
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+
+		buffer, err := asm.NewBuffer(4096)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, buffer.Free()) }()
+
+		callable, err := asm.Link(buffer, arch.ABI(), code)
+		require.NoError(t, err)
+
+		run := func(flag uint64) uint64 {
+			values := [2]uint64{flag, 0}
+			require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
+			return values[1]
+		}
+
+		// The fall-through arm executes v's spill store itself, so this run
+		// is correct however the allocator behaves: a sanity check that the
+		// diamond is otherwise wired correctly.
+		require.Equal(t, uint64(magic), run(1),
+			"fall-through arm must read back the value its own arm stored")
+
+		// The taken arm never executes the fall-through arm's code, so v's
+		// spill store never runs on this call. v was defined before the
+		// branch, not inside the skipped arm, so a sound allocator must
+		// still produce magic here.
+		require.Equal(t, uint64(magic), run(0),
+			"branch-taken arm must still see v's value after the forward-branch merge")
 	})
 
 	t.Run("self-recursive call clobbers the caller's spill slots", func(t *testing.T) {
@@ -443,4 +538,14 @@ func emitWideSum(assembler *asm.Assembler, n int) asm.VReg {
 		sum = next
 	}
 	return sum
+}
+
+// wideSum returns the value emitWideSum(assembler, n) computes, so a caller
+// can state the expected result independently of the allocator's choices.
+func wideSum(n int) uint64 {
+	var want uint64
+	for i := 0; i < n; i++ {
+		want += uint64(i*7 + 1)
+	}
+	return want
 }
