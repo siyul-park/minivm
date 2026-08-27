@@ -46,7 +46,6 @@ type vreg struct {
 	pin PReg
 	reg PReg
 
-	first int
 	last  int
 	guard int
 	slot  int
@@ -97,7 +96,7 @@ func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int,
 		},
 	}
 	for i := range r.regs {
-		r.regs[i] = vreg{first: -1, last: -1, guard: -1, slot: -1}
+		r.regs[i] = vreg{last: -1, guard: -1, slot: -1}
 	}
 	for i := range r.owners {
 		for slot := range r.owners[i] {
@@ -141,8 +140,8 @@ func (r *rewriter) scan(insts []Instruction) error {
 	return nil
 }
 
-// note records that the instruction at at references v, keeping the lowest
-// and highest indices that reference it and the width v declares first.
+// note records that the instruction at at references v, keeping the highest
+// index and the width v declares first.
 func (r *rewriter) note(v VReg, at int) error {
 	if err := r.check(v.ID()); err != nil {
 		return err
@@ -151,9 +150,6 @@ func (r *rewriter) note(v VReg, at int) error {
 		return fmt.Errorf("%w: virtual register %d type %d", ErrInvalidOperand, v.ID(), v.Type())
 	}
 	s := &r.regs[v.ID()]
-	if s.first < 0 {
-		s.first = at
-	}
 	s.last = at
 	if s.width == WidthUndefined {
 		s.width = v.Width()
@@ -306,8 +302,8 @@ func (r *rewriter) alloc(v VReg) (PReg, bool) {
 
 // victim selects the bound integer vreg whose last use lies farthest ahead
 // — the value least likely to be needed soon. Pinned registers, every
-// register the instruction at at touches, and every value live across a
-// label are never chosen.
+// register the instruction at at touches, and every value whose store would
+// not dominate its reload are never chosen.
 func (r *rewriter) victim(at int) (int32, bool) {
 	best := int32(-1)
 	last := -1
@@ -316,7 +312,7 @@ func (r *rewriter) victim(at int) (int32, bool) {
 			continue
 		}
 		s := &r.regs[id]
-		if s.pinned || s.guard == at || s.last <= last || r.crosses(s) {
+		if s.pinned || s.guard == at || s.last <= last || r.crosses(at, s) {
 			continue
 		}
 		last = s.last
@@ -493,15 +489,17 @@ func (r *rewriter) inject(labels map[Label]int, moved []int) ([]Instruction, map
 // Linear-scan lifetimes only describe a forward-only stream: a value live
 // across a loop would be spilled at what merely looks like its last use, so
 // code with a back-edge runs without a spill frame instead.
-// crosses reports whether a label is bound strictly inside s's live range.
-// Spilling such a value is unsound: the allocator places its store where
-// register pressure was observed, which may sit on only one path into the
-// label, while the reload after the label runs on every path.
-func (r *rewriter) crosses(s *vreg) bool {
-	if s.first < 0 || s.last <= s.first {
+// crosses reports whether a label is bound between at, where the store would
+// go, and s's last use, where the reload is read. Spilling s is unsound in
+// that case: control can reach the label without passing the store, and the
+// reload after it runs on every path, so it reads a slot that path never
+// wrote. With no label in between, every path from the store to the reload is
+// straight-line and the store dominates.
+func (r *rewriter) crosses(at int, s *vreg) bool {
+	if s.last <= at {
 		return false
 	}
-	n := sort.SearchInts(r.crossings, s.first+1)
+	n := sort.SearchInts(r.crossings, at+1)
 	return n < len(r.crossings) && r.crossings[n] < s.last
 }
 
