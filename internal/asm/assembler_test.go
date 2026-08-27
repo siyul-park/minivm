@@ -187,10 +187,22 @@ func TestAssembler_Build(t *testing.T) {
 	t.Run("arch without a frame rejects spilling", func(t *testing.T) {
 		// An Arch whose Frame() returns nil disables spilling: allocation
 		// fails with asm.ErrNoRegistersAvailable instead of inserting a spill
-		// frame. Callers that need this (e.g. interp's JIT policy for a
-		// trace ending in a terminal heap mutation) wrap an existing Arch
-		// rather than the asm.Assembler exposing a dedicated toggle.
+		// frame.
 		assembler := asm.New(noFrameArch{arm64.New()})
+		emitWideSum(assembler, 64)
+
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
+	})
+
+	t.Run("NoSpill option rejects spilling even when the arch has a frame", func(t *testing.T) {
+		// A caller with its own reason to forbid spilling (e.g. interp's JIT
+		// policy for a plan holding a container store, see internal/jit's
+		// Plan.NoSpill) passes NoSpill instead of wrapping arch: the same
+		// register pressure that spills cleanly through arm64.New()'s real
+		// Frame (see "spills under register pressure" below) instead rejects
+		// with ErrNoRegistersAvailable.
+		assembler := asm.New(arm64.New(), asm.NoSpill())
 		emitWideSum(assembler, 64)
 
 		_, err := assembler.Build()

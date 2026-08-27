@@ -50,7 +50,10 @@ type Relaxer interface {
 // releases the area before every return.
 //
 // An Arch whose Frame method returns nil disables spilling: allocation
-// fails with ErrNoRegistersAvailable once the bank is full.
+// fails with ErrNoRegistersAvailable once the bank is full. A caller with an
+// Arch that does support spilling can still reject it for one build with
+// New's NoSpill option, without altering Frame's contract for every other
+// build against the same Arch.
 //
 // Slot indices are dense and zero-based; the allocator reports the high
 // watermark so Enter/Leave can size the area. Each slot holds one 64-bit

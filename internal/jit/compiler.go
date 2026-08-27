@@ -25,13 +25,6 @@ type Machine interface {
 	Lower(a *asm.Assembler, input *Input, p Plan, nativeLoop bool) ([]ExitDescriptor, bool)
 }
 
-// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
-// inserting a spill frame. A nil Frame already disables spilling per asm's
-// own contract (see asm.Frame's doc comment), so this policy needs no
-// dedicated asm-level API — it is purely a JIT policy decision (see
-// Plan.NoSpill), not a generic assembler concern.
-type noSpillArch struct{ asm.Arch }
-
 // compilerBufferSize is the executable-memory buffer New allocates for a
 // Compiler's own compiled code. No caller varies it, so it needs no
 // constructor parameter.
@@ -109,21 +102,15 @@ func (c *Compiler) Compile(input *Input, root Anchor) Result {
 	return result
 }
 
-func (noSpillArch) Frame() asm.Frame { return nil }
-
 func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Frontend) (prof.CompileReason, error) {
-	arch := c.arch
-	if plan.NoSpill {
-		arch = noSpillArch{c.arch}
-	}
 	nativeLoop := plan.Kind == EntryLoop
-	reason, err := c.emit(input, plan, code, frontend, arch, nativeLoop)
+	reason, err := c.emit(input, plan, code, frontend, plan.NoSpill, nativeLoop)
 	if reason != prof.CompileReasonRegisterPressure {
 		return reason, err
 	}
 	if len(plan.Carried) > 0 {
 		plan.Carried = nil
-		reason, err = c.emit(input, plan, code, frontend, arch, nativeLoop)
+		reason, err = c.emit(input, plan, code, frontend, plan.NoSpill, nativeLoop)
 		if reason != prof.CompileReasonRegisterPressure {
 			return reason, err
 		}
@@ -131,11 +118,15 @@ func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Fr
 	if !nativeLoop {
 		return reason, err
 	}
-	return c.emit(input, plan, code, frontend, arch, false)
+	return c.emit(input, plan, code, frontend, plan.NoSpill, false)
 }
 
-func (c *Compiler) emit(input *Input, plan Plan, code *Code, frontend prof.Frontend, arch asm.Arch, nativeLoop bool) (prof.CompileReason, error) {
-	asmb := asm.New(arch)
+func (c *Compiler) emit(input *Input, plan Plan, code *Code, frontend prof.Frontend, noSpill bool, nativeLoop bool) (prof.CompileReason, error) {
+	var opts []asm.Option
+	if noSpill {
+		opts = append(opts, asm.NoSpill())
+	}
+	asmb := asm.New(c.arch, opts...)
 	exits, ok := c.machine.Lower(asmb, input, plan, nativeLoop)
 	if !ok {
 		return prof.CompileReasonLoweringRejected, nil

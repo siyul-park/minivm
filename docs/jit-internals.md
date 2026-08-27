@@ -228,14 +228,26 @@ bytes. Its complete Go frame is 8,272 bytes including the 80-byte trampoline
 area.
 Native code starts at the top of the reserve, so generated SP adjustments stay
 inside memory covered by Go's stack-growth check. X26 is the stable spill-frame
-base, so a native self-call may move SP without changing spill addresses. Keep
-the allocator limit, native frame limit, and `internal/asm/arm64/abi_arm64.s` reserve in
-sync: `interp.TestARM64_StackReserve` (`interp/native_test.go`) asserts
-`asm.MaxSpillSlots*8 + nativeFrameLimit*(1<<journal.Shift)` equals the reserve
-literal parsed out of `abi_arm64.s`, and that the reserve plus the 80-byte
-callee-saved save area equals the trampoline's total Go frame size, so an
-edit to any one constant without the others fails a test instead of
-corrupting the native stack at runtime.
+base, so a native self-call may move SP without changing spill addresses.
+
+`internal/asm/arm64` owns the byte arithmetic behind that reserve so it has one
+definition instead of being restated wherever it is needed:
+`arm64.SpillBytes` derives the spill portion from `asm.MaxSpillSlots`, and
+`arm64.StackReserve(recordBytes, callDepth)` / `arm64.FrameSize(recordBytes,
+callDepth)` compute the reserve and total Go frame size for a caller-supplied
+record width (see `journal.Shift`) and call-depth cap. `internal/asm/arm64`
+has no dependency on `internal/jit/journal`, so `recordBytes` is the caller's
+concern, not this package's. A hand-written `.s` literal cannot read a Go
+constant, so `abi_arm64.s`'s two literals still need a test to keep them
+honest, split by what each side can see: `interp.TestARM64_StackReserve`
+(`interp/native_test.go`) asserts `arm64.StackReserve(1<<journal.Shift,
+nativeFrameLimit)` equals the `ADD $N, RSP` reserve literal — the half that
+needs interp's private `nativeFrameLimit` — and `arm64.TestFrameSize`
+(`internal/asm/arm64/stack_test.go`) asserts the `TEXT ·invoke(SB), $N-16`
+literal equals that same reserve literal plus `arm64.SaveAreaBytes`, entirely
+within `internal/asm/arm64`. An edit to `asm.MaxSpillSlots`, `nativeFrameLimit`,
+or either `.s` literal without updating the others fails one of these two
+tests instead of corrupting the native stack at runtime.
 
 Register allocation (`internal/asm/rewriter.go`) is a single linear-scan pass: it spills the live vreg whose final use is farthest ahead to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. A call whose target label is bound in the same build runs through the shared epilogue on return, so the rewriter reserves the caller's spill area again after it. Linear-scan lifetimes describe a forward-only stream, so a build containing a back-edge runs without a spill frame at all: a value live across the loop would otherwise be spilled at what merely looks like its last use. The frame prologue sits ahead of the first instruction, and internal branches rebase past it, so a back-edge can never reserve the frame twice.
 
@@ -244,7 +256,7 @@ Linear spill state is unsafe across a loop back-edge, and mutation blocks can co
 - `internal/asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
 - `noSpill` scans every step in the completed plan, including learned continuations, and forbids spilling whenever `ARRAY_SET` or `STRUCT_SET` is present.
 
-When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. `ARRAY_SET` and `STRUCT_SET` use the common fresh-register heap path rather than a store-specific register-recycling path.
+When a plan forbids spilling, the compiler builds its `asm.Assembler` with the `asm.NoSpill` option instead of the target architecture's real `Frame`. `asm.NoSpill` makes `Build` reject register exhaustion with `asm.ErrNoRegistersAvailable` exactly as an `Arch` with a nil `Frame` would, without altering the architecture's own `Frame` contract for any other build, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. `ARRAY_SET` and `STRUCT_SET` use the common fresh-register heap path rather than a store-specific register-recycling path.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 

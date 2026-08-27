@@ -4,7 +4,12 @@
 //
 // ctx is passed to native code in R0. R19-R26 are callee-saved under AAPCS64
 // and used by the JIT allocator, so the Go trampoline preserves them.
-// The frame also reserves 4096 spill bytes plus 4096 bytes for generated calls.
+// The frame also reserves 4096 spill bytes plus 4096 bytes for generated
+// calls: the $8192 literal below must equal arm64.StackReserve(recordBytes,
+// callDepth) for interp's native call-depth cap, and the TEXT frame size
+// must equal arm64.FrameSize of the same (see stack.go, stack_test.go, and
+// interp's TestARM64_StackReserve — a hand-written literal here cannot read
+// those Go constants, so they are the tests that keep it honest).
 // Native code starts at the top of that reserve and may move SP downward
 // without crossing the Go stack frame or bypassing Go's stack-growth check.
 // Note: R18 is reserved by the Go toolchain; never use it.

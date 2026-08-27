@@ -29,7 +29,9 @@ type watchdog struct {
 }
 
 // nativeFrameLimit caps generated call depth to the stack space reserved by
-// the ARM64 invoke trampoline. Deeper calls trap before moving SP.
+// the ARM64 invoke trampoline (see arm64.StackReserve and
+// TestARM64_StackReserve in native_test.go). Deeper calls trap before moving
+// SP.
 const nativeFrameLimit = 128
 
 // loopBudget is how many native loop back-edges run between safepoints. It is

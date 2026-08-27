@@ -53,10 +53,12 @@ type vreg struct {
 }
 
 // MaxSpillSlots caps how many spill slots the allocator may use for one
-// build. It sizes the spill area the arm64 invoke trampoline reserves on its
-// native stack frame (see docs/jit-internals.md and asm/arm64/abi_arm64.s);
-// changing it without updating the trampoline's reserve and interp's
-// nativeFrameLimit breaks that arithmetic invariant silently.
+// build. arm64.SpillBytes derives the arm64 invoke trampoline's spill
+// reserve from this constant (see docs/jit-internals.md and
+// asm/arm64/abi_arm64.s); changing it without hand-updating the
+// trampoline's stack-reserve literal to match arm64.StackReserve fails
+// TestARM64_StackReserve (interp/native_test.go) instead of corrupting the
+// native stack at runtime.
 const MaxSpillSlots = 512
 
 // bankSize is how many physical register slots one bank can hold, fixed by
@@ -67,11 +69,16 @@ var ErrNoRegistersAvailable = errors.New("no registers available")
 
 // newRewriter prepares the register table for insts. count is how many
 // virtual registers the assembler handed out; every referenced vreg id must
-// fall below it.
-func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int) (*rewriter, error) {
+// fall below it. noSpill forces spilling off regardless of what arch.Frame
+// returns, per the Assembler-level NoSpill option.
+func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int, noSpill bool) (*rewriter, error) {
 	info := arch.Registers()
+	frame := arch.Frame()
+	if noSpill {
+		frame = nil
+	}
 	r := &rewriter{
-		frame: arch.Frame(),
+		frame: frame,
 		regs:  make([]vreg, count),
 		avail: [2]RegMask{
 			RegTypeInt:   info.Allocatable(RegTypeInt),
