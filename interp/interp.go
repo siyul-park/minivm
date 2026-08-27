@@ -1462,17 +1462,17 @@ func (i *Interpreter) call(root jit.Anchor, entry jit.Entry, stats counters, wd 
 // execution may resume at. Counting here rather than at each of the three
 // wrappers keeps the tally with the crossing it measures (see watchdog).
 // The trap already handed the interpreter a fully flushed, owned operand stack
-// (see arm64Lowerer.bridge), so the closure runs exactly as it would under
-// ordinary threaded dispatch.
+// (see internal/jit/arm64's bridge lowering), so the closure runs exactly as
+// it would under ordinary threaded dispatch.
 //
 // ok is false whenever native execution must not resume, and the caller
 // continues in the interpreter instead: the closure moved to another frame or
 // function (a call or a return), it made no forward progress, the new IP is
 // not one the callable can be re-entered at (only a block the planner marked
-// as a bridge resume carries an entry dispatch label, see
-// arm64Lowerer.dispatch), or this dispatch has already bridged its budget of
-// cycles — that last case keeps a bridge-dense function reaching the Run
-// loop's safepoints instead of cycling here indefinitely.
+// as a bridge resume carries an entry dispatch label, see internal/jit/arm64's
+// dispatch), or this dispatch has already bridged its budget of cycles — that
+// last case keeps a bridge-dense function reaching the Run loop's safepoints
+// instead of cycling here indefinitely.
 func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *watchdog, cycles int) (uint64, bool) {
 	wd.bridge()
 	f := i.fr

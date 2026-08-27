@@ -44,7 +44,7 @@ condition that removes it (`docs/coding-patterns.md` §1.1).
 
 | File | Why it is white-box | Removal condition |
 |---|---|---|
-| `interp/jit_test.go` | Drives `jit.Compiler.Compile` and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `jit.ExitDescriptor`); also splices frame state to force a specific exit, and reads install bookkeeping (`tried`, `exits`) that no metric separates from "not attempted". | Moves to `internal/jit` and `internal/jit/arm64` with the compiler, where the same contracts are that package's own public surface. |
+| `interp/native_test.go` | Drives `jit.Compiler.Compile` and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `jit.ExitDescriptor`); splices frame state to force a specific exit; reads install bookkeeping (`tried`, `exits`) that no metric separates from "not attempted"; and ties `asm.MaxSpillSlots`/`nativeFrameLimit` to the ARM64 trampoline's stack reserve. | None known. The ARM64 backend itself moved to `internal/jit/arm64`, but `newCompiler`, `compileSnapshot`, `tried`, `exits`, and `nativeFrameLimit` are interp-private bookkeeping and constants with no contract to move with it. |
 | `interp/trace_test.go` | Calls `tracer.capture` without `Run`, which is the only way to prove speculative capture snapshots a container instead of mutating the live heap. Any public path runs the real instructions too, so the isolation claim is unobservable by construction. | None known. The recorder stays in `interp`, and the claim is only provable from inside it. |
 
 ### Known Coverage Gaps
@@ -60,6 +60,7 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
 | Dataflow fact widening at a control-flow join (`mergeSlot` in `internal/jit`) | A slot's `refKnown`/`calleeKnown` facts are planning-internal: the backend never reads them, so nothing exports them. Their only external effect is which plans a frontend produces or rejects, which no fixture isolates from the rest of planning. |
 | Loop-invariant container selection (`hoistable` in `internal/jit`) | Reachable only through `TracePlan`, so asserting it needs a hand-built recorded trace that survives every other planning check. The recorder that produces real traces lives in `interp` and cannot be called without running the program. Covered end to end by `interp.TestARM64_HoistedContainerLoop`; the selection rule itself has no isolated public expression. |
+| A committing flush's hot-backedge codegen (`lowerer.flush` in `internal/jit/arm64`) emits no VM-slot store for a dirty carried local | The claim is about which instructions a `flush(flushCommit)` call emits into an `asm.Assembler`, which is package-private mechanics of `internal/jit/arm64` with no public accessor. It moved with the ARM64 backend from `interp/jit_test.go`'s `TestARM64_Flush` and could not become an `arm64_test` external test because it constructed the unexported `lowering`/`activation` types directly; deleted rather than kept white-box inside `internal/jit/arm64` outside its normal contract. The behavior it protected — a hot loop back-edge keeps carried locals register-authoritative — is still covered end to end by `interp.TestARM64_LoopCarriedLocals`, which observes the result rather than the emitted bytes. |
 
 Closing the first one needs either a public signal that an anchor was retired,
 or a workload that makes retirement observable through existing metrics.
@@ -915,7 +916,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | Command | Contract |
 |---|---|
 | `make check` | generated files, module tidiness, formatting, vet, race tests, and ARM64 build checks |
-| `make coverage-check` | full coverage run and total coverage of at least the recorded 72.8% baseline |
+| `make coverage-check` | full cross-package coverage run (`-coverpkg=./...`, so a package exercised only through its consumer still counts) and total coverage of at least the recorded 72.5% baseline |
 | `make fuzz` | bounded smoke runs for every declared fuzz target |
 | `make benchmark-pr` | quick deterministic benchmark report; no performance threshold |
 | `make benchmark-core` | all canonical package and VM-kernel benchmarks |

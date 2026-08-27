@@ -61,8 +61,8 @@ const (
 	// TrapBridge reports the IP of one opcode the backend cannot lower.
 	// CellNextIP carries that opcode's own IP; the Go wrapper runs its
 	// threaded closure exactly once and re-enters the same callable at the
-	// closure's new IP (see Interpreter.bridge and arm64Lowerer.dispatch in
-	// package interp).
+	// closure's new IP (see interp.Interpreter.bridge and internal/jit/arm64's
+	// dispatch).
 	TrapBridge
 )
 

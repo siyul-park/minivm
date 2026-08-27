@@ -61,10 +61,10 @@ Do not report work complete until all of these hold:
 
 | Task | Read | Usually edit | Verify |
 |---|---|---|---|
-| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/cmd/geninterp/`, `instr/`, `interp/jit_arm64.go` | `go test ./instr ./interp` |
+| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/cmd/geninterp/`, `instr/`, `internal/jit/arm64/` | `go test ./instr ./interp` |
 | Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
-| JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `interp/jit*.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |
+| JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/native_arm64.go`, `interp/native_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |
 | Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
 | Bytecode verification / untrusted input | `docs/verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
 | REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |

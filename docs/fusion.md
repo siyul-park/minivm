@@ -15,7 +15,7 @@ Read this before changing threaded fusion patterns, generated handlers, lookahea
 | Source generation | `internal/cmd/geninterp/generate.go` |
 | Pattern validation | `internal/cmd/geninterp/validate.go` |
 | Standalone and fused threaded handlers | `interp/threaded.go` |
-| ARM64 trace lowering | `interp/jit_arm64.go` |
+| ARM64 trace lowering | `internal/jit/arm64/` |
 | Opcode metadata | `instr/type.go` |
 
 ## Model
@@ -42,7 +42,7 @@ Compile-time specialization resolves operands, declared slot kinds, constants, h
 
 ## JIT Separation
 
-The generator does not emit architecture-specific code or tests. ARM64 trace fusion is ordinary lowering code in `interp/jit_arm64.go`, next to the standalone operations it combines. This keeps JIT selection, guards, symbolic stack mutation, and emitted instructions in one implementation instead of mirroring them through generator metadata.
+The generator does not emit architecture-specific code or tests. ARM64 trace fusion is ordinary lowering code in `internal/jit/arm64`, next to the standalone operations it combines. This keeps JIT selection, guards, symbolic stack mutation, and emitted instructions in one implementation instead of mirroring them through generator metadata.
 
 Threaded patterns are not a cross-backend registry. An ARM64 specialization is added only when trace lowering benefits from it and is tested through JIT behavior.
 
@@ -60,7 +60,7 @@ Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yie
 
 Add or change an opcode through its single `lowerers` entry in `lower.go`. The emitter must work with both standalone and composable `state` values; do not add a standalone copy or a fusion-only renderer. Add a pattern in `pattern.go` only to select a concrete sequence and compile-time guards. Source kinds and stack limits come from `instr.Type` metadata, with explicit input rules only for ownership-sensitive ref consumers and dynamically typed call or aggregate-index consumers. Preserve the first absorbed step independently from the value-producing step. Reject ambiguous, variable-width, stack-inconsistent, unresolved, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, synthetic opcodes, runtime pattern objects, or architecture-specific output.
 
-Keep ARM64 trace fusion hand-written in `interp/jit_arm64.go`. Do not add architecture flags or backends to this generator.
+Keep ARM64 trace fusion hand-written in `internal/jit/arm64/`. Do not add architecture flags or backends to this generator.
 
 ## Related Docs
 

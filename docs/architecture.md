@@ -27,7 +27,7 @@ For detailed behavior, follow the related topic docs instead of duplicating the 
 - `types` must not import `interp`.
 - Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
 - `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
-- Architecture-specific native code should stay under `internal/asm/<arch>/` and `interp/jit_<arch>.go`.
+- Architecture-specific native code should stay under `internal/asm/<arch>/` and `internal/jit/<arch>/`.
 
 ## Package Dependency Graph
 
@@ -41,7 +41,8 @@ internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
 internal/jit/journal → (leaf)
 internal/jit → instr, types, internal/asm, pass, analysis, prof
-interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/journal, pass, analysis, prof
+internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/journal, pass, analysis, prof
+interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/journal, internal/jit/arm64, pass, analysis, prof
 debug   → interp
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -57,13 +58,14 @@ cmd/minivm → cli
 | `program/` | bytecode, constants, types, handlers, builder, and verifier entry point |
 | `instr/` | opcode definitions, encoding, parsing, formatting, and metadata |
 | `types/` | VM values, type descriptors, boxed representation, arrays, structs, maps, strings, functions, closures, and errors |
-| `interp/` | interpreter state, threaded dispatch, host APIs, coroutines, tracing, JIT driver, and pooling |
+| `interp/` | interpreter state, threaded dispatch, host APIs, coroutines, tracing, JIT arch selection, and pooling |
 | `debug/` | bytecode-level debugger API |
 | `prof/` | execution samples and JIT metrics |
 | `internal/asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
 | `internal/asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
+| `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
 | `internal/jit/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `pass/` | generic analysis and transform infrastructure |
 | `analysis/` | reusable static analyses |

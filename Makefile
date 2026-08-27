@@ -3,7 +3,7 @@
 # tests that exercise them skip on amd64, so they count as uncovered. The
 # number is therefore lower than an arm64 run reports. Raising it needs
 # portable tests for those files, not a different threshold.
-coverage-min ?= 63.5
+coverage-min ?= 72.5
 benchmark-pr-time ?= 100ms
 benchmark-time ?= 1s
 benchmark-count ?= 5
@@ -76,7 +76,7 @@ test:
 	@go test -race $(test-options) ./...
 
 coverage:
-	@go test -race --coverprofile=coverage.out --covermode=atomic $(test-options) ./...
+	@go test -race --coverprofile=coverage.out --covermode=atomic -coverpkg=./... $(test-options) ./...
 
 coverage-check: coverage
 	@coverage="$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}')"; \

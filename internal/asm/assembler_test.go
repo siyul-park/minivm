@@ -350,7 +350,7 @@ func TestAssembler_Build(t *testing.T) {
 		// using.
 		//
 		// head is bound before any spilling code, so it stands in for
-		// ctx.head in interp/jit_arm64.go: both the initial external entry
+		// ctx.head in internal/jit/arm64: both the initial external entry
 		// and every recursive BL fall through to the same point. Recursing
 		// twice (depth 2) is required to observe corruption: the innermost
 		// activation (depth 0) is a trivial base case that touches no

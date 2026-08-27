@@ -14,8 +14,8 @@ Use this document when adding, changing, debugging, or testing bytecode instruct
 | mnemonic, operand widths, fixed stack effects | `instr/type.go` |
 | dynamic verification rules | `program/verify.go` |
 | runtime semantics | `interp/threaded.go` |
-| ARM64 lowering | `interp/jit_arm64.go` |
-| non-ARM64 JIT stub | `interp/jit_stub.go` |
+| ARM64 lowering | `internal/jit/arm64/` |
+| non-ARM64 JIT stub | `interp/native_stub.go` |
 | platform support | `docs/compatibility.md` |
 
 ## Core Rules
@@ -40,7 +40,7 @@ JIT status is per opcode and per backend. It describes whether a recorded trace 
 | ⬜ | threaded-only on that backend |
 | 🔲 | backend unavailable |
 
-AMD64 currently has no active JIT backend. `internal/asm/amd64` is a placeholder and `interp/jit_stub.go` disables compiler construction on non-ARM64 platforms, so every AMD64 entry is `🔲`.
+AMD64 currently has no active JIT backend. `internal/asm/amd64` is a placeholder and `interp/native_stub.go` disables compiler construction on non-ARM64 platforms, so every AMD64 entry is `🔲`.
 
 ARM64 native branches are range-checked before encoding. Conditional label branches outside their signed imm19 range are relaxed to an inverted conditional skip plus an unconditional imm26 branch when that replacement can reach the target; otherwise JIT compilation cleanly falls back to threaded execution.
 
