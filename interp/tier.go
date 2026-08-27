@@ -1,6 +1,9 @@
 package interp
 
-import "github.com/siyul-park/minivm/prof"
+import (
+	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/prof"
+)
 
 type counters struct {
 	entry  *prof.Counter
@@ -68,10 +71,10 @@ func (m counters) yield() {
 // newWatchdog precomputes, for each of entry's exit descriptors, whether taking
 // it means the entry gave up, so the watchdog's hot path only ever indexes a
 // []bool keyed by descriptor ID.
-func newWatchdog(entry native) *watchdog {
-	gaveUp := make([]bool, len(entry.exits))
-	for id, exit := range entry.exits {
-		gaveUp[id] = givesUp(exit.reason)
+func newWatchdog(entry jit.Entry) *watchdog {
+	gaveUp := make([]bool, len(entry.Exits))
+	for id, exit := range entry.Exits {
+		gaveUp[id] = givesUp(exit.Reason)
 	}
 	return &watchdog{gaveUp: gaveUp}
 }

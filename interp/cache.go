@@ -16,7 +16,7 @@ import (
 // buffers, and the append-only module list members install from. Profiling and
 // trace recording live in the tracer, not here.
 type cache struct {
-	modules atomic.Pointer[[]*module]
+	modules atomic.Pointer[[]*jit.Code]
 	buffers []*asm.Buffer
 	hits    []atomic.Int64
 	state   []atomic.Int32
@@ -41,7 +41,7 @@ const (
 
 func newCache(prog *program.Program) *cache {
 	size := len(prog.Constants) + 1
-	mods := []*module{}
+	mods := []*jit.Code{}
 	c := &cache{
 		hits:    make([]atomic.Int64, size),
 		state:   make([]atomic.Int32, size),
@@ -155,19 +155,19 @@ func (c *cache) fail(addr int) {
 	c.finishLocked(addr)
 }
 
-func (c *cache) publish(addr int, mod *module, buf *asm.Buffer) {
+func (c *cache) publish(addr int, mod *jit.Code, buf *asm.Buffer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if buf != nil {
 		c.buffers = append(c.buffers, buf)
 	}
-	if mod != nil && len(mod.entries) > 0 {
+	if mod != nil && len(mod.Entries) > 0 {
 		modules := c.modules.Load()
-		next := make([]*module, 0, len(*modules)+1)
+		next := make([]*jit.Code, 0, len(*modules)+1)
 		next = append(next, (*modules)...)
 		next = append(next, mod)
 		c.modules.Store(&next)
-		for target := range mod.entries {
+		for target := range mod.Entries {
 			if target.Addr >= 0 && target.Addr < len(c.state) && target.Addr != addr &&
 				c.state[target.Addr].Load() == cacheCold && len(c.pending[target.Addr]) == 0 {
 				c.state[target.Addr].Store(cacheReady)

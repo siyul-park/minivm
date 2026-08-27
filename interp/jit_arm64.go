@@ -41,7 +41,7 @@ type lowering struct {
 	frames      []activation
 	work        []work
 	exits       []sideExit
-	descriptors []exitDescriptor
+	descriptors []jit.ExitDescriptor
 	saved       []value
 
 	addr       int
@@ -203,7 +203,7 @@ func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReaso
 	label := ctx.assembler.Label()
 	stack, frames := ctx.snapshot()
 	id := len(ctx.descriptors)
-	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
+	ctx.descriptors = append(ctx.descriptors, jit.ExitDescriptor{Reason: reason, Opcode: opcode})
 	ctx.exits = append(ctx.exits, sideExit{
 		label: label, values: stack, frames: frames, resume: resume,
 		id: id,
@@ -309,21 +309,13 @@ var (
 	tagRef = types.Tag(types.KindRef)
 )
 
-func newCompiler() (*compiler, error) {
-	buffer, err := asm.NewBuffer(4096)
-	if err != nil {
-		return nil, err
-	}
-	return &compiler{
-		arch:    arm64.New(),
-		buffer:  buffer,
-		machine: newMachine(),
-	}, nil
+func newCompiler() (*jit.Compiler, error) {
+	return jit.New(arm64.New(), newMachine())
 }
 
 // newMachine returns the ARM64 machine, holding the scratch registers a
 // lowering context pins the frame journal into (see arm64Lowerer.enter).
-func newMachine() machine {
+func newMachine() jit.Machine {
 	return arm64Lowerer{scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14}}
 }
 
@@ -4307,7 +4299,7 @@ func (l arm64Lowerer) trap(ctx *lowering, kind journal.Trap, resume int, reason 
 	}
 	if kind == journal.TrapFallback {
 		id = len(ctx.descriptors)
-		ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
+		ctx.descriptors = append(ctx.descriptors, jit.ExitDescriptor{Reason: reason, Opcode: opcode})
 	}
 	l.trapFlushed(ctx, kind, resume, id)
 	return true
@@ -4872,11 +4864,11 @@ func (l arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
 }
 
 // Lower lowers plan p into a for one native entry, reporting the exits it
-// queued and whether lowering succeeded. It is the machine interface's seam
-// with the architecture-neutral compiler (see interp/jit.go): the compiler
-// picks the arch and builds a, and everything from here down is ARM64
-// lowering state and mechanics.
-func (l arm64Lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]exitDescriptor, bool) {
+// queued and whether lowering succeeded. It is the jit.Machine interface's
+// seam with the architecture-neutral compiler (see internal/jit/compiler.go):
+// the compiler picks the arch and builds a, and everything from here down is
+// ARM64 lowering state and mechanics.
+func (l arm64Lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.ExitDescriptor, bool) {
 	if len(l.scratch) < scratchCount {
 		return nil, false
 	}
@@ -4885,7 +4877,7 @@ func (l arm64Lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nati
 	if !l.lower(ctx, p) {
 		return nil, false
 	}
-	return append([]exitDescriptor(nil), ctx.descriptors...), true
+	return append([]jit.ExitDescriptor(nil), ctx.descriptors...), true
 }
 
 // newLowering builds the lowering context one plan is emitted through.

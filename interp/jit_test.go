@@ -93,7 +93,7 @@ func TestARM64_StackReserve(t *testing.T) {
 
 // TestCompiler_Compile covers the compiler-selected static and traced plans
 // whose exit encoding, frame splicing, or bare static-plan shape has no public
-// observable: bypassing dispatch through entry.callable.Call to read the
+// observable: bypassing dispatch through entry.Callable.Call to read the
 // journal trap directly, driving a loop or call entry from a hand-spliced
 // i.fr, or asserting staticPlan's return shape without ever running it. The
 // subset of this contract reachable by warming a program up naturally and
@@ -117,17 +117,17 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardValue, opcode: int(instr.I32_DIV_S)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardValue, Opcode: int(instr.I32_DIV_S)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -153,9 +153,9 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 			{
 				value := i.constants[1]
@@ -163,13 +163,13 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardShape, opcode: int(instr.ARRAY_LEN)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardShape, Opcode: int(instr.ARRAY_LEN)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -195,18 +195,18 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardBounds, opcode: int(instr.ARRAY_GET)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardBounds, Opcode: int(instr.ARRAY_GET)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -259,9 +259,9 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, jit.Anchor{IP: headers[0]})
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			i.install(compiled.module, false)
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			i.install(compiled.Code, false)
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.PopBoxed()
 			require.NoError(t, err)
@@ -318,9 +318,9 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, jit.Anchor{})
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			i.install(compiled.module, false)
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			i.install(compiled.Code, false)
 
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.PopBoxed()
@@ -348,9 +348,9 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, jit.Anchor{})
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			i.install(compiled.module, false)
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			i.install(compiled.Code, false)
 
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.PopBoxed()
@@ -379,13 +379,13 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 
-			for _, exit := range entry.exits {
-				if exit.reason == prof.ExitGuardValue && exit.opcode == int(instr.ARRAY_GET) {
+			for _, exit := range entry.Exits {
+				if exit.Reason == prof.ExitGuardValue && exit.Opcode == int(instr.ARRAY_GET) {
 					return
 				}
 			}
@@ -416,19 +416,19 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
 
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitGuardKind, opcode: int(instr.STRUCT_GET)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardKind, Opcode: int(instr.STRUCT_GET)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -459,19 +459,19 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
 
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitColdBranch, opcode: int(instr.BR_IF)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitColdBranch, Opcode: int(instr.BR_IF)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -492,18 +492,18 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitTraceCut, opcode: prof.OpcodeNone}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitTraceCut, Opcode: prof.OpcodeNone}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -521,18 +521,18 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
 
-			require.NoError(t, entry.callable.Call(i.journalPtr()))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitTerminalOp, opcode: int(instr.F64_REM)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitTerminalOp, Opcode: int(instr.F64_REM)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -586,11 +586,11 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
-			require.Equal(t, jit.EntryLoop, entry.kind)
+			require.Equal(t, jit.EntryLoop, entry.Kind)
 			metrics := i.counters(root, entry)
 
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
@@ -599,8 +599,8 @@ func TestCompiler_Compile(t *testing.T) {
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
-			require.Less(t, id, len(entry.exits))
-			require.Equal(t, exitDescriptor{reason: prof.ExitLoop, opcode: int(instr.BR_IF)}, entry.exits[id])
+			require.Less(t, id, len(entry.Exits))
+			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitLoop, Opcode: int(instr.BR_IF)}, entry.Exits[id])
 			exits, ok := local.Metric("vm_jit_native_exits_total",
 				prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: headerLabel},
 				prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"},
@@ -636,11 +636,11 @@ func TestCompiler_Compile(t *testing.T) {
 			input, ok := i.compileSnapshot(root.Addr)
 			require.True(t, ok)
 			compiled := compiler.Compile(input, root)
-			require.NoError(t, compiled.err)
-			require.NotNil(t, compiled.module, "%+v", compiled)
-			entry, ok := compiled.module.entries[root]
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
-			require.Equal(t, jit.EntryFunction, entry.kind)
+			require.Equal(t, jit.EntryFunction, entry.Kind)
 
 			i.call(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
 			require.Equal(t, uint64(journal.TrapYield), i.journal[journal.CellTrap])
@@ -672,11 +672,11 @@ func TestCompiler_Compile(t *testing.T) {
 		input, ok := i.compileSnapshot(0)
 		require.True(t, ok)
 		result := c.Compile(input, jit.Anchor{})
-		require.NoError(t, result.err)
-		require.NotNil(t, result.module)
-		for _, exit := range result.module.entries[jit.Anchor{}].exits {
-			if exit.reason == prof.ExitGuardValue {
-				require.Equal(t, int(instr.I32_DIV_S), exit.opcode)
+		require.NoError(t, result.Err)
+		require.NotNil(t, result.Code)
+		for _, exit := range result.Code.Entries[jit.Anchor{}].Exits {
+			if exit.Reason == prof.ExitGuardValue {
+				require.Equal(t, int(instr.I32_DIV_S), exit.Opcode)
 				return
 			}
 		}
@@ -726,9 +726,9 @@ func TestCompiler_Compile(t *testing.T) {
 		input, ok := i.compileSnapshot(addr)
 		require.True(t, ok)
 		result := c.Compile(input, jit.Anchor{Addr: addr})
-		require.NoError(t, result.err)
-		mod := result.module
-		require.NotEmpty(t, mod.entries)
+		require.NoError(t, result.Err)
+		mod := result.Code
+		require.NotEmpty(t, mod.Entries)
 		i.install(mod, false)
 
 		require.NoError(t, i.Run(context.Background()))
@@ -816,9 +816,9 @@ func TestCompiler_Compile(t *testing.T) {
 		input, ok := native.compileSnapshot(addr)
 		require.True(t, ok)
 		result := c.Compile(input, jit.Anchor{Addr: addr})
-		require.NoError(t, result.err)
-		mod := result.module
-		require.NotEmpty(t, mod.entries)
+		require.NoError(t, result.Err)
+		mod := result.Code
+		require.NotEmpty(t, mod.Entries)
 		native.install(mod, false)
 		require.NoError(t, native.Run(context.Background()))
 		got, err := native.Global(0)

@@ -40,7 +40,7 @@ prof    → instr
 internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
 internal/jit/journal → (leaf)
-internal/jit → instr, types, pass, analysis, prof
+internal/jit → instr, types, internal/asm, pass, analysis, prof
 interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/journal, pass, analysis, prof
 debug   → interp
 analysis → pass, types, instr
@@ -63,7 +63,7 @@ cmd/minivm → cli
 | `internal/asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
 | `internal/asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
-| `internal/jit/` | architecture-neutral compiler IR: the plan graph, per-step dataflow facts, runtime layout tables, and recorded-trace data both JIT frontends and every native backend share |
+| `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `pass/` | generic analysis and transform infrastructure |
 | `analysis/` | reusable static analyses |

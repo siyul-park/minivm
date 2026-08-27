@@ -28,7 +28,7 @@ type Interpreter struct {
 	codec       Codec
 	speculative bool
 
-	compiler *compiler
+	compiler *jit.Compiler
 	cache    *cache
 	profiler *prof.Profiler
 	samples  *prof.Collector
@@ -997,23 +997,23 @@ func (i *Interpreter) compile(root jit.Anchor) error {
 		compiler, err := newCompiler()
 		if err != nil {
 			i.samples.AddMetric("vm_jit_errors_total", 1)
-			i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
+			i.recordCompile(prof.TriggerHot, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
 			return err
 		}
 		i.compiler = compiler
 	}
 	if i.compiler == nil {
-		i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
+		i.recordCompile(prof.TriggerHot, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
 	result := i.attempt(i.compiler, root, prof.TriggerHot)
-	if result.err != nil {
-		return result.err
+	if result.Err != nil {
+		return result.Err
 	}
-	if result.module == nil {
+	if result.Code == nil {
 		return nil
 	}
-	i.install(result.module, true)
+	i.install(result.Code, true)
 	return nil
 }
 
@@ -1071,14 +1071,14 @@ func (i *Interpreter) compileSnapshot(addr int) (*jit.Input, bool) {
 
 // attempt runs one Compile, records the outcome under trigger, and counts any
 // compile error. Acquisition and delivery of the result stay with the caller.
-func (i *Interpreter) attempt(c *compiler, root jit.Anchor, trigger prof.Trigger) compileResult {
+func (i *Interpreter) attempt(c *jit.Compiler, root jit.Anchor, trigger prof.Trigger) jit.Result {
 	input, ok := i.compileSnapshot(root.Addr)
-	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
+	result := jit.Result{Anchor: root, Outcome: prof.CompileOutcomeEmpty, Reason: prof.CompileReasonNoInput}
 	if ok {
 		result = c.Compile(input, root)
 	}
 	i.recordCompile(trigger, result)
-	if result.err != nil {
+	if result.Err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 	}
 	return result
@@ -1087,12 +1087,12 @@ func (i *Interpreter) attempt(c *compiler, root jit.Anchor, trigger prof.Trigger
 // install accounts a successful Compile and rewires the dispatch table: a
 // trace entry replaces the function's first opcode handler and keeps the
 // shadowed threaded handler for guard fallback.
-func (i *Interpreter) install(mod *module, account bool) {
+func (i *Interpreter) install(mod *jit.Code, account bool) {
 	if account {
 		i.account(mod)
 	}
-	for a, entry := range mod.entries {
-		if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) || entry.callable == nil {
+	for a, entry := range mod.Entries {
+		if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) || entry.Callable == nil {
 			continue
 		}
 		// A peer's publish can land on a function this interpreter already
@@ -1117,8 +1117,8 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// natives keeps its New-time size: growing it in bind could dangle the
 		// journal base cached by a native frame suspended across a trap
 		// fallback, so dynamically bound functions never get a natives slot.
-		if entry.kind == jit.EntryFunction && a.Addr < len(i.natives) {
-			atomic.StorePointer(&i.natives[a.Addr], entry.callable.Addr())
+		if entry.Kind == jit.EntryFunction && a.Addr < len(i.natives) {
+			atomic.StorePointer(&i.natives[a.Addr], entry.Callable.Addr())
 		}
 		// A module loop root owns the hot body far better than the whole-module
 		// entry plan that also contains it, and an installed entry answers
@@ -1126,7 +1126,7 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// would never be dispatched. Retire the entry in favour of the loop.
 		// Only module code: its entry runs once per execution, while a
 		// function entry carries the call path and must stay.
-		if entry.kind == jit.EntryLoop && a.Addr == 0 {
+		if entry.Kind == jit.EntryLoop && a.Addr == 0 {
 			if shadowed := i.exits[jit.Anchor{Addr: 0}]; shadowed != nil {
 				i.code[0][0] = shadowed
 			}
@@ -1136,9 +1136,9 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
-		if entry.kind == jit.EntryLoop {
+		if entry.Kind == jit.EntryLoop {
 			i.code[a.Addr][a.IP] = i.loop(a, entry, stats, wd)
-		} else if entry.kind == jit.EntryModule {
+		} else if entry.Kind == jit.EntryModule {
 			i.code[a.Addr][a.IP] = i.start(a, entry, stats, wd)
 		} else {
 			i.code[a.Addr][a.IP] = i.call(a, entry, stats, wd)
@@ -1399,7 +1399,7 @@ func (i *Interpreter) trace(f *frame) error {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root jit.Anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) call(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -1413,7 +1413,7 @@ func (i *Interpreter) call(root jit.Anchor, entry native, stats counters, wd *wa
 			// self tail-call back-edge (see tailLoop) that polls the safepoint every
 			// loopBudget iterations, re-entering native here after each yield.
 			i.journal[journal.CellBudget] = loopBudget
-			if err := entry.callable.Call(ctx); err != nil {
+			if err := entry.Callable.Call(ctx); err != nil {
 				panic(err)
 			}
 
@@ -1473,7 +1473,7 @@ func (i *Interpreter) call(root jit.Anchor, entry native, stats counters, wd *wa
 // arm64Lowerer.dispatch), or this dispatch has already bridged its budget of
 // cycles — that last case keeps a bridge-dense function reaching the Run
 // loop's safepoints instead of cycling here indefinitely.
-func (i *Interpreter) bridge(root jit.Anchor, entry native, wd *watchdog, cycles int) (uint64, bool) {
+func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *watchdog, cycles int) (uint64, bool) {
 	wd.bridge()
 	f := i.fr
 	if cycles >= loopBudget || f.addr != root.Addr {
@@ -1501,7 +1501,7 @@ func (i *Interpreter) bridge(root jit.Anchor, entry native, wd *watchdog, cycles
 	if i.fr != f || f.addr != root.Addr || f.ip <= ip {
 		return 0, false
 	}
-	if !slices.Contains(entry.resumable, f.ip) {
+	if !slices.Contains(entry.Resumable, f.ip) {
 		return 0, false
 	}
 	return uint64(f.ip), true
@@ -1510,7 +1510,7 @@ func (i *Interpreter) bridge(root jit.Anchor, entry native, wd *watchdog, cycles
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root jit.Anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) start(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -1521,7 +1521,7 @@ func (i *Interpreter) start(root jit.Anchor, entry native, stats counters, wd *w
 			i.fr.code = nil
 			i.fr.upvals = nil
 			i.journal[journal.CellBudget] = loopBudget
-			if err := entry.callable.Call(ctx); err != nil {
+			if err := entry.Callable.Call(ctx); err != nil {
 				panic(err)
 			}
 
@@ -1566,7 +1566,7 @@ func (i *Interpreter) start(root jit.Anchor, entry native, stats counters, wd *w
 // A spent budget yields to the safepoint and the Run loop re-enters native at
 // the header; a guarded side exit or the loop-exit edge leaves deopt with
 // i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(root jit.Anchor, entry native, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) loop(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -1579,7 +1579,7 @@ func (i *Interpreter) loop(root jit.Anchor, entry native, stats counters, wd *wa
 			// dispatch) would drown the loop in deopt/re-enter churn. Run many
 			// iterations natively between safepoints instead.
 			i.journal[journal.CellBudget] = loopBudget
-			if err := entry.callable.Call(ctx); err != nil {
+			if err := entry.Callable.Call(ctx); err != nil {
 				panic(err)
 			}
 			i.sp = int(i.journal[journal.CellSP])
@@ -1664,11 +1664,11 @@ func (i *Interpreter) exit(root jit.Anchor) {
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	result := i.attempt(i.compiler, root, prof.TriggerSideExit)
-	if result.err != nil {
-		panic(result.err)
+	if result.Err != nil {
+		panic(result.Err)
 	}
-	if result.module != nil {
-		i.install(result.module, true)
+	if result.Code != nil {
+		i.install(result.Code, true)
 	}
 }
 
@@ -1687,31 +1687,31 @@ func (i *Interpreter) shared(root jit.Anchor, trigger prof.Trigger) error {
 	compiler, err := newCompiler()
 	if err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
-		i.recordCompile(trigger, compileResult{anchor: root, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
+		i.recordCompile(trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
 		i.cache.fail(addr)
 		return err
 	}
 	if compiler == nil {
-		i.recordCompile(trigger, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
+		i.recordCompile(trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
 		i.cache.fail(addr)
 		return nil
 	}
 	result := i.attempt(compiler, root, trigger)
-	if result.err != nil {
+	if result.Err != nil {
 		_ = compiler.Close()
 		i.cache.fail(addr)
-		return result.err
+		return result.Err
 	}
-	if result.module == nil {
+	if result.Code == nil {
 		_ = compiler.Close()
 		i.cache.fail(addr)
 		return nil
 	}
-	mod := result.module
+	mod := result.Code
 	i.account(mod)
 	var buf *asm.Buffer
-	if len(mod.entries) > 0 {
-		buf = compiler.buffer
+	if len(mod.Entries) > 0 {
+		buf = compiler.Buffer()
 	} else {
 		_ = compiler.Close()
 	}
@@ -1719,36 +1719,36 @@ func (i *Interpreter) shared(root jit.Anchor, trigger prof.Trigger) error {
 	return nil
 }
 
-func (i *Interpreter) counters(a jit.Anchor, entry native) counters {
+func (i *Interpreter) counters(a jit.Anchor, entry jit.Entry) counters {
 	if i.profiler == nil {
 		return counters{}
 	}
-	kind := entry.kind.Profile()
+	kind := entry.Kind.Profile()
 	stats := counters{
-		entry:  i.samples.RegisterEntry(a.Addr, a.IP, kind, entry.frontend),
-		yields: i.samples.RegisterYield(a.Addr, a.IP, kind, entry.frontend),
-		exits:  make([]*prof.Counter, len(entry.exits)),
+		entry:  i.samples.RegisterEntry(a.Addr, a.IP, kind, entry.Frontend),
+		yields: i.samples.RegisterYield(a.Addr, a.IP, kind, entry.Frontend),
+		exits:  make([]*prof.Counter, len(entry.Exits)),
 	}
-	for id, exit := range entry.exits {
-		stats.exits[id] = i.samples.RegisterExit(a.Addr, a.IP, kind, entry.frontend, exit.reason, exit.opcode)
+	for id, exit := range entry.Exits {
+		stats.exits[id] = i.samples.RegisterExit(a.Addr, a.IP, kind, entry.Frontend, exit.Reason, exit.Opcode)
 	}
 	return stats
 }
 
-func (i *Interpreter) account(mod *module) {
-	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
-	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
+func (i *Interpreter) account(mod *jit.Code) {
+	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.Entries)))
+	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.Bytes))
 	if i.profiler == nil {
 		return
 	}
-	for a, entry := range mod.entries {
-		i.samples.RecordEmit(a.Addr, a.IP, entry.kind.Profile(), entry.frontend, entry.bytes)
+	for a, entry := range mod.Entries {
+		i.samples.RecordEmit(a.Addr, a.IP, entry.Kind.Profile(), entry.Frontend, entry.Bytes)
 	}
 }
 
-func (i *Interpreter) recordCompile(trigger prof.Trigger, result compileResult) {
+func (i *Interpreter) recordCompile(trigger prof.Trigger, result jit.Result) {
 	if i.profiler != nil {
-		i.samples.RecordCompile(result.anchor.Addr, result.anchor.IP, trigger, result.frontend, result.outcome, result.reason)
+		i.samples.RecordCompile(result.Anchor.Addr, result.Anchor.IP, trigger, result.Frontend, result.Outcome, result.Reason)
 	}
 }
 
