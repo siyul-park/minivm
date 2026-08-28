@@ -8,6 +8,25 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// resolver is the read-only static evidence a static plan resolves value
+// kinds and container shapes against: the function being planned, the
+// module-wide constant, global, heap, and declared-type tables StaticPlan
+// reads from Input, and the two facts derived from them once per plan —
+// locals and declared. Every abstract-interpretation step below queries it;
+// none of it changes once StaticPlan builds it.
+type resolver struct {
+	fn        *types.Function
+	constants []types.Boxed
+	globals   []types.Kind
+	heap      []types.Value
+	decl      []types.Type
+
+	locals []types.Type
+	// declared reports whether a declared array type may answer arrayKind:
+	// only true in a call-free plan (see StaticPlan).
+	declared bool
+}
+
 // StaticPlan builds the whole-function entry plan plus one plan per loop
 // header, from bytecode alone: it covers opcodes no trace can record but
 // resolves a container's element or field kind only when a constant or
@@ -32,8 +51,16 @@ func StaticPlan(input *Input) ([]Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	constants, heap := input.Constants, input.Heap
-	facts, ok := planStates(input.Function, blocks, constants, input.Globals, heap, input.Decl, declared)
+	static := resolver{
+		fn:        input.Function,
+		constants: input.Constants,
+		globals:   input.Globals,
+		heap:      input.Heap,
+		decl:      input.Decl,
+		locals:    localTypes(input.Function),
+		declared:  declared,
+	}
+	facts, ok := static.planStates(blocks)
 	if !ok {
 		return nil, nil
 	}
@@ -44,7 +71,6 @@ func StaticPlan(input *Input) ([]Plan, error) {
 	}
 	result := Plan{Anchor: Anchor{Addr: input.Address}, Kind: entryType}
 	result.Blocks = make([]Block, 0, len(blocks))
-	locals := localTypes(input.Function)
 	for idx, source := range blocks {
 		target := Block{Anchor: Anchor{Addr: input.Address, IP: source.Start}}
 		target.State = append([]Slot{}, facts[idx]...)
@@ -62,7 +88,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 			}
 			if inst.Opcode() == instr.CONST_GET {
 				constant := int(inst.Operand(0))
-				if constant < len(constants) && constants[constant].Kind() == types.KindRef {
+				if constant < len(static.constants) && static.constants[constant].Kind() == types.KindRef {
 					step.Known = true
 				}
 			}
@@ -82,11 +108,11 @@ func StaticPlan(input *Input) ([]Plan, error) {
 			if len(flow) >= 2 {
 				switch inst.Opcode() {
 				case instr.STRUCT_GET:
-					if kind, ok := structFieldKind(heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
+					if kind, ok := structFieldKind(static.heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
 						step.Seen = types.Zero(kind)
 					}
 				case instr.ARRAY_GET:
-					if kind, ok := arrayKind(heap, flow[len(flow)-2], declared); ok {
+					if kind, ok := static.arrayKind(flow[len(flow)-2]); ok {
 						step.Seen = types.Zero(kind)
 					}
 				}
@@ -114,7 +140,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 					target.Steps = append(target.Steps, step)
 				}
 			}
-			if !applyStep(input.Function, locals, constants, input.Globals, heap, input.Decl, declared, &flow, inst) {
+			if !static.applyStep(&flow, inst) {
 				return nil, nil
 			}
 			if bridgeable(inst.Opcode()) {
@@ -293,14 +319,13 @@ func bridgeable(op instr.Opcode) bool {
 	}
 }
 
-func planStates(fn *types.Function, blocks []*analysis.BasicBlock, constants []types.Boxed, globals []types.Kind, heap []types.Value, decl []types.Type, declared bool) ([][]Slot, bool) {
-	if len(fn.Handlers) > 0 {
+func (r resolver) planStates(blocks []*analysis.BasicBlock) ([][]Slot, bool) {
+	if len(r.fn.Handlers) > 0 {
 		return nil, false
 	}
 	if len(blocks) == 0 {
 		return nil, true
 	}
-	locals := localTypes(fn)
 	states := make([][]Slot, len(blocks))
 	seen := make([]bool, len(blocks))
 	seen[0] = true
@@ -309,7 +334,7 @@ func planStates(fn *types.Function, blocks []*analysis.BasicBlock, constants []t
 		idx := work[len(work)-1]
 		work = work[:len(work)-1]
 		state := append([]Slot(nil), states[idx]...)
-		if !applyBlock(fn, locals, constants, globals, heap, decl, declared, blocks[idx], &state) {
+		if !r.applyBlock(blocks[idx], &state) {
 			return nil, false
 		}
 		for _, succ := range blocks[idx].Succs {
@@ -371,10 +396,10 @@ func mergeSlot(dst *Slot, src Slot) (bool, bool) {
 	return changed, true
 }
 
-func applyBlock(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, decl []types.Type, declared bool, block *analysis.BasicBlock, state *[]Slot) bool {
+func (r resolver) applyBlock(block *analysis.BasicBlock, state *[]Slot) bool {
 	for ip := block.Start; ip < block.End; {
-		inst := instr.Instruction(fn.Code[ip:])
-		if !applyStep(fn, locals, constants, globals, heap, decl, declared, state, inst) {
+		inst := instr.Instruction(r.fn.Code[ip:])
+		if !r.applyStep(state, inst) {
 			return false
 		}
 		ip += inst.Width()
@@ -382,7 +407,7 @@ func applyBlock(fn *types.Function, locals []types.Type, constants []types.Boxed
 	return true
 }
 
-func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, decl []types.Type, declared bool, state *[]Slot, inst instr.Instruction) bool {
+func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 	push := func(value Slot) { *state = append(*state, value) }
 	pop := func(count int) bool {
 		if len(*state) < count {
@@ -396,44 +421,44 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		return true
 	case instr.LOCAL_GET:
 		idx := int(inst.Operand(0))
-		if idx >= len(locals) {
+		if idx >= len(r.locals) {
 			return false
 		}
-		styp, _ := locals[idx].(*types.StructType)
-		atyp, _ := locals[idx].(*types.ArrayType)
-		push(Slot{Kind: locals[idx].Kind(), Backing: BackingLocal, Offset: idx, styp: styp, atyp: atyp})
+		styp, _ := r.locals[idx].(*types.StructType)
+		atyp, _ := r.locals[idx].(*types.ArrayType)
+		push(Slot{Kind: r.locals[idx].Kind(), Backing: BackingLocal, Offset: idx, styp: styp, atyp: atyp})
 		return true
 	case instr.LOCAL_TEE:
 		return len(*state) > 0
 	case instr.UPVAL_GET:
 		idx := int(inst.Operand(0))
-		if idx >= len(fn.Captures) {
+		if idx >= len(r.fn.Captures) {
 			return false
 		}
-		styp, _ := fn.Captures[idx].(*types.StructType)
-		atyp, _ := fn.Captures[idx].(*types.ArrayType)
-		push(Slot{Kind: fn.Captures[idx].Kind(), Backing: BackingUpval, Offset: idx, styp: styp, atyp: atyp})
+		styp, _ := r.fn.Captures[idx].(*types.StructType)
+		atyp, _ := r.fn.Captures[idx].(*types.ArrayType)
+		push(Slot{Kind: r.fn.Captures[idx].Kind(), Backing: BackingUpval, Offset: idx, styp: styp, atyp: atyp})
 		return true
 	case instr.GLOBAL_GET:
 		idx := int(inst.Operand(0))
-		if idx >= len(globals) {
+		if idx >= len(r.globals) {
 			return false
 		}
-		push(Slot{Kind: globals[idx], Backing: BackingGlobal, Offset: idx})
+		push(Slot{Kind: r.globals[idx], Backing: BackingGlobal, Offset: idx})
 		return true
 	case instr.GLOBAL_TEE:
 		return len(*state) > 0
 	case instr.CONST_GET:
 		idx := int(inst.Operand(0))
-		if idx >= len(constants) {
+		if idx >= len(r.constants) {
 			return false
 		}
-		value := Slot{Kind: constants[idx].Kind()}
+		value := Slot{Kind: r.constants[idx].Kind()}
 		if value.Kind == types.KindRef {
 			value.Backing = BackingConst
-			value.Ref, value.refKnown = constants[idx].Ref(), true
-			if value.Ref > 0 && value.Ref < len(heap) {
-				if _, ok := heap[value.Ref].(*types.Function); ok {
+			value.Ref, value.refKnown = r.constants[idx].Ref(), true
+			if value.Ref > 0 && value.Ref < len(r.heap) {
+				if _, ok := r.heap[value.Ref].(*types.Function); ok {
 					value.callee, value.calleeKnown = value.Ref, true
 				}
 			}
@@ -473,7 +498,7 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		array := (*state)[len(*state)-2]
-		kind, ok := arrayKind(heap, array, declared)
+		kind, ok := r.arrayKind(array)
 		if !ok || !pop(2) {
 			return false
 		}
@@ -483,7 +508,7 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if len(*state) < 2 {
 			return false
 		}
-		kind, ok := structFieldKind(heap, (*state)[len(*state)-2], (*state)[len(*state)-1])
+		kind, ok := structFieldKind(r.heap, (*state)[len(*state)-2], (*state)[len(*state)-1])
 		if !ok || !pop(2) {
 			return false
 		}
@@ -494,10 +519,10 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		callee := (*state)[len(*state)-1]
-		if !callee.calleeKnown || callee.callee <= 0 || callee.callee >= len(heap) {
+		if !callee.calleeKnown || callee.callee <= 0 || callee.callee >= len(r.heap) {
 			return false
 		}
-		target, ok := heap[callee.callee].(*types.Function)
+		target, ok := r.heap[callee.callee].(*types.Function)
 		if !ok || target.Typ == nil || !pop(1+len(target.Typ.Params)) {
 			return false
 		}
@@ -509,8 +534,8 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		return true
 	case instr.RETURN:
 		returns := 0
-		if fn.Typ != nil {
-			returns = len(fn.Typ.Returns)
+		if r.fn.Typ != nil {
+			returns = len(r.fn.Typ.Returns)
 		}
 		return len(*state) >= returns
 	case instr.REF_CAST:
@@ -528,11 +553,11 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		}
 		top := (*state)[len(*state)-1]
 		cast := Slot{Kind: top.Kind}
-		if idx := int(inst.Operand(0)); idx < len(decl) {
-			if styp, ok := decl[idx].(*types.StructType); ok {
+		if idx := int(inst.Operand(0)); idx < len(r.decl) {
+			if styp, ok := r.decl[idx].(*types.StructType); ok {
 				cast.styp = styp
 			}
-			if atyp, ok := decl[idx].(*types.ArrayType); ok {
+			if atyp, ok := r.decl[idx].(*types.ArrayType); ok {
 				cast.atyp = atyp
 			}
 		}
@@ -544,7 +569,7 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if len(*state) < 2 {
 			return false
 		}
-		kind, ok := arrayKind(heap, (*state)[len(*state)-2], declared)
+		kind, ok := r.arrayKind((*state)[len(*state)-2])
 		if !ok || !pop(2) {
 			return false
 		}
@@ -571,10 +596,10 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		// STRUCT_NEW's arity is not on the operand stack: it pops exactly one
 		// value per field of its declared struct type.
 		idx := int(inst.Operand(0))
-		if idx >= len(decl) {
+		if idx >= len(r.decl) {
 			return false
 		}
-		styp, ok := decl[idx].(*types.StructType)
+		styp, ok := r.decl[idx].(*types.StructType)
 		if !ok || !pop(len(styp.Fields)) {
 			return false
 		}
@@ -605,10 +630,10 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		callee := (*state)[len(*state)-1]
-		if !callee.refKnown || callee.Ref <= 0 || callee.Ref >= len(heap) {
+		if !callee.refKnown || callee.Ref <= 0 || callee.Ref >= len(r.heap) {
 			return false
 		}
-		target, ok := heap[callee.Ref].(*types.Function)
+		target, ok := r.heap[callee.Ref].(*types.Function)
 		if !ok || !pop(1+len(target.Captures)) {
 			return false
 		}
@@ -659,14 +684,14 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 // are hints: the lowering's runtime tag and itab guards verify the shape
 // before any access, so a slot declared as an array that currently holds
 // null or a differently shaped array deopts instead of reading it.
-func arrayKind(heap []types.Value, array Slot, declared bool) (types.Kind, bool) {
-	if !array.refKnown || array.Ref <= 0 || array.Ref >= len(heap) {
-		if declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
+func (r resolver) arrayKind(array Slot) (types.Kind, bool) {
+	if !array.refKnown || array.Ref <= 0 || array.Ref >= len(r.heap) {
+		if r.declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
 			return array.atyp.ElemKind, true
 		}
 		return 0, false
 	}
-	switch heap[array.Ref].(type) {
+	switch r.heap[array.Ref].(type) {
 	case types.TypedArray[bool]:
 		return types.KindI1, true
 	case types.TypedArray[int8]:
