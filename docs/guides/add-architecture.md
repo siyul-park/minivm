@@ -12,9 +12,9 @@ Use this guide when adding a new JIT backend. For the runtime model, journal lay
 |---|---|
 | Generic native-code interfaces | `internal/asm/` |
 | ARM64 reference backend | `internal/asm/arm64/`, `internal/jit/arm64/` |
-| ARM64 arch selection | `interp/native_arm64.go`, `interp/native_stub.go` |
+| ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
 | Architecture-neutral JIT driver | `internal/jit` |
-| Frame-journal layout | `internal/jit/journal/` |
+| Frame-journal layout | `internal/journal/` |
 | Trace recording | `interp/trace.go` |
 | Platform and CGO support | `docs/compatibility.md` |
 | JIT contracts | `docs/jit-internals.md` |
@@ -72,7 +72,7 @@ Scratch slot order is shared with the existing ARM64 backend:
 | `scratchSP` | interpreter stack pointer input |
 | `scratchCtrl` | `&i.journal[0]` |
 
-Then add a build-tagged `interp/native_<arch>.go`, mirroring `interp/native_arm64.go`: it picks the arch, builds the new package's `Machine`, and hands both to `jit.New`. `interp/native_stub.go` (`!arm64`) already covers every architecture without a backend; narrow its build tag only if a second real backend needs to carve out its own arch from that stub. `internal/jit` must never import an arch package — the arch selector belongs in `interp`, one level above the architecture-neutral driver, precisely so `internal/jit` stays free of any specific backend.
+Then add a build-tagged `interp/jit_<arch>.go`, mirroring `interp/jit_arm64.go`: it picks the arch, builds the new package's `Machine`, and hands both to `jit.New`. `interp/jit_stub.go` (`!arm64`) already covers every architecture without a backend; narrow its build tag only if a second real backend needs to carve out its own arch from that stub. `internal/jit` must never import an arch package — the arch selector belongs in `interp`, one level above the architecture-neutral driver, precisely so `internal/jit` stays free of any specific backend.
 
 ## Step 3 — Keep Platform Behavior Explicit
 

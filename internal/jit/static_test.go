@@ -179,4 +179,42 @@ func TestStaticPlan(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, plans)
 	})
+
+	t.Run("multi-block function compiles", func(t *testing.T) {
+		b := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		})
+		alt := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			BrIf(alt).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(alt).
+			Emit(instr.New(instr.I32_CONST, 2)).
+			Emit(instr.New(instr.RETURN))
+		fn := b.MustBuild()
+
+		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
+		require.NoError(t, err)
+		require.NotEmpty(t, plans)
+	})
+
+	t.Run("unsupported opcode compiles an exact fallback", func(t *testing.T) {
+		// I32_DIV_S needs runtime trap semantics the baseline lowerer does not
+		// duplicate, so the plan exits at that opcode and threaded dispatch owns it.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_DIV_S),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
+		require.NoError(t, err)
+		require.NotEmpty(t, plans)
+	})
 }

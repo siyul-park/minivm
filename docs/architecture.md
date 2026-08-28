@@ -39,10 +39,10 @@ program → instr, types
 prof    → instr
 internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
-internal/jit/journal → (leaf)
+internal/journal → (leaf)
 internal/jit → instr, types, internal/asm, pass, analysis, prof
-internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/journal, pass, analysis, prof
-interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/journal, internal/jit/arm64, pass, analysis, prof
+internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
+interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, internal/jit/arm64, pass, analysis, prof
 debug   → interp
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -66,7 +66,7 @@ cmd/minivm → cli
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
-| `internal/jit/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
+| `internal/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `pass/` | generic analysis and transform infrastructure |
 | `analysis/` | reusable static analyses |
 | `transform/` | optimization transforms |

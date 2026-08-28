@@ -19,7 +19,7 @@ import (
 // way to read a Go constant, so this narrow check is the part of the
 // invariant this package can verify on its own.
 //
-// interp.TestARM64_StackReserve (interp/native_test.go) carries the other
+// interp.TestARM64_StackReserve (interp/tier_test.go) carries the other
 // half: that the reserve literal itself equals arm64.StackReserve for
 // interp's own native-call-depth cap, a private interp constant this
 // package cannot see. See docs/jit-internals.md.

@@ -6,7 +6,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
-	"github.com/siyul-park/minivm/internal/jit/journal"
+	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )

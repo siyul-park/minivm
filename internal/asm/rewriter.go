@@ -76,7 +76,7 @@ type vreg struct {
 // reserve from this constant (see docs/jit-internals.md and
 // asm/arm64/abi_arm64.s); changing it without hand-updating the
 // trampoline's stack-reserve literal to match arm64.StackReserve fails
-// TestARM64_StackReserve (interp/native_test.go) instead of corrupting the
+// TestARM64_StackReserve (interp/tier_test.go) instead of corrupting the
 // native stack at runtime.
 const MaxSpillSlots = 512
 

@@ -3,60 +3,18 @@ package interp
 import (
 	"context"
 	"math"
-	"os"
-	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
-	"github.com/siyul-park/minivm/internal/jit/journal"
+	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
-
-// TestARM64_StackReserve ties nativeFrameLimit (interp's private native
-// call-depth cap) to the arm64 invoke trampoline's hard-coded stack reserve
-// and total frame size in abi_arm64.s. arm64.StackReserve and arm64.FrameSize
-// own the byte arithmetic — one 64-bit spill slot per asm.MaxSpillSlots plus
-// one journal frame record per native call-depth level, plus the
-// callee-saved save area — so nativeFrameLimit changing without
-// abi_arm64.s keeping pace fails this test instead of the mismatch
-// surfacing as a corrupted native stack at runtime. arm64.TestFrameSize
-// (internal/asm/arm64/stack_test.go) carries the complementary half of the
-// invariant: that abi_arm64.s's own two literals are consistent with each
-// other independent of nativeFrameLimit, a check this package cannot make
-// since it owns neither literal. See docs/jit-internals.md for the full
-// explanation.
-func TestARM64_StackReserve(t *testing.T) {
-	reserve := arm64.StackReserve(1<<journal.Shift, nativeFrameLimit)
-	frame := arm64.FrameSize(1<<journal.Shift, nativeFrameLimit)
-
-	_, thisFile, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	abiFile := filepath.Join(filepath.Dir(thisFile), "..", "internal", "asm", "arm64", "abi_arm64.s")
-	src, err := os.ReadFile(abiFile)
-	require.NoError(t, err)
-
-	reserveLiteral := regexp.MustCompile(`ADD\s+\$(\d+),\s*RSP`).FindSubmatch(src)
-	require.NotNil(t, reserveLiteral, "expected an ADD $N, RSP reserve instruction in %s", abiFile)
-	reserveVal, err := strconv.Atoi(string(reserveLiteral[1]))
-	require.NoError(t, err)
-	require.Equal(t, reserveVal, reserve,
-		"arm64.StackReserve(1<<journal.Shift, nativeFrameLimit) must equal the trampoline's ADD $N, RSP reserve")
-
-	frameLiteral := regexp.MustCompile(`TEXT ·invoke\(SB\), \$(\d+)-`).FindSubmatch(src)
-	require.NotNil(t, frameLiteral, "expected a TEXT ·invoke(SB), $N-M frame size in %s", abiFile)
-	frameVal, err := strconv.Atoi(string(frameLiteral[1]))
-	require.NoError(t, err)
-	require.Equal(t, frameVal, frame,
-		"arm64.FrameSize(1<<journal.Shift, nativeFrameLimit) must equal the trampoline's TEXT frame size")
-}
 
 // TestCompiler_Compile covers the compiler-selected static and traced plans
 // whose exit encoding, frame splicing, or bare static-plan shape has no public
@@ -704,33 +662,6 @@ func TestCompiler_Compile(t *testing.T) {
 		require.Equal(t, int32(14), got.I32())
 	})
 
-	t.Run("multi-block function compiles", func(t *testing.T) {
-		b := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		})
-		alt := b.Label()
-		b.Emit(instr.New(instr.LOCAL_GET, 0)).
-			BrIf(alt).
-			Emit(instr.New(instr.I32_CONST, 1)).
-			Emit(instr.New(instr.RETURN)).
-			Bind(alt).
-			Emit(instr.New(instr.I32_CONST, 2)).
-			Emit(instr.New(instr.RETURN))
-		fn := b.MustBuild()
-
-		i := New(program.New(nil))
-		defer i.Close()
-
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-
-		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
-		require.NoError(t, err)
-		require.NotEmpty(t, plans)
-	})
-
 	t.Run("branches and loops match threaded execution", func(t *testing.T) {
 		calleeBuilder := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
@@ -793,30 +724,6 @@ func TestCompiler_Compile(t *testing.T) {
 		require.Equal(t, want, got)
 	})
 
-	t.Run("unsupported opcode compiles an exact fallback", func(t *testing.T) {
-		// I32_DIV_S needs runtime trap semantics the baseline lowerer does not
-		// duplicate, so the plan exits at that opcode and threaded dispatch owns it.
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32, types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.LOCAL_GET, 1),
-			instr.New(instr.I32_DIV_S),
-			instr.New(instr.RETURN),
-		).MustBuild()
-
-		i := New(program.New(nil))
-		defer i.Close()
-
-		c, err := newCompiler()
-		require.NoError(t, err)
-		defer c.Close()
-
-		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
-		require.NoError(t, err)
-		require.NotEmpty(t, plans)
-	})
 }
 
 // Backedge covers when a module loop is attempted for compilation, which

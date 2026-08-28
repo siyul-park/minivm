@@ -4,7 +4,7 @@ Contracts for the ARM64 JIT in `internal/jit/arm64` and its interaction with `in
 
 ## When to Read
 
-Use this document before changing `internal/jit/arm64/*.go`, `interp/native_*.go`, `interp/trace.go`, `interp/tier.go`, `asm` callable ABI code, trace recording, lowering, deoptimization, loop safepoints, or JIT installation.
+Use this document before changing `internal/jit/arm64/*.go`, `interp/jit_*.go`, `interp/trace.go`, `interp/tier.go`, `asm` callable ABI code, trace recording, lowering, deoptimization, loop safepoints, or JIT installation.
 
 For user-facing performance results, see `docs/benchmarks.md`. For sampling and hotness thresholds, see `docs/profile.md`.
 
@@ -19,8 +19,8 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | architecture-neutral compiler driver | `internal/jit` |
 | runtime tier-up and retirement policy | `interp/tier.go` |
 | ARM64 lowering | `internal/jit/arm64/` |
-| ARM64 arch selection | `interp/native_arm64.go`, `interp/native_stub.go` |
-| frame-journal layout | `internal/jit/journal/` |
+| ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
+| frame-journal layout | `internal/journal/` |
 | callable ABI | `internal/asm/` |
 | value layout | `docs/value-representation.md` |
 | heap ownership | `docs/memory-model.md` |
@@ -187,7 +187,7 @@ In a loop plan, a partial leg whose cut lands on the plan's own header (same fun
 
 ## Backend
 
-`internal/jit.Compiler` (built by `jit.New`) is architecture-neutral: it picks the arch and `Machine` its caller supplies, builds the assembler, and hands both to the `Machine.Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.ExitDescriptor, bool)` seam. `jit.Input` and `jit.Plan` live in `internal/jit`; all lowering state — `lowering`, the symbolic `value` stack, inlined `activation`s, deferred `work`, and queued `sideExit`s — lives on the machine's side of that seam, private to `internal/jit/arm64`. `interp`'s build-tagged `native_arm64.go`/`native_stub.go` are the arch selector: on arm64, `newCompiler` builds `jit.New(arm64.New(), newMachine())` where `newMachine` calls `internal/jit/arm64.New()`; on every other architecture `newCompiler` returns `(nil, nil)` and the unavailable backend is never constructed.
+`internal/jit.Compiler` (built by `jit.New`) is architecture-neutral: it picks the arch and `Machine` its caller supplies, builds the assembler, and hands both to the `Machine.Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.ExitDescriptor, bool)` seam. `jit.Input` and `jit.Plan` live in `internal/jit`; all lowering state — `lowering`, the symbolic `value` stack, inlined `activation`s, deferred `work`, and queued `sideExit`s — lives on the machine's side of that seam, private to `internal/jit/arm64`. `interp`'s build-tagged `jit_arm64.go`/`jit_stub.go` are the arch selector: on arm64, `newCompiler` builds `jit.New(arm64.New(), newMachine())` where `newMachine` calls `internal/jit/arm64.New()`; on every other architecture `newCompiler` returns `(nil, nil)` and the unavailable backend is never constructed.
 
 `internal/jit/arm64` owns all ARM64 lowering, split by concern across `machine.go` (orchestration and the `Machine`/`lowering` types), `dispatch.go` (the single opcode dispatcher), `control.go` (control flow), `numeric.go` (numeric operations), `call.go` (calls and frames), `deopt.go` (deoptimization), `heap.go` (heap access), and `ref.go` (reference ownership).
 
@@ -234,11 +234,11 @@ definition instead of being restated wherever it is needed:
 `arm64.StackReserve(recordBytes, callDepth)` / `arm64.FrameSize(recordBytes,
 callDepth)` compute the reserve and total Go frame size for a caller-supplied
 record width (see `journal.Shift`) and call-depth cap. `internal/asm/arm64`
-has no dependency on `internal/jit/journal`, so `recordBytes` is the caller's
+has no dependency on `internal/journal`, so `recordBytes` is the caller's
 concern, not this package's. A hand-written `.s` literal cannot read a Go
 constant, so `abi_arm64.s`'s two literals still need a test to keep them
 honest, split by what each side can see: `interp.TestARM64_StackReserve`
-(`interp/native_test.go`) asserts `arm64.StackReserve(1<<journal.Shift,
+(`interp/tier_test.go`) asserts `arm64.StackReserve(1<<journal.Shift,
 nativeFrameLimit)` equals the `ADD $N, RSP` reserve literal — the half that
 needs interp's private `nativeFrameLimit` — and `arm64.TestFrameSize`
 (`internal/asm/arm64/stack_test.go`) asserts the `TEXT ·invoke(SB), $N-16`
@@ -261,7 +261,7 @@ Native code does not marshal parameters or returns. It writes results and trap s
 
 ## Frame Journal
 
-`i.journal` is owned by `Interpreter`. It is both input context for native entry and output state for deoptimization. `internal/jit/journal` owns the cell, record, and trap layout: `journal.Cell` indexes a header cell, `journal.Record` indexes a field within a frame record, and `journal.Trap` is the exit kind stored at `journal.CellTrap`.
+`i.journal` is owned by `Interpreter`. It is both input context for native entry and output state for deoptimization. `internal/journal` owns the cell, record, and trap layout: `journal.Cell` indexes a header cell, `journal.Record` indexes a field within a frame record, and `journal.Trap` is the exit kind stored at `journal.CellTrap`.
 
 Header cells come before fixed-stride frame records (`journal.Stride` cells wide, indexed by `journal.Record`).
 
@@ -573,7 +573,7 @@ When changing JIT internals:
 - prefer one simple terminal fallback over duplicated semantics
 - keep architecture-neutral code in `jit.go`
 - keep ARM64 lowering in `internal/jit/arm64/`
-- keep the frame-journal cell, record, and trap layout in `internal/jit/journal`, explicit and stable
+- keep the frame-journal cell, record, and trap layout in `internal/journal`, explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
 - keep shared cache, tracer, and coroutine state private behind `Pool` and `Interpreter`
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`

@@ -3,7 +3,7 @@ package journal_test
 import (
 	"testing"
 
-	"github.com/siyul-park/minivm/internal/jit/journal"
+	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/stretchr/testify/require"
 )
 
