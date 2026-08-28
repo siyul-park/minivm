@@ -178,7 +178,7 @@ For plain functions, `addr == ref`. For closures, `addr` points to the function 
 ### JIT
 
 
-The interpreter requests native compilation through `compiler.Compile(i, root)` only. The compiler runs the static and trace frontends internally; both produce the same flat, backend-neutral plan with block-ID edges, and installation depends only on the entry ABI kind.
+The interpreter requests native compilation through `jit.Compiler.Compile(input, root)` only, handing it a snapshot it built rather than itself. The compiler runs the static and trace frontends internally; both produce the same flat, backend-neutral plan with block-ID edges, and installation depends only on the entry ABI kind.
 
 - Native code is speculative and guarded.
 - Blocks with declared entry state carry no register state across edges; stack and dirty locals are materialized in VM memory.

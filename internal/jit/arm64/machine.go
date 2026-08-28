@@ -203,12 +203,14 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	return v
 }
 
-// Boxing masks used by scalar lowering.
+// Boxing masks used by scalar lowering. The i64 payload width is the boxed
+// value field's own width, derived rather than restated: a change to the kind
+// tag's width moves it, and a literal here would desync silently.
 const (
 	maskI32 = uint64(0xFFFFFFFF)
-	maskI64 = uint64(0x0001_FFFF_FFFF_FFFF)
+	maskI64 = uint64(types.VMask)
 
-	boxableWidth = uint8(49)
+	boxableWidth = uint8(types.VBits)
 )
 
 // scratchStack..scratchCtrl index the physical registers a lowering context

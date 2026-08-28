@@ -102,9 +102,9 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 ## Compiler
 
-`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, root)` and receives an opaque `module`; it does not select or inspect a compilation strategy. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
+`jit.Compiler` lives in `internal/jit`. The interpreter builds the read-only `jit.Input` snapshot itself (`Interpreter.compileSnapshot` in `interp/jit.go`) and calls `Compile(input, root)`, receiving a `jit.Code`; it does not select or inspect a compilation strategy. Passing a snapshot rather than the interpreter is what keeps the dependency one-way: `internal/jit` never imports `interp`. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
 
-The compiler builds one read-only `jit.Input` (`internal/jit`), then runs two ordered frontends:
+The compiler runs two ordered frontends over that input:
 
 1. `jit.StaticPlan` constructs complete plans from verified bytecode and dataflow: one entry plan when no entry is installed, plus one `jit.EntryLoop` plan per loop header (`headers`, unexported).
 2. `jit.TracePlan` constructs plans from immutable runtime trace snapshots.
@@ -271,6 +271,7 @@ Header cells come before fixed-stride frame records (`journal.Stride` cells wide
 | `journal.CellGlobals` | globals base pointer |
 | `journal.CellBP` | current frame base |
 | `journal.CellSP` | stack pointer |
+| `journal.CellEntry` | bridge resume IP in; zero starts at the anchor |
 | `journal.CellDepth` | number of written frame records |
 | `journal.CellCap` | available frame record capacity, capped at 128 |
 | `journal.CellTrap` | trap state (`journal.Trap`) |
@@ -571,7 +572,7 @@ When changing JIT internals:
 - keep native lowering speculative and guarded
 - deoptimize before behavior the JIT cannot fully own
 - prefer one simple terminal fallback over duplicated semantics
-- keep architecture-neutral code in `jit.go`
+- keep architecture-neutral code in `internal/jit/`
 - keep ARM64 lowering in `internal/jit/arm64/`
 - keep the frame-journal cell, record, and trap layout in `internal/journal`, explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
