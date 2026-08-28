@@ -153,9 +153,11 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 	// frame; on return that frame is dead. Save and restore X26 around the
 	// call - the 32-byte save area already has the room - or every spill
 	// reload after the call would address a dead frame. A self-call (BL to
-	// ctx.head) needs no such save: it shares this activation's frame, and
-	// that stream cannot spill at all, because its backward branch to head
-	// disables the spill frame (see asm/rewriter.go backEdge).
+	// ctx.head) needs no such save: it shares this activation's frame, so
+	// X26 still names the right one on return. The allocator keeps that
+	// sharing safe by declining to spill any value live across such a call
+	// (see asm/eligibility.go barriers), since two activations would
+	// otherwise write one physical slot.
 	a.Emit(
 		arm64.SUBI(arm64.SP, arm64.SP, 32),
 		arm64.STP(oldBP, oldSP, arm64.SP, 0),

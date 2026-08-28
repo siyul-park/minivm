@@ -142,12 +142,6 @@ func StaticPlan(input *Input) ([]Plan, error) {
 		roots[block.Anchor] = id
 	}
 	wire(&result, roots)
-	// Store paths must never spill, exactly as they must not in a trace plan
-	// (see noSpill): they use the common fresh-register heap path, and a
-	// spilled store across a branch or back-edge is unsound. Before declared
-	// array types let array code plan statically this was unreachable, because
-	// such a function had no static plan at all.
-	result.NoSpill = noSpill(result.Blocks)
 	result.Carried = carried(input.Function, result.Blocks)
 	// The entry plan owns the function's ABI and reaches every block. Each loop
 	// header additionally gets a plan that re-enters the live frame there, so a
@@ -167,9 +161,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 		}
 		header.Kind = EntryLoop
 		// Recomputed, not inherited: a block the header cannot reach is never
-		// emitted, so its stores must not force this plan off the spill frame
-		// and its bridges must not strip its loop-carried registers.
-		header.NoSpill = noSpill(header.Blocks)
+		// emitted, so its bridges must not strip its loop-carried registers.
 		header.Carried = carried(input.Function, header.Blocks)
 		plans = append(plans, header)
 	}

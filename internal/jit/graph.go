@@ -37,20 +37,6 @@ func wire(p *Plan, roots map[Anchor]int) {
 	}
 }
 
-// noSpill reports whether blocks contains a container store. Store paths must
-// never spill: they use the common fresh-register heap path, and a spilled
-// store across a branch or back-edge is unsound.
-func noSpill(blocks []Block) bool {
-	for _, block := range blocks {
-		for _, step := range block.Steps {
-			if instr.StoresContainer(step.Op) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // carried returns the inline scalar locals that a call-free native loop may
 // keep authoritative in registers until an exit. The blocks must contain a
 // real backward edge; straight-line prefixes keep the VM slots authoritative.

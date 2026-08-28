@@ -104,13 +104,13 @@ func (c *Compiler) Compile(input *Input, root Anchor) Result {
 
 func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Frontend) (prof.CompileReason, error) {
 	nativeLoop := plan.Kind == EntryLoop
-	reason, err := c.emit(input, plan, code, frontend, plan.NoSpill, nativeLoop)
+	reason, err := c.emit(input, plan, code, frontend, nativeLoop)
 	if reason != prof.CompileReasonRegisterPressure {
 		return reason, err
 	}
 	if len(plan.Carried) > 0 {
 		plan.Carried = nil
-		reason, err = c.emit(input, plan, code, frontend, plan.NoSpill, nativeLoop)
+		reason, err = c.emit(input, plan, code, frontend, nativeLoop)
 		if reason != prof.CompileReasonRegisterPressure {
 			return reason, err
 		}
@@ -118,15 +118,11 @@ func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Fr
 	if !nativeLoop {
 		return reason, err
 	}
-	return c.emit(input, plan, code, frontend, plan.NoSpill, false)
+	return c.emit(input, plan, code, frontend, false)
 }
 
-func (c *Compiler) emit(input *Input, plan Plan, code *Code, frontend prof.Frontend, noSpill bool, nativeLoop bool) (prof.CompileReason, error) {
-	var opts []asm.Option
-	if noSpill {
-		opts = append(opts, asm.NoSpill())
-	}
-	asmb := asm.New(c.arch, opts...)
+func (c *Compiler) emit(input *Input, plan Plan, code *Code, frontend prof.Frontend, nativeLoop bool) (prof.CompileReason, error) {
+	asmb := asm.New(c.arch)
 	exits, ok := c.machine.Lower(asmb, input, plan, nativeLoop)
 	if !ok {
 		return prof.CompileReasonLoweringRejected, nil

@@ -3,31 +3,44 @@ package asm
 import (
 	"errors"
 	"fmt"
-	"sort"
 )
 
 // rewriter transforms an instruction list whose operands reference virtual
 // registers into one whose operands reference physical registers. It owns
-// both the physical-register pool and the linear-scan policy: bind each
-// vreg as it is used or defined, release it at its last use, and — when the
-// bank is exhausted — spill the value whose final use is farthest away to a
-// stack slot, reloading it on demand.
+// both the physical-register pool and the register-allocation policy: bind
+// each vreg as it is used or defined, release it at its last reference
+// (read or write), and — when the bank is exhausted — spill the value whose
+// final use is farthest away to a stack slot, reloading it on demand.
 //
 // Virtual registers are dense, so every per-vreg fact lives in one indexed
 // table rather than a map, and owners is its inverse: a bank slot maps to
 // the vreg holding it. Slots are width-insensitive, so X0 and W0 name the
 // same slot.
 //
-// run is a single forward pass. Spilling inserts reload/store instructions
-// and a stack frame, so run also rebases the caller's label→index table
-// onto the rewritten stream.
+// run is a single forward pass over the instruction stream. Spill
+// eligibility alone consults a control-flow graph built once up front (see
+// block.go, dominance.go, uses.go): whether a store actually dominates
+// every reload, rather than a flat last-use index whose only question was
+// "did a label sit in between." Register-release timing keeps the flat
+// index — see dead — since spilling is the one decision where a wrong
+// answer merely declines a spill, while a wrong release can silently evict
+// an unrelated pinned value. Spilling inserts reload/store instructions and
+// a stack frame, so run also rebases the caller's label→index table onto
+// the rewritten stream.
 type rewriter struct {
 	frame Frame
 
-	// crossings holds every bound label position, ascending. A value whose
-	// live range spans one of them cannot be spilled: its store would sit on
-	// one path into the label while the reload after it runs on all of them.
-	crossings []int
+	dom  *dominance
+	uses useIndex
+
+	// barriers holds the position of every self-recursive call — a call
+	// whose target label is bound at or before the call itself — ascending.
+	// See crosses.
+	barriers []int
+
+	// hazards indexes, per vreg id, every loop-governed self-referencing
+	// redefinition. See crosses and carry.go.
+	hazards [][]hazard
 
 	regs   []vreg
 	owners [2][bankSize]int32
@@ -75,14 +88,10 @@ var ErrNoRegistersAvailable = errors.New("no registers available")
 
 // newRewriter prepares the register table for insts. count is how many
 // virtual registers the assembler handed out; every referenced vreg id must
-// fall below it. noSpill forces spilling off regardless of what arch.Frame
-// returns, per the Assembler-level NoSpill option.
-func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int, noSpill bool) (*rewriter, error) {
+// fall below it.
+func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg, count int) (*rewriter, error) {
 	info := arch.Registers()
 	frame := arch.Frame()
-	if noSpill {
-		frame = nil
-	}
 	r := &rewriter{
 		frame: frame,
 		regs:  make([]vreg, count),
@@ -167,12 +176,18 @@ func (r *rewriter) check(id int32) error {
 }
 
 // run produces the rewritten instruction list together with the rebased
-// label table.
+// label table. The control-flow graph, dominance, and use index below back
+// spill eligibility alone (see crosses); without a frame spilling is
+// impossible, and there is no arch to ask Returns/Calls/Jumps of in the
+// first place, so building them is skipped entirely.
 func (r *rewriter) run(insts []Instruction, labels map[Label]int) ([]Instruction, map[Label]int, error) {
-	if backEdge(insts, labels) {
-		r.frame = nil
+	if r.frame != nil {
+		g := buildCFG(insts, labels, r.frame)
+		r.dom = newDominance(g)
+		r.uses = buildUseIndex(insts, len(r.regs))
+		r.barriers = barriers(insts, labels, r.frame)
+		r.hazards = carryHazards(insts, g, r.dom, len(r.regs))
 	}
-	r.crossings = bounds(labels)
 
 	moved := make([]int, len(insts)+1)
 	for i, inst := range insts {
@@ -207,16 +222,32 @@ func (r *rewriter) step(i int, inst Instruction) error {
 	r.out = append(r.out, r.substitute(inst))
 
 	for _, v := range uses[:n] {
-		if r.regs[v.ID()].last == i {
+		if r.dead(v.ID(), i) {
 			r.release(v.ID())
 		}
 	}
 	// A def that is never read again is dead after this instruction; the use
 	// loop above only frees operands that appear as reads.
-	if defines && r.regs[dst.ID()].last == i {
+	if defines && r.dead(dst.ID(), i) {
 		r.release(dst.ID())
 	}
 	return nil
+}
+
+// dead reports whether id's binding may be released right after
+// instruction i: scan recorded i as the last instruction referencing id at
+// all, by either a read or a write, so nothing later in the stream — not
+// even a later definition that reads id's current value in place (a
+// multi-instruction immediate load's MOVK chain, say) — still needs it.
+//
+// This deliberately stays flat rather than asking the per-vreg use index
+// (built for spill eligibility; see crosses): that index only tracks reads,
+// and a pinned vreg released between two of its writes would be reserved
+// back into its fixed physical slot on the next one, silently evicting —
+// with no spill, since reserve does not call spill — whatever unrelated
+// vreg claimed that slot while it looked free.
+func (r *rewriter) dead(id int32, i int) bool {
+	return r.regs[id].last == i
 }
 
 // use ensures v occupies a physical register before the instruction that
@@ -312,7 +343,7 @@ func (r *rewriter) victim(at int) (int32, bool) {
 			continue
 		}
 		s := &r.regs[id]
-		if s.pinned || s.guard == at || s.last <= last || r.crosses(at, s) {
+		if s.pinned || s.guard == at || s.last <= last || r.crosses(at, id) {
 			continue
 		}
 		last = s.last
@@ -483,45 +514,4 @@ func (r *rewriter) inject(labels map[Label]int, moved []int) ([]Instruction, map
 		rebased[id] = framed[moved[idx]]
 	}
 	return final, rebased
-}
-
-// backEdge reports whether any branch targets an earlier instruction.
-// Linear-scan lifetimes only describe a forward-only stream: a value live
-// across a loop would be spilled at what merely looks like its last use, so
-// code with a back-edge runs without a spill frame instead.
-// crosses reports whether a label is bound between at, where the store would
-// go, and s's last use, where the reload is read. Spilling s is unsound in
-// that case: control can reach the label without passing the store, and the
-// reload after it runs on every path, so it reads a slot that path never
-// wrote. With no label in between, every path from the store to the reload is
-// straight-line and the store dominates.
-func (r *rewriter) crosses(at int, s *vreg) bool {
-	if s.last <= at {
-		return false
-	}
-	n := sort.SearchInts(r.crossings, at+1)
-	return n < len(r.crossings) && r.crossings[n] < s.last
-}
-
-// bounds collects every bound label position in ascending order.
-func bounds(labels map[Label]int) []int {
-	out := make([]int, 0, len(labels))
-	for _, at := range labels {
-		out = append(out, at)
-	}
-	sort.Ints(out)
-	return out
-}
-
-func backEdge(insts []Instruction, labels map[Label]int) bool {
-	for i, inst := range insts {
-		lbl, ok := inst.Src2.(LabelOperand)
-		if !ok {
-			continue
-		}
-		if pos, bound := labels[lbl.ID]; bound && pos <= i {
-			return true
-		}
-	}
-	return false
 }

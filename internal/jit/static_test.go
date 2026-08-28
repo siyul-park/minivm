@@ -71,7 +71,14 @@ func TestStaticPlan(t *testing.T) {
 		require.Equal(t, types.KindF64, plans[0].Blocks[0].Steps[2].Seen.Kind())
 	})
 
-	t.Run("a store forbids spilling", func(t *testing.T) {
+	t.Run("a store plans like any other step", func(t *testing.T) {
+		// Plan.NoSpill forced the whole build off the spill frame for any
+		// function holding a container store, because the allocator's own
+		// spill-eligibility check could not yet tell a sound spill from an
+		// unsound one around a store's branches. Now that the allocator
+		// judges each spill by dominance (internal/asm/dominance.go), a
+		// store carries no plan-level restriction of its own: it is just
+		// another step, and asm declines an unsound spill on its own merits.
 		store := &types.Function{
 			Typ: &types.FunctionType{Params: []types.Type{types.TypeI32Array}},
 			Code: instr.Marshal([]instr.Instruction{
@@ -85,21 +92,8 @@ func TestStaticPlan(t *testing.T) {
 		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: store})
 		require.NoError(t, err)
 		require.Len(t, plans, 1)
-		require.True(t, plans[0].NoSpill, "a plan holding ARRAY_SET must forbid the spill frame")
-
-		pure := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			Code: instr.Marshal([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.RETURN),
-			}),
-		}
-		plans, err = jit.StaticPlan(&jit.Input{Address: 1, Function: pure})
-		require.NoError(t, err)
-		require.Len(t, plans, 1)
-		require.False(t, plans[0].NoSpill)
+		require.True(t, plans[0].Valid())
+		require.Equal(t, instr.ARRAY_SET, plans[0].Blocks[0].Steps[3].Op)
 	})
 
 	t.Run("converging paths share one block", func(t *testing.T) {

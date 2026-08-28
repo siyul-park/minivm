@@ -20,7 +20,6 @@ type Label int
 // supported — discard after Build returns.
 type Assembler struct {
 	arch     Arch
-	noSpill  bool
 	insts    []Instruction
 	pins     map[int32]PReg
 	labels   map[Label]int
@@ -34,28 +33,12 @@ var (
 	ErrUnresolvedLabel = errors.New("unresolved label")
 )
 
-// Option configures an Assembler at construction. See New.
-type Option func(*Assembler)
-
-// NoSpill directs Build to reject register exhaustion with
-// ErrNoRegistersAvailable instead of inserting a spill frame, even when arch
-// declares one through Frame. Use it for a build whose caller has its own
-// reason to forbid spilling — a plan holding a container store that must
-// never roll back a partial write, say — without altering arch's own Frame
-// contract for every other build against it.
-func NoSpill() Option {
-	return func(a *Assembler) { a.noSpill = true }
-}
-
 // New constructs an Assembler targeting the given architecture.
-func New(arch Arch, opts ...Option) *Assembler {
+func New(arch Arch) *Assembler {
 	a := &Assembler{
 		arch:   arch,
 		pins:   make(map[int32]PReg),
 		labels: make(map[Label]int),
-	}
-	for _, opt := range opts {
-		opt(a)
 	}
 	return a
 }
@@ -114,7 +97,7 @@ func (a *Assembler) Build() ([]byte, error) {
 		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
 	}
 
-	rw, err := newRewriter(a.arch, a.insts, a.pins, int(a.nextVReg), a.noSpill)
+	rw, err := newRewriter(a.arch, a.insts, a.pins, int(a.nextVReg))
 	if err != nil {
 		return nil, err
 	}

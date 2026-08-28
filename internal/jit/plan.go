@@ -32,7 +32,6 @@ type Plan struct {
 	Blocks  []Block
 	Carried []int
 	Hoist   *Hoist
-	NoSpill bool
 
 	// tails memoizes suffix's per-trace continuation blocks. It is planning
 	// scratch state with no reader outside this package: a backend receives

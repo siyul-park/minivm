@@ -195,20 +195,6 @@ func TestAssembler_Build(t *testing.T) {
 		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
 	})
 
-	t.Run("NoSpill option rejects spilling even when the arch has a frame", func(t *testing.T) {
-		// A caller with its own reason to forbid spilling (e.g. interp's JIT
-		// policy for a plan holding a container store, see internal/jit's
-		// Plan.NoSpill) passes NoSpill instead of wrapping arch: the same
-		// register pressure that spills cleanly through arm64.New()'s real
-		// Frame (see "spills under register pressure" below) instead rejects
-		// with ErrNoRegistersAvailable.
-		assembler := asm.New(arm64.New(), asm.NoSpill())
-		emitWideSum(assembler, 64)
-
-		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
-	})
-
 	if runtime.GOARCH != "arm64" {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
 	}
@@ -351,15 +337,12 @@ func TestAssembler_Build(t *testing.T) {
 	})
 
 	t.Run("spills a value live across a forward branch", func(t *testing.T) {
-		// backEdge only disables the spill frame for a branch whose target
-		// is at or before the branch itself; it says nothing about a
-		// forward branch. This diamond has no back-edge, so the frame
-		// stays available, and the linear-scan liveness model
-		// (rewriter.scan records only the highest instruction index
-		// referencing a vreg, with no notion of which branch arm an
-		// instruction belongs to) has no special handling for a value live
-		// across the two arms either. The question this proves the answer
-		// to: is that combination sound?
+		// This diamond has no back-edge, so nothing keeps the spill frame
+		// away on that account, and a value live across both arms is the
+		// shape that broke the allocator when it judged spills by a single
+		// linear last-use index with no notion of which arm an instruction
+		// belonged to. The store must dominate the reload; this proves it
+		// does.
 		//
 		// v is defined before the branch, so it is live on both arms.
 		// Register pressure inside the fall-through arm forces the
@@ -511,15 +494,198 @@ func TestAssembler_Build(t *testing.T) {
 		assembler.Emit(arm64.RET())
 
 		// The build must refuse rather than emit that overwrite. A BL to a
-		// label bound earlier in the stream is a backward branch, so the
-		// same rule that keeps a loop from spilling (see backEdge) also
-		// keeps a self-recursive build from spilling: with the frame
-		// unavailable, exhausting the register bank rejects the build
-		// instead of silently sharing one spill area between activations.
+		// label bound at or before the call site is a self-recursive call,
+		// and every value still needed after it is barred from spilling
+		// (internal/asm/rewriter.go's barriers, fed by carryHazards-adjacent
+		// bookkeeping in crosses): with the frame unavailable for these wide
+		// values, exhausting the register bank rejects the build instead of
+		// silently sharing one spill area between activations.
 		// interp/jit.go's publish turns this into "keep threaded dispatch".
 		_, err := assembler.Build()
 		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable,
 			"a self-recursive build must reject rather than share one spill area between activations")
+	})
+
+	t.Run("spills a value confined to one loop iteration", func(t *testing.T) {
+		// backEdge used to disable the spill frame for the whole build
+		// whenever any branch targeted an earlier instruction, so a
+		// function containing a loop could not spill at all, however far a
+		// value sat from the loop. Dominance judges each spill on its own
+		// merits instead: wide is computed fresh and folded away within the
+		// same pass through the loop body every iteration, so wherever
+		// register pressure forces its store, that store dominates its one
+		// reload — the same shape as the non-looping "spills under register
+		// pressure" case above, just replayed inside a loop body.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+
+		const iterations = 5
+		const pressure = 17 // one past the 17 auto-allocatable integer registers.
+
+		counter := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(counter, iterations)...)
+
+		loop := assembler.Label()
+		done := assembler.Label()
+		assembler.Bind(loop)
+		assembler.Emit(arm64.CBZLabel(counter, done))
+		wide := emitWideSum(assembler, pressure)
+		combined := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.ADD(combined, wide, counter))
+		assembler.Emit(arm64.STR(combined, ctx, 8))
+		assembler.Emit(arm64.SUBI(counter, counter, 1))
+		assembler.Emit(arm64.BLabel(loop))
+		assembler.Bind(done)
+		assembler.Emit(arm64.RET())
+
+		code, err := assembler.Build()
+		require.NoError(t, err, "a loop confining its pressure to one iteration must still get a spill frame")
+
+		buffer, err := asm.NewBuffer(4096)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, buffer.Free()) }()
+
+		callable, err := asm.Link(buffer, arch.ABI(), code)
+		require.NoError(t, err)
+
+		values := [2]uint64{0, 0}
+		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
+		// The loop counts 5, 4, 3, 2, 1, so the last iteration to run — the
+		// one whose store survives — sees counter == 1.
+		require.Equal(t, wideSum(pressure)+1, values[1],
+			"the last iteration's spilled-and-reloaded value must survive intact")
+	})
+
+	t.Run("declines a value live across a back edge", func(t *testing.T) {
+		// total is defined once before the loop and updated by an
+		// instruction that reads its own current value (ADD total, total,
+		// counter): the shape a loop-carried mutable value takes in this
+		// flat IR. Its last reference is the store after the loop, the
+		// largest instruction index in the whole build, so victim's
+		// farthest-last-use heuristic tries it before anything else the
+		// pre-loop pressure below also makes available.
+		//
+		// Dominance alone would accept spilling it here: a store issued
+		// before the loop dominates every reference inside and after the
+		// loop under the ordinary definition, because dominance counts
+		// paths, not iterations. But a spill inserts exactly one store and
+		// one reload instruction, not one pair per iteration: a reload
+		// sitting at total's self-referencing update would replay the
+		// pre-loop value (0) on every iteration instead of the previous
+		// iteration's running sum, discarding the accumulation. carryHazards
+		// (internal/asm/carry.go) is what actually declines this, and this
+		// test is the proof: if it did not, the sum below would come back
+		// wrong after more than one iteration.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+
+		const iterations = 6
+		const pressure = 17 // one past the 17 auto-allocatable integer registers.
+
+		counter := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(counter, iterations)...)
+		total := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(total, 0)...)
+
+		// Pressure right after total and counter are both bound and both
+		// carry a far-future last use tempts victim into choosing one of
+		// them before it ever reaches the loop.
+		pre := emitWideSum(assembler, pressure)
+		discard := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.ADD(discard, pre, counter))
+
+		loop := assembler.Label()
+		done := assembler.Label()
+		assembler.Bind(loop)
+		assembler.Emit(arm64.CBZLabel(counter, done))
+		assembler.Emit(arm64.ADD(total, total, counter))
+		assembler.Emit(arm64.SUBI(counter, counter, 1))
+		assembler.Emit(arm64.BLabel(loop))
+		assembler.Bind(done)
+		assembler.Emit(arm64.STR(total, ctx, 8))
+		assembler.Emit(arm64.RET())
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+
+		buffer, err := asm.NewBuffer(4096)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, buffer.Free()) }()
+
+		callable, err := asm.Link(buffer, arch.ABI(), code)
+		require.NoError(t, err)
+
+		values := [2]uint64{0, 0}
+		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
+		require.Equal(t, uint64(iterations*(iterations+1)/2), values[1],
+			"a store issued once before the loop must not silently replay on every iteration of a self-referencing reload")
+	})
+
+	t.Run("declines a value spilled on one diamond arm and reloaded on the sibling arm", func(t *testing.T) {
+		// The existing "spills a value live across a forward branch" case
+		// above spills inside the fall-through arm and reloads at the
+		// merge point both arms reach. This one has no merge at all: v is
+		// used only inside taken, a sibling arm the fall-through arm never
+		// runs. The old label-crossing heuristic and dominance agree on the
+		// merge-point shape, but only a real per-arm reachability question
+		// — does every path to v's one use pass through a store placed
+		// inside the other arm — tells the two apart in general; this
+		// build is the case where the answer is unconditionally no; there
+		// is no path from the fall-through arm into taken at all.
+		//
+		// v is bound (from before the branch) with its only use — the
+		// store inside taken — far ahead of anything the fall-through arm's
+		// own pressure needs, so victim tries v first.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+
+		const pressure = 17 // one past the 17 auto-allocatable integer registers.
+		const magic = 0x1234567890ABCDEF
+
+		flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDR(flag, ctx, 0))
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, magic)...)
+
+		taken := assembler.Label()
+		assembler.Emit(arm64.CBZLabel(flag, taken))
+
+		pre := emitWideSum(assembler, pressure)
+		discard := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.ADD(discard, pre, flag))
+		assembler.Emit(arm64.STR(discard, ctx, 8))
+		assembler.Emit(arm64.RET())
+
+		assembler.Bind(taken)
+		assembler.Emit(arm64.STR(v, ctx, 8))
+		assembler.Emit(arm64.RET())
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+
+		buffer, err := asm.NewBuffer(4096)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, buffer.Free()) }()
+
+		callable, err := asm.Link(buffer, arch.ABI(), code)
+		require.NoError(t, err)
+
+		run := func(flag uint64) uint64 {
+			values := [2]uint64{flag, 0}
+			require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
+			return values[1]
+		}
+
+		require.Equal(t, wideSum(pressure)+1, run(1),
+			"the fall-through arm must still compute its own result correctly")
+		require.Equal(t, uint64(magic), run(0),
+			"the taken arm must read v intact even though the sibling arm's own pressure never dominates it")
 	})
 }
 

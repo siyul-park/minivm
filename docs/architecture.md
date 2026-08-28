@@ -187,7 +187,7 @@ The interpreter requests native compilation through `compiler.Compile(i, root)` 
 - JIT handlers must not duplicate complex interpreter behavior unless they can own all semantics.
 - Guard failure materializes VM state and resumes threaded dispatch.
 - ARM64 label branches are range-checked and relaxed only to replacements that are already in range; an unreachable target falls back to threaded execution.
-- Spill frames use a stable base register, and every internal call resume point must restore the active spill-frame depth. Loop traces and plans containing heap mutation disable spilling when control flow cannot preserve that contract.
+- Spill frames use a stable base register, and every internal call resume point must restore the active spill-frame depth. The allocator (`internal/asm`) judges every spill by dominance plus two narrower rules — a loop-governed self-referencing redefinition, and a self-recursive call sharing the caller's frame instead of getting one of its own — rather than disabling the whole build's spill frame whenever a loop or a container store appears anywhere in it; see `jit-internals.md`'s Register Allocation section.
 - A ref operand may be compiled deferred, borrowing its retain from backing storage. Every path handing the flushed operand stack to the interpreter must own or redeem it first, and a committing loop-backedge flush rejects any live deferred ref.
 
 See `jit-internals.md` for trace recording, journal layout, calls, branches, loops, and fallback rules.

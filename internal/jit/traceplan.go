@@ -110,7 +110,6 @@ func TracePlan(input *Input) ([]Plan, error) {
 		if kind == EntryLoop {
 			planned.Hoist = hoistable(input.Function, planned.Blocks)
 		}
-		planned.NoSpill = noSpill(planned.Blocks)
 		plans = append(plans, planned)
 	}
 	return plans, nil
