@@ -29,10 +29,24 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
 
 Every test package uses the production package name plus `_test` and acts as an
-importing client. Tests do not access private symbols or representation.
+importing client. Tests do not access private symbols or representation; the
+files listed under White-Box Test Files are the recorded exceptions, each with
+the condition that ends it.
 Internal invariants use public behavior, generated output, or executable
 artifacts; tests that cannot express an observable contract are removed rather
 than widening production APIs for test access.
+
+### White-Box Test Files
+
+Three test files still declare `package interp` because the contracts they
+assert have no external-package expression yet. Each is recorded with the
+condition that removes it (`docs/coding-patterns.md` §1.1).
+
+| File | Why it is white-box | Removal condition |
+|---|---|---|
+| `interp/tier_test.go` | Ties private `nativeFrameLimit` (declared in `interp/tier.go`) to the ARM64 invoke trampoline's stack reserve and total frame size via `arm64.StackReserve`/`arm64.FrameSize`, which own the byte arithmetic (`internal/asm/arm64/stack.go`), and reads `abi_arm64.s`'s two literals directly to compare against them. The complementary half of that reserve invariant — that `abi_arm64.s`'s own two literals agree with each other — needs no private interp state and lives as an ordinary external test, `arm64.TestFrameSize` (`internal/asm/arm64/stack_test.go`). | None known. `nativeFrameLimit` is interp-private bookkeeping with no contract to move with the ARM64 backend, which already lives in `internal/jit/arm64`. |
+| `interp/jit_test.go` | Drives `jit.Compiler.Compile` against a snapshot only the private `Interpreter.compileSnapshot` can build (module, constants, globals, heap, declared types, and the `HostStruct`/`field`/`conversion`/`coroutine` layout offsets `jit.Layout` needs), installs the result with the private `Interpreter.install`, and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `jit.Exit`) and splicing frame state to force a specific exit; also reads install bookkeeping (`tried`, `exits`) and `tracer.headers` that no metric separates from "not attempted" (`TestARM64_Backedge`). | None known. `newCompiler`, `compileSnapshot`, `journalPtr`, `install`, `tried`, `exits`, and the loop/call dispatch wrappers are interp-private mechanics with no contract to move with the ARM64 backend, which already lives in `internal/jit/arm64`. |
+| `interp/trace_test.go` | Calls `tracer.capture` without `Run`, which is the only way to prove speculative capture snapshots a container instead of mutating the live heap. Any public path runs the real instructions too, so the isolation claim is unobservable by construction. | None known. The recorder stays in `interp`, and the claim is only provable from inside it. |
 
 ### Known Coverage Gaps
 
@@ -42,9 +56,12 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 
 | Uncovered | Why it cannot be reached publicly |
 |---|---|
-| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold`, `checkRetire` in `interp/jit.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
+| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold` in `interp/tier.go`; `checkRetire` in `interp/jit.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
 | Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
+| Dataflow fact widening at a control-flow join (`mergeSlot` in `internal/jit`) | A slot's `refKnown`/`calleeKnown` facts are planning-internal: the backend never reads them, so nothing exports them. Their only external effect is which plans a frontend produces or rejects, which no fixture isolates from the rest of planning. |
+| Loop-invariant container selection (`hoistable` in `internal/jit`) | Reachable only through `TracePlan`, so asserting it needs a hand-built recorded trace that survives every other planning check. The recorder that produces real traces lives in `interp` and cannot be called without running the program. Covered end to end by `interp.TestARM64_HoistedContainerLoop`; the selection rule itself has no isolated public expression. |
+| A committing flush's hot-backedge codegen (`lowerer.flush` in `internal/jit/arm64`) emits no VM-slot store for a dirty carried local | The claim is about which instructions a `flush(flushCommit)` call emits into an `asm.Assembler`, which is package-private mechanics of `internal/jit/arm64` with no public accessor. It moved with the ARM64 backend from `interp/jit_test.go`'s `TestARM64_Flush` and could not become an `arm64_test` external test because it constructed the unexported `lowering`/`activation` types directly; deleted rather than kept white-box inside `internal/jit/arm64` outside its normal contract. The behavior it protected — a hot loop back-edge keeps carried locals register-authoritative — is still covered end to end by `interp.TestARM64_LoopCarriedLocals`, which observes the result rather than the emitted bytes. |
 
 Closing the first one needs either a public signal that an anchor was retired,
 or a workload that makes retirement observable through existing metrics.
@@ -900,7 +917,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | Command | Contract |
 |---|---|
 | `make check` | generated files, module tidiness, formatting, vet, race tests, and ARM64 build checks |
-| `make coverage-check` | full coverage run and total coverage of at least the recorded 72.8% baseline |
+| `make coverage-check` | full cross-package coverage run (`-coverpkg=./...`, so a package exercised only through its consumer still counts) and total coverage of at least the recorded 72.5% baseline |
 | `make fuzz` | bounded smoke runs for every declared fuzz target |
 | `make benchmark-pr` | quick deterministic benchmark report; no performance threshold |
 | `make benchmark-core` | all canonical package and VM-kernel benchmarks |

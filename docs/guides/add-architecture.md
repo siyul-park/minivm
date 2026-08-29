@@ -11,8 +11,10 @@ Use this guide when adding a new JIT backend. For the runtime model, journal lay
 | Concern | File or package |
 |---|---|
 | Generic native-code interfaces | `internal/asm/` |
-| ARM64 reference backend | `internal/asm/arm64/`, `interp/jit_arm64.go` |
-| Architecture-neutral JIT driver | `interp/jit.go` |
+| ARM64 reference backend | `internal/asm/arm64/`, `internal/jit/arm64/` |
+| ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
+| Architecture-neutral JIT driver | `internal/jit` |
+| Frame-journal layout | `internal/journal/` |
 | Trace recording | `interp/trace.go` |
 | Platform and CGO support | `docs/compatibility.md` |
 | JIT contracts | `docs/jit-internals.md` |
@@ -40,12 +42,14 @@ There is no VM parameter/return ABI. Native traces read and write VM state throu
 
 Return `nil` from `Arch.Frame()` when the backend has no spill-frame support. If spilling is supported, keep the frame implementation as a separate private type instead of adding frame methods to the architecture type.
 
-## Step 2 — Add `interp/jit_<arch>.go`
+## Step 2 — Add `internal/jit/arch/`
 
-Add an architecture-specific lowerer in package `interp`, then provide a build-tagged `newCompiler` implementation for the architecture.
+Add an architecture-specific lowerer as its own package under `internal/jit/`, mirroring the ARM64 shape (`internal/jit/arm64`): a `Machine` implementation split by concern into files such as `machine.go` (orchestration, the `Machine`/`lowering` types), `dispatch.go` (the single opcode dispatcher), `control.go` (control flow), `numeric.go` (numeric operations), `call.go` (calls and frames), `deopt.go` (deoptimization), `heap.go` (heap access), and `ref.go` (reference ownership) — adjusted to where the new backend's code actually cleaves. Export approximately one symbol: a `New() jit.Machine` constructor. Everything else stays package-private.
 
 ```go
-type archLowerer struct{}
+type lowerer struct{}
+
+func New() jit.Machine { return lowerer{} }
 ```
 
 Lowering rules:
@@ -53,8 +57,8 @@ Lowering rules:
 - return `false` without mutating published state when an opcode, kind, or observed heap shape is unsupported
 - load the context journal into pinned scratch registers before entering the trace body
 - materialize live symbolic state on guard exits
-- write `journalSP`, `journalNextIP`, and frame records before returning to Go
-- handle entry-frame `RETURN` by writing boxed returns and returning with `trapNone`
+- write `journal.CellSP`, `journal.CellNextIP`, and frame records before returning to Go
+- handle entry-frame `RETURN` by writing boxed returns and returning with `journal.TrapNone`
 - stitch inlined callee returns into the caller's symbolic stack
 - lower `CALL` only when the target, frame budget, refs, host behavior, stack bounds, and write-barrier constraints are safe
 
@@ -67,6 +71,8 @@ Scratch slot order is shared with the existing ARM64 backend:
 | `scratchBP` | current frame base pointer |
 | `scratchSP` | interpreter stack pointer input |
 | `scratchCtrl` | `&i.journal[0]` |
+
+Then add a build-tagged `interp/jit_<arch>.go`, mirroring `interp/jit_arm64.go`: it picks the arch, builds the new package's `Machine`, and hands both to `jit.New`. `interp/jit_stub.go` (`!arm64`) already covers every architecture without a backend; narrow its build tag only if a second real backend needs to carve out its own arch from that stub. `internal/jit` must never import an arch package — the arch selector belongs in `interp`, one level above the architecture-neutral driver, precisely so `internal/jit` stays free of any specific backend.
 
 ## Step 3 — Keep Platform Behavior Explicit
 
@@ -100,7 +106,7 @@ More complex paths, such as calls, ref-counted stores, heap reads, loops, and co
 ## Step 5 — Verify
 
 ```bash
-go test ./internal/asm/<arch>/... ./interp/...
+go test ./internal/asm/<arch>/... ./internal/jit/<arch>/... ./interp/...
 GOOS=linux GOARCH=<arch> go build ./...
 ```
 

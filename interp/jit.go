@@ -1,821 +1,899 @@
 package interp
 
 import (
-	"errors"
-	"reflect"
+	"math"
+	"slices"
+	"sync/atomic"
 	"unsafe"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
-type compiler struct {
-	arch        asm.Arch
-	buffer      *asm.Buffer
-	scratchRegs []asm.PReg
-}
+// This file holds the interpreter's JIT integration: tier-up event counting,
+// compilation requests, native installation, the native dispatch wrappers
+// threaded code hands control to, deoptimization, and journal marshalling.
+// interp/tier.go owns tier-up and retirement policy - counters, the watchdog,
+// and their thresholds; this file is what drives an Interpreter against that
+// policy and the architecture-neutral internal/jit driver.
+//
+// entryWarmup is how many hot events capture an entry trace before the entry
+// compile fires. The compile is one-shot per root, so a trace has to already be
+// published when it runs; capturing from the first few events records the
+// shallowest states the function ever has. tracer.attemptLimit bounds the cost
+// independently.
+const entryWarmup = 8
 
-type module struct {
-	entries map[anchor]native
-	bytes   int
-}
+// coolLimit is the number of consecutive unproductive observations - every
+// compilation root already tried and nothing installed - before a function
+// is cooled and stops being instrumented. See checkCool.
+const coolLimit = 2
 
-type native struct {
-	callable  asm.Callable
-	kind      entryKind
-	frontend  prof.Frontend
-	bytes     int
-	exits     []exitDescriptor
-	resumable []int
-}
-
-type exitDescriptor struct {
-	reason prof.ExitReason
-	opcode int
-}
-
-type counters struct {
-	entry  *prof.Counter
-	yields *prof.Counter
-	exits  []*prof.Counter
-}
-
-// watchdog counts native entries, give-up exits, and bridge cycles for one
-// installed anchor. Unlike counters, it is always live regardless of
-// i.profiler: a give-up exit is one where the entry abandoned the work it was
-// compiled for (see givesUp) rather than completing its job or leaving
-// through a healthy loop-exit edge, so a high rate of it — not a high exit rate
-// alone — is the signal that the installed entry should be retired (see
-// Interpreter.retire). A bridge cycle (see Interpreter.bridge) is productive
-// work and must never count as one, but an anchor that spends most of its
-// entries bridging pays the same deopt/re-enter cost, so it is tracked and
-// retired the same way, just through its own counter.
-type watchdog struct {
-	gaveUp  []bool // exit descriptor ID -> givesUp(reason)
-	entries uint32
-	giveUps uint32
-	bridges uint32
-}
-
-type compileResult struct {
-	module   *module
-	anchor   anchor
-	frontend prof.Frontend
-	outcome  prof.CompileOutcome
-	reason   prof.CompileReason
-	err      error
-}
-
-// lowering carries symbolic values, inlined activations, deferred blocks, and
-// cold exits while one plan is emitted. It contains no planner source objects.
-type lowering struct {
-	assembler *asm.Assembler
-	blocks    []block
-	labels    map[int]asm.Label
-	module    *types.Function
-	constants []types.Boxed
-	globals   []types.Kind
-	heap      []types.Value
-	scratch   []asm.PReg
-	head      asm.Label
-	back      asm.Label
-	budget    asm.VReg
-
-	values      []value
-	frames      []activation
-	work        []work
-	exits       []sideExit
-	descriptors []exitDescriptor
-	saved       []value
-
-	addr       int
-	loopRoot   int
-	params     int
-	returns    int
-	kind       entryKind
-	leaf       bool
-	nativeLoop bool
-	carried    []carriedLocal
-
-	// hoist caches one loop-invariant container's slice header, derived by a
-	// per-entry prologue (see arm64Lowerer.hoist). The registers are pure
-	// derived state: flush, snapshots, and reload never see them, and an
-	// access uses them only when its operand matches slot and want.
-	hoist struct {
-		slot    int
-		want    uintptr
-		dataPtr asm.VReg
-		n       asm.VReg
-		live    bool
-	}
-}
-
-// value is one typed operand: a register plus the runtime kind the trace
-// observed for it. raw scalars skip NaN-boxing between opcodes — an i32 keeps
-// its value in the low 32 bits, an f64 keeps its IEEE bits (identical to its
-// boxed form). For refs, backing records where the reference count lives: an
-// backingStack ref carries its own retain on the operand stack, while every
-// other backing defers the retain to its backing storage until the value
-// transfers to interpreter state. Field validity depends on backing:
-// backingStack uses reg; backingConst uses ref and may also use fn for a direct
-// call target; backingLocal, backingGlobal, and backingUpval use reg plus slot.
-// slot identifies the VM stack local, global, or upval that carries the retain.
-type value struct {
-	reg     asm.VReg
-	kind    types.Kind
-	raw     bool
-	backing backing
-	slot    int
-	known   bool
-	imm     int64
-	fn      int
-	ref     int
-}
-
-// backing identifies where a ref value derives its reference count.
-type backing uint8
-
-const (
-	backingStack  backing = iota // retain lives on the operand stack copy
-	backingConst                 // compile-time constant, never retained
-	backingLocal                 // deferred to a VM stack local slot
-	backingGlobal                // deferred to a global slot
-	backingUpval                 // deferred to a closure upval slot
-)
-
-// activation mirrors one interpreter frame the trace inlined. Locals live in
-// registers; loaded marks which have been pulled from the VM stack and dirty
-// marks which must be written back before native code gives up control.
-type activation struct {
-	end    int
-	kinds  []types.Kind
-	upvals []types.Kind
-	locals []value
-	state  []localState
-
-	addr     int
-	base     int
-	opBase   int
-	upvalRef int
-	resume   int
-	returns  int
-}
-
-// carriedLocal is one root-frame scalar whose register is authoritative until
-// a native loop exits. slot remains the VM home committed by cold paths.
-type carriedLocal struct {
-	value value
-	local int
-	slot  int
-}
-
-type localState uint8
-
-const (
-	localLoaded localState = 1 << iota
-	localDirty
-	localStored
-)
-
-// work is a deferred block whose branch point produced its symbolic state:
-// ordinary VM stack slots are current, so the block re-enters at label with
-// every ordinary local unloaded and every operand awaiting reload. Carried
-// loop locals reconnect to their authoritative registers instead. If the
-// branch returned from an inlined callee, tail keeps the caller path that must
-// run after the deferred block stitches back into the caller frame.
-type work struct {
-	label  asm.Label
-	block  int
-	tail   []int
-	values []value
-	frames []activation
-}
-
-type sideExit struct {
-	label  asm.Label
-	values []value
-	frames []activation
-	resume int
-	id     int
-}
-
-// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
-// inserting a spill frame. A nil Frame already disables spilling per asm's
-// own contract (see asm.Frame's doc comment), so this policy needs no
-// dedicated asm-level API — it is purely an interp-side JIT policy decision
-// (see noSpill), not a generic assembler concern.
-type noSpillArch struct{ asm.Arch }
-
-// elemShape is how one array element kind is stored: the concrete container
-// itab, the byte offset its data begins at, the shift from index to byte, and
-// whether the element is raw rather than boxed.
-type elemShape struct {
-	itab  uintptr
-	base  int16
-	scale uint8
-	raw   bool
-}
-
-const (
-	scratchStack = iota
-	scratchGlobals
-	scratchBP
-	scratchSP
-	scratchCtrl
-	scratchCount
-)
-
-// Frame-journal layout. X0 carries &journal[0] to native code, which mirrors the
-// first cells into pinned scratch registers (X10-X14) on external entry. Header
-// cells precede a stack of fixed-stride frame records; each record mirrors the
-// int fields the threaded interpreter needs to resume a frame.
-const (
-	journalStack   = iota // &i.stack[0]; external entry in
-	journalGlobals        // &i.globals[0]; external entry in
-	journalBP             // current frame bp; external entry in
-	journalSP             // interpreter sp; external entry in/out
-	journalEntry          // bridge resume IP in; zero starts at the anchor
-	journalDepth          // trap-time frame records written; native read/write
-	journalCap            // frame budget capped by nativeFrameLimit; read-only
-	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield | trapBridge
-	journalNextIP         // resume/fallback IP out for the single-frame path
-	journalBudget         // back-edges remaining before the next safepoint; native read/write
-	journalActive         // active native call depth for frame-budget checks
-	journalRC             // &i.rc[0]; read/write for guarded native refcount fast paths
-	journalUpvals         // &i.fr.upvals[0] or 0; read/write for closure body fast paths
-	journalHeap           // &i.heap[0]; read-only for heap object fast paths
-	journalNatives        // &i.natives[0]; atomic per-function entry slots
-	journalExitID         // fallback descriptor ID + 1; zero means none
-	journalHead           // first frame record cell
-)
-
-const journalStride = 4
-
-const (
-	recordAddr = iota
-	recordBP
-	recordIP
-	recordReturns
-)
-
-const (
-	trapNone = iota
-	trapFallback
-	trapOverflow
-	trapYield
-	// trapBridge reports the IP of one opcode the backend cannot lower.
-	// journalNextIP carries that opcode's own IP; the Go wrapper runs its
-	// threaded closure exactly once and re-enters the same callable at the
-	// closure's new IP (see Interpreter.bridge and arm64Lowerer.dispatch).
-	trapBridge
-)
-
-// nativeFrameLimit caps generated call depth to the stack space reserved by
-// the ARM64 invoke trampoline. Deeper calls trap before moving SP.
-const nativeFrameLimit = 128
-
-// loopBudget is how many native loop back-edges run between safepoints. It is
-// independent of tick so a hot loop amortizes the deopt/re-enter cost of a
-// yield over many iterations while still polling for cancellation and fuel.
-const loopBudget = 1 << 13
-
-// retireWindow is the number of native entries a watchdog observes before
-// judging whether an installed anchor is paying for itself (see watchdog).
-const retireWindow = 1024
-
-// retireGiveUpThreshold is the minimum count of give-up exits (see givesUp)
-// within one retireWindow that marks the anchor as a net loss rather than a
-// healthy kernel's normal loop-exit traffic.
-const retireGiveUpThreshold = retireWindow / 4
-
-// arrayElems is where a ref array's elements begin. It sits here with the
-// shape table rather than with the lowering offsets because the portable
-// planner reads it through elemShapes.
-const arrayElems = int(unsafe.Offsetof(types.Array{}.Elems))
-
-// The heap itabs the backends and the planner compare against. They are
-// runtime type identities rather than lowering detail, so they belong with
-// the portable JIT core: jit_plan.go resolves element layout on every
-// architecture, including ones with no native backend at all.
-var (
-	heapI32        = itab(types.I32(0))
-	heapF32        = itab(types.F32(0))
-	heapF64        = itab(types.F64(0))
-	heapArrayI1    = itab(types.TypedArray[bool](nil))
-	heapArrayI8    = itab(types.TypedArray[int8](nil))
-	heapArrayI32   = itab(types.TypedArray[int32](nil))
-	heapArrayI64   = itab(types.TypedArray[int64](nil))
-	heapArrayF32   = itab(types.TypedArray[float32](nil))
-	heapArrayF64   = itab(types.TypedArray[float64](nil))
-	heapArrayRef   = itab((*types.Array)(nil))
-	heapString     = itab(types.String(""))
-	heapStruct     = itab((*types.Struct)(nil))
-	heapHostStruct = itab((*HostStruct)(nil))
-	heapError      = itab((*types.Error)(nil))
-	heapCoroutine  = itab((*coroutine)(nil))
-)
-
-// elemShapes is the one place the element storage layout is written down.
-// arrayGet, arraySet, arrayLen, and the planner's hoist eligibility all resolve
-// through it, so a new element kind is one row rather than an edit to each.
-var elemShapes = []struct {
-	kind  types.Kind
-	shape elemShape
-}{
-	{types.KindI1, elemShape{itab: heapArrayI1, raw: true}},
-	{types.KindI8, elemShape{itab: heapArrayI8, raw: true}},
-	{types.KindI32, elemShape{itab: heapArrayI32, scale: 2, raw: true}},
-	{types.KindI64, elemShape{itab: heapArrayI64, scale: 3, raw: true}},
-	{types.KindF32, elemShape{itab: heapArrayF32, scale: 2, raw: true}},
-	{types.KindF64, elemShape{itab: heapArrayF64, scale: 3, raw: true}},
-	{types.KindRef, elemShape{itab: heapArrayRef, base: int16(arrayElems)}},
-}
-
-// elemShapeOf resolves the storage shape of an element kind.
-func elemShapeOf(kind types.Kind) (elemShape, bool) {
-	for _, row := range elemShapes {
-		if row.kind == kind {
-			return row.shape, true
-		}
-	}
-	return elemShape{}, false
-}
-
-// elemShapeByItab resolves the storage shape of a container's concrete itab.
-func elemShapeByItab(want uintptr) (elemShape, bool) {
-	for _, row := range elemShapes {
-		if row.shape.itab == want {
-			return row.shape, true
-		}
-	}
-	return elemShape{}, false
-}
-
-// hostShape is how one Go field kind sits in memory. kind is the VM kind its
-// conversion produces, size is the width of the Go field, and signed is the
-// extension a field narrower than its slot widens with; a float row is signed
-// because the VM holds a float's bit pattern sign-extended, as it holds an i32.
-type hostShape struct {
-	kind   types.Kind
-	size   uintptr
-	signed bool
-}
-
-// hostShapes is the one place the memory layout of a hosted Go field is written
-// down, indexed by the reflect.Kind the codec compiled the field through. It
-// mirrors the leaves table the codec picks a conversion from, and holds a row
-// exactly where that conversion is a plain load or store: a string, pointer, or
-// container field publishes a heap reference instead, so it has no row and its
-// access stays with the interpreter.
-var hostShapes = [...]hostShape{
-	reflect.Bool:    {kind: types.KindI1, size: unsafe.Sizeof(false)},
-	reflect.Int8:    {kind: types.KindI8, size: unsafe.Sizeof(int8(0)), signed: true},
-	reflect.Int16:   {kind: types.KindI32, size: unsafe.Sizeof(int16(0)), signed: true},
-	reflect.Int32:   {kind: types.KindI32, size: unsafe.Sizeof(int32(0)), signed: true},
-	reflect.Int:     {kind: types.KindI64, size: unsafe.Sizeof(int(0)), signed: true},
-	reflect.Int64:   {kind: types.KindI64, size: unsafe.Sizeof(int64(0)), signed: true},
-	reflect.Uint8:   {kind: types.KindI32, size: unsafe.Sizeof(uint8(0))},
-	reflect.Uint16:  {kind: types.KindI32, size: unsafe.Sizeof(uint16(0))},
-	reflect.Uint32:  {kind: types.KindI32, size: unsafe.Sizeof(uint32(0))},
-	reflect.Uint:    {kind: types.KindI64, size: unsafe.Sizeof(uint(0))},
-	reflect.Uint64:  {kind: types.KindI64, size: unsafe.Sizeof(uint64(0))},
-	reflect.Uintptr: {kind: types.KindI64, size: unsafe.Sizeof(uintptr(0))},
-	reflect.Float32: {kind: types.KindF32, size: unsafe.Sizeof(float32(0)), signed: true},
-	reflect.Float64: {kind: types.KindF64, size: unsafe.Sizeof(float64(0)), signed: true},
-}
-
-// hostShapeOf resolves the layout of a Go field kind, and reports false where
-// the kind has no row.
-func hostShapeOf(kind reflect.Kind) (hostShape, bool) {
-	if int(kind) >= len(hostShapes) {
-		return hostShape{}, false
-	}
-	shape := hostShapes[kind]
-	return shape, shape.size != 0
-}
-
-// slotShapes is the width a VM slot holds a raw scalar in, and whether it holds
-// it sign-extended. A host field as wide as its slot is the slot's exact image,
-// so a read reinterprets it and a write stores it whole.
-var slotShapes = [...]struct {
-	size   uintptr
-	signed bool
-}{
-	types.KindI1:  {size: 1},
-	types.KindI8:  {size: 1, signed: true},
-	types.KindI32: {size: 4, signed: true},
-	types.KindI64: {size: 8, signed: true},
-	types.KindF32: {size: 4, signed: true},
-	types.KindF64: {size: 8, signed: true},
-}
-
-// exact reports whether the Go field of shape s is as wide as a VM slot of
-// s.kind, which makes the two the same bytes in either direction. A narrower
-// field is not: it decodes through the range check setSigned and setUnsigned
-// perform, and a check that can fail belongs with the interpreter that reports
-// it, so only an exact field lowers a write. Signedness does not enter, because
-// at equal width a conversion only reinterprets the bytes a store already
-// writes.
-func (s hostShape) exact() bool {
-	return s.size == slotShapes[s.kind].size
-}
-
-// read is the width and extension a read of the field loads with. An exact
-// field is reinterpreted with its slot's own extension, which is how an
-// unsigned Go field reaches the guest as the signed VM value its conversion
-// casts to; a narrower one widens with its own.
-func (s hostShape) read() (uintptr, bool) {
-	if s.exact() {
-		return s.size, slotShapes[s.kind].signed
-	}
-	return s.size, s.signed
-}
-
-func newActivation(addr int, fn *types.Function, base, opBase int) activation {
-	kinds := fn.Slots()
-	upvals := types.Kinds(fn.Captures)
-	returns := 0
-	if fn.Typ != nil {
-		returns = len(fn.Typ.Returns)
-	}
-	return activation{
-		end:     len(fn.Code),
-		kinds:   kinds,
-		upvals:  upvals,
-		locals:  make([]value, len(kinds)),
-		state:   make([]localState, len(kinds)),
-		addr:    addr,
-		base:    base,
-		opBase:  opBase,
-		returns: returns,
-	}
-}
-
-// isLoadedAt reports whether local idx currently lives in a register. It is the
-// one test for that: locals holds whichever register a value was last
-// materialized into, and a native call clears the state without clearing that
-// name, so a reader that consults locals alone sees a register the callee has
-// since overwritten (see docs/jit-internals.md).
-func (f *activation) isLoadedAt(idx int) bool {
-	return f.state[idx]&localLoaded != 0
-}
-
-func (c *compiler) Close() error {
-	return c.buffer.Free()
-}
-
-// Compile selects and lowers the first frontend that emits native code.
-func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
-	input, ok := input(i, root.addr)
-	if !ok {
-		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
-	}
-	// Entry roots go to the static frontend first: it plans the whole function
-	// deterministically and covers opcodes no trace can record. Loop roots go
-	// to the trace frontend first, because a recorded loop specializes its
-	// body to the path actually taken - folded legs, a hoisted container - and
-	// the static loop plan is the fallback for a loop no trace could record.
-	frontends := [...]struct {
-		kind prof.Frontend
-		plan func(*compileInput) ([]plan, error)
-	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
-	if root.ip != 0 {
-		frontends[0], frontends[1] = frontends[1], frontends[0]
-	}
-	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
-	for _, frontend := range frontends {
-		plans, err := frontend.plan(input)
+// compile lowers traces already recorded for root and installs the resulting
+// native entries. Recording belongs to the hot-event hooks and side-exit
+// handling because only those paths hold the exact runtime state for their
+// anchor.
+func (i *Interpreter) compile(root jit.Anchor) error {
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	if i.compiler == nil {
+		compiler, err := newCompiler()
 		if err != nil {
-			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+			i.samples.AddMetric("vm_jit_errors_total", 1)
+			i.recordCompile(prof.TriggerHot, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
+			return err
 		}
-		result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
-		mod := &module{entries: map[anchor]native{}}
-		for _, plan := range plans {
-			if plan.anchor != root {
-				continue
-			}
-			if !plan.valid() {
-				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
-				continue
-			}
-			reason, err := c.compile(input, plan, mod, frontend.kind)
-			if err != nil {
-				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
-			}
-			if reason != prof.CompileReasonNone {
-				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
-				continue
-			}
+		i.compiler = compiler
+	}
+	if i.compiler == nil {
+		i.recordCompile(prof.TriggerHot, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
+		return nil
+	}
+	result := i.attempt(i.compiler, root, prof.TriggerHot)
+	if result.Err != nil {
+		return result.Err
+	}
+	if result.Code == nil {
+		return nil
+	}
+	i.install(result.Code, true)
+	return nil
+}
+
+// compileSnapshot builds the compile-time-stable view of addr's function that
+// the architecture-neutral JIT driver plans and lowers against: building it
+// is the interpreter's job, because it is the only side that holds the
+// private state (function bodies, constants, globals, heap, declared types,
+// recorded traces) a snapshot copies out of. It reports false when addr names
+// no compilable function.
+func (i *Interpreter) compileSnapshot(addr int) (*jit.Input, bool) {
+	fn, ok := i.function(addr)
+	if !ok || fn == nil || len(fn.Code) == 0 {
+		return nil, false
+	}
+	input := &jit.Input{
+		Address:   addr,
+		Function:  fn,
+		Module:    i.module,
+		Constants: i.constants,
+		Globals:   i.globalKinds(),
+		Heap:      i.heap,
+		Decl:      i.types,
+		// Layout is computed here, in architecture-neutral code where
+		// HostStruct, field, conversion, and coroutine are visible, so an
+		// architecture backend consuming jit.Input never has to import
+		// them (see jit.Layout). HostStructItab and CoroutineItab are the
+		// same treatment applied to the two heap type identities a backend
+		// guards against: jit.Itab only needs the types.Value interface, so
+		// interp computes them here rather than exporting the concrete
+		// types.
+		Layout: jit.Layout{
+			HostFields:      int(unsafe.Offsetof(HostStruct{}.fields)),
+			HostPtr:         int(unsafe.Offsetof(HostStruct{}.ptr)),
+			HostFieldOffset: int(unsafe.Offsetof(field{}.offset)),
+			HostFieldConv:   int(unsafe.Offsetof(field{}.conversion)),
+			HostFieldSize:   int(unsafe.Sizeof(field{})),
+			HostConvKind:    int(unsafe.Offsetof(conversion{}.kind)),
+			CoroutineValue:  int(unsafe.Offsetof(coroutine{}.value)),
+			CoroutineDone:   int(unsafe.Offsetof(coroutine{}.done)),
+			HostStructItab:  jit.Itab((*HostStruct)(nil)),
+			CoroutineItab:   jit.Itab((*coroutine)(nil)),
+		},
+		Installed: i.stub(addr) != nil,
+	}
+	// i.tracer is nil only for a speculative clone (see tracer.clone), which
+	// never compiles; widening a nil *tracer into the RecordedTraces
+	// interface would produce a non-nil interface holding a nil pointer, so
+	// jit.TracePlan's own nil check would stop seeing "no recorder" the way
+	// it did before this value lived behind an interface.
+	if i.tracer != nil {
+		input.Traces = i.tracer
+	}
+	return input, true
+}
+
+// globalKinds returns the logical kinds of current global values for JIT
+// specialization. Heap-backed i64 values recover KindI64 from the heap object.
+// Dynamic scalar globals remain unknown so native lowering does not assume a
+// stable representation.
+func (i *Interpreter) globalKinds() []types.Kind {
+	kinds := make([]types.Kind, len(i.globals))
+	for idx, val := range i.globals {
+		kind := val.Kind()
+		if kind == types.KindRef && i.alive(val.Ref()) {
+			kind = i.heap[val.Ref()].Kind()
 		}
-		if len(mod.entries) > 0 {
-			return compileResult{module: mod, anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
+		if i.globalTypes[idx] == types.TypeAny && kind != types.KindRef {
+			kind = instr.KindAny
 		}
+		kinds[idx] = kind
+	}
+	return kinds
+}
+
+// attempt runs one Compile, records the outcome under trigger, and counts any
+// compile error. Acquisition and delivery of the result stay with the caller.
+func (i *Interpreter) attempt(c *jit.Compiler, root jit.Anchor, trigger prof.Trigger) jit.Result {
+	input, ok := i.compileSnapshot(root.Addr)
+	result := jit.Result{Anchor: root, Outcome: prof.CompileOutcomeEmpty, Reason: prof.CompileReasonNoInput}
+	if ok {
+		result = c.Compile(input, root)
+	}
+	i.recordCompile(trigger, result)
+	if result.Err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 	}
 	return result
 }
 
-func (noSpillArch) Frame() asm.Frame { return nil }
-
-func (current compileResult) prefer(candidate compileResult) compileResult {
-	if reasonPriority(candidate.reason) > reasonPriority(current.reason) ||
-		reasonPriority(candidate.reason) == reasonPriority(current.reason) && candidate.frontend > current.frontend {
-		return candidate
+// install accounts a successful Compile and rewires the dispatch table: a
+// trace entry replaces the function's first opcode handler and keeps the
+// shadowed threaded handler for guard fallback.
+func (i *Interpreter) install(mod *jit.Code, account bool) {
+	if account {
+		i.account(mod)
 	}
-	return current
-}
-
-func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend prof.Frontend) (prof.CompileReason, error) {
-	if len(c.scratchRegs) < scratchCount {
-		return prof.CompileReasonLoweringRejected, nil
-	}
-	arch := c.arch
-	if plan.noSpill {
-		arch = noSpillArch{c.arch}
-	}
-	nativeLoop := plan.kind == entryLoop
-	reason, err := c.emit(input, plan, mod, frontend, arch, nativeLoop)
-	if reason != prof.CompileReasonRegisterPressure {
-		return reason, err
-	}
-	if len(plan.carried) > 0 {
-		plan.carried = nil
-		reason, err = c.emit(input, plan, mod, frontend, arch, nativeLoop)
-		if reason != prof.CompileReasonRegisterPressure {
-			return reason, err
+	for a, entry := range mod.Entries {
+		if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) || entry.Callable == nil {
+			continue
 		}
-	}
-	if !nativeLoop {
-		return reason, err
-	}
-	return c.emit(input, plan, mod, frontend, arch, false)
-}
-
-func (c *compiler) emit(input *compileInput, plan plan, mod *module, frontend prof.Frontend, arch asm.Arch, nativeLoop bool) (prof.CompileReason, error) {
-	ctx := c.newLowering(input, arch)
-	ctx.nativeLoop = nativeLoop
-	if !lower(ctx, plan) {
-		return prof.CompileReasonLoweringRejected, nil
-	}
-	exits := append([]exitDescriptor(nil), ctx.descriptors...)
-	var resumable []int
-	for _, block := range plan.blocks {
-		if block.bridge {
-			resumable = append(resumable, block.anchor.ip)
+		// A peer's publish can land on a function this interpreter already
+		// cooled (see cool); installing native code for it makes further
+		// instrumentation useful again, so resume it.
+		if a.Addr < len(i.cold) && i.cold[a.Addr] {
+			i.cold[a.Addr] = false
+			i.misses[a.Addr] = 0
 		}
-	}
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits, resumable: resumable})
-}
-
-func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
-	asmb := asm.New(arch)
-	ctx := &lowering{
-		assembler: asmb,
-		labels:    map[int]asm.Label{},
-		module:    input.module,
-		constants: input.constants,
-		globals:   input.globals,
-		heap:      input.heap,
-		scratch:   c.scratchRegs[:scratchCount],
-		head:      asmb.Label(),
-		addr:      input.address,
-	}
-	if input.function.Typ != nil {
-		ctx.returns = len(input.function.Typ.Returns)
-		ctx.params = len(input.function.Typ.Params)
-	}
-	ctx.frames = append(ctx.frames, newActivation(input.address, input.function, 0, 0))
-	return ctx
-}
-
-func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (prof.CompileReason, error) {
-	code, err := ctx.assembler.Build()
-	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) {
-			return prof.CompileReasonRegisterPressure, nil
+		// Save the original threaded handler once so deopt always resumes in the
+		// interpreter, but reinstall the latest native callable on every publish:
+		// a recompiled trace tree (with a hot side exit now inlined) must replace
+		// the earlier one, not be dropped because one was already installed. An
+		// entry root (ip 0) compiles the whole function and tears down the frame
+		// on return; a loop root re-enters mid-function and never unwinds it.
+		if i.exits[a] == nil {
+			i.exits[a] = i.code[a.Addr][a.IP]
 		}
-		if errors.Is(err, asm.ErrBranchOutOfRange) {
-			return prof.CompileReasonBranchRange, nil
+		// natives keeps its New-time size: growing it in bind could dangle the
+		// journal base cached by a native frame suspended across a trap
+		// fallback, so dynamically bound functions never get a natives slot.
+		if entry.Kind == jit.EntryFunction && a.Addr < len(i.natives) {
+			atomic.StorePointer(&i.natives[a.Addr], entry.Callable.Addr())
 		}
-		return prof.CompileReasonError, err
+		// A module loop root owns the hot body far better than the whole-module
+		// entry plan that also contains it, and an installed entry answers
+		// i.code[0][0] and keeps execution inside itself, so the loop stub
+		// would never be dispatched. Retire the entry in favour of the loop.
+		// Only module code: its entry runs once per execution, while a
+		// function entry carries the call path and must stay.
+		if entry.Kind == jit.EntryLoop && a.Addr == 0 {
+			if shadowed := i.exits[jit.Anchor{Addr: 0}]; shadowed != nil {
+				i.code[0][0] = shadowed
+			}
+		}
+		stats := i.counters(a, entry)
+		// wd tracks give-up exits independent of stats: counters is a no-op
+		// under WithProfiler off (see i.counters), but a net-loss native entry
+		// must still be caught and retired without profiling enabled.
+		wd := newWatchdog(entry)
+		i.code[a.Addr][a.IP] = i.cycle(a, entry, stats, wd)
 	}
-	callable, err := asm.Link(c.buffer, arch.ABI(), code)
-	if err != nil {
-		return prof.CompileReasonError, err
-	}
-	n.callable = callable
-	n.bytes = len(code)
-	mod.entries[a] = n
-	mod.bytes += len(code)
-	return prof.CompileReasonNone, nil
 }
 
-func (m counters) exit(encoded uint64) {
-	if encoded == 0 {
+func (i *Interpreter) sync() {
+	if i.cache == nil {
 		return
 	}
-	id := int(encoded - 1)
-	if id >= 0 && id < len(m.exits) {
-		m.exits[id].Inc()
+	modules := i.cache.modules.Load()
+	if modules == nil {
+		return
+	}
+	for i.gen < len(*modules) {
+		i.install((*modules)[i.gen], false)
+		i.gen++
 	}
 }
 
-func (m counters) enter() {
-	if m.entry != nil {
-		m.entry.Inc()
+// entered records one call into the current function. Threaded handlers report
+// failures by panicking so dispatch can annotate them at the interpreter boundary.
+func (i *Interpreter) entered() {
+	if err := i.hit(); err != nil {
+		panic(err)
 	}
 }
 
-func (m counters) yield() {
-	if m.yields != nil {
-		m.yields.Inc()
+// hit records one hot event.
+func (i *Interpreter) hit() error {
+	addr := i.fr.addr
+	if i.trigger == 0 || addr < 0 || addr >= len(i.entries) {
+		return nil
 	}
+	hits := i.entries[addr]
+	if hits < math.MaxUint64 {
+		hits++
+		i.entries[addr] = hits
+	}
+	if hits <= entryWarmup || hits >= i.trigger {
+		if err := i.warm(addr, hits); err != nil {
+			return err
+		}
+	}
+	if i.cache != nil {
+		request, ok := i.cache.claim(addr, i.threshold)
+		if ok {
+			return i.shared(request.root, request.trigger)
+		}
+	}
+	return nil
 }
 
-// newWatchdog precomputes, for each of entry's exit descriptors, whether taking
-// it means the entry gave up, so the watchdog's hot path only ever indexes a
-// []bool keyed by descriptor ID.
-func newWatchdog(entry native) *watchdog {
-	gaveUp := make([]bool, len(entry.exits))
-	for id, exit := range entry.exits {
-		gaveUp[id] = givesUp(exit.reason)
+// warm handles entry tracing and compilation once an event reaches the warmup
+// window or threshold. Entry capture records the shallowest runtime state.
+//
+// Only an event raised at the entry itself may capture. A back edge is a hot
+// event for the same function but stands mid-body, and recording the entry root
+// from there replays the entry instructions against loop-carried locals - a
+// state the function never reaches on entry, whose trace then plans nothing.
+func (i *Interpreter) warm(addr int, hits uint64) error {
+	if i.isCold(addr) {
+		return nil
 	}
-	return &watchdog{gaveUp: gaveUp}
+	root := jit.Anchor{Addr: addr}
+	if hits <= entryWarmup && i.fr.ip == 0 {
+		i.tracer.capture(i, root)
+	}
+	if hits >= i.trigger && i.cache == nil && !i.tried[root] && i.settled(addr, hits) {
+		i.tried[root] = true
+		if err := i.compile(root); err != nil {
+			return err
+		}
+	}
+	i.checkCool(addr, root)
+	return nil
 }
 
-// givesUp reports whether taking this exit means the native entry abandoned the
-// work it was compiled for. A guard failure and a cold branch both say the
-// recording predicted the program wrong, and a trace cut says the code knowingly
-// stopped mid-function; each pays full bailout and re-entry for nothing. A loop
-// exit is how a loop normally ends and a terminal op is a deopt the plan
-// intended, so neither counts.
-func givesUp(reason prof.ExitReason) bool {
-	switch reason {
-	case prof.ExitTraceCut, prof.ExitColdBranch,
-		prof.ExitGuardKind, prof.ExitGuardShape, prof.ExitGuardBounds, prof.ExitGuardValue:
+// settled reports whether addr's entry root is ready to be compiled. A loop
+// header is the better root of the two - it carries the hoisting and the native
+// back-edge that the enclosing entry's copy of the same blocks does not - and an
+// installed entry runs its loops inside itself, so their back edges stop
+// reporting and they can never earn one. Headers therefore go first.
+//
+// The wait is bounded, because a header the function never actually reaches
+// would otherwise hold its entry back forever.
+func (i *Interpreter) settled(addr int, hits uint64) bool {
+	if hits >= i.trigger+entryWarmup {
 		return true
-	default:
-		return false
 	}
-}
-
-// enter counts one invocation of the installed native entry.
-func (w *watchdog) enter() {
-	w.entries++
-}
-
-// exit counts one give-up fallback exit. encoded is i.journal[journalExitID]
-// exactly as counters.exit consumes it: the exit descriptor ID plus one, zero
-// meaning no descriptor.
-func (w *watchdog) exit(encoded uint64) {
-	if encoded == 0 {
-		return
-	}
-	id := int(encoded - 1)
-	if id >= 0 && id < len(w.gaveUp) && w.gaveUp[id] {
-		w.giveUps++
-	}
-}
-
-// bridge counts one bridge cycle (see Interpreter.bridge). It is tracked
-// separately from exit so a bridge never counts toward the give-up rate.
-func (w *watchdog) bridge() {
-	w.bridges++
-}
-
-// failed reports whether this anchor lost the window it just completed: its
-// give-up rate or bridge rate reached retireGiveUpThreshold, so it is retired
-// (see Interpreter.retire). A window shorter than retireWindow has decided
-// nothing yet; a completed one always resets every counter, so the next window
-// starts clean whichever way it went.
-func (w *watchdog) failed() bool {
-	if w.entries < retireWindow {
-		return false
-	}
-	bad := w.giveUps >= retireGiveUpThreshold || w.bridges >= retireGiveUpThreshold
-	w.entries, w.giveUps, w.bridges = 0, 0, 0
-	return bad
-}
-
-// push appends one operand to the symbolic stack.
-func (ctx *lowering) push(v value) {
-	ctx.values = append(ctx.values, v)
-}
-
-// pop removes and returns the top operand.
-func (ctx *lowering) pop() value {
-	v := ctx.values[len(ctx.values)-1]
-	ctx.values = ctx.values[:len(ctx.values)-1]
-	return v
-}
-
-// count reports how many operands the innermost frame owns.
-func (ctx *lowering) count() int {
-	return len(ctx.values) - ctx.frame().opBase
-}
-
-// slot returns the VM stack slot of values[idx] as a delta from the entry
-// frame's bp: the owning frame's locals floor plus the operand's position.
-func (ctx *lowering) slot(idx int) int {
-	for k := len(ctx.frames) - 1; k >= 0; k-- {
-		f := &ctx.frames[k]
-		if f.opBase <= idx {
-			return f.base + len(f.kinds) + (idx - f.opBase)
+	for _, header := range i.tracer.headers(i, addr) {
+		// A header at ip 0 is this very root, not a separate one to wait for.
+		if header != 0 && !i.tried[jit.Anchor{Addr: addr, IP: header}] {
+			return false
 		}
 	}
-	return idx
+	return true
 }
 
-// sp returns the interpreter stack pointer as a delta from the entry bp.
-func (ctx *lowering) sp() int {
-	f := ctx.frame()
-	return f.base + len(f.kinds) + (len(ctx.values) - f.opBase)
-}
-
-func (ctx *lowering) opcode(ip int) int {
-	fn := resolve(ctx.module, ctx.heap, ctx.frame().addr)
-	if fn == nil || ip < 0 || ip >= len(fn.Code) {
-		return prof.OpcodeNone
+// checkCool counts one unproductive observation when addr's entry root and
+// every loop header returned by i.tracer.headers have already been attempted
+// (recorded in i.tried). coolLimit consecutive such observations cool addr,
+// which permanently stops instrumenting it. A root still waiting to be
+// attempted resets nothing and costs one map lookup.
+//
+// Whether anything installed is deliberately not consulted. Once every root
+// has been attempted there is nothing further to compile, so continuing to
+// sample, capture, and observe back-edges only costs dispatch overhead - a
+// function that installed native code pays that overhead in the tier that
+// wins, and its installed entries keep running. checkRetire, not this, is what
+// reacts to native code that turned out not to pay for itself.
+func (i *Interpreter) checkCool(addr int, root jit.Anchor) {
+	if !i.tried[root] {
+		return
 	}
-	return int(fn.Code[ip])
-}
-
-// frame returns the innermost (currently executing) frame.
-func (ctx *lowering) frame() *activation {
-	return &ctx.frames[len(ctx.frames)-1]
-}
-
-// queueExit records a cold fallback after the caller has materialized VM stack
-// state. values may be nil to snapshot the current symbolic stack; retains for
-// deferred refs in the snapshot are applied only on the cold path before
-// returning to threaded execution.
-func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReason, opcode int) asm.Label {
-	if values != nil {
-		ctx.values = append(ctx.values[:0], values...)
+	for _, header := range i.tracer.headers(i, addr) {
+		if !i.tried[jit.Anchor{Addr: addr, IP: header}] {
+			return
+		}
 	}
-	label := ctx.assembler.Label()
-	stack, frames := ctx.snapshot()
-	id := len(ctx.descriptors)
-	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
-	ctx.exits = append(ctx.exits, sideExit{
-		label: label, values: stack, frames: frames, resume: resume,
-		id: id,
-	})
-	return label
-}
-
-// snapshot deep-copies operand and frame state for a deferred branch. Callers
-// must flush VM stack slots first; re-entry reloads locals on demand, so stale
-// register and local-loaded state must stay dropped.
-func (ctx *lowering) snapshot() ([]value, []activation) {
-	values := make([]value, len(ctx.values))
-	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
+	if addr < 0 || addr >= len(i.misses) {
+		return
 	}
-	frames := make([]activation, len(ctx.frames))
-	for i, f := range ctx.frames {
-		frames[i] = f
-		frames[i].locals = make([]value, len(f.locals))
-		frames[i].state = make([]localState, len(f.state))
+	if i.misses[addr] < math.MaxUint8 {
+		i.misses[addr]++
 	}
-	return values, frames
-}
-
-// pre copies the operand stack for one guard fallback. saved may share backing
-// storage with values; mutating ops must remain terminal or avoid changing
-// symbolic values after aliasing.
-func (ctx *lowering) pre() []value {
-	ctx.saved = append(ctx.saved[:0], ctx.values...)
-	return ctx.saved
-}
-
-// pin returns a fresh Width64 int vreg bound to the scratch register at idx.
-func (ctx *lowering) pin(idx int) asm.VReg {
-	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(v, ctx.scratch[idx])
-	return v
-}
-
-// pinTo returns a fresh Width64 int vreg bound to the physical register pr.
-func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
-	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(v, pr)
-	return v
-}
-
-func reasonPriority(reason prof.CompileReason) int {
-	switch reason {
-	case prof.CompileReasonInvalidPlan:
-		return 1
-	case prof.CompileReasonLoweringRejected, prof.CompileReasonBackendUnavailable:
-		return 2
-	case prof.CompileReasonRegisterPressure:
-		return 3
-	case prof.CompileReasonBranchRange:
-		return 4
-	case prof.CompileReasonError:
-		return 5
-	default:
-		return 0
+	if i.misses[addr] >= coolLimit {
+		i.cool(addr)
 	}
+}
+
+// backedge receives the exact target of a warmed backward branch, which is the
+// loop header itself - no header scan is needed here. The arrival is also a hot
+// event for the enclosing function, so a loop makes its own function's entry
+// eligible without any instruction sampling. It drives cooling too: once every
+// root of this function has been attempted, repeated arrivals are what
+// eventually retire its instrumentation.
+func (i *Interpreter) backedge(f *frame) error {
+	if f.ip <= 0 {
+		return nil
+	}
+	if i.isCold(f.addr) {
+		return nil
+	}
+	if err := i.hit(); err != nil {
+		return err
+	}
+	// The loop root waits for the same hot count as the entry root, so the
+	// whole-function plan is always attempted first. Compiling the header first
+	// would install a native loop that stops running this hook, and the function
+	// it belongs to would never accumulate the events its own entry needs.
+	if f.addr >= 0 && f.addr < len(i.entries) && i.entries[f.addr] < i.trigger {
+		return nil
+	}
+	err := i.trace(f)
+	i.checkCool(f.addr, jit.Anchor{Addr: f.addr})
+	return err
+}
+
+// yielded reports a native loop yield through the same back-edge path as the threaded loop.
+func (i *Interpreter) yielded() error {
+	if err := i.backedge(i.fr); err != nil {
+		return err
+	}
+	return i.safepoint()
+}
+
+func (i *Interpreter) trace(f *frame) error {
+	root := jit.Anchor{Addr: f.addr, IP: f.ip}
+	if i.exits[root] != nil || i.tried[root] {
+		return nil
+	}
+	i.tried[root] = true
+	result := i.tracer.capture(i, root)
+	if result.trace == nil {
+		return nil
+	}
+	if i.cache != nil {
+		i.cache.request(request{root: root, trigger: prof.TriggerHot})
+		return nil
+	}
+	if err := i.compile(root); err != nil {
+		return err
+	}
+	// A loop header reached on the iteration that exits records the path out of
+	// the loop rather than the loop, and the walk ends cut at some later header -
+	// a partial. That plans nothing, and keeping it would serve the same
+	// recording to every later arrival, so forget it and let the next arrival
+	// record again; tracer.attemptLimit bounds the retries. A recording that
+	// completed and still planned nothing is a real answer about this header, not
+	// bad luck, and retrying only spends clones to reach the same plan.
+	if root.IP != 0 && i.exits[root] == nil && result.outcome == prof.CaptureOutcomePartial {
+		i.tracer.forget(root)
+		delete(i.tried, root)
+	}
+	return nil
+}
+
+// cycle builds the native dispatch closure threaded code hands control to at
+// anchor root: it enters counters and the watchdog, seeds the journal's
+// resume IP and back-edge budget, calls the native Callable, then dispatches
+// on the trap it reports. All three installed roles - function entry, module
+// entry, and loop header - share this scaffold; entry.Kind and root.Addr
+// alone say what each one does differently:
+//
+//   - EntryFunction: the CALL handler has already pushed a frame and set i.fr
+//     before this closure runs, so the fresh frame's code and upvals are
+//     cleared before the call - refreshing the back-edge budget the same way
+//     a loop does, since an entry trace can carry a self tail-call back-edge
+//     (see tailLoop) that polls the safepoint every loopBudget iterations,
+//     re-entering native here after each yield. The native Entry reads params
+//     from stack scratch slots. sp is restored from the journal only on a
+//     trap, because a clean return runs popFrame, which recomputes it from
+//     the frame itself and performs the teardown RETURN would do in the
+//     threaded interpreter; on a trap this closure rebuilds the native call
+//     chain into real VM frames before resuming threaded execution at the
+//     fallback IP, or gives up and bails out.
+//   - EntryModule: top-level code. The frame is fresh the same way, but a
+//     clean return does not tear it down - it preserves the operand stack and
+//     marks the module frame exhausted so dispatch returns normally, so sp
+//     must come from the journal unconditionally. A give-up bails out the
+//     same way.
+//   - EntryLoop: the header is reached mid-function with the frame already
+//     live, so it is never reinitialized, and sp is restored unconditionally
+//     like EntryModule. A clean return completes the module when the loop
+//     owns the whole module (root.Addr == 0) and tears the frame down
+//     otherwise. A spent budget yields to the safepoint and the Run loop
+//     re-enters native at the header. A give-up records the exit and, only if
+//     execution resumed at the header itself, runs the shadowed handler once
+//     so the interpreter makes progress instead of re-dispatching the same
+//     native stub (see resumeShadowed) - a loop root has no function-entry
+//     stub to bail out to instead.
+//
+// checkRetire's clearNatives is set only for EntryFunction: retiring a
+// function entry must also clear its fast-call slot in i.natives (see
+// install and retire), which a module or loop root never has.
+func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
+	resetFrame := entry.Kind != jit.EntryLoop
+	earlySP := entry.Kind != jit.EntryFunction
+	isFunction := entry.Kind == jit.EntryFunction
+	// popOnReturn and shadow fold the per-role decisions the dispatch loop
+	// would otherwise re-derive on every native entry: whether a clean return
+	// tears the frame down, and which installation point a give-up may have
+	// resumed at. Only the loop role's shadow anchor is the root itself; the
+	// other two ask about the function they returned into, whose address is
+	// not known until the trap.
+	popOnReturn := isFunction || (entry.Kind == jit.EntryLoop && root.Addr != 0)
+	loopShadow := entry.Kind == jit.EntryLoop
+	return func(i *Interpreter) {
+		resume := uint64(0)
+		for cycles := 0; ; cycles++ {
+			stats.enter()
+			wd.enter()
+			ctx := i.journalPtr()
+			i.journal[journal.CellEntry] = resume
+			if resetFrame {
+				i.fr.code = nil
+				i.fr.upvals = nil
+			}
+			i.journal[journal.CellBudget] = loopBudget
+			if err := entry.Callable.Call(ctx); err != nil {
+				panic(err)
+			}
+
+			if earlySP {
+				i.sp = int(i.journal[journal.CellSP])
+			}
+			trap := journal.Trap(i.journal[journal.CellTrap])
+			if trap == journal.TrapNone {
+				if popOnReturn {
+					i.popFrame()
+				} else {
+					i.complete()
+				}
+				break
+			}
+
+			// A trap rebuilt the native call chain into real VM frames; resume the
+			// innermost in the interpreter, surface a frame overflow, or service a
+			// loop safepoint.
+			if !earlySP {
+				i.sp = int(i.journal[journal.CellSP])
+			}
+			i.deopt()
+			if trap == journal.TrapBridge {
+				next, ok := i.bridge(root, entry, wd, cycles)
+				if !ok {
+					break
+				}
+				resume = next
+				continue
+			}
+			switch trap {
+			case journal.TrapOverflow:
+				panic(ErrFrameOverflow)
+			case journal.TrapYield:
+				stats.yield()
+				// A loop back-edge spent its budget. deopt left i.fr at the loop header;
+				// report it and run coordination, then let the threaded Run loop
+				// continue from there.
+				if err := i.yielded(); err != nil {
+					panic(err)
+				}
+			default:
+				stats.exit(i.journal[journal.CellExitID])
+				wd.exit(i.journal[journal.CellExitID])
+				// Record the exit as a branch so the tracer captures the leg and a
+				// hot in-loop branch recompiles the tree with the leg folded in.
+				i.exit(root)
+				if loopShadow {
+					// An exit that resumes at the header itself made no progress - the
+					// header slot holds this native stub, so dispatching it again would
+					// livelock (the hoist prologue's shape guard exits here). Run the
+					// shadowed threaded handler once so the interpreter advances.
+					i.resumeShadowed(root)
+				} else {
+					// A give-up that resumed at some function's own entry (ip 0) would
+					// otherwise retrap immediately on redispatch; run that function's
+					// shadowed entry handler once instead.
+					i.resumeShadowed(jit.Anchor{Addr: i.fr.addr, IP: 0})
+				}
+			}
+			break
+		}
+		i.checkRetire(root, wd, isFunction)
+	}
+}
+
+// bridge runs the one opcode native code could not lower, through its own
+// threaded closure, records the crossing on wd, and reports the IP native
+// execution may resume at. Counting here rather than at each of the three
+// wrappers keeps the tally with the crossing it measures (see watchdog).
+// The trap already handed the interpreter a fully flushed, owned operand stack
+// (see internal/jit/arm64's bridge lowering), so the closure runs exactly as
+// it would under ordinary threaded dispatch.
+//
+// ok is false whenever native execution must not resume, and the caller
+// continues in the interpreter instead: the closure moved to another frame or
+// function (a call or a return), it made no forward progress, the new IP is
+// not one the callable can be re-entered at (only a block the planner marked
+// as a bridge resume carries an entry dispatch label, see internal/jit/arm64's
+// dispatch), or this dispatch has already bridged its budget of cycles — that
+// last case keeps a bridge-dense function reaching the Run loop's safepoints
+// instead of cycling here indefinitely.
+func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *watchdog, cycles int) (uint64, bool) {
+	wd.bridge()
+	f := i.fr
+	if cycles >= loopBudget || f.addr != root.Addr {
+		return 0, false
+	}
+	ip := f.ip
+	if ip < 0 || ip >= len(i.code[f.addr]) {
+		return 0, false
+	}
+	// Run the threaded handler, never whatever occupies the dispatch slot. An
+	// installed native entry lives in that slot - the function entry at ip 0
+	// this wrapper is already running inside, or a loop header compiled as its
+	// own root - and invoking it here would re-enter native code from inside
+	// this wrapper, resetting the journal the outer activation is about to
+	// reuse. i.exits keeps the shadowed threaded closure for exactly this
+	// case, the same one resumeShadowed uses when a give-up resumes on an anchor.
+	closure := i.code[f.addr][ip]
+	if shadowed, installed := i.exits[jit.Anchor{Addr: f.addr, IP: ip}]; installed {
+		if shadowed == nil {
+			return 0, false
+		}
+		closure = shadowed
+	}
+	closure(i)
+	if i.fr != f || f.addr != root.Addr || f.ip <= ip {
+		return 0, false
+	}
+	if !slices.Contains(entry.Resumable, f.ip) {
+		return 0, false
+	}
+	return uint64(f.ip), true
+}
+
+func (i *Interpreter) popFrame() {
+	f := i.fr
+	i.sp = f.bp + f.returns
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+func (i *Interpreter) complete() {
+	i.fr.ip = len(i.code[i.fr.addr])
+	i.fr.code = i.code[i.fr.addr]
+}
+
+func (i *Interpreter) exit(root jit.Anchor) {
+	hits := i.tracer.branch(i, root, jit.Anchor{Addr: i.fr.addr, IP: i.fr.ip})
+	if i.cache != nil {
+		if hits < exitThreshold || hits%exitThreshold != 0 {
+			return
+		}
+		// Queue a side-exit build request without disturbing an active owner.
+		i.cache.request(request{root: root, trigger: prof.TriggerSideExit})
+		return
+	}
+	if hits != exitThreshold {
+		return
+	}
+	if i.compiler == nil {
+		return
+	}
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	result := i.attempt(i.compiler, root, prof.TriggerSideExit)
+	if result.Err != nil {
+		panic(result.Err)
+	}
+	if result.Code != nil {
+		i.install(result.Code, true)
+	}
+}
+
+// resumeShadowed runs the threaded handler installed anchor a's native code
+// shadowed (see install) exactly once, when a give-up has resumed execution
+// precisely at a's own installation point: redispatching a's native stub
+// again there would just retrap or, for a loop header, livelock instead of
+// making progress (see cycle). It is a no-op wherever execution resumed
+// somewhere else, or nothing was ever shadowed at a.
+func (i *Interpreter) resumeShadowed(a jit.Anchor) {
+	if i.fr.addr != a.Addr || i.fr.ip != a.IP {
+		return
+	}
+	if fn := i.exits[a]; fn != nil {
+		fn(i)
+	}
+}
+
+func (i *Interpreter) shared(root jit.Anchor, trigger prof.Trigger) error {
+	addr := root.Addr
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	compiler, err := newCompiler()
+	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
+		i.recordCompile(trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
+		i.cache.fail(addr)
+		return err
+	}
+	if compiler == nil {
+		i.recordCompile(trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
+		i.cache.fail(addr)
+		return nil
+	}
+	result := i.attempt(compiler, root, trigger)
+	if result.Err != nil {
+		_ = compiler.Close()
+		i.cache.fail(addr)
+		return result.Err
+	}
+	if result.Code == nil {
+		_ = compiler.Close()
+		i.cache.fail(addr)
+		return nil
+	}
+	mod := result.Code
+	i.account(mod)
+	var buf *asm.Buffer
+	if len(mod.Entries) > 0 {
+		buf = compiler.Buffer()
+	} else {
+		_ = compiler.Close()
+	}
+	i.cache.publish(addr, mod, buf)
+	return nil
+}
+
+func (i *Interpreter) counters(a jit.Anchor, entry jit.Entry) counters {
+	if i.profiler == nil {
+		return counters{}
+	}
+	kind := entry.Kind.Profile()
+	stats := counters{
+		entry:  i.samples.RegisterEntry(a.Addr, a.IP, kind, entry.Frontend),
+		yields: i.samples.RegisterYield(a.Addr, a.IP, kind, entry.Frontend),
+		exits:  make([]*prof.Counter, len(entry.Exits)),
+	}
+	for id, exit := range entry.Exits {
+		stats.exits[id] = i.samples.RegisterExit(a.Addr, a.IP, kind, entry.Frontend, exit.Reason, exit.Opcode)
+	}
+	return stats
+}
+
+func (i *Interpreter) account(mod *jit.Code) {
+	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.Entries)))
+	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.Bytes))
+	if i.profiler == nil {
+		return
+	}
+	for a, entry := range mod.Entries {
+		i.samples.RecordEmit(a.Addr, a.IP, entry.Kind.Profile(), entry.Frontend, entry.Bytes)
+	}
+}
+
+func (i *Interpreter) recordCompile(trigger prof.Trigger, result jit.Result) {
+	if i.profiler != nil {
+		i.samples.RecordCompile(result.Anchor.Addr, result.Anchor.IP, trigger, result.Frontend, result.Outcome, result.Reason)
+	}
+}
+
+// cool permanently stops instrumenting addr once every compilation root has
+// been tried and nothing installed: further entry capture and back-edge
+// observation would only pay dispatch overhead for no benefit (see checkCool).
+// Reverting the function to the zero-overhead BR handler is what actually
+// removes the loop instrumentation, since back-edge hooks are installed by
+// default rather than upgraded into; sync still runs afterward so a peer's
+// later publish can still be adopted (see install).
+func (i *Interpreter) cool(addr int) {
+	if addr < 0 || addr >= len(i.cold) || i.cold[addr] {
+		return
+	}
+	i.cold[addr] = true
+	if i.backedges[addr] {
+		i.rethread(addr, false)
+	}
+}
+
+// checkRetire evaluates wd's window (see watchdog.expired) once native code
+// has already finished making this dispatch's forward progress — a normal
+// return, a serviced yield, or a bailout have all already run — so retiring
+// a's installed entry here never skips a step the interpreter owed the
+// program. clearNatives is true only for a function-entry anchor (see
+// Interpreter.retire).
+func (i *Interpreter) checkRetire(a jit.Anchor, wd *watchdog, clearNatives bool) {
+	if wd.failed() {
+		i.retire(a, clearNatives)
+	}
+}
+
+// retire undoes install for anchor a once its watchdog finds it spends at least
+// retireGiveUpThreshold of a retireWindow giving up (see watchdog): it restores the shadowed threaded handler saved in i.exits,
+// clears a's function-entry call-fast-path slot in i.natives when
+// clearNatives is set (a null slot already makes callers fall back at the
+// CALL, see install), and calls cool so addr is neither re-instrumented nor
+// recompiled. The threaded handler must be restored before cool, because
+// cool may rethread addr's whole table and preserves whatever i.code
+// currently holds at every live anchor (see rethread).
+//
+// retire only ever writes i.code, i.natives, and i.cold, all local to this
+// Interpreter, so it never reaches into a pool's shared published module (see
+// sync). It is safe to call from inside the very wrapper closure it replaces:
+// the caller is already done making this dispatch's progress and is about to
+// return to the Run loop.
+func (i *Interpreter) retire(a jit.Anchor, clearNatives bool) {
+	if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) {
+		return
+	}
+	if fn := i.exits[a]; fn != nil {
+		i.code[a.Addr][a.IP] = fn
+	}
+	if clearNatives && a.Addr < len(i.natives) {
+		atomic.StorePointer(&i.natives[a.Addr], nil)
+	}
+	i.cool(a.Addr)
+}
+
+// rethread rebuilds addr's dispatch table for the given back-edge mode: true
+// installs the counting back-edge handlers every function starts with, false
+// reverts to the plain zero-overhead ones (see cool).
+//
+// The rethreaded handlers are copied into the table already installed rather
+// than replacing it. Compile emits one handler per code byte, so both tables
+// describe the same function at the same length, and keeping that slice live
+// rewires every frame currently executing addr in place.
+func (i *Interpreter) rethread(addr int, backedge bool) {
+	fn, ok := i.function(addr)
+	if !ok || fn == nil {
+		return
+	}
+	c := i.threader(backedge)
+	installed := i.code[addr]
+	compiled := c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
+	// Rethreading replaces only interpreted handlers. Installed native entries
+	// stay live while their saved fallbacks advance to the rebuilt table.
+	for root := range i.exits {
+		if root.Addr != addr || root.IP < 0 || root.IP >= len(compiled) || root.IP >= len(installed) {
+			continue
+		}
+		i.exits[root] = compiled[root.IP]
+		compiled[root.IP] = installed[root.IP]
+	}
+	copy(installed, compiled)
+	i.backedges[addr] = backedge
+}
+
+// function returns the *types.Function at addr in the heap, or false if
+// addr does not point at a function.
+func (i *Interpreter) function(addr int) (*types.Function, bool) {
+	if addr == 0 {
+		return i.module, true
+	}
+	if addr <= 0 || addr >= len(i.heap) {
+		return nil, false
+	}
+	fn, ok := i.heap[addr].(*types.Function)
+	return fn, ok
+}
+
+// stub returns the threaded handler a function entry's native code shadows,
+// or nil where nothing is installed at addr's entry (see install).
+func (i *Interpreter) stub(addr int) func(*Interpreter) {
+	return i.exits[jit.Anchor{Addr: addr}]
+}
+
+// isCold reports whether addr has been cooled (see cool).
+func (i *Interpreter) isCold(addr int) bool {
+	return addr >= 0 && addr < len(i.cold) && i.cold[addr]
+}
+
+// deopt rebuilds VM frames from the native journal after a trap. Native frames
+// record themselves while unwinding, so record[depth-1] is the outermost native
+// frame — already live at i.frames[i.fp-1]. Earlier records become deeper VM
+// frames in reverse order, matching generated fused direct calls (ref
+// unretained, code/upvals restored).
+func (i *Interpreter) deopt() {
+	depth := int(i.journal[journal.CellDepth])
+	if depth == 0 {
+		return
+	}
+	base := i.fp - 1
+
+	// The last record is the live outermost frame; reconcile its resume state.
+	fn, bp, ip, _ := i.unpack(depth - 1)
+	outer := &i.frames[base]
+	outer.bp = bp
+	outer.ip = ip
+	i.restore(outer, fn)
+
+	// Earlier records become fresh frames from outer to inner. Like the fused
+	// generated direct call, the callee ref was never pushed or retained, so
+	// release stays false.
+	for n := 1; n < depth; n++ {
+		fn, bp, ip, returns := i.unpack(depth - 1 - n)
+		f := &i.frames[base+n]
+		f.addr = fn
+		f.ref = fn
+		f.release = false
+		f.bp = bp
+		f.ip = ip
+		f.returns = returns
+		i.restore(f, fn)
+	}
+	i.fp += depth - 1
+	i.fr = &i.frames[i.fp-1]
+}
+
+// unpack reads frame record n from the native journal.
+func (i *Interpreter) unpack(n int) (addr, bp, ip, returns int) {
+	return int(i.journal[journal.At(n, journal.RecordAddr)]),
+		int(i.journal[journal.At(n, journal.RecordBP)]),
+		int(i.journal[journal.At(n, journal.RecordIP)]),
+		int(i.journal[journal.At(n, journal.RecordReturns)])
+}
+
+// journalPtr resets and fills the journal handed to native code: stack/global base
+// pointers, current frame BP/SP, pointer cells for native fast paths, and the
+// per-call frame budget. It returns &journal[0], passed to native code in X0.
+func (i *Interpreter) journalPtr() unsafe.Pointer {
+	i.journal[journal.CellStack] = 0
+	if len(i.stack) > 0 {
+		i.journal[journal.CellStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
+	}
+	i.journal[journal.CellGlobals] = 0
+	if len(i.globals) > 0 {
+		i.journal[journal.CellGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
+	}
+	i.journal[journal.CellBP] = uint64(i.fr.bp)
+	i.journal[journal.CellSP] = uint64(i.sp)
+
+	i.journal[journal.CellRC] = 0
+	if len(i.rc) > 0 {
+		i.journal[journal.CellRC] = uint64(uintptr(unsafe.Pointer(&i.rc[0])))
+	}
+	i.journal[journal.CellUpvals] = 0
+	if len(i.fr.upvals) > 0 {
+		i.journal[journal.CellUpvals] = uint64(uintptr(unsafe.Pointer(&i.fr.upvals[0])))
+	}
+	i.journal[journal.CellHeap] = 0
+	if len(i.heap) > 0 {
+		i.journal[journal.CellHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
+	}
+	i.journal[journal.CellNatives] = 0
+	if len(i.natives) > 0 {
+		i.journal[journal.CellNatives] = uint64(uintptr(unsafe.Pointer(&i.natives[0])))
+	}
+
+	i.journal[journal.CellDepth] = 0
+	i.journal[journal.CellCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
+	i.journal[journal.CellTrap] = uint64(journal.TrapNone)
+	i.journal[journal.CellExitID] = 0
+	i.journal[journal.CellEntry] = 0
+	i.journal[journal.CellBudget] = uint64(i.tick)
+	i.journal[journal.CellActive] = 0
+	return unsafe.Pointer(&i.journal[0])
 }

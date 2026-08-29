@@ -14,7 +14,7 @@ Use this document when adding, changing, debugging, or testing bytecode instruct
 | mnemonic, operand widths, fixed stack effects | `instr/type.go` |
 | dynamic verification rules | `program/verify.go` |
 | runtime semantics | `interp/threaded.go` |
-| ARM64 lowering | `interp/jit_arm64.go` |
+| ARM64 lowering | `internal/jit/arm64/` |
 | non-ARM64 JIT stub | `interp/jit_stub.go` |
 | platform support | `docs/compatibility.md` |
 
@@ -260,7 +260,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | native typed-array length fast path |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | native typed-array get fast path |
-| Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | guarded native store when the no-spill budget permits; ref stores remain terminal |
+| Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | guarded native store when the register budget permits; ref stores remain terminal |
 | Arrays | `ARRAY_FILL` | `array.fill` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
 | Arrays | `ARRAY_COPY` | `array.copy` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
 | Arrays | `ARRAY_APPEND` | `array.append` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
@@ -269,7 +269,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path; static plans resolve constant field indexes; a `*HostStruct` field loads Go memory in place |
-| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | guarded native store when the no-spill budget permits; ref-field writes remain terminal; a `*HostStruct` field stores Go memory in place when it is as wide as its slot |
+| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | guarded native store when the register budget permits; ref-field writes remain terminal; a `*HostStruct` field stores Go memory in place when it is as wide as its slot |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | terminal fallback |

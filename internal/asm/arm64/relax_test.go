@@ -60,7 +60,7 @@ func TestArch_Relax(t *testing.T) {
 		require.True(t, relaxed)
 		require.Len(t, repl, 2)
 		require.Equal(t, uint16(arm64.OpCBNZ), repl[0].Op)
-		require.Equal(t, asm.P(arm64.X3), repl[0].Src1)
+		require.Equal(t, asm.Physical(arm64.X3), repl[0].Src1)
 		require.Equal(t, skip, repl[0].Src2)
 		require.Equal(t, uint16(arm64.OpB), repl[1].Op)
 		require.Equal(t, target, repl[1].Src2)
@@ -68,7 +68,7 @@ func TestArch_Relax(t *testing.T) {
 		repl, relaxed = relaxer.Relax(arm64.CBNZLabel(arm64.X3, label), -(1 << 21))
 		require.True(t, relaxed)
 		require.Equal(t, uint16(arm64.OpCBZ), repl[0].Op)
-		require.Equal(t, asm.P(arm64.X3), repl[0].Src1)
+		require.Equal(t, asm.Physical(arm64.X3), repl[0].Src1)
 	})
 
 	t.Run("TBZ/TBNZ never carry a label operand and are never relaxed", func(t *testing.T) {

@@ -16,7 +16,7 @@ Use this guide when adding or changing an opcode. For canonical semantics, keep 
 | Runtime lowering | `internal/cmd/geninterp/lower.go` |
 | Fusion patterns | `internal/cmd/geninterp/pattern.go` |
 | Generated runtime semantics | `interp/threaded.go` |
-| ARM64 native lowering | `interp/jit_arm64.go` |
+| ARM64 native lowering | `internal/jit/arm64/` |
 | Public reference | `docs/instruction-set.md` |
 
 Threaded support is required. JIT support is optional and should be added only when it can preserve exact threaded fallback semantics.
@@ -84,7 +84,7 @@ Keep the generated handler explicit. Generator-only lowering methods may remove 
 
 ## Step 5 — Add JIT Support When Appropriate
 
-Add ARM64 lowering in `interp/jit_arm64.go` only when the operation can be lowered with clear guards and correct fallback.
+Add ARM64 lowering in `internal/jit/arm64/` only when the operation can be lowered with clear guards and correct fallback.
 
 Rules:
 

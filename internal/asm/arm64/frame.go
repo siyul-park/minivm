@@ -89,6 +89,15 @@ func (frame) Calls(op uint16) bool {
 	return Op(op) == OpBL
 }
 
+// Jumps reports whether op is ARM64's unconditional branch: the only label
+// branch this backend emits that never falls through. Every conditional
+// form (CBZ, CBNZ, TBZ, TBNZ, B.cond) and OpBL always falls through — the
+// first three because the condition can be false, the last because a call
+// returns — so none of them belong here.
+func (frame) Jumps(op uint16) bool {
+	return Op(op) == OpB
+}
+
 // spillReg widens reg to its 64-bit view so a full slot is stored and
 // reloaded regardless of the value's declared width.
 func spillReg(reg asm.PReg) asm.PReg {

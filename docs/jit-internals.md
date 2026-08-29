@@ -1,10 +1,10 @@
 # JIT Internals
 
-Contracts for the ARM64 JIT in `interp/` and its interaction with `internal/asm/`.
+Contracts for the ARM64 JIT in `internal/jit/arm64` and its interaction with `interp/` and `internal/asm/`.
 
 ## When to Read
 
-Use this document before changing `interp/jit*.go`, `interp/trace.go`, `asm` callable ABI code, trace recording, lowering, deoptimization, loop safepoints, or JIT installation.
+Use this document before changing `internal/jit/arm64/*.go`, `interp/jit_*.go`, `interp/trace.go`, `interp/tier.go`, `asm` callable ABI code, trace recording, lowering, deoptimization, loop safepoints, or JIT installation.
 
 For user-facing performance results, see `docs/benchmarks.md`. For sampling and hotness thresholds, see `docs/profile.md`.
 
@@ -15,8 +15,12 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | opcode semantics | `docs/instruction-set.md`, `instr/type.go` |
 | threaded behavior | `interp/threaded.go` |
 | trace recording | `interp/trace.go` |
-| architecture-neutral compiler | `interp/jit.go`, `interp/jit_plan.go` |
-| ARM64 lowering | `interp/jit_arm64.go` |
+| architecture-neutral compiler IR (plan graph, dataflow facts, layout tables, recorded-trace data) | `internal/jit/` |
+| architecture-neutral compiler driver | `internal/jit` |
+| runtime tier-up and retirement policy | `interp/tier.go` |
+| ARM64 lowering | `internal/jit/arm64/` |
+| ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
+| frame-journal layout | `internal/journal/` |
 | callable ABI | `internal/asm/` |
 | value layout | `docs/value-representation.md` |
 | heap ownership | `docs/memory-model.md` |
@@ -98,29 +102,27 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 ## Compiler
 
-`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, root)` and receives an opaque `module`; it does not select or inspect a compilation strategy. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
+`jit.Compiler` lives in `internal/jit`. The interpreter builds the read-only `jit.Input` snapshot itself (`Interpreter.compileSnapshot` in `interp/jit.go`) and calls `Compile(input, root)`, receiving a `jit.Code`; it does not select or inspect a compilation strategy. Passing a snapshot rather than the interpreter is what keeps the dependency one-way: `internal/jit` never imports `interp`. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
 
-The compiler builds one read-only `compileInput`, then runs two ordered frontends:
+The compiler runs two ordered frontends over that input:
 
-1. `staticPlan` constructs complete plans from verified bytecode and dataflow: one entry plan when no entry is installed, plus one `entryLoop` plan per loop header (`headers`).
-2. `tracePlan` constructs plans from immutable runtime trace snapshots.
+1. `jit.StaticPlan` constructs complete plans from verified bytecode and dataflow: one entry plan when no entry is installed, plus one `jit.EntryLoop` plan per loop header (`headers`, unexported).
+2. `jit.TracePlan` constructs plans from immutable runtime trace snapshots.
 3. If neither frontend produces a lowerable plan, threaded execution remains installed.
 
 The order depends on the requested root. An entry root tries the static frontend first: it plans the whole function deterministically and covers opcodes no trace can record. A loop root tries the trace frontend first, because a recorded loop specializes its body to the path actually taken - folded legs, a hoisted container - and the static loop plan is the fallback for a loop no trace could record.
 
-Both frontends return the same private `plan` model: ABI kind, a root block ID, flat blocks, entry states, ordinary steps, explicit edges, and spill policy. Every internal edge carries a block ID; unresolved edges retain only their threaded fallback anchor. Build, link, validation, accounting, and publication are centralized in the compiler.
+Both frontends return the same `jit.Plan` model (`internal/jit`): ABI kind, a root block ID, flat blocks, entry states, ordinary steps, and explicit edges. Every internal edge carries a block ID; unresolved edges retain only their threaded fallback anchor. Build, link, validation, accounting, and publication are centralized in the compiler.
 
 ## Static Frontend
 
-The static frontend analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, direct-call targets, declared struct types, and known i32 constants. A `STRUCT_GET` whose container carries a declared struct type (or references a known heap struct) and whose field index is a known in-bounds constant resolves its result kind statically; the planner synthesizes `step.seen` as the zero boxed value of that kind, and the lowering's runtime itab, type, and per-field kind guards keep it sound. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. An opcode `bridgeable` names (see Bridge) ends its block on that opcode instead of rejecting the whole function, provided `applyStep` can still model its stack effect; any other opcode the backend cannot lower, or one whose effect cannot be modeled, rejects the whole static plan for the function.
+The static frontend (`internal/jit`) analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, direct-call targets, declared struct types, and known i32 constants. A `STRUCT_GET` whose container carries a declared struct type (or references a known heap struct) and whose field index is a known in-bounds constant resolves its result kind statically; the planner synthesizes `Step.Seen` as the zero boxed value of that kind, and the lowering's runtime itab, type, and per-field kind guards keep it sound. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. An opcode `bridgeable` (unexported) names (see Bridge) ends its block on that opcode instead of rejecting the whole function, provided `applyStep` (unexported) can still model its stack effect; any other opcode the backend cannot lower, or one whose effect cannot be modeled, rejects the whole static plan for the function.
 
 A container's element kind resolves from the live heap cell when its identity is known, and otherwise from its declared array type (`types.ArrayType.ElemKind`) reached through the local, param, upvalue, or `REF_CAST` slot that carries it. Both are hints the runtime tag, itab, and bounds guards verify before any access, so a slot declared as an array that currently holds null or a differently shaped array deopts instead of being read. The declared type answers only in a call-free plan: the general array path combined with a native call still corrupts native state, so a calling function keeps resolving only from a constant container.
 
-Static plans compute `noSpill` exactly as trace plans do. A store path must never spill, and before declared array types let array code plan statically this was unreachable, because such a function had no static plan at all.
-
 Every root of a function is planned from one shared block list, but each `entryLoop` plan keeps only the blocks its own root reaches (`prune`), renumbered densely. The backend emits every block a plan holds, so an unpruned header would re-emit the whole function once per header - O(headers) redundant code size, register pressure, and branch range. Reachability follows `term.edges` and their tail continuations, plus one edge no terminator names: a `terminateBridge` block resumes at the block planned immediately after it, because resumption is a fresh external entry rather than a branch. A block list that does not satisfy that layout skips the root instead of emitting a plan whose resume target is missing.
 
-`noSpill` and the loop-carried registers are recomputed per pruned plan rather than inherited. A block the header cannot reach is never emitted, so its stores must not force the plan off the spill frame and its bridges must not strip the plan's carried registers.
+The loop-carried registers are recomputed per pruned plan rather than inherited: a block the header cannot reach is never emitted, so its bridges must not strip the plan's carried registers. Plans no longer carry a spill policy of their own (see Register Allocation below): a container store used to force a plan off the spill frame entirely, but the allocator now judges every spill by dominance, so a store is just another step.
 
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
@@ -179,15 +181,15 @@ Threaded back-edge handlers report loop hotness directly; forward branches carry
 
 A pool shares one private `tracer`. Tree mutations are locked. `rootAt` returns a stable snapshot containing immutable trace pointers plus copied branch and hit containers.
 
-`tracePlan` converts that snapshot into flat plan blocks. It excludes aborted fragments and loop-kind legs (a loop-kind leg is a loop root of its own: anchored at this header it is the root itself and its edge already wires to the root block, anchored elsewhere it is a different loop with its own native entry), sorts continuation roots deterministically, connects internal paths by block ID, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
+`tracePlan` converts that snapshot into flat plan blocks. It excludes aborted fragments and loop-kind legs (a loop-kind leg is a loop root of its own: anchored at this header it is the root itself and its edge already wires to the root block, anchored elsewhere it is a different loop with its own native entry), sorts continuation roots deterministically, and connects internal paths by block ID rather than exposing the trace tree to lowering.
 
 In a loop plan, a partial leg whose cut lands on the plan's own header (same function, depth 0) folds into the loop back-edge: `split` emits a real branch terminator instead of a fallback, `wire` resolves it onto the root block, and lowering takes the committing-flush native back-edge, so an in-loop branch that rejoins the header no longer exits native code (issue #155). A cut record that directly follows an explicit branch with the same target ends the split without materializing a spurious block, leaving the branch edge for `wire` to resolve. Cuts inside an inlined frame or to any other location keep the deopt fallback.
 
 ## Backend
 
-`jit.go` is architecture-neutral. Build-tagged `lower(*lowering, plan)` implementations consume the normalized plan directly; unsupported architectures never construct a compiler.
+`internal/jit.Compiler` (built by `jit.New`) is architecture-neutral: it picks the arch and `Machine` its caller supplies, builds the assembler, and hands both to the `Machine.Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool)` seam. `jit.Input` and `jit.Plan` live in `internal/jit`; all lowering state — `lowering`, the symbolic `value` stack, inlined `activation`s, deferred `work`, and queued `sideExit`s — lives on the machine's side of that seam, private to `internal/jit/arm64`. `interp`'s build-tagged `jit_arm64.go`/`jit_stub.go` are the arch selector: on arm64, `newCompiler` builds `jit.New(arm64.New(), newMachine())` where `newMachine` calls `internal/jit/arm64.New()`; on every other architecture `newCompiler` returns `(nil, nil)` and the unavailable backend is never constructed.
 
-`jit_arm64.go` owns all ARM64 lowering: orchestration, the single opcode dispatcher, control flow, numeric operations, calls, frames, deoptimization, heap access, and reference ownership.
+`internal/jit/arm64` owns all ARM64 lowering, split by concern across `machine.go` (orchestration and the `Machine`/`lowering` types), `dispatch.go` (the single opcode dispatcher), `control.go` (control flow), `numeric.go` (numeric operations), `call.go` (calls and frames), `deopt.go` (deoptimization), `heap.go` (heap access), and `ref.go` (reference ownership).
 
 Every plan block passes through one `emitBlock` path and every edge carries an explicit block ID or an unresolved threaded-fallback anchor. Bytecode locations describe source positions only; block IDs preserve distinct inlined contexts even when they share the same `(function, IP)`. A state-backed block reloads VM homes, while a profiled successor may continue with the current symbolic state.
 
@@ -224,50 +226,64 @@ bytes. Its complete Go frame is 8,272 bytes including the 80-byte trampoline
 area.
 Native code starts at the top of the reserve, so generated SP adjustments stay
 inside memory covered by Go's stack-growth check. X26 is the stable spill-frame
-base, so a native self-call may move SP without changing spill addresses. Keep
-the allocator limit, native frame limit, and `internal/asm/arm64/abi_arm64.s` reserve in
-sync: `interp.TestNativeStackReserve` (`interp/jit_arm64_test.go`) asserts
-`asm.MaxSpillSlots*8 + nativeFrameLimit*journalStride*8` equals the reserve
-literal parsed out of `abi_arm64.s`, and that the reserve plus the 80-byte
-callee-saved save area equals the trampoline's total Go frame size, so an
-edit to any one constant without the others fails a test instead of
-corrupting the native stack at runtime.
+base, so a native self-call may move SP without changing spill addresses.
 
-Register allocation (`internal/asm/rewriter.go`) is a single linear-scan pass: it spills the live vreg whose final use is farthest ahead to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. A call whose target label is bound in the same build runs through the shared epilogue on return, so the rewriter reserves the caller's spill area again after it. Linear-scan lifetimes describe a forward-only stream, so a build containing a back-edge runs without a spill frame at all: a value live across the loop would otherwise be spilled at what merely looks like its last use. The frame prologue sits ahead of the first instruction, and internal branches rebase past it, so a back-edge can never reserve the frame twice.
+`internal/asm/arm64` owns the byte arithmetic behind that reserve so it has one
+definition instead of being restated wherever it is needed:
+`arm64.SpillBytes` derives the spill portion from `asm.MaxSpillSlots`, and
+`arm64.StackReserve(recordBytes, callDepth)` / `arm64.FrameSize(recordBytes,
+callDepth)` compute the reserve and total Go frame size for a caller-supplied
+record width (see `journal.Shift`) and call-depth cap. `internal/asm/arm64`
+has no dependency on `internal/journal`, so `recordBytes` is the caller's
+concern, not this package's. A hand-written `.s` literal cannot read a Go
+constant, so `abi_arm64.s`'s two literals still need a test to keep them
+honest, split by what each side can see: `interp.TestARM64_StackReserve`
+(`interp/tier_test.go`) asserts `arm64.StackReserve(1<<journal.Shift,
+nativeFrameLimit)` equals the `ADD $N, RSP` reserve literal — the half that
+needs interp's private `nativeFrameLimit` — and `arm64.TestFrameSize`
+(`internal/asm/arm64/stack_test.go`) asserts the `TEXT ·invoke(SB), $N-16`
+literal equals that same reserve literal plus `arm64.SaveAreaBytes`, entirely
+within `internal/asm/arm64`. An edit to `asm.MaxSpillSlots`, `nativeFrameLimit`,
+or either `.s` literal without updating the others fails one of these two
+tests instead of corrupting the native stack at runtime.
 
-Linear spill state is unsafe across a loop back-edge, and mutation blocks can combine paths around state materialization. Two layers enforce safety:
+Register allocation (`internal/asm/rewriter.go`) is a single forward pass over the instruction stream: it binds a vreg on first use, releases it at its last reference, and — when the physical bank is exhausted — spills the bound integer vreg whose final use is farthest ahead to a stack slot at the point pressure was observed, reloading it on demand. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. A call whose target label is bound in the same build runs through the shared epilogue on return, so the rewriter reserves the caller's spill area again after it (`Frame.Resume`, not a fresh `Frame.Enter`).
 
-- `internal/asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
-- `noSpill` scans every step in the completed plan, including learned continuations, and forbids spilling whenever `ARRAY_SET` or `STRUCT_SET` is present.
+Spill *eligibility*, though, is not decided from the flat instruction stream: `rewriter.run` builds a control-flow graph once up front (`internal/asm/block.go`), computes dominance over it (`dominance.go`), and indexes every instruction position that reads each vreg (`uses.go`) — replacing an earlier design where a value was ineligible whenever any label sat between its store and its last use, and a build containing any backward branch disabled spilling entirely regardless of whether a given value was anywhere near the loop. `rewriter.crosses` combines three independent checks, each catching a hazard the others cannot see:
 
-When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. `ARRAY_SET` and `STRUCT_SET` use the common fresh-register heap path rather than a store-specific register-recycling path.
+- **Dominance.** A value may be spilled at a point only if that store dominates every one of its remaining uses — every path from the entry to a use must pass through the store. This is the literal question the earlier "no label in between" rule only approximated: a value confined to one pass through a loop body dies before the back-edge and is redefined after it, so it is now spillable for the first time, while a value genuinely carried into the next iteration still fails, because the first pass through the loop reaches its use without ever running a store issued later. `TestAssembler_Build/spills a value live across a forward branch` and `.../declines a value spilled on one diamond arm and reloaded on the sibling arm` exercise this against a merge point and a bare sibling arm respectively; `.../spills a value confined to one loop iteration` and `.../declines a value live across a back edge` exercise it against a real back-edge.
+- **Loop-carried self-reference (`internal/asm/carry.go`).** Dominance alone is not sound for a redefinition that reads its own value — an accumulating `ADD dst, dst, x`, the shape a mutable loop-carried local takes in this flat, non-SSA IR. Such a redefinition's own store trivially dominates its own reload under the ordinary definition, because dominance counts paths, not how many times a loop body re-executes; but a spill inserts exactly one store and one reload instruction, not one pair per iteration, so a reload sitting at that redefinition would replay whatever the store captured once rather than the previous iteration's update. `carryHazards` finds every self-referencing redefinition a natural loop governs and `crosses` declines to spill across it unless the store itself sits inside the same loop, refreshing on the same schedule. `TestAssembler_Build/declines a value live across a back edge` is the case this rule alone catches: dominance would accept it.
+- **Self-recursive calls (`rewriter.barriers`).** A `BL` to a label bound at or before the call site shares the caller's spill frame (`Frame.Resume`) rather than getting a fresh one, so a value the caller still needs after such a call is unsound to leave spilled across it even though the store trivially dominates the reload in the caller's own single-execution control flow — two activations of the same code are sharing one physical slot, which no dominance or liveness query is about. `TestAssembler_Build/self-recursive call clobbers the caller's spill slots` proves the build rejects rather than emits that overwrite.
+
+A container store (`ARRAY_SET`, `STRUCT_SET`) carries no spill restriction of its own now that dominance judges every spill on its own merits; it used to force `Plan.NoSpill`, disabling the whole build's spill frame, because the allocator could not yet tell a sound spill from an unsound one around a store's own branches.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
 ## Frame Journal
 
-`i.journal` is owned by `Interpreter`. It is both input context for native entry and output state for deoptimization.
+`i.journal` is owned by `Interpreter`. It is both input context for native entry and output state for deoptimization. `internal/journal` owns the cell, record, and trap layout: `journal.Cell` indexes a header cell, `journal.Record` indexes a field within a frame record, and `journal.Trap` is the exit kind stored at `journal.CellTrap`.
 
-Header cells come before fixed-stride frame records.
+Header cells come before fixed-stride frame records (`journal.Stride` cells wide, indexed by `journal.Record`).
 
 | Cell | Purpose |
 |---|---|
-| `journalStack` | stack base pointer |
-| `journalGlobals` | globals base pointer |
-| `journalBP` | current frame base |
-| `journalSP` | stack pointer |
-| `journalDepth` | number of written frame records |
-| `journalCap` | available frame record capacity, capped at 128 |
-| `journalTrap` | trap state |
-| `journalNextIP` | fallback or resume IP |
-| `journalBudget` | native loop back-edge budget |
-| `journalActive` | active native call depth |
-| `journalRC` | refcount base pointer |
-| `journalUpvals` | closure upvalue base pointer |
-| `journalHeap` | heap base pointer |
-| `journalNatives` | fixed per-function native-entry slot base |
-| `journalExitID` | fallback descriptor ID plus one; zero means no descriptor |
-| `journalHead...` | frame records `{addr, bp, ip, returns}` |
+| `journal.CellStack` | stack base pointer |
+| `journal.CellGlobals` | globals base pointer |
+| `journal.CellBP` | current frame base |
+| `journal.CellSP` | stack pointer |
+| `journal.CellEntry` | bridge resume IP in; zero starts at the anchor |
+| `journal.CellDepth` | number of written frame records |
+| `journal.CellCap` | available frame record capacity, capped at 128 |
+| `journal.CellTrap` | trap state (`journal.Trap`) |
+| `journal.CellNextIP` | fallback or resume IP |
+| `journal.CellBudget` | native loop back-edge budget |
+| `journal.CellActive` | active native call depth |
+| `journal.CellRC` | refcount base pointer |
+| `journal.CellUpvals` | closure upvalue base pointer |
+| `journal.CellHeap` | heap base pointer |
+| `journal.CellNatives` | fixed per-function native-entry slot base |
+| `journal.CellExitID` | fallback descriptor ID plus one; zero means no descriptor |
+| `journal.CellHead...` | frame records `{journal.RecordAddr, journal.RecordBP, journal.RecordIP, journal.RecordReturns}` |
 
 On guard failure, native code writes live stack state, appends frame records, sets trap state, sets the resume IP, and returns to Go.
 
@@ -287,9 +303,9 @@ not construct labels.
 Every fallback creation site assigns a descriptor with a stable reason. It uses
 the concrete source opcode when the fallback is attributable to one; synthetic
 boundaries such as an `opLimit` trace cut use `none`. Generated code writes
-`descriptor ID + 1` to `journalExitID` before returning with `trapFallback`. The
+`descriptor ID + 1` to `journal.CellExitID` before returning with `journal.TrapFallback`. The
 Go wrapper resolves that ID and counts the exact exit row. Zero means no
-descriptor. `trapYield` counts only a yield, and native frame overflow counts
+descriptor. `journal.TrapYield` counts only a yield, and native frame overflow counts
 neither an exit nor a yield.
 
 Compile and emission ownership follows compilation ownership: a solo compiler
@@ -324,11 +340,11 @@ A call whose callee is the function being compiled uses the native self-call pat
 
 A callee frame's non-parameter locals are cleared by the callee, in the entry prologue at `ctx.head` (`zeroLocals`), not by its callers. Every entry path arrives there with `bp` already pointing at the new frame — the Go wrapper, `directCall`'s `BLR`, and `selfCall`'s `BL` — so one clear covers all three, and it matches what threaded `CALL` does before transferring control. Only a whole-function entry may do this: a loop plan re-enters a frame whose locals are live, and module code has no caller that would have cleared them. Skipping it hands the callee stale boxed words from whatever frame last occupied that stack region, so its first `LOCAL_SET` releases a ref it never owned and `RETURN` teardown releases the rest. `TestARM64_CalleeLocals` covers both native call paths; a function with no non-parameter local cannot expose it, which is the shape every earlier self-call test used.
 
-Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, publishes the callee BP/SP into the journal, enters the callee trace, and restores the caller state and journal frame on normal return. The journal publication is required because every native entry prologue reloads BP/SP from `journalBP`/`journalSP`; without it, nested native entries inherit the outer caller's frame and mutual recursion can keep reusing the wrong argument slot until frame overflow. A trap leaves the callee's journal state intact for deoptimization, while the normal path restores the caller before continuing. `TestARM64_MutualEntries` covers two independently installed native entries calling each other.
+Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, publishes the callee BP/SP into the journal, enters the callee trace, and restores the caller state and journal frame on normal return. The journal publication is required because every native entry prologue reloads BP/SP from `journal.CellBP`/`journal.CellSP`; without it, nested native entries inherit the outer caller's frame and mutual recursion can keep reusing the wrong argument slot until frame overflow. A trap leaves the callee's journal state intact for deoptimization, while the normal path restores the caller before continuing. `TestARM64_MutualEntries` covers two independently installed native entries calling each other.
 
 A native call invalidates the caller's cached local registers: the callee owns every allocatable register, so the call sites clear `activation.state` on return, and the committing flush before the call leaves the VM stack slot authoritative. `activation.locals` still names the register each value was last materialized into, so `activation.isLoadedAt` is the one test for whether that name is still good. `guardFrame` reads every ref local for the frame teardown; boxing an unloaded one releases whatever the callee left in that register, which faults inside the Go runtime rather than diverging quietly. `TestARM64_SelfCallFrameLocals` pins it.
 
-X26 carries the caller's spill base across a `BLR`. The callee is entered at its own offset zero, so it runs the frame prologue and repoints X26 at its own frame; the caller saves X26 into its 32-byte save area before the call and restores it immediately after, on both the normal and the trap path. A self-call (`BL` to `ctx.head`) needs no such save: it shares the caller's frame, and that stream cannot spill at all because the backward branch to `head` disables the spill frame (`internal/asm/rewriter.go` `backEdge`).
+X26 carries the caller's spill base across a `BLR`. The callee is entered at its own offset zero, so it runs the frame prologue and repoints X26 at its own frame; the caller saves X26 into its 32-byte save area before the call and restores it immediately after, on both the normal and the trap path. A self-call (`BL` to `ctx.head`) needs no such save: it shares the caller's frame rather than getting one of its own, so any value the caller still needs after the call is barred from spilling across it (`rewriter.barriers`, under Register Allocation above) instead of the whole stream losing its spill frame outright.
 
 On deoptimization, native frames append enough journal records for Go to rebuild the VM call chain.
 
@@ -350,7 +366,7 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. The loop wrapper records every fallback exit as a branch, so loop anchors recompile through the same side-exit machinery as entries. Loop roots are never folded as ordinary continuations: a leg that rejoins this plan's header folds into the native back-edge (see Trace Snapshots), while a leg that is another loop's root deoptimizes and uses that loop's standalone entry, which preserves back-edge and safepoint semantics.
 
-A loop callable normally exits through a trap, but a folded depth-0 `RETURN` leg emits `ret()` and a folded completed leg emits `complete()`, both returning with `trapNone`. The loop wrapper handles this like the entry wrappers: a function loop performs the threaded `RETURN` frame teardown, and a module loop marks the frame exhausted.
+A loop callable normally exits through a trap, but a folded depth-0 `RETURN` leg emits `ret()` and a folded completed leg emits `complete()`, both returning with `journal.TrapNone`. The loop wrapper handles this like the entry wrappers: a function loop performs the threaded `RETURN` frame teardown, and a module loop marks the frame exhausted.
 
 Pending blocks reload from VM stack slots, run through a FIFO worklist, and stop at a bounded pending cap. The trace frontend orders learned roots once; the backend does not repeatedly sort pending work.
 
@@ -368,7 +384,7 @@ A committing flush (`selfCall`, `tailLoop`) transfers operand ownership to the V
 
 ### Branch range validation
 
-ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `internal/asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `publish` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable.
+ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `internal/asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `internal/jit`'s `publish` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable.
 
 Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation fixpoint (`asm.Relaxer`, implemented by `internal/asm/arm64.arch.Relax`) between the draft and final encoding passes. Each pass drafts the current instruction list once, collects every `B.cond`/`CBZ`/`CBNZ` label branch whose imm19 displacement does not fit, and rewrites all of them together into an inverted-condition branch that skips a following unconditional `B` (imm26, ±128MB) to the original target; it then re-drafts and repeats until a pass finds nothing left to relax. Both replacement instructions are constructed to already be in range, so a given branch relaxes at most once and the loop always terminates, and batching every out-of-range branch within a pass keeps the number of drafts proportional to the number of passes rather than the number of branches; if the unconditional `B` itself would not reach the target (>±128MB), `Relax` returns `false` and `ErrBranchOutOfRange`/the JIT fallback still applies. `TBZ`/`TBNZ` never carry a `LabelOperand` in this codebase (their offset is always a caller-computed immediate — see `internal/asm/arm64/instr.go`), so they never reach `Relax` and the imm14 (±32KB) window has no relaxation path; architectures without a `Relaxer` (amd64) are unaffected — `encode` no-ops the pass.
 
@@ -424,7 +440,7 @@ Result kinds must match the interpreter:
 
 Scalar slots load and store raw values directly.
 
-A ref slot store releases the overwritten ref and transfers the stored ref, both guarded through `journalRC`. A ref `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` instead pushes a deferred operand and takes no retain (see Reference Ownership).
+A ref slot store releases the overwritten ref and transfers the stored ref, both guarded through `journal.CellRC`. A ref `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` instead pushes a deferred operand and takes no retain (see Reference Ownership).
 
 If a release may free the object (`rc == 1`), native code deoptimizes before the release. The interpreter owns recursive release and cleanup.
 
@@ -460,21 +476,29 @@ Native full-trace reads include observed shapes for scalar `REF_GET`, selected `
 
 Heap reads guard ref address, heap itab, array element kind, struct type pointer, struct field kind, index bounds, and release safety when needed.
 
-`STRUCT_GET` and `STRUCT_SET` also lower against a `*HostStruct`, whose fields hold Go memory rather than VM words (see `docs/host-integration.md`). `hostGet` and `hostSet` (`interp/jit_arm64.go`) guard the heap itab against `heapHostStruct`, bounds-guard the field index against the compiled layout the view carries, and guard that field's Go kind against the one the trace recorded in `shape.field`, then load or store the Go field through the address the layout's offset names. Nothing about a host view is assumed from the itab alone: the same compiled access serves every `*HostStruct`, so a container whose field at that index has another Go kind exits at the kind guard rather than loading the wrong width.
+`STRUCT_GET` and `STRUCT_SET` also lower against a `*HostStruct`, whose fields hold Go memory rather than VM words (see `docs/host-integration.md`). `hostGet` and `hostSet` (`internal/jit/arm64/heap.go`) guard the heap itab against `ctx.layout.HostStructItab` — `HostStruct` is unexported, so `Interpreter.compileSnapshot` computes its itab with `jit.Itab` and hands it across on `jit.Layout` alongside the field offsets, the same treatment struct offsets already get — bounds-guard the field index against the compiled layout the view carries, and guard that field's Go kind against the one the trace recorded in `Shape.Field`, then load or store the Go field through the address the layout's offset names. Nothing about a host view is assumed from the itab alone: the same compiled access serves every `*HostStruct`, so a container whose field at that index has another Go kind exits at the kind guard rather than loading the wrong width.
 
-`hostShapes` (`interp/jit.go`) is the one place a hosted Go field's layout is written down, indexed by the `reflect.Kind` the codec compiled the field through, and mirrors the codec's own `leaves` table. A kind with no row - `string`, a pointer, a nested container - publishes a heap reference rather than loading a word, so its access stays with the interpreter. A read reinterprets a field as wide as its VM slot and widens a narrower one by the field's own signedness, which is why an `int16`, an `int32`, and a `uint32` field all reach the guest as i32 but do not share a load. A write lowers only for a field as wide as its slot: a narrower one decodes through the range check `setSigned` and `setUnsigned` perform, and a check that can fail belongs with the interpreter that reports it.
+`hostShapes` (`internal/jit/layout.go`, resolved through the exported `jit.HostShapeByKind`) is the one place a hosted Go field's layout is written down, indexed by the `reflect.Kind` the codec compiled the field through, and mirrors the codec's own `leaves` table. A kind with no row - `string`, a pointer, a nested container - publishes a heap reference rather than loading a word, so its access stays with the interpreter. A read reinterprets a field as wide as its VM slot and widens a narrower one by the field's own signedness, which is why an `int16`, an `int32`, and a `uint32` field all reach the guest as i32 but do not share a load. A write lowers only for a field as wide as its slot: a narrower one decodes through the range check `setSigned` and `setUnsigned` perform, and a check that can fail belongs with the interpreter that reports it.
 
 Ref reads retain the loaded element or payload. A container consumer releases its container handle only when that operand owns its retain, eliding the release for a deferred operand (see Reference Ownership): `CORO_VALUE` still retains the value and releases the handle when the handle is `backingStack`. `CORO_DONE` keeps the handle.
 
 Heap-promoted `i64` values fall back before boxing.
 
-Primitive typed-array `ARRAY_SET` and scalar-field `STRUCT_SET` may continue through native execution when their guarded heap path fits the no-spill register budget. Guard failure resumes at the original opcode; success performs the store and continues to later operations or the loop back-edge.
+Primitive typed-array `ARRAY_SET` and scalar-field `STRUCT_SET` may continue through native execution when their guarded heap path fits the register budget. Guard failure resumes at the original opcode; success performs the store and continues to later operations or the loop back-edge.
 
 Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` continue natively like their scalar counterparts. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. A replaced `BoxedNull` field/element has no heap ownership and is not released.
 
 Both were terminal until the callee-frame defect below was found. Letting either continue drove refcounts negative against a threaded twin from self-recursion depth two upward, and two attempts to lift the rule were reverted on that evidence. The cause was never in the stores: a native callee began with non-parameter locals that no one had cleared, so its first `LOCAL_SET` released a stale boxed word it never owned. Lifting the store rule is merely what first admitted a function holding a ref local into native lowering, which is why the two appeared connected. `TestARM64_RefContainerStore` covers the shape that used to diverge.
 
-Mutation plans are always no-spill. Stores use the common fresh-register heap path; if the physical register budget is exhausted, `asm.Build` rejects native compilation with `CompileReasonRegisterPressure` and threaded execution remains installed. Native compilation must never spill a store path across a back-edge.
+Stores carry no spill restriction of their own. They use the common
+fresh-register heap path, and the allocator judges any spill they need the same
+way it judges every other: the store must dominate every pending reload, and
+must clear the loop-carry and self-recursive-call hazards (see Register
+Allocation). A mutation plan used to force the whole build off the spill frame,
+because the allocator could not yet tell a sound spill from an unsound one
+around a store's own branches; it can now. When no value is eligible and the
+bank is exhausted, `asm.Build` still rejects native compilation with
+`CompileReasonRegisterPressure` and threaded execution remains installed.
 
 Allocation and complex ref-bearing mutations either bridge (see Bridge) in a static plan or stay threaded/terminate the native trace in a trace plan.
 
@@ -482,15 +506,15 @@ Allocation and complex ref-bearing mutations either bridge (see Bridge) in a sta
 
 A bridge deopts one opcode the backend cannot lower to the threaded interpreter and resumes native execution afterward, instead of ending the native entry outright. It generalizes the mechanism first built for `ARRAY_NEW_DEFAULT` alone.
 
-`bridgeable` (`interp/jit_plan.go`) is the single predicate naming every opcode eligible: the allocation family (`ARRAY_NEW`, `ARRAY_NEW_DEFAULT`, `ARRAY_SLICE`, `ARRAY_DELETE`, `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `MAP_NEW`, `MAP_NEW_DEFAULT`, `MAP_DELETE`, `MAP_CLEAR`, `REF_NEW`, `REF_SET`, `CLOSURE_NEW`, `STRING_NEW_UTF32`), the map/string/bulk-array opcodes jit_arm64.go otherwise lowers as an unconditional trap (`MAP_LEN`, `MAP_GET`, `MAP_LOOKUP`, `MAP_KEYS`, `MAP_ITER`, `STRING_ENCODE_UTF32`, `STRING_ITER`, `ARRAY_FILL`, `ARRAY_COPY`, `ARRAY_APPEND`, `MAP_SET`), structured errors (`ERROR_NEW`, `ERROR_CODE`, `THROW`), and `REF_TEST`/`REF_CAST`. An opcode already lowered natively (`ARRAY_GET`, `STRUCT_SET`, and so on) must never appear here: a bridge is strictly the fallback for opcodes with no native lowering. `YIELD`/`RESUME` are excluded even though the backend cannot lower them either — suspension cannot resume mid-frame into native code (see Suspension) — so they keep the unconditional terminal-fallback treatment in `arm64Lowerer.steps` instead.
+`bridgeable` (`internal/jit`, unexported) is the single predicate naming every opcode eligible: the allocation family (`ARRAY_NEW`, `ARRAY_NEW_DEFAULT`, `ARRAY_SLICE`, `ARRAY_DELETE`, `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `MAP_NEW`, `MAP_NEW_DEFAULT`, `MAP_DELETE`, `MAP_CLEAR`, `REF_NEW`, `REF_SET`, `CLOSURE_NEW`, `STRING_NEW_UTF32`), the map/string/bulk-array opcodes `internal/jit/arm64` otherwise lowers as an unconditional trap (`MAP_LEN`, `MAP_GET`, `MAP_LOOKUP`, `MAP_KEYS`, `MAP_ITER`, `STRING_ENCODE_UTF32`, `STRING_ITER`, `ARRAY_FILL`, `ARRAY_COPY`, `ARRAY_APPEND`, `MAP_SET`), structured errors (`ERROR_NEW`, `ERROR_CODE`, `THROW`), and `REF_TEST`/`REF_CAST`. An opcode already lowered natively (`ARRAY_GET`, `STRUCT_SET`, and so on) must never appear here: a bridge is strictly the fallback for opcodes with no native lowering. `YIELD`/`RESUME` are excluded even though the backend cannot lower them either — suspension cannot resume mid-frame into native code (see Suspension) — so they keep the unconditional terminal-fallback treatment in `internal/jit/arm64`'s `steps` instead.
 
 The static planner (`staticPlan`) is the frontend that acts on `bridgeable`: walking a function's bytecode, an opcode it names ends the current plan block with a `terminateBridge` terminator instead of becoming an ordinary step, and the remaining source instructions continue into a fresh block anchored right after it, marked `block.bridge`, carrying the post-op dataflow state so lowering reloads it exactly like any other state-backed block. `applyStep` must still be able to model the opcode's stack effect for the plan to proceed: fixed-arity opcodes use `instr.TypeOf`'s `Pop`/`Push` directly; the dynamic-arity ones (`STRUCT_NEW`, `MAP_NEW`, `CLOSURE_NEW`, `ARRAY_NEW`, `ARRAY_APPEND`) derive their count from the instruction's own operand, a known compile-time constant on the stack (`slot.valKnown`), or a statically resolved callee, matching how `program/verify.go`'s `flow()` computes the same opcodes' effects for verification; when none of these resolve the effect, the plan is rejected exactly as before. A pushed slot produced by a bridged opcode's own effect (a fresh allocation, a resolved element/field value) must be a new `backingStack` slot, never a mutated copy of an operand that existed before the bridge: after the bridge, `retainDeferred` has already taken a real retain for every deferred operand handed to the threaded closure, so continuing to mark a survivor as deferred (`backingLocal`/`backingGlobal`/`backingUpval`/`backingConst`) makes a later consumer elide a release that must run, leaking the retain (see Reference Ownership). `REF_CAST` (identity pass-through: pop, then push the same kind, narrowing `styp` when the declared target is a struct type) and `ARRAY_APPEND` (its array operand is never popped, so it survives on the stack) both learned this the hard way and construct a fresh slot instead of reusing the pre-bridge one.
 
-`arm64Lowerer.dispatch`, emitted once per callable, reads the journal's entry-IP cell at the top of the callable and, when it names a `block.bridge` anchor, branches directly to that block's label instead of falling into the normal anchor start; zero (every ordinary `Call`'s value) falls through unchanged. `arm64Lowerer.bridge` (`l.term`'s `terminateBridge` case) traps with `trapBridge` and the opcode's own IP, sharing `trapFallback`'s flush and `retainDeferred` handoff but carrying no exit descriptor — a bridge is productive continuation, not a give-up (see Retirement), and `watchdog.bridge` counts it on a separate counter so it can never inflate the give-up rate. `Interpreter.bridge` (`interp/interp.go`) is the Go-side half: it runs `i.code[f.addr][ip](i)` — the bridged opcode's own threaded closure — exactly once, then reports the IP native execution may resume at, or `ok=false` when it must not (the closure moved frame/function, made no forward progress, spent the wrapper's `loopBudget` of bridge cycles, or the new IP is not one the callable's `resumable` list carries an entry-dispatch label for). If the bridged opcode's own IP is 0 — the function's very first instruction — `i.code[f.addr][0]` is the native wrapper this call is already running inside (`install` overwrites only the anchor slot), so `Interpreter.bridge` runs the shadowed threaded handler (`i.stub`) instead of that wrapper, exactly as a `trapFallback` resuming at 0 already did (see the Loops section's header note).
+`internal/jit/arm64`'s `dispatch`, emitted once per callable, reads the journal's entry-IP cell at the top of the callable and, when it names a `block.bridge` anchor, branches directly to that block's label instead of falling into the normal anchor start; zero (every ordinary `Call`'s value) falls through unchanged. `bridge` (`l.term`'s `terminateBridge` case) traps with `journal.TrapBridge` and the opcode's own IP, sharing `journal.TrapFallback`'s flush and `retainDeferred` handoff but carrying no exit descriptor — a bridge is productive continuation, not a give-up (see Retirement), and `watchdog.bridge` counts it on a separate counter so it can never inflate the give-up rate. `Interpreter.bridge` (`interp/jit.go`) is the Go-side half: it runs `i.code[f.addr][ip](i)` — the bridged opcode's own threaded closure — exactly once, then reports the IP native execution may resume at, or `ok=false` when it must not (the closure moved frame/function, made no forward progress, spent the wrapper's `loopBudget` of bridge cycles, or the new IP is not one the callable's `resumable` list carries an entry-dispatch label for). If the bridged opcode's own IP is 0 — the function's very first instruction — `i.code[f.addr][0]` is the native wrapper this call is already running inside (`install` overwrites only the anchor slot), so `Interpreter.bridge` runs the shadowed threaded handler (`i.stub`) instead of that wrapper, exactly as a `journal.TrapFallback` resuming at 0 already did (see the Loops section's header note).
 
-A bridge cycle re-enters through a fresh external `Call`, which never runs the loop-carry prologue (see `arm64Lowerer.dispatch` above): a carried register would be uninitialized garbage on such a resume. A bridge a plan can reach therefore keeps every local slot-backed instead of loop-carried. The scope is the plan, not the function: each loop plan carries only the blocks its own root reaches (see Static Frontend), so a bridge this header cannot reach is not compiled into this callable, has no resume label here, and does not disable carrying. A bridge that the header does reach but that sits outside the loop's own back-edge range still disables it; narrowing that residual case to "a bridge inside the loop body" is unimplemented follow-up work, tracked because it would need the carry-load prologue to run on every re-entry path, not just the callable's own head.
+A bridge cycle re-enters through a fresh external `Call`, which never runs the loop-carry prologue (see `dispatch` above): a carried register would be uninitialized garbage on such a resume. A bridge a plan can reach therefore keeps every local slot-backed instead of loop-carried. The scope is the plan, not the function: each loop plan carries only the blocks its own root reaches (see Static Frontend), so a bridge this header cannot reach is not compiled into this callable, has no resume label here, and does not disable carrying. A bridge that the header does reach but that sits outside the loop's own back-edge range still disables it; narrowing that residual case to "a bridge inside the loop body" is unimplemented follow-up work, tracked because it would need the carry-load prologue to run on every re-entry path, not just the callable's own head.
 
-`arrayKind` (`interp/jit_plan.go`) resolves an `ARRAY_GET`/`ARRAY_DELETE` element kind from a known constant container's concrete heap itab, matching `arrayGetKnown`'s native lowering, and otherwise from the declared array type — mirroring `structFieldKind`'s declared-struct-type resolution, which `STRUCT_GET` already relies on. The declared type answers only in a call-free plan (`callFree`). Lifting that gate lets `ARRAY_GET`'s general (non-constant) lowering path run alongside a native `CALL` in the same plan, and that combination corrupted native execution state on the next native call boundary (`runtime.mallocgc` SIGSEGV) instead of cleanly guarding and falling back the way `structFieldKind`'s equivalent case does. The `BLR` no longer clobbers the spill base (see Calls and Returns), so it no longer crashes, but three tests still diverge behaviourally, so the gate stands until that is understood. Until then a function containing a call keeps resolving `ARRAY_GET`, `ARRAY_LEN`, and `ARRAY_DELETE` only from a known constant container.
+`arrayKind` (`internal/jit`, unexported) resolves an `ARRAY_GET`/`ARRAY_DELETE` element kind from a known constant container's concrete heap itab, matching `arrayGetKnown`'s native lowering, and otherwise from the declared array type — mirroring `structFieldKind`'s declared-struct-type resolution, which `STRUCT_GET` already relies on. The declared type answers only in a call-free plan (`callFree`). Lifting that gate lets `ARRAY_GET`'s general (non-constant) lowering path run alongside a native `CALL` in the same plan, and that combination corrupted native execution state on the next native call boundary (`runtime.mallocgc` SIGSEGV) instead of cleanly guarding and falling back the way `structFieldKind`'s equivalent case does. The `BLR` no longer clobbers the spill base (see Calls and Returns), so it no longer crashes, but three tests still diverge behaviourally, so the gate stands until that is understood. Until then a function containing a call keeps resolving `ARRAY_GET`, `ARRAY_LEN`, and `ARRAY_DELETE` only from a known constant container.
 
 ## Structured Errors
 
@@ -556,9 +580,9 @@ When changing JIT internals:
 - keep native lowering speculative and guarded
 - deoptimize before behavior the JIT cannot fully own
 - prefer one simple terminal fallback over duplicated semantics
-- keep architecture-neutral code in `jit.go`
-- keep ARM64 lowering in `interp/jit_arm64.go`
-- keep journal layout explicit and stable
+- keep architecture-neutral code in `internal/jit/`
+- keep ARM64 lowering in `internal/jit/arm64/`
+- keep the frame-journal cell, record, and trap layout in `internal/journal`, explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
 - keep shared cache, tracer, and coroutine state private behind `Pool` and `Interpreter`
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`

@@ -77,6 +77,10 @@ type Frame interface {
 	// address, so a target bound in the same code returns through the
 	// shared epilogue.
 	Calls(op uint16) bool
+	// Jumps reports whether op is an unconditional branch to its label
+	// operand that never falls through, so the allocator's control-flow
+	// graph must not add a fall-through edge after it.
+	Jumps(op uint16) bool
 }
 
 // Callable is a fully linked, directly invokable entry into the executable

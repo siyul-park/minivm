@@ -16,7 +16,7 @@ For reference ownership and heap lifecycle, see `docs/memory-model.md`.
 | kind definitions | `instr/kind.go` |
 | runtime type descriptors | `types/type.go` |
 | marshal/unmarshal conversion | `interp/codec.go`, `interp/encode.go`, `interp/decode.go` |
-| JIT value passing | `interp/jit_arm64.go` |
+| JIT value passing | `internal/jit/arm64/` |
 
 ## Summary
 

@@ -35,11 +35,12 @@ var (
 
 // New constructs an Assembler targeting the given architecture.
 func New(arch Arch) *Assembler {
-	return &Assembler{
+	a := &Assembler{
 		arch:   arch,
 		pins:   make(map[int32]PReg),
 		labels: make(map[Label]int),
 	}
+	return a
 }
 
 // Reg allocates a fresh virtual register of the given type and width.

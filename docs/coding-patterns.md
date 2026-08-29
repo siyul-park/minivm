@@ -457,8 +457,8 @@ the constructor they configure.
 
 A struct and all its methods SHOULD remain in one file. A large type MAY be
 split by a real concern, but methods MUST NOT be placed in another type's file
-for superficial locality. JIT-neutral orchestration belongs in `interp/jit.go`;
-architecture lowering belongs in `interp/jit_<arch>.go`.
+for superficial locality. JIT-neutral orchestration belongs in
+`internal/jit`; architecture lowering belongs in `internal/jit/<arch>/`.
 
 ### 9.2 Method Order
 
