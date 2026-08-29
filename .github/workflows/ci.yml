@@ -41,7 +41,11 @@ jobs:
 
   coverage:
     needs: check
-    runs-on: ubuntu-24.04
+    # ARM64: the JIT is ARM64-only, so coverage measured on x86-64 counts
+    # thousands of statements that cannot execute there, and the suite never
+    # exercises native compilation at all. docs/compatibility.md lists
+    # Linux/ARM64 JIT as supported; this is what checks that.
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
