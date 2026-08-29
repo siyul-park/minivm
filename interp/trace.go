@@ -271,7 +271,6 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.code = slices.Clone(t.exactCodes(i))
 	out.backedges = make([]bool, len(i.backedges))
 	out.exits = map[jit.Anchor]func(*Interpreter){}
-	out.stubs = make([]func(*Interpreter), len(out.code))
 	out.tried = map[jit.Anchor]bool{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)

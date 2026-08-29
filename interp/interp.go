@@ -30,7 +30,6 @@ type Interpreter struct {
 	profiler *prof.Profiler
 	samples  *prof.Collector
 	exits    map[jit.Anchor]func(*Interpreter)
-	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
 	tried    map[jit.Anchor]bool
 	journal  []uint64
@@ -277,7 +276,6 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		coros:       make([]bool, len(prog.Constants)+1),
 		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
 		exits:       map[jit.Anchor]func(*Interpreter){},
-		stubs:       make([]func(*Interpreter), len(prog.Constants)+1),
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:       map[jit.Anchor]bool{},
 		dynamic:     map[int]bool{},
@@ -1664,9 +1662,6 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.misses) {
 		i.misses = append(i.misses, make([]uint8, n-len(i.misses))...)
 	}
-	if addr >= len(i.stubs) {
-		i.stubs = append(i.stubs, make([]func(*Interpreter), n-len(i.stubs))...)
-	}
 	if addr >= len(i.handlers) {
 		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
 	}
@@ -2021,7 +2016,6 @@ func (i *Interpreter) remove(addr int) {
 	i.backedges[addr] = false
 	i.cold[addr] = false
 	i.misses[addr] = 0
-	i.stubs[addr] = nil
 	i.handlers[addr] = nil
 	i.coros[addr] = false
 	for a := range i.exits {

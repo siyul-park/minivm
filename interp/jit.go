@@ -175,9 +175,6 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 		// on return; a loop root re-enters mid-function and never unwinds it.
 		if i.exits[a] == nil {
 			i.exits[a] = i.code[a.Addr][a.IP]
-			if a.IP == 0 {
-				i.stubs[a.Addr] = i.exits[a]
-			}
 		}
 		// natives keeps its New-time size: growing it in bind could dangle the
 		// journal base cached by a native frame suspended across a trap
@@ -784,9 +781,6 @@ func (i *Interpreter) rethread(addr int, backedge bool) {
 			continue
 		}
 		i.exits[root] = compiled[root.IP]
-		if root.IP == 0 {
-			i.stubs[addr] = compiled[root.IP]
-		}
 		compiled[root.IP] = installed[root.IP]
 	}
 	copy(installed, compiled)
@@ -806,11 +800,10 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
+// stub returns the threaded handler a function entry's native code shadows,
+// or nil where nothing is installed at addr's entry (see install).
 func (i *Interpreter) stub(addr int) func(*Interpreter) {
-	if addr < 0 || addr >= len(i.stubs) {
-		return nil
-	}
-	return i.stubs[addr]
+	return i.exits[jit.Anchor{Addr: addr}]
 }
 
 // isCold reports whether addr has been cooled (see cool).

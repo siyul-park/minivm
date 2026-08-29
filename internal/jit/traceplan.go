@@ -124,6 +124,13 @@ func TracePlan(input *Input) ([]Plan, error) {
 // fixed-effect operators use instr.Type, and anything else clears the
 // markers conservatively. Underflow also clears them — loop plans with
 // carried entry operands are rejected before planning.
+// hoistable mirrors part of resolver.applyStep's stack-provenance tracking
+// (see static.go): both answer which local, if any, backs a stack position,
+// over the same LOCAL_GET/DUP/SWAP/SELECT/TEE effects. They stay separate
+// because resolver runs a fixpoint over a CFG while a trace is a linear
+// recording with cuts and has no join points to converge at; giving this walk
+// Slot-shaped state would mean adding a second abstract-interpretation pass to
+// the trace frontend for the sake of about forty lines.
 func hoistable(fn *types.Function, blocks []Block) *Hoist {
 	locals := localTypes(fn)
 	banned := make([]bool, len(locals))

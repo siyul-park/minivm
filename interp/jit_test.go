@@ -71,7 +71,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -113,7 +113,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -297,7 +297,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -334,7 +334,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -377,7 +377,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -410,7 +410,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -504,7 +504,7 @@ func TestCompiler_Compile(t *testing.T) {
 			headerLabel := strconv.Itoa(header)
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
@@ -554,7 +554,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := jit.Anchor{Addr: addr}
 			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
-			i.stubs[root.Addr] = i.code[root.Addr][0]
+			i.exits[jit.Anchor{Addr: root.Addr}] = i.code[root.Addr][0]
 			compiler, err := newCompiler()
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
