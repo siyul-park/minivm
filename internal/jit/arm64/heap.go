@@ -222,7 +222,7 @@ func (l lowerer) arrayGet(ctx *lowering, op jit.Step) bool {
 		return false
 	}
 	kind := op.Seen.Kind()
-	shape, ok := jit.ElemShapeOf(kind)
+	shape, ok := jit.ElemShapeByKind(kind)
 	if !ok {
 		return false
 	}
@@ -317,7 +317,7 @@ func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 	}
 	container := ctx.values[len(ctx.values)-3]
 	kind := ctx.values[len(ctx.values)-1].kind
-	shape, ok := jit.ElemShapeOf(kind)
+	shape, ok := jit.ElemShapeByKind(kind)
 	if !ok {
 		return false, false
 	}
@@ -553,7 +553,7 @@ func (l lowerer) hostLoad(ctx *lowering, size uintptr, signed bool, target asm.V
 // rather than a VM word, so the read loads that memory in the form the field's
 // conversion produces instead of reading a struct data slot.
 func (l lowerer) hostGet(ctx *lowering, op jit.Step) bool {
-	s, ok := jit.HostShapeOf(op.Shape.Field)
+	s, ok := jit.HostShapeByKind(op.Shape.Field)
 	if !ok || s.Kind != op.Seen.Kind() {
 		return false
 	}
@@ -610,7 +610,7 @@ func (l lowerer) hostGet(ctx *lowering, op jit.Step) bool {
 // the range check setSigned and setUnsigned perform, and a check that can fail
 // belongs with the interpreter that reports it.
 func (l lowerer) hostSet(ctx *lowering, op jit.Step) (bool, bool) {
-	s, ok := jit.HostShapeOf(op.Shape.Field)
+	s, ok := jit.HostShapeByKind(op.Shape.Field)
 	if !ok || !s.Exact() || s.Kind != ctx.values[len(ctx.values)-1].kind {
 		return false, false
 	}
@@ -873,7 +873,7 @@ func (l lowerer) coroDone(ctx *lowering, op jit.Step) bool {
 	l.guardItab(ctx, itab, ctx.layout.CoroutineItab, fail)
 
 	done := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDRB(done, data, int16(ctx.layout.CoroDone)))
+	ctx.assembler.Emit(arm64.LDRB(done, data, int16(ctx.layout.CoroutineDone)))
 	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI1, raw: true})
 	return true
 }
@@ -883,7 +883,7 @@ func (l lowerer) coroDone(ctx *lowering, op jit.Step) bool {
 // The stored field is a full Boxed, so its representation matches a global
 // slot (see globalGet) — scalars push raw, refs stay boxed.
 func (l lowerer) coroValue(ctx *lowering, op jit.Step) bool {
-	return l.payloadGet(ctx, op, ctx.layout.CoroutineItab, int16(ctx.layout.CoroValue))
+	return l.payloadGet(ctx, op, ctx.layout.CoroutineItab, int16(ctx.layout.CoroutineValue))
 }
 
 // guardHeap loads a heap cell or branches to fail on a non-ref tag. Unlike

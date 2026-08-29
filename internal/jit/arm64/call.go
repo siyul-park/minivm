@@ -74,7 +74,7 @@ func (f *activation) isLoadedAt(idx int) bool {
 }
 
 func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
-	target := jit.Resolve(ctx.module, ctx.heap, op.Callee)
+	target := jit.FunctionAt(ctx.module, ctx.heap, op.Callee)
 	if target == nil || target.Typ == nil || ctx.count() < 1 {
 		return false
 	}
@@ -236,7 +236,7 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 	if v.kind != types.KindRef {
 		return false
 	}
-	target := jit.Resolve(ctx.module, ctx.heap, op.Callee)
+	target := jit.FunctionAt(ctx.module, ctx.heap, op.Callee)
 	if target == nil || target.Typ == nil {
 		return false
 	}
@@ -552,7 +552,7 @@ func (l lowerer) tailTarget(ctx *lowering, op jit.Step) (*types.Function, int, b
 	if v.kind != types.KindRef {
 		return nil, 0, false
 	}
-	target := jit.Resolve(ctx.module, ctx.heap, op.Callee)
+	target := jit.FunctionAt(ctx.module, ctx.heap, op.Callee)
 	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
 		return nil, 0, false
 	}

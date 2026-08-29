@@ -24,8 +24,8 @@ type Layout struct {
 	HostFieldConv   int
 	HostFieldSize   int
 	HostConvKind    int
-	CoroValue       int
-	CoroDone        int
+	CoroutineValue  int
+	CoroutineDone   int
 	// HostStructItab and CoroutineItab are the concrete heap itabs of
 	// interp's private *HostStruct and *coroutine types. Neither type is
 	// visible from this package, so interp computes their itabs with Itab
@@ -63,7 +63,7 @@ const arrayElems = int(unsafe.Offsetof(types.Array{}.Elems))
 // the portable JIT core: this file resolves element layout on every
 // architecture, including ones with no native backend at all. heapArrayRef
 // has no reader outside elemShapes: every array-kind comparison a backend
-// makes goes through ElemShapeOf or ElemShapeByItab instead.
+// makes goes through ElemShapeByKind or ElemShapeByItab instead.
 var (
 	HeapI32      = Itab(types.I32(0))
 	HeapF32      = Itab(types.F32(0))
@@ -97,8 +97,8 @@ var elemShapes = []struct {
 	{types.KindRef, ElemShape{Itab: heapArrayRef, Base: int16(arrayElems)}},
 }
 
-// ElemShapeOf resolves the storage shape of an element kind.
-func ElemShapeOf(kind types.Kind) (ElemShape, bool) {
+// ElemShapeByKind resolves the storage shape of an element kind.
+func ElemShapeByKind(kind types.Kind) (ElemShape, bool) {
 	for _, row := range elemShapes {
 		if row.kind == kind {
 			return row.shape, true
@@ -166,9 +166,9 @@ var slotShapes = [...]struct {
 	types.KindF64: {size: 8, signed: true},
 }
 
-// HostShapeOf resolves the layout of a Go field kind, and reports false where
+// HostShapeByKind resolves the layout of a Go field kind, and reports false where
 // the kind has no row.
-func HostShapeOf(kind reflect.Kind) (HostShape, bool) {
+func HostShapeByKind(kind reflect.Kind) (HostShape, bool) {
 	if int(kind) >= len(hostShapes) {
 		return HostShape{}, false
 	}

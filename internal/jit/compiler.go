@@ -22,7 +22,7 @@ type Compiler struct {
 // the arch, builds the assembler, and hands both to the machine, which emits
 // instructions and reports the exits it queued.
 type Machine interface {
-	Lower(a *asm.Assembler, input *Input, p Plan, nativeLoop bool) ([]ExitDescriptor, bool)
+	Lower(a *asm.Assembler, input *Input, p Plan, nativeLoop bool) ([]Exit, bool)
 }
 
 // compilerBufferSize is the executable-memory buffer New allocates for a

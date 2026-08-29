@@ -35,13 +35,13 @@ type MemOperand struct {
 	Offset int64
 }
 
-// V wraps a VReg as an operand.
-func V(r VReg) VRegOperand {
+// Virtual wraps a VReg as an operand.
+func Virtual(r VReg) VRegOperand {
 	return VRegOperand{Reg: r}
 }
 
-// P wraps a PReg as an operand.
-func P(r PReg) PRegOperand {
+// Physical wraps a PReg as an operand.
+func Physical(r PReg) PRegOperand {
 	return PRegOperand{Reg: r}
 }
 

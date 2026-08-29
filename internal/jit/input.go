@@ -35,9 +35,9 @@ type RecordedTraces interface {
 	RootAt(a Anchor) *Tree
 }
 
-// Resolve returns the function addr names: module when addr is zero, or the
+// FunctionAt returns the function addr names: module when addr is zero, or the
 // heap function at addr otherwise.
-func Resolve(module *types.Function, heap []types.Value, addr int) *types.Function {
+func FunctionAt(module *types.Function, heap []types.Value, addr int) *types.Function {
 	if addr == 0 {
 		return module
 	}

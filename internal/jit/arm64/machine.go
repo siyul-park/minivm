@@ -46,12 +46,12 @@ type lowering struct {
 	back      asm.Label
 	budget    asm.VReg
 
-	values      []value
-	frames      []activation
-	work        []work
-	exits       []sideExit
-	descriptors []jit.ExitDescriptor
-	saved       []value
+	values    []value
+	frames    []activation
+	work      []work
+	sideExits []sideExit
+	exits     []jit.Exit
+	saved     []value
 
 	addr       int
 	loopRoot   int
@@ -133,7 +133,7 @@ func (ctx *lowering) sp() int {
 }
 
 func (ctx *lowering) opcode(ip int) int {
-	fn := jit.Resolve(ctx.module, ctx.heap, ctx.frame().addr)
+	fn := jit.FunctionAt(ctx.module, ctx.heap, ctx.frame().addr)
 	if fn == nil || ip < 0 || ip >= len(fn.Code) {
 		return prof.OpcodeNone
 	}
@@ -155,9 +155,9 @@ func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReaso
 	}
 	label := ctx.assembler.Label()
 	stack, frames := ctx.snapshot()
-	id := len(ctx.descriptors)
-	ctx.descriptors = append(ctx.descriptors, jit.ExitDescriptor{Reason: reason, Opcode: opcode})
-	ctx.exits = append(ctx.exits, sideExit{
+	id := len(ctx.exits)
+	ctx.exits = append(ctx.exits, jit.Exit{Reason: reason, Opcode: opcode})
+	ctx.sideExits = append(ctx.sideExits, sideExit{
 		label: label, values: stack, frames: frames, resume: resume,
 		id: id,
 	})
@@ -280,7 +280,7 @@ func (l lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
 // seam with the architecture-neutral compiler (see internal/jit/compiler.go):
 // the compiler picks the arch and builds a, and everything from here down is
 // ARM64 lowering state and mechanics.
-func (l lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.ExitDescriptor, bool) {
+func (l lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
 	if len(l.scratch) < scratchCount {
 		return nil, false
 	}
@@ -289,7 +289,7 @@ func (l lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoo
 	if !l.lower(ctx, p) {
 		return nil, false
 	}
-	return append([]jit.ExitDescriptor(nil), ctx.descriptors...), true
+	return append([]jit.Exit(nil), ctx.exits...), true
 }
 
 // newLowering builds the lowering context one plan is emitted through.

@@ -117,7 +117,7 @@ func TestAssembler_Emit(t *testing.T) {
 		assembler := asm.New(arm64.New())
 		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
 		assembler.Emit(arm64.LDI(v, 1)...)
-		assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(v)})
+		assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.Virtual(v)})
 		assembler.Emit(arm64.RET())
 
 		code, err := assembler.Build()
@@ -152,7 +152,7 @@ func TestAssembler_Emit(t *testing.T) {
 			assembler.Emit(arm64.LDI(values[i], uint64(i))...)
 		}
 		for _, v := range values {
-			assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(v)})
+			assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.Virtual(v)})
 		}
 		assembler.Emit(arm64.RET())
 

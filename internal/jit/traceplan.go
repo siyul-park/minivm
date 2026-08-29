@@ -301,7 +301,7 @@ func split(p *Plan, tr *Trace, input *Input) []Block {
 			blocks = append(blocks, current)
 		case instr.BR_TABLE:
 			var targets []int
-			if fn := Resolve(input.Module, input.Heap, op.Fn); fn != nil {
+			if fn := FunctionAt(input.Module, input.Heap, op.Fn); fn != nil {
 				targets = instr.Targets(fn.Code, op.IP)
 			}
 			hot := -1

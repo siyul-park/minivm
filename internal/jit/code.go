@@ -20,13 +20,13 @@ type Entry struct {
 	Kind      EntryKind
 	Frontend  prof.Frontend
 	Bytes     int
-	Exits     []ExitDescriptor
+	Exits     []Exit
 	Resumable []int
 }
 
-// ExitDescriptor names one guard, cold-branch, or terminal-opcode exit an
-// Entry may take: the reason it exited and the opcode it exited from.
-type ExitDescriptor struct {
+// Exit is one guard, cold-branch, or terminal-opcode exit an Entry may take:
+// the reason it exited and the opcode it exited from.
+type Exit struct {
 	Reason prof.ExitReason
 	Opcode int
 }

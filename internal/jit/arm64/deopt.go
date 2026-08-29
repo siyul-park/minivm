@@ -61,7 +61,7 @@ func (l lowerer) emitExits(ctx *lowering) bool {
 	// budget (a function with several guarded ops and a live deferred operand
 	// can have many exits, each otherwise adding its own fresh registers).
 	var reg, refAddr, rcBase, rc asm.VReg
-	for _, exit := range ctx.exits {
+	for _, exit := range ctx.sideExits {
 		ctx.values = exit.values
 		ctx.frames = exit.frames
 		ctx.assembler.Bind(exit.label)
@@ -215,8 +215,8 @@ func (l lowerer) trap(ctx *lowering, kind journal.Trap, resume int, reason prof.
 		l.retainDeferred(ctx)
 	}
 	if kind == journal.TrapFallback {
-		id = len(ctx.descriptors)
-		ctx.descriptors = append(ctx.descriptors, jit.ExitDescriptor{Reason: reason, Opcode: opcode})
+		id = len(ctx.exits)
+		ctx.exits = append(ctx.exits, jit.Exit{Reason: reason, Opcode: opcode})
 	}
 	l.trapFlushed(ctx, kind, resume, id)
 	return true

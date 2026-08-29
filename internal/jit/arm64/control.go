@@ -163,7 +163,7 @@ func (l lowerer) next(ctx *lowering, from jit.Anchor, target jit.Edge, tail []in
 		}
 		if ctx.nativeLoop && target.Index == ctx.loopRoot && len(ctx.frames) == 1 && ctx.count() == 0 {
 			if ctx.hoist.live {
-				ctx.assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(ctx.hoist.dataPtr), Src2: asm.V(ctx.hoist.n)})
+				ctx.assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.Virtual(ctx.hoist.dataPtr), Src2: asm.Virtual(ctx.hoist.n)})
 			}
 			return l.back(ctx, ctx.back, target.Anchor.IP)
 		}

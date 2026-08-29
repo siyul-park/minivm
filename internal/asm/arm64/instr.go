@@ -722,9 +722,9 @@ func DMB() asm.Instruction { return newInst(OpDMB, nil) }
 func regOperand(reg asm.Reg) asm.Operand {
 	switch r := reg.(type) {
 	case asm.PReg:
-		return asm.P(r)
+		return asm.Physical(r)
 	case asm.VReg:
-		return asm.V(r)
+		return asm.Virtual(r)
 	default:
 		panic("unsupported register type")
 	}

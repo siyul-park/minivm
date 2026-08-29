@@ -142,13 +142,13 @@ func TestEncoder_Encode(t *testing.T) {
 	}{
 		{
 			"unsupported opcode",
-			asm.Instruction{Op: 0xFFFF, Dst: asm.P(arm64.X1), Src1: asm.P(arm64.X2), Src2: asm.P(arm64.X3)},
+			asm.Instruction{Op: 0xFFFF, Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2), Src2: asm.Physical(arm64.X3)},
 			arm64.ErrUnsupportedOpcode,
 		},
 		{"mixed widths", arm64.ADD(arm64.X1, arm64.X2, arm64.W3), asm.ErrInvalidOperand},
 		{
 			"missing immediate",
-			asm.Instruction{Op: uint16(arm64.OpADDI), Dst: asm.P(arm64.X1), Src1: asm.P(arm64.X2)},
+			asm.Instruction{Op: uint16(arm64.OpADDI), Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2)},
 			arm64.ErrMissingImmediate,
 		},
 		{"unencodable logical immediate", arm64.ANDI(arm64.X1, arm64.X2, 0), arm64.ErrMissingImmediate},

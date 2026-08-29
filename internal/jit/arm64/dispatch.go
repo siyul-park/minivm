@@ -511,7 +511,7 @@ func (l lowerer) fuse(ctx *lowering, ops []jit.Step, idx int) int {
 	default:
 		return 0
 	}
-	if callee != consumer.Callee || jit.Resolve(ctx.module, ctx.heap, callee) == nil {
+	if callee != consumer.Callee || jit.FunctionAt(ctx.module, ctx.heap, callee) == nil {
 		return 0
 	}
 	ctx.push(value{fn: callee, kind: types.KindRef, backing: jit.BackingConst, ref: ref})

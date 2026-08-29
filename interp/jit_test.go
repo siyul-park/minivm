@@ -52,7 +52,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardValue, Opcode: int(instr.I32_DIV_S)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitGuardValue, Opcode: int(instr.I32_DIV_S)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -94,7 +94,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardShape, Opcode: int(instr.ARRAY_LEN)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitGuardShape, Opcode: int(instr.ARRAY_LEN)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -131,7 +131,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardBounds, Opcode: int(instr.ARRAY_GET)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitGuardBounds, Opcode: int(instr.ARRAY_GET)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -353,7 +353,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitGuardKind, Opcode: int(instr.STRUCT_GET)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitGuardKind, Opcode: int(instr.STRUCT_GET)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -396,7 +396,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitColdBranch, Opcode: int(instr.BR_IF)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitColdBranch, Opcode: int(instr.BR_IF)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -428,7 +428,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitTraceCut, Opcode: prof.OpcodeNone}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitTraceCut, Opcode: prof.OpcodeNone}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -457,7 +457,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitTerminalOp, Opcode: int(instr.F64_REM)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitTerminalOp, Opcode: int(instr.F64_REM)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -525,7 +525,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.ExitDescriptor{Reason: prof.ExitLoop, Opcode: int(instr.BR_IF)}, entry.Exits[id])
+			require.Equal(t, jit.Exit{Reason: prof.ExitLoop, Opcode: int(instr.BR_IF)}, entry.Exits[id])
 			exits, ok := local.Metric("vm_jit_native_exits_total",
 				prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: headerLabel},
 				prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"},

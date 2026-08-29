@@ -434,7 +434,7 @@ func (r *rewriter) rewriteOp(op Operand) Operand {
 	switch v := op.(type) {
 	case VRegOperand:
 		if preg, ok := r.resolve(v.Reg); ok {
-			return P(preg)
+			return Physical(preg)
 		}
 	case MemOperand:
 		vbase, isVReg := v.Base.(VRegOperand)
@@ -442,7 +442,7 @@ func (r *rewriter) rewriteOp(op Operand) Operand {
 			break
 		}
 		if preg, ok := r.resolve(vbase.Reg); ok {
-			return Mem(P(preg), v.Offset)
+			return Mem(Physical(preg), v.Offset)
 		}
 	}
 	return op
