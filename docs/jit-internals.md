@@ -484,13 +484,21 @@ Ref reads retain the loaded element or payload. A container consumer releases it
 
 Heap-promoted `i64` values fall back before boxing.
 
-Primitive typed-array `ARRAY_SET` and scalar-field `STRUCT_SET` may continue through native execution when their guarded heap path fits the no-spill register budget. Guard failure resumes at the original opcode; success performs the store and continues to later operations or the loop back-edge.
+Primitive typed-array `ARRAY_SET` and scalar-field `STRUCT_SET` may continue through native execution when their guarded heap path fits the register budget. Guard failure resumes at the original opcode; success performs the store and continues to later operations or the loop back-edge.
 
 Ref-element `ARRAY_SET` and ref-field `STRUCT_SET` continue natively like their scalar counterparts. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. A replaced `BoxedNull` field/element has no heap ownership and is not released.
 
 Both were terminal until the callee-frame defect below was found. Letting either continue drove refcounts negative against a threaded twin from self-recursion depth two upward, and two attempts to lift the rule were reverted on that evidence. The cause was never in the stores: a native callee began with non-parameter locals that no one had cleared, so its first `LOCAL_SET` released a stale boxed word it never owned. Lifting the store rule is merely what first admitted a function holding a ref local into native lowering, which is why the two appeared connected. `TestARM64_RefContainerStore` covers the shape that used to diverge.
 
-Mutation plans are always no-spill. Stores use the common fresh-register heap path; if the physical register budget is exhausted, `asm.Build` rejects native compilation with `CompileReasonRegisterPressure` and threaded execution remains installed. Native compilation must never spill a store path across a back-edge.
+Stores carry no spill restriction of their own. They use the common
+fresh-register heap path, and the allocator judges any spill they need the same
+way it judges every other: the store must dominate every pending reload, and
+must clear the loop-carry and self-recursive-call hazards (see Register
+Allocation). A mutation plan used to force the whole build off the spill frame,
+because the allocator could not yet tell a sound spill from an unsound one
+around a store's own branches; it can now. When no value is eligible and the
+bank is exhausted, `asm.Build` still rejects native compilation with
+`CompileReasonRegisterPressure` and threaded execution remains installed.
 
 Allocation and complex ref-bearing mutations either bridge (see Bridge) in a static plan or stay threaded/terminate the native trace in a trace plan.
 

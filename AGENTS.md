@@ -61,7 +61,7 @@ Do not report work complete until all of these hold:
 
 | Task | Read | Usually edit | Verify |
 |---|---|---|---|
-| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/cmd/geninterp/`, `instr/`, `internal/jit/arm64/` | `go test ./instr ./interp` |
+| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/cmd/geninterp/`, `instr/`, `internal/jit/arm64/` | `go test ./internal/cmd/geninterp ./instr ./internal/jit/arm64 ./interp` |
 | Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
 | JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/jit_arm64.go`, `interp/jit_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |

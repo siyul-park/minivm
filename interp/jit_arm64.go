@@ -11,9 +11,5 @@ import (
 const nativeBackend = true
 
 func newCompiler() (*jit.Compiler, error) {
-	return jit.New(arm64.New(), newMachine())
-}
-
-func newMachine() jit.Machine {
-	return jitarm64.New()
+	return jit.New(arm64.New(), jitarm64.New())
 }

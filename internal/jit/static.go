@@ -389,6 +389,10 @@ func mergeSlot(dst *Slot, src Slot) (bool, bool) {
 		dst.styp = nil
 		changed = true
 	}
+	if dst.atyp != nil && dst.atyp != src.atyp {
+		dst.atyp = nil
+		changed = true
+	}
 	if dst.valKnown && (!src.valKnown || dst.val != src.val) {
 		dst.val, dst.valKnown = 0, false
 		changed = true
