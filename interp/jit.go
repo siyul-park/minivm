@@ -201,13 +201,7 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
-		if entry.Kind == jit.EntryLoop {
-			i.code[a.Addr][a.IP] = i.loop(a, entry, stats, wd)
-		} else if entry.Kind == jit.EntryModule {
-			i.code[a.Addr][a.IP] = i.start(a, entry, stats, wd)
-		} else {
-			i.code[a.Addr][a.IP] = i.call(a, entry, stats, wd)
-		}
+		i.code[a.Addr][a.IP] = i.cycle(a, entry, stats, wd)
 	}
 }
 
@@ -403,13 +397,56 @@ func (i *Interpreter) trace(f *frame) error {
 	return nil
 }
 
-// call wraps a native trace Entry Callable. The CALL handler has already
-// pushed a frame and set i.fr before this closure runs. The native Entry reads
-// params from stack scratch slots; on a normal return
-// this closure performs the frame teardown that RETURN would do in the threaded
-// interpreter, and on a trap it rebuilds the native call chain into real VM
-// frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
+// cycle builds the native dispatch closure threaded code hands control to at
+// anchor root: it enters counters and the watchdog, seeds the journal's
+// resume IP and back-edge budget, calls the native Callable, then dispatches
+// on the trap it reports. All three installed roles - function entry, module
+// entry, and loop header - share this scaffold; entry.Kind and root.Addr
+// alone say what each one does differently:
+//
+//   - EntryFunction: the CALL handler has already pushed a frame and set i.fr
+//     before this closure runs, so the fresh frame's code and upvals are
+//     cleared before the call - refreshing the back-edge budget the same way
+//     a loop does, since an entry trace can carry a self tail-call back-edge
+//     (see tailLoop) that polls the safepoint every loopBudget iterations,
+//     re-entering native here after each yield. The native Entry reads params
+//     from stack scratch slots. sp is restored from the journal only on a
+//     trap, because a clean return runs popFrame, which recomputes it from
+//     the frame itself and performs the teardown RETURN would do in the
+//     threaded interpreter; on a trap this closure rebuilds the native call
+//     chain into real VM frames before resuming threaded execution at the
+//     fallback IP, or gives up and bails out.
+//   - EntryModule: top-level code. The frame is fresh the same way, but a
+//     clean return does not tear it down - it preserves the operand stack and
+//     marks the module frame exhausted so dispatch returns normally, so sp
+//     must come from the journal unconditionally. A give-up bails out the
+//     same way.
+//   - EntryLoop: the header is reached mid-function with the frame already
+//     live, so it is never reinitialized, and sp is restored unconditionally
+//     like EntryModule. A clean return completes the module when the loop
+//     owns the whole module (root.Addr == 0) and tears the frame down
+//     otherwise. A spent budget yields to the safepoint and the Run loop
+//     re-enters native at the header. A give-up records the exit and, only if
+//     execution resumed at the header itself, runs the shadowed handler once
+//     so the interpreter makes progress instead of re-dispatching the same
+//     native stub (see resumeShadowed) - a loop root has no function-entry
+//     stub to bail out to instead.
+//
+// checkRetire's clearNatives is set only for EntryFunction: retiring a
+// function entry must also clear its fast-call slot in i.natives (see
+// install and retire), which a module or loop root never has.
+func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
+	resetFrame := entry.Kind != jit.EntryLoop
+	earlySP := entry.Kind != jit.EntryFunction
+	isFunction := entry.Kind == jit.EntryFunction
+	// popOnReturn and shadow fold the per-role decisions the dispatch loop
+	// would otherwise re-derive on every native entry: whether a clean return
+	// tears the frame down, and which installation point a give-up may have
+	// resumed at. Only the loop role's shadow anchor is the root itself; the
+	// other two ask about the function they returned into, whose address is
+	// not known until the trap.
+	popOnReturn := isFunction || (entry.Kind == jit.EntryLoop && root.Addr != 0)
+	loopShadow := entry.Kind == jit.EntryLoop
 	return func(i *Interpreter) {
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
@@ -417,27 +454,36 @@ func (i *Interpreter) call(root jit.Anchor, entry jit.Entry, stats counters, wd 
 			wd.enter()
 			ctx := i.journalPtr()
 			i.journal[journal.CellEntry] = resume
-			i.fr.code = nil
-			i.fr.upvals = nil
-			// Refresh the back-edge budget like loop does: an entry trace can carry a
-			// self tail-call back-edge (see tailLoop) that polls the safepoint every
-			// loopBudget iterations, re-entering native here after each yield.
+			if resetFrame {
+				i.fr.code = nil
+				i.fr.upvals = nil
+			}
 			i.journal[journal.CellBudget] = loopBudget
 			if err := entry.Callable.Call(ctx); err != nil {
 				panic(err)
 			}
 
-			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
-				i.popFrame()
+			if earlySP {
+				i.sp = int(i.journal[journal.CellSP])
+			}
+			trap := journal.Trap(i.journal[journal.CellTrap])
+			if trap == journal.TrapNone {
+				if popOnReturn {
+					i.popFrame()
+				} else {
+					i.complete()
+				}
 				break
 			}
 
 			// A trap rebuilt the native call chain into real VM frames; resume the
 			// innermost in the interpreter, surface a frame overflow, or service a
 			// loop safepoint.
-			i.sp = int(i.journal[journal.CellSP])
+			if !earlySP {
+				i.sp = int(i.journal[journal.CellSP])
+			}
 			i.deopt()
-			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapBridge {
+			if trap == journal.TrapBridge {
 				next, ok := i.bridge(root, entry, wd, cycles)
 				if !ok {
 					break
@@ -445,7 +491,7 @@ func (i *Interpreter) call(root jit.Anchor, entry jit.Entry, stats counters, wd 
 				resume = next
 				continue
 			}
-			switch journal.Trap(i.journal[journal.CellTrap]) {
+			switch trap {
 			case journal.TrapOverflow:
 				panic(ErrFrameOverflow)
 			case journal.TrapYield:
@@ -459,11 +505,25 @@ func (i *Interpreter) call(root jit.Anchor, entry jit.Entry, stats counters, wd 
 			default:
 				stats.exit(i.journal[journal.CellExitID])
 				wd.exit(i.journal[journal.CellExitID])
-				i.bailout(root)
+				// Record the exit as a branch so the tracer captures the leg and a
+				// hot in-loop branch recompiles the tree with the leg folded in.
+				i.exit(root)
+				if loopShadow {
+					// An exit that resumes at the header itself made no progress - the
+					// header slot holds this native stub, so dispatching it again would
+					// livelock (the hoist prologue's shape guard exits here). Run the
+					// shadowed threaded handler once so the interpreter advances.
+					i.resumeShadowed(root)
+				} else {
+					// A give-up that resumed at some function's own entry (ip 0) would
+					// otherwise retrap immediately on redispatch; run that function's
+					// shadowed entry handler once instead.
+					i.resumeShadowed(jit.Anchor{Addr: i.fr.addr, IP: 0})
+				}
 			}
 			break
 		}
-		i.checkRetire(root, wd, true)
+		i.checkRetire(root, wd, isFunction)
 	}
 }
 
@@ -499,7 +559,7 @@ func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *watchdog, cyc
 	// own root - and invoking it here would re-enter native code from inside
 	// this wrapper, resetting the journal the outer activation is about to
 	// reuse. i.exits keeps the shadowed threaded closure for exactly this
-	// case, the same one bailout uses when a fallback resumes on an anchor.
+	// case, the same one resumeShadowed uses when a give-up resumes on an anchor.
 	closure := i.code[f.addr][ip]
 	if shadowed, installed := i.exits[jit.Anchor{Addr: f.addr, IP: ip}]; installed {
 		if shadowed == nil {
@@ -515,129 +575,6 @@ func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *watchdog, cyc
 		return 0, false
 	}
 	return uint64(f.ip), true
-}
-
-// start wraps a native trace for top-level code. Unlike function entries,
-// top-level completion does not tear down its frame; it preserves the operand
-// stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
-	return func(i *Interpreter) {
-		resume := uint64(0)
-		for cycles := 0; ; cycles++ {
-			stats.enter()
-			wd.enter()
-			ctx := i.journalPtr()
-			i.journal[journal.CellEntry] = resume
-			i.fr.code = nil
-			i.fr.upvals = nil
-			i.journal[journal.CellBudget] = loopBudget
-			if err := entry.Callable.Call(ctx); err != nil {
-				panic(err)
-			}
-
-			i.sp = int(i.journal[journal.CellSP])
-			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
-				i.complete()
-				break
-			}
-
-			i.deopt()
-			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapBridge {
-				next, ok := i.bridge(root, entry, wd, cycles)
-				if !ok {
-					break
-				}
-				resume = next
-				continue
-			}
-			switch journal.Trap(i.journal[journal.CellTrap]) {
-			case journal.TrapOverflow:
-				panic(ErrFrameOverflow)
-			case journal.TrapYield:
-				stats.yield()
-				if err := i.yielded(); err != nil {
-					panic(err)
-				}
-			default:
-				stats.exit(i.journal[journal.CellExitID])
-				wd.exit(i.journal[journal.CellExitID])
-				i.bailout(root)
-			}
-			break
-		}
-		i.checkRetire(root, wd, false)
-	}
-}
-
-// loop wraps a native loop Callable installed at a loop header. Unlike entry,
-// the header is reached mid-function with the frame already live, so loop never
-// pushes a frame. It returns normally when a folded return or completion leg
-// finishes native execution; every other exit is a trap.
-// A spent budget yields to the safepoint and the Run loop re-enters native at
-// the header; a guarded side exit or the loop-exit edge leaves deopt with
-// i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
-	return func(i *Interpreter) {
-		resume := uint64(0)
-		for cycles := 0; ; cycles++ {
-			stats.enter()
-			wd.enter()
-			ctx := i.journalPtr()
-			i.journal[journal.CellEntry] = resume
-			// Decouple the loop's safepoint cadence from tick: a native iteration does
-			// the work of a whole loop body, so yielding every tick (1 under exact
-			// dispatch) would drown the loop in deopt/re-enter churn. Run many
-			// iterations natively between safepoints instead.
-			i.journal[journal.CellBudget] = loopBudget
-			if err := entry.Callable.Call(ctx); err != nil {
-				panic(err)
-			}
-			i.sp = int(i.journal[journal.CellSP])
-			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapNone {
-				if root.Addr == 0 {
-					i.complete()
-				} else {
-					i.popFrame()
-				}
-				break
-			}
-			i.deopt()
-			if journal.Trap(i.journal[journal.CellTrap]) == journal.TrapBridge {
-				next, ok := i.bridge(root, entry, wd, cycles)
-				if !ok {
-					break
-				}
-				resume = next
-				continue
-			}
-			switch journal.Trap(i.journal[journal.CellTrap]) {
-			case journal.TrapOverflow:
-				panic(ErrFrameOverflow)
-			case journal.TrapYield:
-				stats.yield()
-				if err := i.yielded(); err != nil {
-					panic(err)
-				}
-			case journal.TrapFallback:
-				stats.exit(i.journal[journal.CellExitID])
-				wd.exit(i.journal[journal.CellExitID])
-				// Record the exit as a branch so the tracer captures the leg and a
-				// hot in-loop branch recompiles the tree with the leg folded in.
-				i.exit(root)
-				// An exit that resumes at the header itself made no progress — the
-				// header slot holds this native stub, so dispatching it again would
-				// livelock (the hoist prologue's shape guard exits here). Run the
-				// shadowed threaded handler once so the interpreter advances.
-				if i.fr.addr == root.Addr && i.fr.ip == root.IP {
-					if fn := i.exits[root]; fn != nil {
-						fn(i)
-					}
-				}
-			}
-			break
-		}
-		i.checkRetire(root, wd, false)
-	}
 }
 
 func (i *Interpreter) popFrame() {
@@ -682,12 +619,18 @@ func (i *Interpreter) exit(root jit.Anchor) {
 	}
 }
 
-func (i *Interpreter) bailout(root jit.Anchor) {
-	i.exit(root)
-	if i.fr.ip == 0 {
-		if fn := i.stub(i.fr.addr); fn != nil {
-			fn(i)
-		}
+// resumeShadowed runs the threaded handler installed anchor a's native code
+// shadowed (see install) exactly once, when a give-up has resumed execution
+// precisely at a's own installation point: redispatching a's native stub
+// again there would just retrap or, for a loop header, livelock instead of
+// making progress (see cycle). It is a no-op wherever execution resumed
+// somewhere else, or nothing was ever shadowed at a.
+func (i *Interpreter) resumeShadowed(a jit.Anchor) {
+	if i.fr.addr != a.Addr || i.fr.ip != a.IP {
+		return
+	}
+	if fn := i.exits[a]; fn != nil {
+		fn(i)
 	}
 }
 

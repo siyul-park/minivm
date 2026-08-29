@@ -520,7 +520,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
 			i.fr.ip = header
-			i.loop(root, entry, metrics, newWatchdog(entry))(i)
+			i.cycle(root, entry, metrics, newWatchdog(entry))(i)
 			encoded := i.journal[journal.CellExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
@@ -567,7 +567,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, jit.EntryFunction, entry.Kind)
 
-			i.call(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
+			i.cycle(root, entry, i.counters(root, entry), newWatchdog(entry))(i)
 			require.Equal(t, uint64(journal.TrapYield), i.journal[journal.CellTrap])
 			require.Zero(t, i.journal[journal.CellExitID])
 			yields, ok := local.Metric("vm_jit_native_yields_total",
