@@ -20,7 +20,7 @@ import (
 type tracer struct {
 	prog  *program.Program
 	exact [][]func(*Interpreter)
-	loops map[int][]int
+	loops map[int][]loopSpan
 	trees map[jit.Anchor]*jit.Tree
 
 	recordMu sync.Mutex
@@ -41,7 +41,7 @@ const attemptLimit = 8
 
 func newTracer() *tracer {
 	return &tracer{
-		loops: map[int][]int{},
+		loops: map[int][]loopSpan{},
 		trees: map[jit.Anchor]*jit.Tree{},
 	}
 }
@@ -272,6 +272,7 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.backedges = make([]bool, len(i.backedges))
 	out.exits = map[jit.Anchor]func(*Interpreter){}
 	out.tried = map[jit.Anchor]bool{}
+	out.live = map[jit.Anchor]jit.Entry{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)
 	out.handlers = slices.Clone(i.handlers)
@@ -711,10 +712,18 @@ func (t *tracer) RootAt(a jit.Anchor) *jit.Tree {
 	return tr.Snapshot()
 }
 
-// headers returns the loop-header IPs of the function at addr: the targets of
-// backward branches, where a hot loop re-enters. The scan is static and
-// memoized per address.
-func (t *tracer) headers(i *Interpreter, addr int) []int {
+// loop is one loop of a function: the IP a backward branch re-enters at, and
+// the IP of the last branch that re-enters it. Together they bound the loop's
+// body, which is what tells a nested header from a sibling one - a sibling
+// starts after end, while a nested header lies inside (see encloses).
+type loopSpan struct {
+	header int
+	end    int
+}
+
+// headers returns the loops of the function at addr, found from the targets of
+// backward branches. The scan is static and memoized per address.
+func (t *tracer) headers(i *Interpreter, addr int) []loopSpan {
 	t.mu.Lock()
 	hs, ok := t.loops[addr]
 	t.mu.Unlock()
@@ -728,7 +737,7 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 	hs = nil
 	if addr >= 0 && addr < len(i.instrs) {
 		code := i.instrs[addr]
-		seen := map[int]bool{}
+		at := map[int]int{}
 		for ip := 0; ip < len(code); {
 			w := instr.Instruction(code[ip:]).Width()
 			if w <= 0 {
@@ -738,9 +747,19 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 			// BR/BR_IF's single target, so a loop formed only through a
 			// backward BR_TABLE case is recognized as a header too.
 			for _, target := range instr.Targets(code, ip) {
-				if target >= 0 && target < ip && !seen[target] {
-					seen[target] = true
-					hs = append(hs, target)
+				if target < 0 || target >= ip {
+					continue
+				}
+				idx, ok := at[target]
+				if !ok {
+					at[target] = len(hs)
+					hs = append(hs, loopSpan{header: target, end: ip})
+					continue
+				}
+				// A loop can be re-entered from more than one branch; the last
+				// of them is the end of its body.
+				if ip > hs[idx].end {
+					hs[idx].end = ip
 				}
 			}
 			ip += w
@@ -756,6 +775,22 @@ func (t *tracer) headers(i *Interpreter, addr int) []int {
 	}
 	t.loops[addr] = hs
 	return hs
+}
+
+// encloses reports whether the loop headed at outer contains the loop headed
+// at inner in the function at addr. Two loops that merely follow one another
+// do not: a sibling's header lies past the end of the first one's body, while
+// a nested header lies inside it.
+func (t *tracer) encloses(i *Interpreter, addr, outer, inner int) bool {
+	if outer >= inner {
+		return false
+	}
+	for _, l := range t.headers(i, addr) {
+		if l.header == outer {
+			return inner <= l.end
+		}
+	}
+	return false
 }
 
 func (t *tracer) reason(i *Interpreter, op instr.Opcode) prof.CaptureReason {

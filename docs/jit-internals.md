@@ -514,7 +514,7 @@ The static planner (`staticPlan`) is the frontend that acts on `bridgeable`: wal
 
 A bridge cycle re-enters through a fresh external `Call`, which never runs the loop-carry prologue (see `dispatch` above): a carried register would be uninitialized garbage on such a resume. A bridge a plan can reach therefore keeps every local slot-backed instead of loop-carried. The scope is the plan, not the function: each loop plan carries only the blocks its own root reaches (see Static Frontend), so a bridge this header cannot reach is not compiled into this callable, has no resume label here, and does not disable carrying. A bridge that the header does reach but that sits outside the loop's own back-edge range still disables it; narrowing that residual case to "a bridge inside the loop body" is unimplemented follow-up work, tracked because it would need the carry-load prologue to run on every re-entry path, not just the callable's own head.
 
-`arrayKind` (`internal/jit`, unexported) resolves an `ARRAY_GET`/`ARRAY_DELETE` element kind from a known constant container's concrete heap itab, matching `arrayGetKnown`'s native lowering, and otherwise from the declared array type — mirroring `structFieldKind`'s declared-struct-type resolution, which `STRUCT_GET` already relies on. The declared type answers only in a call-free plan (`callFree`). Lifting that gate lets `ARRAY_GET`'s general (non-constant) lowering path run alongside a native `CALL` in the same plan, and that combination corrupted native execution state on the next native call boundary (`runtime.mallocgc` SIGSEGV) instead of cleanly guarding and falling back the way `structFieldKind`'s equivalent case does. The `BLR` no longer clobbers the spill base (see Calls and Returns), so it no longer crashes, but three tests still diverge behaviourally, so the gate stands until that is understood. Until then a function containing a call keeps resolving `ARRAY_GET`, `ARRAY_LEN`, and `ARRAY_DELETE` only from a known constant container.
+`arrayKind` (`internal/jit`, unexported) resolves an `ARRAY_GET`/`ARRAY_DELETE` element kind from a known constant container's concrete heap itab, matching `arrayGetKnown`'s native lowering, and otherwise from the declared array type — mirroring `structFieldKind`'s declared-struct-type resolution, which `STRUCT_GET` already relies on. The declared type answers only in a call-free plan (`callFree`). The gate was added because lifting it corrupted native execution state (`runtime.mallocgc` SIGSEGV) when `ARRAY_GET`'s general lowering path ran alongside a native `CALL`; that is fixed — the `BLR` no longer clobbers the spill base (see Calls and Returns) — and the full suite passes with the gate lifted. It stands for a measured reason instead: lifting it makes a whole-function static plan available for kernels like `Numeric_SpectralNorm`, and while root arbitration (see Arbitration between roots) now keeps that from costing 45%, the wider planning still gives back the gains it buys and improves no kernel. A function containing a call therefore keeps resolving `ARRAY_GET`, `ARRAY_LEN`, and `ARRAY_DELETE` only from a known constant container.
 
 ## Structured Errors
 
@@ -536,6 +536,43 @@ Entry wrappers and loop wrappers differ:
 | `loop` | loop header | re-enters live frame |
 
 Install only accepted callables. Rejected roots leave the existing threaded closure intact.
+
+### Arbitration between roots
+
+Two roots of one function can both compile, and an installed root keeps
+execution inside itself, so whichever one holds the dispatch slot starves the
+other. `install` refuses a static plan that would swallow a root already
+dispatching, in either compile order: it declines the install when the loser is
+the newcomer, and withdraws the installed one when the loser is already in
+place. `i.live` records which anchor owns each slot — `i.exits` cannot answer
+that, because `retire` restores the slot but keeps its shadow entry.
+
+Only a static plan loses. The trace frontend anchors a nested loop as an edge
+to that root's own entry instead of inlining it, so a recording never takes an
+inner root's work away; the static loop plan is the fallback for a loop no
+trace could record (see Compiler above), so it must not displace one.
+
+What counts as swallowing depends on the root:
+
+| Root | Swallows |
+|---|---|
+| function entry | every loop in the function |
+| loop header | only loops nested in its own body (`tracer.encloses`) |
+| module entry | nothing — see below |
+
+Containment comes from the loop's own span: a backward branch's target opens a
+loop and the last branch back to it closes it, so a nested header lies inside
+that range while a sibling only follows it. Sibling loops must keep installing
+independently, which is what a rule based on mere coexistence gets wrong.
+
+Module code is excluded and keeps the arbitration it already had — a module
+loop root withdrawing the whole-module entry. Its entry runs once per execution
+rather than once per call, so the whole-module plan is the program; measured,
+withdrawing it costs `Control_Sieve` about 10%. For the same reason a side-exit
+recompile of a module loop root may still install the static fallback over a
+running recording, while off module code it may not: a side exit asks for the
+tree to be rebuilt with its leg folded in, and an answer that fell through to
+the static plan is a downgrade, not an improvement.
 
 Native wrappers must always leave the interpreter in a valid state for threaded redispatch.
 

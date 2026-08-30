@@ -160,6 +160,26 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 		if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) || entry.Callable == nil {
 			continue
 		}
+		// Two loop roots of one function can both compile, and an installed
+		// root keeps execution inside itself, so whichever one holds the
+		// dispatch slot silently starves the other. When one covers the other
+		// they are nested, and the inner root is the specialized one: a
+		// recorded trace folds its legs and hoists its container, while the
+		// enclosing static plan - pruned by plain forward reachability, so it
+		// swallows the inner header whole (see jit.Plan.prune) - does neither.
+		// The static loop plan is the fallback for a loop no trace could
+		// record (see internal/jit/compiler.go's frontend order), so it must
+		// never take the slot from a recorded one it contains.
+		//
+		// Sibling loops cover neither the other and are left alone, which is
+		// the distinction this rule turns on: coexistence is normal, and only
+		// containment starves.
+		if i.covered(a, entry) {
+			continue
+		}
+		if entry.Kind == jit.EntryLoop {
+			i.uncover(a)
+		}
 		// A peer's publish can land on a function this interpreter already
 		// cooled (see cool); installing native code for it makes further
 		// instrumentation useful again, so resume it.
@@ -193,12 +213,81 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 				i.code[0][0] = shadowed
 			}
 		}
+		i.live[a] = entry
 		stats := i.counters(a, entry)
 		// wd tracks give-up exits independent of stats: counters is a no-op
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
 		i.code[a.Addr][a.IP] = i.cycle(a, entry, stats, wd)
+	}
+}
+
+// covered reports whether the static plan about to install at a would swallow
+// a loop root of the same function that is already dispatching. Only a static
+// plan can lose here: the trace frontend anchors a nested loop as an edge to
+// that root's own entry instead of inlining it, so a recorded plan never takes
+// an inner root's work away in the first place.
+func (i *Interpreter) covered(a jit.Anchor, entry jit.Entry) bool {
+	if entry.Frontend != prof.FrontendStatic {
+		return false
+	}
+	for root, live := range i.live {
+		if root.Addr != a.Addr || root == a || live.Kind != jit.EntryLoop {
+			continue
+		}
+		if i.swallows(a, entry, root.IP) {
+			return true
+		}
+	}
+	return false
+}
+
+// swallows reports whether the plan installing at a runs the loop headed at
+// header as part of itself. A function entry plans the whole function, so it
+// swallows every loop in it; a loop root swallows only the loops nested in
+// its own body (see tracer.encloses), never a sibling that merely follows it.
+//
+// A module entry is excluded. It runs once per execution rather than once per
+// call, so the whole-module plan is the program, and measurement says it wins:
+// withdrawing it costs Control_Sieve about 10%. Its arbitration against a
+// module loop root stays the one install already had.
+func (i *Interpreter) swallows(a jit.Anchor, entry jit.Entry, header int) bool {
+	switch entry.Kind {
+	case jit.EntryFunction:
+		return true
+	case jit.EntryLoop:
+		return i.tracer.encloses(i, a.Addr, a.IP, header)
+	default:
+		return false
+	}
+}
+
+// uncover withdraws an installed static loop root that covers a, so the inner
+// root about to install at a is reachable at all: the outer one holds the
+// dispatch slot execution passes through first and would otherwise keep
+// running the whole nest itself (see install and covered, the same rule in
+// the other install order).
+//
+// It restores the shadowed threaded handler rather than cooling the function,
+// unlike retire: nothing here says the outer root fails to pay for itself,
+// only that a better root now owns the work, so the address must stay
+// instrumented and its watchdog must stay free to retire the inner root later.
+func (i *Interpreter) uncover(a jit.Anchor) {
+	for root, live := range i.live {
+		if root.Addr != a.Addr || root == a || live.Frontend != prof.FrontendStatic {
+			continue
+		}
+		if !i.swallows(root, live, a.IP) {
+			continue
+		}
+		if fn := i.exits[root]; fn != nil {
+			i.code[root.Addr][root.IP] = fn
+		}
+		if live.Kind == jit.EntryFunction && root.Addr < len(i.natives) {
+			atomic.StorePointer(&i.natives[root.Addr], nil)
+		}
+		delete(i.live, root)
 	}
 }
 
@@ -286,9 +375,9 @@ func (i *Interpreter) settled(addr int, hits uint64) bool {
 	if hits >= i.trigger+entryWarmup {
 		return true
 	}
-	for _, header := range i.tracer.headers(i, addr) {
+	for _, l := range i.tracer.headers(i, addr) {
 		// A header at ip 0 is this very root, not a separate one to wait for.
-		if header != 0 && !i.tried[jit.Anchor{Addr: addr, IP: header}] {
+		if l.header != 0 && !i.tried[jit.Anchor{Addr: addr, IP: l.header}] {
 			return false
 		}
 	}
@@ -311,8 +400,8 @@ func (i *Interpreter) checkCool(addr int, root jit.Anchor) {
 	if !i.tried[root] {
 		return
 	}
-	for _, header := range i.tracer.headers(i, addr) {
-		if !i.tried[jit.Anchor{Addr: addr, IP: header}] {
+	for _, l := range i.tracer.headers(i, addr) {
+		if !i.tried[jit.Anchor{Addr: addr, IP: l.header}] {
 			return
 		}
 	}
@@ -611,9 +700,28 @@ func (i *Interpreter) exit(root jit.Anchor) {
 	if result.Err != nil {
 		panic(result.Err)
 	}
-	if result.Code != nil {
-		i.install(result.Code, true)
+	if result.Code == nil {
+		return
 	}
+	// A side exit asks for this root to be rebuilt with the exit's leg folded
+	// in, and the answer is only an improvement if it is still a recording.
+	// When the trace frontend cannot plan the tree any more the compiler falls
+	// through to the static plan (see internal/jit/compiler.go's frontend
+	// order), and installing that would swap the running recording - folded
+	// legs, hoisted container - for the fallback that has neither.
+	//
+	// Module code keeps the behaviour it had. Its loop root competes with a
+	// whole-module plan that is the program rather than one call of it, and
+	// holding the recording there costs Control_Sieve about 10%.
+	if live, ok := i.live[root]; ok && root.Addr != 0 && live.Frontend == prof.FrontendTrace {
+		if rebuilt, ok := result.Code.Entries[root]; ok && rebuilt.Frontend != prof.FrontendTrace {
+			// The code was still emitted, so it is still accounted; only the
+			// dispatch slot stays with the recording that already owns it.
+			i.account(result.Code)
+			return
+		}
+	}
+	i.install(result.Code, true)
 }
 
 // resumeShadowed runs the threaded handler installed anchor a's native code
@@ -752,6 +860,7 @@ func (i *Interpreter) retire(a jit.Anchor, clearNatives bool) {
 	if fn := i.exits[a]; fn != nil {
 		i.code[a.Addr][a.IP] = fn
 	}
+	delete(i.live, a)
 	if clearNatives && a.Addr < len(i.natives) {
 		atomic.StorePointer(&i.natives[a.Addr], nil)
 	}

@@ -183,7 +183,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotEmpty(t, headers)
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
-			compiled := compiler.Compile(input, jit.Anchor{IP: headers[0]})
+			compiled := compiler.Compile(input, jit.Anchor{IP: headers[0].header})
 			require.NoError(t, compiled.Err)
 			require.NotNil(t, compiled.Code, "%+v", compiled)
 			i.install(compiled.Code, false)
@@ -780,7 +780,7 @@ func TestARM64_Backedge(t *testing.T) {
 			defer i.Close()
 			headers := i.tracer.headers(i, 0)
 			require.NotEmpty(t, headers)
-			root := jit.Anchor{IP: headers[0]}
+			root := jit.Anchor{IP: headers[0].header}
 
 			for run, attempted := range tt.attempted {
 				require.NoError(t, i.Run(context.Background()))
@@ -797,4 +797,87 @@ func TestARM64_Backedge(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestARM64_Encloses covers the containment the installer arbitrates on: a
+// nested loop header lies inside the enclosing loop's body, while a sibling
+// header only follows it. install refuses a static plan that would swallow a
+// loop root already dispatching, and that refusal turns entirely on telling
+// those two shapes apart (see Interpreter.covered).
+//
+// Exception (docs/coding-patterns.md §1.1): loop spans and install ownership
+// are interp-private bookkeeping with no profiler metric of their own, the
+// same reason TestARM64_Backedge above reads `tried` and `exits`.
+func TestARM64_Encloses(t *testing.T) {
+	t.Run("an outer loop encloses a nested header", func(t *testing.T) {
+		b := program.NewBuilder()
+		outer := b.Label()
+		outerDone := b.Label()
+		inner := b.Label()
+		innerDone := b.Label()
+		b.Locals(types.TypeI32, types.TypeI32)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+			Bind(outer).
+			Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(outerDone).
+			Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+			Bind(inner).
+			Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone).
+			Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+			Br(inner).
+			Bind(innerDone).
+			Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+			Br(outer).
+			Bind(outerDone).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1<<20), WithThreshold(-1))
+		defer i.Close()
+		spans := i.tracer.headers(i, 0)
+		require.Len(t, spans, 2)
+
+		outerHeader, innerHeader := spans[0].header, spans[1].header
+		if outerHeader > innerHeader {
+			outerHeader, innerHeader = innerHeader, outerHeader
+		}
+		require.True(t, i.tracer.encloses(i, 0, outerHeader, innerHeader),
+			"the outer header must enclose the nested one")
+		require.False(t, i.tracer.encloses(i, 0, innerHeader, outerHeader),
+			"containment must not run the other way")
+	})
+
+	t.Run("sequential loops enclose neither the other", func(t *testing.T) {
+		b := program.NewBuilder()
+		first := b.Label()
+		firstDone := b.Label()
+		second := b.Label()
+		secondDone := b.Label()
+		b.Locals(types.TypeI32, types.TypeI32)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+			Bind(first).
+			Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(firstDone).
+			Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+			Br(first).
+			Bind(firstDone).
+			Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+			Bind(second).
+			Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(secondDone).
+			Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+			Br(second).
+			Bind(secondDone).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1<<20), WithThreshold(-1))
+		defer i.Close()
+		spans := i.tracer.headers(i, 0)
+		require.Len(t, spans, 2)
+
+		require.False(t, i.tracer.encloses(i, 0, spans[0].header, spans[1].header),
+			"a loop that merely precedes another must not enclose it")
+		require.False(t, i.tracer.encloses(i, 0, spans[1].header, spans[0].header),
+			"nor the other way round")
+	})
 }
