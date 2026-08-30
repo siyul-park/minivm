@@ -32,6 +32,7 @@ type Interpreter struct {
 	exits    map[jit.Anchor]func(*Interpreter)
 	natives  []unsafe.Pointer
 	tried    map[jit.Anchor]bool
+	live     map[jit.Anchor]jit.Entry
 	journal  []uint64
 
 	types       []types.Type
@@ -278,6 +279,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		exits:       map[jit.Anchor]func(*Interpreter){},
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:       map[jit.Anchor]bool{},
+		live:        map[jit.Anchor]jit.Entry{},
 		dynamic:     map[int]bool{},
 		journal:     make([]uint64, journal.Len(opt.frame)),
 		frames:      make([]frame, opt.frame),
@@ -2026,6 +2028,11 @@ func (i *Interpreter) remove(addr int) {
 	for a := range i.tried {
 		if a.Addr == addr {
 			delete(i.tried, a)
+		}
+	}
+	for a := range i.live {
+		if a.Addr == addr {
+			delete(i.live, a)
 		}
 	}
 	if addr >= 0 && addr < len(i.entries) {

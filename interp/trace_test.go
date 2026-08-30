@@ -532,7 +532,7 @@ func TestTracer_Headers(t *testing.T) {
 		defer i.Close()
 
 		const workers = 16
-		results := make([][]int, workers)
+		results := make([][]loopSpan, workers)
 		var wg sync.WaitGroup
 		wg.Add(workers)
 		for w := range workers {
