@@ -147,8 +147,8 @@ func scalars() []pattern {
 		indexed = append(indexed, seq(index, op(instr.ARRAY_GET)))
 	}
 	patterns = append(patterns, cross(arrayContainers, indexed...)...)
-	setPatterns := make([]pattern, 0, len(arrayConstants)*len(producers[types.I32](instr.I32_CONST))*4)
-	for _, container := range arrayConstants {
+	setPatterns := make([]pattern, 0, len(arrayContainers)*len(producers[types.I32](instr.I32_CONST))*4)
+	for _, container := range arrayContainers {
 		kind, _ := arrayKind(container[0].typ)
 		for _, index := range producers[types.I32](instr.I32_CONST) {
 			for _, val := range arrayProducers(kind) {
