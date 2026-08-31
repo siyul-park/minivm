@@ -648,7 +648,6 @@ func(struct {value: i64; left: any; right: any}) i32
 	ref.is_null
 	br_if nullCase
 	local.get 0
-	ref.cast 0
 	i32.const 1
 	struct.get
 	const.get 1
@@ -747,7 +746,6 @@ func(struct {item: i32; left: any; right: any}) i32
 	ref.is_null
 	br_if nullCase
 	local.get 0
-	ref.cast 0
 	i32.const 1
 	struct.get
 	ref.is_null
