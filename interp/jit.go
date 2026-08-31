@@ -535,14 +535,14 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 	popOnReturn := isFunction || (entry.Kind == jit.EntryLoop && root.Addr != 0)
 	loopShadow := entry.Kind == jit.EntryLoop
 	return func(i *Interpreter) {
-		if wd.isShadow() {
+		if wd.probe == probeShadow {
 			done := wd.shadowReach()
 			i.resumeShadowed(root)
 			if done {
 				if isFunction && root.Addr < len(i.natives) {
 					atomic.StorePointer(&i.natives[root.Addr], entry.Callable.Addr())
 				}
-				if wd.shouldRetire() {
+				if wd.probeRetire {
 					i.retire(root, isFunction)
 				}
 			}
@@ -846,10 +846,11 @@ func (i *Interpreter) cool(addr int) {
 // finished, while keeping the existing give-up and bridge retirement window
 // unchanged. clearNatives is true only for a function-entry anchor.
 func (i *Interpreter) checkRetire(a jit.Anchor, wd *watchdog, clearNatives bool) {
-	if wd.prepareShadow() && clearNatives && a.Addr < len(i.natives) {
+	if wd.probePending && clearNatives && a.Addr < len(i.natives) {
+		wd.probePending = false
 		atomic.StorePointer(&i.natives[a.Addr], nil)
 	}
-	if wd.shouldRetire() || wd.failed() {
+	if wd.probeRetire || wd.failed() {
 		i.retire(a, clearNatives)
 	}
 }

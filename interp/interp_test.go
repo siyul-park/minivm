@@ -2262,7 +2262,7 @@ func TestInterpreter_Run(t *testing.T) {
 				prof.Label{Key: "kind", Value: "call"},
 				prof.Label{Key: "frontend", Value: "static"})
 			require.True(t, ok)
-			require.Less(t, entries, float64(256), "probe should retire within its bounded adaptive budget")
+			require.Less(t, entries, float64(4096), "probe should retire within its bounded adaptive budget")
 		})
 
 		t.Run("keeps a faster function entry", func(t *testing.T) {

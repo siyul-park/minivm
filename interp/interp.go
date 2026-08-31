@@ -1037,18 +1037,13 @@ func (i *Interpreter) owns(f *frame) bool {
 // restarted from a fresh native window so host-side work between Run calls is
 // never included in the measured interpreter span.
 func (i *Interpreter) probeBoundary() {
-	if len(i.watchdogs) == 0 {
-		return
-	}
 	for _, wd := range i.watchdogs {
 		if wd.probe == probeShadow {
 			wd.probe = probeNative
-			wd.probeNative = 0
-		} else if wd.probe == probeNative {
-			wd.probeNative = 0
 		}
 		wd.probeCount = 0
 		wd.probeStart = time.Time{}
+		wd.probeNative = 0
 		wd.probePending = false
 	}
 }

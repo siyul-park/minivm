@@ -75,7 +75,7 @@ const (
 	probeWindowMin = 32
 	probeWindowMax = 256
 	probeRoundsMin = 3
-	probeRoundsMax = 7
+	probeRoundsMax = 6
 	probeMinGain   = 0.01
 	probeZ         = 1.96
 	probeError     = 0.05
@@ -148,10 +148,7 @@ func (w *watchdog) enter() {
 	if w.probe != probeNative {
 		return
 	}
-	if w.probeRound == 0 && w.probeNative == 0 {
-		w.probeSize = maxProbeSize(w.probeSize)
-	}
-	if w.probeSize != 0 && w.probeCount == 0 {
+	if w.probeCount == 0 {
 		w.probeStart = time.Now()
 	}
 	w.probeCount++
@@ -161,24 +158,6 @@ func (w *watchdog) enter() {
 		w.probeCount = 0
 		w.probePending = true
 	}
-}
-
-// isShadow reports whether the next anchor reach must run through its shadowed
-// threaded handler instead of the native callable.
-func (w *watchdog) isShadow() bool {
-	return w.probe == probeShadow
-}
-
-// prepareShadow activates the shadow window after the native wrapper that
-// completed it has returned. Keeping this transition at wrapper exit prevents
-// bridge cycles inside one native activation from consuming a second probe
-// reach.
-func (w *watchdog) prepareShadow() bool {
-	if !w.probePending {
-		return false
-	}
-	w.probePending = false
-	return true
 }
 
 // shadowReach records one shadow reach. It returns true after the final reach
@@ -197,21 +176,28 @@ func (w *watchdog) shadowReach() bool {
 	shadow := time.Since(w.probeStart)
 	native := w.probeNative
 	w.probeRound++
+	if w.probeRound == 1 {
+		w.probe = probeNative
+		w.probeCount = 0
+		return true
+	}
+	samples := w.probeRound - 1
 	diff := 1 - float64(shadow)/float64(native)
 	delta := diff - w.probeMean
-	w.probeMean += delta / float64(w.probeRound)
+	w.probeMean += delta / float64(samples)
 	w.probeM2 += delta * (diff - w.probeMean)
-	if w.probeRound >= probeRoundsMin {
-		bound := probeBound(w.probeRound, w.probeM2)
+	if samples >= probeRoundsMin {
+		variance := w.probeM2 / float64(samples-1)
+		bound := probeZ * math.Sqrt(variance/float64(samples))
 		if w.probeMean-bound > probeMinGain {
 			w.probeRetire = true
 			w.probe = probeDecided
 		} else if w.probeMean+bound < -probeMinGain {
 			w.probe = probeDecided
-		} else if w.probeRound == probeRoundsMax {
+		} else if samples == probeRoundsMax {
 			w.probe = probeDecided
 		} else if bound > probeError {
-			w.probeSize = maxProbeSize(w.probeSize * 2)
+			w.probeSize = min(w.probeSize*2, uint32(probeWindowMax))
 			w.probe = probeNative
 		} else {
 			w.probe = probeNative
@@ -221,24 +207,6 @@ func (w *watchdog) shadowReach() bool {
 	}
 	w.probeCount = 0
 	return true
-}
-
-func maxProbeSize(size uint32) uint32 {
-	if size < probeWindowMin {
-		return probeWindowMin
-	}
-	if size > probeWindowMax {
-		return probeWindowMax
-	}
-	return size
-}
-
-func probeBound(round uint8, m2 float64) float64 {
-	if round < 2 {
-		return math.Inf(1)
-	}
-	variance := m2 / float64(round-1)
-	return probeZ * math.Sqrt(variance/float64(round))
 }
 
 // exit counts one give-up fallback exit. encoded is i.journal[journal.CellExitID]
@@ -272,11 +240,4 @@ func (w *watchdog) failed() bool {
 	bad := w.giveUps >= retireGiveUpThreshold || w.bridges >= retireGiveUpThreshold
 	w.entries, w.giveUps, w.bridges = 0, 0, 0
 	return bad
-}
-
-// retire reports whether throughput probing found the native anchor to be a
-// net loss. The verdict is sticky and only becomes true after all probe rounds
-// have completed.
-func (w *watchdog) shouldRetire() bool {
-	return w.probeRetire
 }
