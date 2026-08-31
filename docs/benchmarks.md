@@ -72,7 +72,7 @@ before making a performance claim.
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 10.63 µs | 1,048 | 2 |
+| Interpreter | minivm `threaded` | 7.77 µs | 1,048 | 2 |
 |  | Tengo | 57.17 µs | 122,504 | 1,611 |
 |  | GopherLua | 22.85 µs | 18,416 | 44 |
 |  | Goja | 43.29 µs | 1,872 | 25 |
@@ -264,8 +264,8 @@ before making a performance claim.
 | Interpreter | minivm `threaded` | 281.1 µs | 648 | 6 |
 |  | CPython | 415.89 µs | 20 | 0 |
 |  | gpython | 1.94 ms | 2,457,137 | 52,718 |
-| Native | minivm `default` | 38.62 µs | 648 | 6 |
-|  | minivm `jit` | 38.49 µs | 648 | 6 |
+| Native | minivm `default` | 36.51 µs | 648 | 6 |
+|  | minivm `jit` | 36.36 µs | 648 | 6 |
 | Reference | Native Go | 2.79 µs | 576 | 3 |
 #### `Mandelbrot(16x16)`
 

@@ -285,12 +285,21 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 		at = jen.Id("c").Dot("ip")
 	}
 	return loader{
-		slot:       slot,
-		width:      width(op),
-		raw:        name,
-		boxed:      boxed(name),
-		index:      fmt.Sprintf("i%d", slot),
-		addr:       fmt.Sprintf("i%d", 2+slot),
+		slot:  slot,
+		width: width(op),
+		raw:   name,
+		boxed: boxed(name),
+		index: fmt.Sprintf("i%d", slot),
+		// addr names a runtime local-slot address temp declared inside the
+		// closure body (LOCAL_GET only; see (loader).read). It uses a
+		// distinct prefix from index so it can never shadow another fused
+		// producer's compile-time index variable "iN" regardless of how
+		// many producers a pattern fuses; index and addr previously shared
+		// the "i" prefix at a fixed +2 offset, which collided once
+		// array.set's three-producer container fusion put a LOCAL_GET
+		// container at slot 0 (addr "i2") alongside a GLOBAL_GET/UPVAL_GET
+		// producer at slot 2 (index "i2").
+		addr:       fmt.Sprintf("a%d", slot),
 		pos:        at,
 		label:      label,
 		standalone: standalone,
@@ -667,7 +676,7 @@ func resolve(pattern pattern) ([]step, error) {
 		steps[2].kind = kind
 		return steps, nil
 	}
-	if consumer == instr.ARRAY_SET && consumerAt == 3 && steps[0].op == instr.CONST_GET {
+	if consumer == instr.ARRAY_SET && consumerAt == 3 && (steps[0].op == instr.CONST_GET || (isContainerSource(steps[0].op) && steps[0].typ != nil)) {
 		kind, ok := arrayKind(steps[0].typ)
 		if !ok {
 			return nil, fmt.Errorf("array.set cannot resolve element kind")
@@ -2843,30 +2852,78 @@ func element(state *state, current step) (value, error) {
 
 	container, index, val := state.stack[0], state.stack[1], state.stack[2]
 	kind, ok := arrayKind(container.typ)
-	if !ok || container.object == nil {
+	if !ok {
 		return value{}, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(current.op).Mnemonic)
 	}
-
-	compile := append(append(append([]jen.Code(nil), container.compile...), index.compile...), val.compile...)
-	body := []jen.Code{overflow()}
-	body = append(body, index.check...)
-	body = append(body, index.body...)
-	body = append(body, val.check...)
-	body = append(body, val.body...)
 	raw := val.raw
 	if raw == nil {
 		raw = val.boxed
 	}
-	body = append(body,
-		jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.object).Assert(typeName(container.typ)),
-		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		jen.Id("at").Op(":=").Int().Call(index.raw),
-		bounds(jen.Id("at"), jen.Lit(1), jen.Len(jen.Id("array"))),
-		storeArray(kind, jen.Id("array"), jen.Id("at"), raw),
-		jen.Id("i").Dot("sp").Op("-=").Lit(3),
-		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
-		jen.Return(),
-	)
+
+	compile := append(append(append([]jen.Code(nil), container.compile...), index.compile...), val.compile...)
+	body := []jen.Code{overflow()}
+
+	// tail emits the shared bounds-check/store/advance-ip/return sequence
+	// once at, array, and raw are resolved; both acquisition arms below
+	// return through it on their success path.
+	tail := func(array jen.Code) []jen.Code {
+		return []jen.Code{
+			bounds(jen.Id("at"), jen.Lit(1), jen.Len(array)),
+			storeArray(kind, array, jen.Id("at"), raw),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+			jen.Return(),
+		}
+	}
+
+	switch {
+	case container.object != nil:
+		body = append(body, index.check...)
+		body = append(body, index.body...)
+		body = append(body, val.check...)
+		body = append(body, val.body...)
+		body = append(body,
+			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.object).Assert(typeName(container.typ)),
+			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("at").Op(":=").Int().Call(index.raw),
+		)
+		body = append(body, tail(jen.Id("array"))...)
+
+	case isContainerSource(container.op) && container.typ != nil:
+		body = append(body, container.check...)
+		body = append(body, container.body...)
+		body = append(body, index.check...)
+		body = append(body, index.body...)
+		body = append(body, val.check...)
+		body = append(body, val.body...)
+		body = append(body,
+			jen.If(jen.Add(container.boxed).Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("at").Op(":=").Int().Call(index.raw),
+		)
+		// A miss on the specialized TypedArray[T] assertion falls back to
+		// (*Interpreter).arraySet, the same generic writer arraySet() calls
+		// unconditionally: the declared type proves only what to specialize
+		// for, not the runtime representation.
+		//
+		// The container is borrowed, never retained or released here,
+		// unlike the standalone arraySet() handler, which pops an owned ref
+		// and releases it after the write.
+		//
+		// A fused sequence pushes none of its three operands, so its net
+		// stack effect is zero: i.sp is left unchanged in both arms.
+		body = append(body, jen.If(
+			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
+			jen.Id("ok"),
+		).Block(tail(jen.Id("array"))...))
+		body = append(body,
+			jen.Id("i").Dot("arraySet").Call(container.raw, jen.Id("at"), val.boxed),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width),
+			jen.Return(),
+		)
+
+	default:
+		return value{}, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(current.op).Mnemonic)
+	}
+
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),

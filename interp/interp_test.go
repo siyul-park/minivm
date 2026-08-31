@@ -1682,6 +1682,214 @@ var runTests = []struct {
 		}, program.WithTypes(types.TypeI32Array)),
 		err: interp.ErrIndexOutOfRange,
 	},
+	{
+		// Regression: array.set fused through a CONST_GET typed-array
+		// constant container previously did i.sp -= 3 after the write, but a
+		// fused sequence never pushes its container, index, or value onto the
+		// operand stack, so its net stack effect must be zero. The stray
+		// decrement corrupted the stack pointer and crashed the next stack
+		// access (interp.Run panicked "index out of range [-3]").
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+		}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// array.set fused onto a LOCAL_GET whose declared slot type is a
+		// concrete typed array specializes directly: the runtime value's
+		// representation matches the declared kind, so no fallback is
+		// needed.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeI32Array),
+			program.WithLocals(types.TypeI32Array),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// Mirrors the LOCAL_GET case above, but the container is a module
+		// global instead of a local.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
+			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeI32Array),
+			program.WithGlobals(types.TypeI32Array),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// Mirrors the LOCAL_GET case above, but the container is a
+		// closure's captured upvalue instead of a local.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.CALL),
+		},
+			program.WithTypes(types.TypeI32Array),
+			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Captures(types.TypeI32Array).
+				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
+					instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+				MustBuild()),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// array.set's fused LOCAL_GET path over the i1 (bool) element kind.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeI1Array),
+			program.WithLocals(types.TypeI1Array),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		// array.set's fused LOCAL_GET path over the i8 element kind.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 7), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeI8Array),
+			program.WithLocals(types.TypeI8Array),
+		),
+		values: []types.Value{types.I8(7)},
+	},
+	{
+		// array.set's fused LOCAL_GET path over the i32 element kind.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeI32Array),
+			program.WithLocals(types.TypeI32Array),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// array.set's fused LOCAL_GET path over the i64 element kind.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I64_CONST, i64operand(42)), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeI64Array),
+			program.WithLocals(types.TypeI64Array),
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		// array.set's fused LOCAL_GET path over the f32 element kind.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeF32Array),
+			program.WithLocals(types.TypeF32Array),
+		),
+		values: []types.Value{types.F32(1.5)},
+	},
+	{
+		// array.set's fused LOCAL_GET path over the f64 element kind.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.TypeF64Array),
+			program.WithLocals(types.TypeF64Array),
+		),
+		values: []types.Value{types.F64(2.5)},
+	},
+	{
+		// Mirrors the LOCAL_GET parity case for array.get: array.new_default's
+		// type index names a ref-element array type, so it allocates the
+		// generic *types.Array boxed-element representation (never
+		// TypedArray[int32]), while the local it is stored into is declared
+		// types.TypeI32Array. array.set's fused LOCAL_GET path proves only
+		// the local's declared element kind at threading time, so a miss on
+		// its specialized TypedArray[int32] assertion must fall back to
+		// (*Interpreter).arraySet, which stores the boxed value as-is,
+		// instead of trapping.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithTypes(types.NewArrayType(types.TypeAny)),
+			program.WithLocals(types.TypeI32Array),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// Mirrors the LOCAL_GET parity case for array.get: LOCAL_SET does
+		// not recheck the declared type of the slot it writes into, so a
+		// local declared as a concrete i32-element array can still hold a
+		// different concrete element kind (here f32) at runtime. array.set's
+		// fused LOCAL_GET path proves only the local's declared element kind
+		// at threading time, so a miss on its specialized TypedArray[int32]
+		// assertion must fall back through every other concrete
+		// TypedArray[_] representation, not just *types.Array, instead of
+		// trapping a case the unfused handler accepts. The fallback stores
+		// through val.F32(), which reinterprets the fused I32_CONST
+		// payload's raw bits rather than numerically converting it, so
+		// I32_CONST 0 lands as float32(0) -- distinct from the constant's
+		// original 1.5, proving the write actually happened.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		},
+			program.WithConstants(types.TypedArray[float32]{1.5}),
+			program.WithLocals(types.TypeI32Array),
+		),
+		values: []types.Value{types.F32(0)},
+	},
+	{
+		// array.set's fused LOCAL_GET path still bounds-checks: an
+		// out-of-range index traps the same as the unfused handler.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
+		},
+			program.WithTypes(types.TypeI32Array),
+			program.WithLocals(types.TypeI32Array),
+		),
+		err: interp.ErrIndexOutOfRange,
+	},
+	{
+		// A local declared as a typed array can still hold a non-ref value
+		// at runtime (LOCAL_SET does not recheck the declared type).
+		// array.set's fused LOCAL_GET path traps type mismatch the same as
+		// the unfused handler.
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
+		}, program.WithLocals(types.TypeI32Array)),
+		err: interp.ErrTypeMismatch,
+	},
 }
 
 // runTestName renders a runTests case's program to a single-line name, so the
@@ -12431,6 +12639,196 @@ func arraySumUpvalue(size, repeats int32) *program.Program {
 	b := program.NewBuilder()
 	fnIdx := b.Const(sumFn)
 	b.ConstGet(types.TypedArray[int32](elems))
+	b.Emit(instr.CONST_GET, uint64(fnIdx)).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// BenchmarkInterpreter_ArraySetContainerFusion measures ARRAY_SET fused onto
+// a LOCAL_GET, GLOBAL_GET, and UPVAL_GET container -- the three sources
+// element()'s isContainerSource branch (internal/cmd/geninterp/lower.go)
+// specializes. Each subtest writes arr[j] = j through the fused container in
+// a nested loop instead of summing, so the timed body is dominated by
+// array.set rather than array.get; a final single pass sums the written
+// array so the benchmark can still verify correctness.
+func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
+	const size, repeats = 64, 4000
+	for _, tt := range []struct {
+		name string
+		prog *program.Program
+	}{
+		{name: "local", prog: arrayFillLocal(size, repeats)},
+		{name: "global", prog: arrayFillGlobal(size, repeats)},
+		{name: "upvalue", prog: arrayFillUpvalue(size, repeats)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			vm := interp.New(tt.prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
+			b.Cleanup(func() { require.NoError(b, vm.Close()) })
+			ctx := context.Background()
+
+			require.NoError(b, vm.Run(ctx))
+			want, err := vm.PopBoxed()
+			require.NoError(b, err)
+			vm.Reset()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				require.NoError(b, vm.Run(ctx))
+				got, err := vm.PopBoxed()
+				require.NoError(b, err)
+				require.Equal(b, want, got)
+				vm.Reset()
+			}
+		})
+	}
+}
+
+// arrayFillLocal builds a kernel that holds a size-length int32 array in a
+// declared LOCAL_GET slot and writes arr[j] = j repeats times in a nested
+// loop, so every array.set is a LOCAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
+// local-container fusion specializes. A final pass sums the written array
+// once to produce a checksum the benchmark can verify.
+func arrayFillLocal(size, repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32) // 0=arr, 1=outer, 2=inner, 3=sum
+	outerLoop, outerDone := b.Label(), b.Label()
+	innerLoop, innerDone := b.Label(), b.Label()
+	sumLoop, sumDone := b.Label(), b.Label()
+	b.ConstGet(types.TypedArray[int32](make([]int32, size))).Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(outerLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(innerLoop).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(innerDone).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_SET).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(sumLoop).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(sumDone).
+		Emit(instr.LOCAL_GET, 3).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Br(sumLoop).
+		Bind(sumDone).
+		Emit(instr.LOCAL_GET, 3)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arrayFillGlobal builds the same kernel as arrayFillLocal, except the array
+// is held in a declared GLOBAL_GET slot instead of a local, so every
+// array.set is a GLOBAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
+// global-container fusion specializes.
+func arrayFillGlobal(size, repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Globals(types.TypeI32Array)
+	b.Locals(types.TypeI32, types.TypeI32, types.TypeI32) // 0=outer, 1=inner, 2=sum
+	outerLoop, outerDone := b.Label(), b.Label()
+	innerLoop, innerDone := b.Label(), b.Label()
+	sumLoop, sumDone := b.Label(), b.Label()
+	b.ConstGet(types.TypedArray[int32](make([]int32, size))).Emit(instr.GLOBAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+		Bind(outerLoop).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(innerLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(innerDone).
+		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_SET).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(sumLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(sumDone).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(sumLoop).
+		Bind(sumDone).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arrayFillUpvalue builds the same kernel as arrayFillLocal, except the
+// array is captured as a closure upvalue instead of stored in a local, so
+// every array.set is a UPVAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
+// upvalue-container fusion specializes.
+func arrayFillUpvalue(size, repeats int32) *program.Program {
+	fillBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Captures(types.TypeI32Array).
+		Locals(types.TypeI32, types.TypeI32, types.TypeI32) // 0=outer, 1=inner, 2=sum
+	outerLoop, outerDone := fillBuilder.Label(), fillBuilder.Label()
+	innerLoop, innerDone := fillBuilder.Label(), fillBuilder.Label()
+	sumLoop, sumDone := fillBuilder.Label(), fillBuilder.Label()
+	fillFn := fillBuilder.
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
+		Bind(outerLoop).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
+		BrIf(outerDone).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Bind(innerLoop).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		BrIf(innerDone).
+		Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Bind(sumLoop).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		BrIf(sumDone).
+		Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		).
+		Br(sumLoop).
+		Bind(sumDone).
+		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
+		MustBuild()
+
+	b := program.NewBuilder()
+	fnIdx := b.Const(fillFn)
+	b.ConstGet(types.TypedArray[int32](make([]int32, size)))
 	b.Emit(instr.CONST_GET, uint64(fnIdx)).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
 	prog, err := b.Build()
 	if err != nil {
