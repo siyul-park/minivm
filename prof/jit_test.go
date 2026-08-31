@@ -113,6 +113,24 @@ func TestCollector_RegisterYield(t *testing.T) {
 	require.Equal(t, float64(2), value)
 }
 
+func TestCollector_RegisterRetirement(t *testing.T) {
+	local := prof.NewCollector()
+	retirement := local.RegisterRetirement(3, 17, prof.EntryCall, prof.FrontendStatic)
+	p := prof.New()
+
+	retirement.Inc()
+	p.Flush(local)
+	retirement.Inc()
+	p.Flush(local)
+	p.Flush(local)
+
+	value, ok := p.Metric("vm_jit_retirements_total",
+		prof.Label{Key: "func", Value: "3"}, prof.Label{Key: "ip", Value: "17"},
+		prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "static"})
+	require.True(t, ok)
+	require.Equal(t, float64(2), value)
+}
+
 func TestCounter_Inc(t *testing.T) {
 	s := prof.NewCollector()
 	entry := s.RegisterEntry(2, 11, prof.EntryCall, prof.FrontendStatic)

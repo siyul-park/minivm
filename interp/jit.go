@@ -534,6 +534,20 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 	popOnReturn := isFunction || (entry.Kind == jit.EntryLoop && root.Addr != 0)
 	loopShadow := entry.Kind == jit.EntryLoop
 	return func(i *Interpreter) {
+		if wd.isShadow() {
+			done := wd.shadowReach()
+			i.resumeShadowed(root)
+			if done {
+				if isFunction && root.Addr < len(i.natives) {
+					atomic.StorePointer(&i.natives[root.Addr], entry.Callable.Addr())
+				}
+				if wd.shouldRetire() {
+					i.retire(root, isFunction)
+				}
+			}
+			return
+		}
+
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
 			stats.enter()
@@ -827,20 +841,21 @@ func (i *Interpreter) cool(addr int) {
 	}
 }
 
-// checkRetire evaluates wd's window (see watchdog.expired) once native code
-// has already finished making this dispatch's forward progress — a normal
-// return, a serviced yield, or a bailout have all already run — so retiring
-// a's installed entry here never skips a step the interpreter owed the
-// program. clearNatives is true only for a function-entry anchor (see
-// Interpreter.retire).
+// checkRetire advances the throughput probe after a native dispatch has
+// finished, while keeping the existing give-up and bridge retirement window
+// unchanged. clearNatives is true only for a function-entry anchor.
 func (i *Interpreter) checkRetire(a jit.Anchor, wd *watchdog, clearNatives bool) {
-	if wd.failed() {
+	if wd.prepareShadow() && clearNatives && a.Addr < len(i.natives) {
+		atomic.StorePointer(&i.natives[a.Addr], nil)
+	}
+	if wd.shouldRetire() || wd.failed() {
 		i.retire(a, clearNatives)
 	}
 }
 
-// retire undoes install for anchor a once its watchdog finds it spends at least
-// retireGiveUpThreshold of a retireWindow giving up (see watchdog): it restores the shadowed threaded handler saved in i.exits,
+// retire undoes install for anchor a once either watchdog signal finds a net
+// loss: the existing give-up/bridge window or the function-entry throughput
+// probe. It restores the shadowed threaded handler saved in i.exits,
 // clears a's function-entry call-fast-path slot in i.natives when
 // clearNatives is set (a null slot already makes callers fall back at the
 // CALL, see install), and calls cool so addr is neither re-instrumented nor
@@ -857,8 +872,12 @@ func (i *Interpreter) retire(a jit.Anchor, clearNatives bool) {
 	if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) {
 		return
 	}
+	entry, live := i.live[a]
 	if fn := i.exits[a]; fn != nil {
 		i.code[a.Addr][a.IP] = fn
+	}
+	if live && i.profiler != nil {
+		i.samples.RegisterRetirement(a.Addr, a.IP, entry.Kind.Profile(), entry.Frontend).Inc()
 	}
 	delete(i.live, a)
 	if clearNatives && a.Addr < len(i.natives) {

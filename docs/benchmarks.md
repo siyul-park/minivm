@@ -134,6 +134,9 @@ before making a performance claim.
 | Native | minivm `default` | 3.34 µs | 64 | 2 |
 |  | minivm `jit` | 3.33 µs | 64 | 2 |
 | Reference | Native Go | 34.9 ns | 0 | 0 |
+
+`#223` retest (2026-08-31, Apple M4 Pro, Go 1.26.2, `-benchtime=300ms -count=6`) measured the same VM modes at medians of `threaded` 2.53 µs, `default` 2.84 µs, and `jit` 3.55 µs, all at 64 B/op and 2 allocs/op. The throughput probe retired a synthetic slower function-entry fixture, but it did not recover ClosureCounter to the threaded baseline; per the issue stop rule, no further kernel-specific mechanism was introduced. Guard medians remained flat or improved: NQueens 106.6 µs, Fannkuch 408.8 µs, IterativeFib 25.7 ns, Sieve 1.29 µs, TypedArraySum 296.6 ns, SpectralNorm 37.3 µs, and MatMul 16.1 µs for the JIT tier.
+
 #### `NQueens(7)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |

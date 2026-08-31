@@ -56,7 +56,7 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 
 | Uncovered | Why it cannot be reached publicly |
 |---|---|
-| `Interpreter.retire` and the watchdog (`retireWindow`, `retireGiveUpThreshold` in `interp/tier.go`; `checkRetire` in `interp/jit.go`) | Retirement is not observable from outside. A program producing a `trace-cut` give-up on every native entry runs past 80,000 entries without native-entry counts plateauing, so no public metric distinguishes a retired entry from a live one. The mechanism is what handled the RecursiveFib/35 regression, where a native entry was a net loss; a break in the give-up accounting would not fail any test today. |
+| Throughput retirement decision (`watchdog` probe in `interp/tier.go`; `checkRetire`/`retire` in `interp/jit.go`) | The exact timing windows are implementation detail, but actual retirement is now observable through `vm_jit_retirements_total`. Black-box tests cover both a function-entry net loss that retires and a profitable function entry that remains installed. |
 | Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
 | Dataflow fact widening at a control-flow join (`mergeSlot` in `internal/jit`) | A slot's `refKnown`/`calleeKnown` facts are planning-internal: the backend never reads them, so nothing exports them. Their only external effect is which plans a frontend produces or rejects, which no fixture isolates from the rest of planning. |

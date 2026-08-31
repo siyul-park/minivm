@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"time"
+
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/prof"
 )
@@ -26,7 +28,25 @@ type watchdog struct {
 	entries uint32
 	giveUps uint32
 	bridges uint32
+
+	probe        probePhase
+	probeReaches uint32
+	probeRounds  uint8
+	probeWins    uint8
+	probeStart   time.Time
+	probeNative  time.Duration
+	probeRetire  bool
+	probePending bool
 }
+
+type probePhase uint8
+
+const (
+	probeWarm probePhase = iota
+	probeNative
+	probeShadow
+	probeDecided
+)
 
 // nativeFrameLimit caps generated call depth to the stack space reserved by
 // the ARM64 invoke trampoline (see arm64.StackReserve and
@@ -47,6 +67,13 @@ const retireWindow = 1024
 // within one retireWindow that marks the anchor as a net loss rather than a
 // healthy kernel's normal loop-exit traffic.
 const retireGiveUpThreshold = retireWindow / 4
+
+const (
+	probeWindow     = 64
+	probeShadowSize = 64
+	probeRounds     = 5
+	probeMargin     = 0.01
+)
 
 func (m counters) exit(encoded uint64) {
 	if encoded == 0 {
@@ -78,7 +105,11 @@ func newWatchdog(entry jit.Entry) *watchdog {
 	for id, exit := range entry.Exits {
 		gaveUp[id] = givesUp(exit.Reason)
 	}
-	return &watchdog{gaveUp: gaveUp}
+	wd := &watchdog{gaveUp: gaveUp}
+	if entry.Kind != jit.EntryFunction {
+		wd.probe = probeDecided
+	}
+	return wd
 }
 
 // givesUp reports whether taking this exit means the native entry abandoned the
@@ -100,6 +131,73 @@ func givesUp(reason prof.ExitReason) bool {
 // enter counts one invocation of the installed native entry.
 func (w *watchdog) enter() {
 	w.entries++
+	if w.probe == probeWarm {
+		w.probeReaches++
+		if w.probeReaches == probeWindow {
+			w.probe = probeNative
+			w.probeReaches = 0
+		}
+		return
+	}
+	if w.probe == probeNative {
+		if w.probeReaches == 0 {
+			w.probeStart = time.Now()
+		}
+		w.probeReaches++
+		if w.probeReaches == probeWindow {
+			w.probeNative = time.Since(w.probeStart)
+			w.probe = probeShadow
+			w.probeReaches = 0
+			w.probePending = true
+		}
+	}
+}
+
+// isShadow reports whether the next anchor reach must run through its shadowed
+// threaded handler instead of the native callable.
+func (w *watchdog) isShadow() bool {
+	return w.probe == probeShadow
+}
+
+// prepareShadow activates the shadow window after the native wrapper that
+// completed it has returned. Keeping this transition at wrapper exit prevents
+// bridge cycles inside one native activation from consuming a second probe
+// reach.
+func (w *watchdog) prepareShadow() bool {
+	if !w.probePending {
+		return false
+	}
+	w.probePending = false
+	return true
+}
+
+// shadowReach records one shadow reach. It returns true after the final reach
+// so the caller can restore the native call-fast-path and decide the round.
+func (w *watchdog) shadowReach() bool {
+	if w.probe == probeShadow {
+		if w.probeReaches == 0 {
+			w.probeStart = time.Now()
+		}
+		w.probeReaches++
+		if w.probeReaches == probeShadowSize {
+			elapsed := time.Since(w.probeStart)
+			shadow := elapsed
+			native := w.probeNative
+			w.probeRounds++
+			if float64(shadow) < float64(native)*(1-probeMargin) {
+				w.probeWins++
+			}
+			if w.probeRounds == probeRounds {
+				w.probeRetire = w.probeWins > probeRounds/2
+				w.probe = probeDecided
+			} else {
+				w.probe = probeNative
+			}
+			w.probeReaches = 0
+			return true
+		}
+	}
+	return false
 }
 
 // exit counts one give-up fallback exit. encoded is i.journal[journal.CellExitID]
@@ -133,4 +231,11 @@ func (w *watchdog) failed() bool {
 	bad := w.giveUps >= retireGiveUpThreshold || w.bridges >= retireGiveUpThreshold
 	w.entries, w.giveUps, w.bridges = 0, 0, 0
 	return bad
+}
+
+// retire reports whether throughput probing found the native anchor to be a
+// net loss. The verdict is sticky and only becomes true after all probe rounds
+// have completed.
+func (w *watchdog) shouldRetire() bool {
+	return w.probeRetire
 }
