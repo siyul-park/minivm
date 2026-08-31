@@ -1183,6 +1183,13 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
+			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.New(instr.REF_IS_NULL),
+		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeAny)))),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
@@ -2368,6 +2375,95 @@ func TestInterpreter_Run(t *testing.T) {
 				jit.Reset()
 				threaded.Reset()
 			}
+		})
+
+		t.Run("STRUCT_NEW_DEFAULT's default ref field agrees between threaded and JIT", func(t *testing.T) {
+			// A struct's unset ref field is a raw zero word, not the
+			// BoxedNull bit pattern, and ref.is_null must report both as
+			// null. The tree's leaves reach ref.is_null through exactly that
+			// field, so a JIT lowering that only matched BoxedNull fell
+			// through into the ref.cast below and trapped.
+			const listing = `
+.types
+struct {value: i64; left: any; right: any}
+.constants
+func(i32) struct {value: i64; left: any; right: any}
+	struct {value: i64; left: any; right: any}
+	struct.new_default 0
+	local.set 1
+	local.get 1
+	i32.const 0
+	local.get 0
+	i32.to_i64_s
+	struct.set
+	local.get 0
+	i32.const 0
+	i32.le_s
+	br_if buildDone
+	local.get 1
+	i32.const 1
+	local.get 0
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	struct.set
+	local.get 1
+	i32.const 2
+	local.get 0
+	i32.const 1
+	i32.sub
+	const.get 0
+	call
+	struct.set
+	buildDone:
+	local.get 1
+	return
+func(struct {value: i64; left: any; right: any}) i32
+	local.get 0
+	ref.is_null
+	br_if nullCase
+	local.get 0
+	ref.cast 0
+	i32.const 1
+	struct.get
+	const.get 1
+	call
+	local.get 0
+	i32.const 2
+	struct.get
+	const.get 1
+	call
+	i32.add
+	i32.const 1
+	i32.add
+	return
+	nullCase:
+	i32.const 0
+	return
+.code
+	i32.const 9
+	const.get 0
+	call
+	const.get 1
+	call
+`
+			prog, err := program.Parse(strings.NewReader(listing))
+			require.NoError(t, err)
+
+			threaded := interp.New(prog, interp.WithThreshold(-1))
+			t.Cleanup(func() { require.NoError(t, threaded.Close()) })
+			require.NoError(t, threaded.Run(context.Background()))
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(1023), want)
+
+			jit := interp.New(prog, interp.WithThreshold(0))
+			t.Cleanup(func() { require.NoError(t, jit.Close()) })
+			require.NoError(t, jit.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded")
 		})
 	}
 	modes := []struct {
