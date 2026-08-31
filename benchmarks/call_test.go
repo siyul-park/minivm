@@ -328,19 +328,19 @@ func closureCounter(count int) *program.Program {
 
 // nqueens builds the eight-queens backtracking-count kernel. solve is
 // genuinely recursive, called through CONST_GET+CALL once per board column,
-// with cols/diag1/diag2 passed as ref parameters on every recursive call.
-// solve params: 0=row, 1=n, 2=cols, 3=diag1, 4=diag2;
+// with []i1 cols/diag1/diag2 passed as ref parameters on every recursive call.
+// solve params: 0=row, 1=n, 2=cols, 3=diag1, 4=diag2 (each []i1);
 // solve locals:  5=count, 6=col, 7=d1, 8=d2.
-// Type 0 is the []i1 element type shared by cols/diag1/diag2.
+// Main locals: 0=cols, 1=diag1, 2=diag2 (each []i1). Type 0 is their type.
 const nqueensListing = `
 .locals
-any
-any
-any
+[]i1
+[]i1
+[]i1
 .types
 []i1
 .constants
-func(i32, i32, any, any, any) i32
+func(i32, i32, []i1, []i1, []i1) i32
 	i32
 	i32
 	i32
@@ -461,26 +461,27 @@ func nqueens(n int32) *program.Program {
 // tuple: program/verify.go's call already pushes every declared return, and
 // RETURN copies the top len(Returns) stack values to the caller in order.
 //
-// Constant 0 is count_flips (params: 0=perm; locals: 1=a, 2=flips, 3=k, 4=i,
-// 5=j, 6=t). perm is not read again after the copy, so the copy consuming its
-// one retained local.get instance via array.slice needs no dup.
+// Constant 0 is count_flips (params: 0=perm ([]i32); locals: 1=a ([]i32),
+// 2=flips, 3=k, 4=i, 5=j, 6=t). perm is not read again after the copy, so
+// the copy consuming its one retained local.get instance via array.slice
+// needs no dup.
 //
-// Constant 1 is permute (params: 0=a, 1=k, 2=permcount, 3=checksum,
+// Constant 1 is permute (params: 0=a ([]i32), 1=k, 2=permcount, 3=checksum,
 // 4=maxflips; locals: 5=flips, 6=i, 7=tmp), self-recursive through
 // const.get 1 and returning (permcount, checksum, maxflips).
 //
-// Type 0 is the []i32 element type shared by perm/a.
+// Main local 0=perm is []i32. Type 0 is the []i32 type shared by perm/a.
 const fannkuchListing = `
 .locals
-any
+[]i32
 i32
 i32
 i32
 .types
 []i32
 .constants
-func(any) i32
-	any
+func([]i32) i32
+	[]i32
 	i32
 	i32
 	i32
@@ -547,7 +548,7 @@ func(any) i32
 	outerDone:
 	local.get 2
 	return
-func(any, i32, i32, i32, i32) (i32, i32, i32)
+func([]i32, i32, i32, i32, i32) (i32, i32, i32)
 	i32
 	i32
 	i32

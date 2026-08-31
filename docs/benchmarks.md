@@ -39,7 +39,14 @@ independent statement with its own tier controls and memory behavior.
 Compare within a tier. An interpreter losing to a compiler is not a finding, and
 `threaded` beating `default` on a kernel is a statement about promotion policy, not
 about interpreters. `ClosureCounter`, `AllocationGraph`, `PermutationFlips`,
-`StructTreeWalk`, and `BinaryTrees` currently run fastest under `threaded`.
+`StructTreeWalk`, `BinaryTrees`, and `Fannkuch` currently run fastest under
+`threaded`.
+
+`NQueens`, `Fannkuch`, `SortStress`, and `StringBuild` moved because their
+fixtures were corrected to declare concrete slot types instead of `any`, which
+is what lets a container reach the fused `array.get` / `array.set` paths. The
+interpreter did not change; the kernels simply started exercising a path a
+well-typed program always reaches.
 
 Allocation behavior is a first-class result. `IterativeFib`, `TypedArraySum`,
 `BranchTree`, `Mandelbrot`, `RecursiveFib`, and `IndirectRecursiveFib` hold 0 B/op and
@@ -130,21 +137,21 @@ before making a performance claim.
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 312.42 µs | 120 | 6 |
-|  | CPython | **226.15 µs** | 11 | 0 |
+| Interpreter | minivm `threaded` | 196.49 µs | 120 | 6 |
+|  | CPython | 226.15 µs | 11 | 0 |
 |  | gpython | 782.30 µs | 363,441 | 4,156 |
-| Native | minivm `default` | 133.59 µs | 120 | 6 |
-|  | minivm `jit` | 134.39 µs | 120 | 6 |
+| Native | minivm `default` | 104.60 µs | 120 | 6 |
+|  | minivm `jit` | 104.69 µs | 120 | 6 |
 | Reference | Native Go | 4.21 µs | 0 | 0 |
 #### `Fannkuch(6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 532.22 µs | 34,608 | 1,442 |
-|  | CPython | **430.81 µs** | 20 | 0 |
+| Interpreter | minivm `threaded` | 399.53 µs | 34,608 | 1,442 |
+|  | CPython | 430.81 µs | 20 | 0 |
 |  | gpython | 1.57 ms | 1,367,678 | 16,944 |
-| Native | minivm `default` | 413.81 µs | 34,608 | 1,442 |
-|  | minivm `jit` | 414.71 µs | 34,608 | 1,442 |
+| Native | minivm `default` | 402.25 µs | 34,608 | 1,442 |
+|  | minivm `jit` | 404.40 µs | 34,608 | 1,442 |
 | Reference | Native Go | 17.54 µs | 17,280 | 720 |
 
 ### Memory and data structures
@@ -215,21 +222,21 @@ before making a performance claim.
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 313.3 µs | 5,136 | 512 |
+| Interpreter | minivm `threaded` | 186.7 µs | 5,136 | 512 |
 |  | CPython | 339.27 µs | 16 | 0 |
 |  | gpython | 870.26 µs | 23,448 | 2,034 |
-| Native | minivm `default` | 54.13 µs | 5,136 | 512 |
-|  | minivm `jit` | 69.94 µs | 5,136 | 512 |
+| Native | minivm `default` | 51.07 µs | 5,136 | 512 |
+|  | minivm `jit` | 66.49 µs | 5,136 | 512 |
 | Reference | Native Go | 4.38 µs | 1,024 | 2 |
 #### `StringBuild(512)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 379.3 µs | 85,408 | 4,107 |
-|  | CPython | **368.74 µs** | 17 | 0 |
+| Interpreter | minivm `threaded` | 335.8 µs | 85,408 | 4,107 |
+|  | CPython | 368.74 µs | 17 | 0 |
 |  | gpython | 1.25 ms | 2,104,720 | 21,456 |
-| Native | minivm `default` | 266.5 µs | 85,408 | 4,107 |
-|  | minivm `jit` | 267.2 µs | 85,408 | 4,107 |
+| Native | minivm `default` | 261.7 µs | 85,408 | 4,107 |
+|  | minivm `jit` | 260.6 µs | 85,408 | 4,107 |
 | Reference | Native Go | 138.19 µs | 855,892 | 5,001 |
 
 ### Numeric
