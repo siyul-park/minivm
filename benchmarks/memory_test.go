@@ -886,21 +886,22 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 // least code among the alternatives, keeping the kernel a measure of VM
 // dispatch rather than of an algorithm choice. The LCG state overflows i32
 // (s*1103515245 can reach ~2.4e18), so make_list (constant 0; params: 0=n,
-// 1=seed; locals: 2=xs,3=s(i64),4=i) keeps s in i64; the sorted values
-// (s % 1000000) fit i32, so the array itself stays i32. insertion_sort
-// (constant 1; params: 0=arr,1=n; locals: 2=i,3=key,4=j) sorts in place.
-// Main locals: 0=xs,1=checksum,2=r,3=i. %[1]d substitutes n, %[2]d rounds.
+// 1=seed; result and local 2=xs are []i32; locals 3=s(i64),4=i) keeps s in
+// i64; the sorted values (s % 1000000) fit i32, so the array itself stays
+// i32. insertion_sort (constant 1; params: 0=arr ([]i32),1=n; locals:
+// 2=i,3=key,4=j) sorts in place. Main locals: 0=xs ([]i32),1=checksum,2=r,
+// 3=i. %[1]d substitutes n, %[2]d rounds.
 const sortStressListing = `
 .locals
-any
+[]i32
 i32
 i32
 i32
 .types
 []i32
 .constants
-func(i32, i32) any
-	any
+func(i32, i32) []i32
+	[]i32
 	i64
 	i32
 	local.get 0
@@ -939,7 +940,7 @@ func(i32, i32) any
 	mlDone:
 	local.get 2
 	return
-func(any, i32)
+func([]i32, i32)
 	i32
 	i32
 	i32
@@ -1058,20 +1059,20 @@ func sortStress(n, rounds int32) *program.Program {
 }
 
 // stringBuildListing builds the strbuild kernel: digits(n) token generation
-// (constant 0; params: 0=n; locals: 1=count,2=v,3=arr,4=idx,5=d), a
+// (constant 0; params: 0=n; locals: 1=count,2=v,3=arr ([]i32),4=idx,5=d), a
 // per-character checksum read back through string.encode_utf32, and
 // "big = big + tok + ' '" through string.concat (the allocating operation
 // this kernel exists to measure). Type 0 is the []i32 code-point array used
 // to build each token. Constant 1 is the " " separator, constant 2 the ""
 // used to seed big. Main locals: 0=big,1=tokenChecksum,2=i,3=tok,
-// 4=codePoints,5=tokLen,6=j. %d substitutes n.
+// 4=codePoints ([]i32),5=tokLen,6=j. %d substitutes n.
 const stringBuildListing = `
 .locals
 any
 i32
 i32
 any
-any
+[]i32
 i32
 i32
 .types
@@ -1080,7 +1081,7 @@ i32
 func(i32) any
 	i32
 	i32
-	any
+	[]i32
 	i32
 	i32
 	local.get 0
