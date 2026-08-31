@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"time"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -25,15 +26,16 @@ type Interpreter struct {
 	codec       Codec
 	speculative bool
 
-	compiler *jit.Compiler
-	cache    *cache
-	profiler *prof.Profiler
-	samples  *prof.Collector
-	exits    map[jit.Anchor]func(*Interpreter)
-	natives  []unsafe.Pointer
-	tried    map[jit.Anchor]bool
-	live     map[jit.Anchor]jit.Entry
-	journal  []uint64
+	compiler  *jit.Compiler
+	cache     *cache
+	profiler  *prof.Profiler
+	samples   *prof.Collector
+	exits     map[jit.Anchor]func(*Interpreter)
+	natives   []unsafe.Pointer
+	tried     map[jit.Anchor]bool
+	live      map[jit.Anchor]jit.Entry
+	watchdogs map[jit.Anchor]*watchdog
+	journal   []uint64
 
 	types       []types.Type
 	constants   []types.Boxed
@@ -280,6 +282,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:       map[jit.Anchor]bool{},
 		live:        map[jit.Anchor]jit.Entry{},
+		watchdogs:   map[jit.Anchor]*watchdog{},
 		dynamic:     map[int]bool{},
 		journal:     make([]uint64, journal.Len(opt.frame)),
 		frames:      make([]frame, opt.frame),
@@ -398,7 +401,9 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	return i
 }
 
-func (i *Interpreter) Run(ctx context.Context) error {
+func (i *Interpreter) Run(ctx context.Context) (err error) {
+	i.probeBoundary()
+	defer i.probeBoundary()
 	i.ctx = ctx
 	i.done = nil
 	if ctx != nil {
@@ -1025,6 +1030,22 @@ func (i *Interpreter) owns(f *frame) bool {
 	}
 	code := i.code[f.addr]
 	return len(f.code) > 0 && len(code) > 0 && &f.code[0] == &code[0]
+}
+
+// probeBoundary discards an incomplete throughput sample at a Run boundary.
+// Warmup and completed verdicts remain intact; an interrupted timed pair is
+// restarted from a fresh native window so host-side work between Run calls is
+// never included in the measured interpreter span.
+func (i *Interpreter) probeBoundary() {
+	for _, wd := range i.watchdogs {
+		if wd.probe == probeShadow {
+			wd.probe = probeNative
+		}
+		wd.probeCount = 0
+		wd.probeStart = time.Time{}
+		wd.probeNative = 0
+		wd.probePending = false
+	}
 }
 
 func (i *Interpreter) flush() {
@@ -2033,6 +2054,11 @@ func (i *Interpreter) remove(addr int) {
 	for a := range i.live {
 		if a.Addr == addr {
 			delete(i.live, a)
+		}
+	}
+	for a := range i.watchdogs {
+		if a.Addr == addr {
+			delete(i.watchdogs, a)
 		}
 	}
 	if addr >= 0 && addr < len(i.entries) {

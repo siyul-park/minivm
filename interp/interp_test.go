@@ -2222,6 +2222,100 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 
 	if runtime.GOARCH == "arm64" {
+		t.Run("retires a slower function entry", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
+				MustBuild()
+
+			builder := program.NewBuilder()
+			builder.Const(fn)
+			const calls = 1024
+			for index := 0; index < calls; index++ {
+				builder.ConstGet(fn).Emit(instr.CALL)
+				if index+1 < calls {
+					builder.Emit(instr.DROP)
+				}
+			}
+			prog, err := builder.Build()
+			require.NoError(t, err)
+
+			profile := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profile))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(1), value)
+			vm.Flush()
+
+			retirements, ok := profile.Metric("vm_jit_retirements_total",
+				prof.Label{Key: "func", Value: "1"},
+				prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "call"},
+				prof.Label{Key: "frontend", Value: "static"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), retirements)
+
+			entries, ok := profile.Metric("vm_jit_native_entries_total",
+				prof.Label{Key: "func", Value: "1"},
+				prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "call"},
+				prof.Label{Key: "frontend", Value: "static"})
+			require.True(t, ok)
+			require.Less(t, entries, float64(4096), "probe should retire within its bounded adaptive budget")
+		})
+
+		t.Run("keeps a faster function entry", func(t *testing.T) {
+			const ops = 128
+			body := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Locals(types.TypeI32)
+			body.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0))
+			for range ops {
+				body.Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.LOCAL_SET, 0),
+				)
+			}
+			body.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+			fn := body.MustBuild()
+
+			builder := program.NewBuilder()
+			builder.Const(fn)
+			const calls = 128
+			for index := 0; index < calls; index++ {
+				builder.ConstGet(fn).Emit(instr.CALL)
+				if index+1 < calls {
+					builder.Emit(instr.DROP)
+				}
+			}
+			prog, err := builder.Build()
+			require.NoError(t, err)
+
+			profile := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profile))
+			defer vm.Close()
+			const want int32 = ops
+			for range 3 {
+				require.NoError(t, vm.Run(context.Background()))
+				value, err := vm.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, types.BoxI32(want), value)
+				vm.Reset()
+			}
+			vm.Flush()
+
+			_, retired := profile.Metric("vm_jit_retirements_total",
+				prof.Label{Key: "func", Value: "1"},
+				prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "call"},
+				prof.Label{Key: "frontend", Value: "static"})
+			require.False(t, retired, "a faster native function entry must not retire")
+		})
+	}
+
+	if runtime.GOARCH == "arm64" {
 		t.Run("ARM64 in-loop branch rejoins the header natively", func(t *testing.T) {
 			const size = int32(8)
 			b := program.NewBuilder()

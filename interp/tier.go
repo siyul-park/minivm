@@ -1,6 +1,9 @@
 package interp
 
 import (
+	"math"
+	"time"
+
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/prof"
 )
@@ -26,7 +29,27 @@ type watchdog struct {
 	entries uint32
 	giveUps uint32
 	bridges uint32
+
+	probe        probePhase
+	probeSize    uint32
+	probeCount   uint32
+	probeRound   uint8
+	probeStart   time.Time
+	probeNative  time.Duration
+	probeMean    float64
+	probeM2      float64
+	probeRetire  bool
+	probePending bool
 }
+
+type probePhase uint8
+
+const (
+	probeWarm probePhase = iota
+	probeNative
+	probeShadow
+	probeDecided
+)
 
 // nativeFrameLimit caps generated call depth to the stack space reserved by
 // the ARM64 invoke trampoline (see arm64.StackReserve and
@@ -47,6 +70,16 @@ const retireWindow = 1024
 // within one retireWindow that marks the anchor as a net loss rather than a
 // healthy kernel's normal loop-exit traffic.
 const retireGiveUpThreshold = retireWindow / 4
+
+const (
+	probeWindowMin = 32
+	probeWindowMax = 256
+	probeRoundsMin = 3
+	probeRoundsMax = 6
+	probeMinGain   = 0.01
+	probeZ         = 1.96
+	probeError     = 0.05
+)
 
 func (m counters) exit(encoded uint64) {
 	if encoded == 0 {
@@ -78,7 +111,11 @@ func newWatchdog(entry jit.Entry) *watchdog {
 	for id, exit := range entry.Exits {
 		gaveUp[id] = givesUp(exit.Reason)
 	}
-	return &watchdog{gaveUp: gaveUp}
+	wd := &watchdog{gaveUp: gaveUp, probeSize: probeWindowMin}
+	if entry.Kind != jit.EntryFunction {
+		wd.probe = probeDecided
+	}
+	return wd
 }
 
 // givesUp reports whether taking this exit means the native entry abandoned the
@@ -100,6 +137,76 @@ func givesUp(reason prof.ExitReason) bool {
 // enter counts one invocation of the installed native entry.
 func (w *watchdog) enter() {
 	w.entries++
+	if w.probe == probeWarm {
+		w.probeCount++
+		if w.probeCount == probeWindowMin {
+			w.probe = probeNative
+			w.probeCount = 0
+		}
+		return
+	}
+	if w.probe != probeNative {
+		return
+	}
+	if w.probeCount == 0 {
+		w.probeStart = time.Now()
+	}
+	w.probeCount++
+	if w.probeCount == w.probeSize {
+		w.probeNative = time.Since(w.probeStart)
+		w.probe = probeShadow
+		w.probeCount = 0
+		w.probePending = true
+	}
+}
+
+// shadowReach records one shadow reach. It returns true after the final reach
+// so the caller can restore the native call-fast-path and decide the round.
+func (w *watchdog) shadowReach() bool {
+	if w.probe != probeShadow {
+		return false
+	}
+	if w.probeCount == 0 {
+		w.probeStart = time.Now()
+	}
+	w.probeCount++
+	if w.probeCount != w.probeSize {
+		return false
+	}
+	shadow := time.Since(w.probeStart)
+	native := w.probeNative
+	w.probeRound++
+	if w.probeRound == 1 {
+		w.probe = probeNative
+		w.probeCount = 0
+		return true
+	}
+	samples := w.probeRound - 1
+	diff := 1 - float64(shadow)/float64(native)
+	delta := diff - w.probeMean
+	w.probeMean += delta / float64(samples)
+	w.probeM2 += delta * (diff - w.probeMean)
+	if samples >= probeRoundsMin {
+		variance := w.probeM2 / float64(samples-1)
+		bound := probeZ * math.Sqrt(variance/float64(samples))
+		if w.probeMean-bound > probeMinGain {
+			w.probeRetire = true
+			w.probe = probeDecided
+		} else if w.probeMean+bound < -probeMinGain {
+			w.probe = probeDecided
+		} else if samples == probeRoundsMax {
+			w.probe = probeDecided
+		} else if bound > probeError {
+			w.probeSize = min(w.probeSize*2, uint32(probeWindowMax))
+			w.probe = probeNative
+		} else {
+			w.probe = probeNative
+		}
+	} else {
+		w.probe = probeNative
+	}
+	w.probeCount = 0
+	return true
 }
 
 // exit counts one give-up fallback exit. encoded is i.journal[journal.CellExitID]

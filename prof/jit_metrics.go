@@ -12,13 +12,14 @@ import (
 // an immutable key describing the row's labels to a stable counter handle, so
 // a registered handle stays valid across merges and resets.
 type jitMetrics struct {
-	captures map[captureKey]*Counter
-	compiles map[compileKey]*Counter
-	emits    map[entryKey]*Counter
-	bytes    map[entryKey]*Counter
-	entries  map[entryKey]*Counter
-	yields   map[entryKey]*Counter
-	exits    map[exitKey]*Counter
+	captures    map[captureKey]*Counter
+	compiles    map[compileKey]*Counter
+	emits       map[entryKey]*Counter
+	bytes       map[entryKey]*Counter
+	entries     map[entryKey]*Counter
+	yields      map[entryKey]*Counter
+	exits       map[exitKey]*Counter
+	retirements map[entryKey]*Counter
 }
 
 // key constrains the label set of one JIT metric row. A row key is a
@@ -125,7 +126,8 @@ func (m *jitMetrics) appendMetrics(out []Metric) []Metric {
 	out = appendRows(out, "vm_jit_entry_bytes_total", m.bytes)
 	out = appendRows(out, "vm_jit_native_entries_total", m.entries)
 	out = appendRows(out, "vm_jit_native_yields_total", m.yields)
-	return appendRows(out, "vm_jit_native_exits_total", m.exits)
+	out = appendRows(out, "vm_jit_native_exits_total", m.exits)
+	return appendRows(out, "vm_jit_retirements_total", m.retirements)
 }
 
 func (m *jitMetrics) merge(other *jitMetrics) {
@@ -136,6 +138,7 @@ func (m *jitMetrics) merge(other *jitMetrics) {
 	mergeRows(&m.entries, other.entries)
 	mergeRows(&m.yields, other.yields)
 	mergeRows(&m.exits, other.exits)
+	mergeRows(&m.retirements, other.retirements)
 }
 
 func (m *jitMetrics) reset() {
@@ -146,6 +149,7 @@ func (m *jitMetrics) reset() {
 	resetRows(m.entries)
 	resetRows(m.yields)
 	resetRows(m.exits)
+	resetRows(m.retirements)
 }
 
 func (k captureKey) labels() []Label {

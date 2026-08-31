@@ -164,6 +164,12 @@ func (c *Collector) RegisterYield(fn, ip int, kind EntryKind, frontend Frontend)
 	return register(&c.jit.yields, key)
 }
 
+// RegisterRetirement returns the stable counter for one retired native entry row.
+func (c *Collector) RegisterRetirement(fn, ip int, kind EntryKind, frontend Frontend) *Counter {
+	key := entryKey{fn: fn, ip: ip, kind: kind, frontend: frontend}
+	return register(&c.jit.retirements, key)
+}
+
 // Inc increments a pre-resolved counter without allocating.
 func (c *Counter) Inc() {
 	c.value++
