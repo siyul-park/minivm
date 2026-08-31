@@ -605,14 +605,14 @@ func permutationFlips(size, depth int32) *program.Program {
 
 // structTreeWalkListing builds a self-recursive binary-tree build/count
 // kernel over a named struct type (constant 0=build, 1=check; type 0=Node
-// {value, left, right}). build's params: 0=d; locals: 1=n. check's params:
-// 0=node.
+// {value, left, right}). build's params: 0=d; its result and local 1=n are
+// Node. check's param 0=node is Node, and may be the null ref at a leaf.
 const structTreeWalkListing = `
 .types
 struct {value: i64; left: any; right: any}
 .constants
-func(i32) any
-	any
+func(i32) struct {value: i64; left: any; right: any}
+	struct {value: i64; left: any; right: any}
 	struct.new_default 0
 	local.set 1
 	local.get 1
@@ -643,7 +643,7 @@ func(i32) any
 	buildDone:
 	local.get 1
 	return
-func(any) i32
+func(struct {value: i64; left: any; right: any}) i32
 	local.get 0
 	ref.is_null
 	br_if nullCase
@@ -680,30 +680,31 @@ func structTreeWalk(depth int32) *program.Program {
 // binaryTreesListing builds the benchmarks-game binary-trees kernel over a
 // named struct type (type 0=Node{item, left, right}; constant 0=
 // bottom_up_tree, 1=item_check; each is self-recursive, calling back through
-// its own const.get index). bottom_up_tree params: 0=item,1=depth; locals:
-// 2=n. item_check params: 0=t. STRUCT_NEW_DEFAULT zero-initializes ref
-// fields to the null heap ref, so the depth<=0 base case can leave
-// left/right unset instead of writing a null ref. Main locals:
-// 0=stretchTree,1=checksum,2=longLivedTree,3=depth,4=iterations,5=shift,
-// 6=acc,7=i,8=t1,9=t2. %[1]d substitutes min_depth, %[2]d max_depth, %[3]d
+// its own const.get index). bottom_up_tree params: 0=item,1=depth; its
+// result and local 2=n are Node. item_check param 0=t is Node, and may be
+// the null ref at a leaf. STRUCT_NEW_DEFAULT zero-initializes ref fields to
+// the null heap ref, so the depth<=0 base case can leave left/right unset
+// instead of writing a null ref. Main locals: 0=stretchTree (Node),
+// 1=checksum,2=longLivedTree (Node),3=depth,4=iterations,5=shift,
+// 6=acc,7=i,8=t1 (Node),9=t2 (Node). %[1]d substitutes min_depth, %[2]d max_depth, %[3]d
 // max_depth+1.
 const binaryTreesListing = `
 .locals
-any
+struct {item: i32; left: any; right: any}
 i32
-any
-i32
-i32
+struct {item: i32; left: any; right: any}
 i32
 i32
 i32
-any
-any
+i32
+i32
+struct {item: i32; left: any; right: any}
+struct {item: i32; left: any; right: any}
 .types
 struct {item: i32; left: any; right: any}
 .constants
-func(i32, i32) any
-	any
+func(i32, i32) struct {item: i32; left: any; right: any}
+	struct {item: i32; left: any; right: any}
 	struct.new_default 0
 	local.set 2
 	local.get 2
@@ -741,7 +742,7 @@ func(i32, i32) any
 	buDone:
 	local.get 2
 	return
-func(any) i32
+func(struct {item: i32; left: any; right: any}) i32
 	local.get 0
 	ref.is_null
 	br_if nullCase
