@@ -27,9 +27,13 @@ func (l lowerer) refIsNull(ctx *lowering, op jit.Step) bool {
 	if !ok {
 		return false
 	}
-	vNull := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(vNull, uint64(types.BoxedNull))...)
-	ctx.assembler.Emit(arm64.CMP(ref, vNull))
+	// A heap slot may hold a null that is not the BoxedNull bit pattern: a
+	// struct's default-initialized ref field is a raw zero word. The threaded
+	// lowering is boxed.Ref() == 0, so match on the ref payload rather than on
+	// the whole boxed word.
+	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(addr, ref, maskI32))
+	ctx.assembler.Emit(arm64.CMPI(addr, 0))
 	// Capture the flags before release clobbers them, then release the consumed
 	// ref (when it carries its own retain) so the bool result leaves no leaked
 	// reference on the stack. A deferred operand carries no retain to release.

@@ -221,6 +221,10 @@ Rules:
 - never put it in `free`
 - releasing `BoxedNull` is a no-op
 - `BoxedNull` is `BoxRef(0)`
+- a null ref is not always the `BoxedNull` bit pattern: `struct.new_default`
+  zero-fills, so an unset `KindRef` field reads back as `Boxed(0)`. Null-ness is
+  `Boxed.Ref() == 0`, a test on the ref payload, and every consumer — threaded,
+  fused, or native — must use it rather than comparing the whole boxed word
 
 ### Only refs use RC
 
