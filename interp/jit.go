@@ -219,6 +219,7 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
 		wd := newWatchdog(entry)
+		i.watchdogs[a] = wd
 		i.code[a.Addr][a.IP] = i.cycle(a, entry, stats, wd)
 	}
 }
@@ -880,6 +881,7 @@ func (i *Interpreter) retire(a jit.Anchor, clearNatives bool) {
 		i.samples.RegisterRetirement(a.Addr, a.IP, entry.Kind.Profile(), entry.Frontend).Inc()
 	}
 	delete(i.live, a)
+	delete(i.watchdogs, a)
 	if clearNatives && a.Addr < len(i.natives) {
 		atomic.StorePointer(&i.natives[a.Addr], nil)
 	}

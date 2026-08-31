@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"math"
 	"time"
 
 	"github.com/siyul-park/minivm/internal/jit"
@@ -30,11 +31,13 @@ type watchdog struct {
 	bridges uint32
 
 	probe        probePhase
-	probeReaches uint32
-	probeRounds  uint8
-	probeWins    uint8
+	probeSize    uint32
+	probeCount   uint32
+	probeRound   uint8
 	probeStart   time.Time
 	probeNative  time.Duration
+	probeMean    float64
+	probeM2      float64
 	probeRetire  bool
 	probePending bool
 }
@@ -69,10 +72,13 @@ const retireWindow = 1024
 const retireGiveUpThreshold = retireWindow / 4
 
 const (
-	probeWindow     = 64
-	probeShadowSize = 64
-	probeRounds     = 5
-	probeMargin     = 0.01
+	probeWindowMin = 32
+	probeWindowMax = 256
+	probeRoundsMin = 3
+	probeRoundsMax = 7
+	probeMinGain   = 0.01
+	probeZ         = 1.96
+	probeError     = 0.05
 )
 
 func (m counters) exit(encoded uint64) {
@@ -105,7 +111,7 @@ func newWatchdog(entry jit.Entry) *watchdog {
 	for id, exit := range entry.Exits {
 		gaveUp[id] = givesUp(exit.Reason)
 	}
-	wd := &watchdog{gaveUp: gaveUp}
+	wd := &watchdog{gaveUp: gaveUp, probeSize: probeWindowMin}
 	if entry.Kind != jit.EntryFunction {
 		wd.probe = probeDecided
 	}
@@ -132,24 +138,28 @@ func givesUp(reason prof.ExitReason) bool {
 func (w *watchdog) enter() {
 	w.entries++
 	if w.probe == probeWarm {
-		w.probeReaches++
-		if w.probeReaches == probeWindow {
+		w.probeCount++
+		if w.probeCount == probeWindowMin {
 			w.probe = probeNative
-			w.probeReaches = 0
+			w.probeCount = 0
 		}
 		return
 	}
-	if w.probe == probeNative {
-		if w.probeReaches == 0 {
-			w.probeStart = time.Now()
-		}
-		w.probeReaches++
-		if w.probeReaches == probeWindow {
-			w.probeNative = time.Since(w.probeStart)
-			w.probe = probeShadow
-			w.probeReaches = 0
-			w.probePending = true
-		}
+	if w.probe != probeNative {
+		return
+	}
+	if w.probeRound == 0 && w.probeNative == 0 {
+		w.probeSize = maxProbeSize(w.probeSize)
+	}
+	if w.probeSize != 0 && w.probeCount == 0 {
+		w.probeStart = time.Now()
+	}
+	w.probeCount++
+	if w.probeCount == w.probeSize {
+		w.probeNative = time.Since(w.probeStart)
+		w.probe = probeShadow
+		w.probeCount = 0
+		w.probePending = true
 	}
 }
 
@@ -174,30 +184,61 @@ func (w *watchdog) prepareShadow() bool {
 // shadowReach records one shadow reach. It returns true after the final reach
 // so the caller can restore the native call-fast-path and decide the round.
 func (w *watchdog) shadowReach() bool {
-	if w.probe == probeShadow {
-		if w.probeReaches == 0 {
-			w.probeStart = time.Now()
-		}
-		w.probeReaches++
-		if w.probeReaches == probeShadowSize {
-			elapsed := time.Since(w.probeStart)
-			shadow := elapsed
-			native := w.probeNative
-			w.probeRounds++
-			if float64(shadow) < float64(native)*(1-probeMargin) {
-				w.probeWins++
-			}
-			if w.probeRounds == probeRounds {
-				w.probeRetire = w.probeWins > probeRounds/2
-				w.probe = probeDecided
-			} else {
-				w.probe = probeNative
-			}
-			w.probeReaches = 0
-			return true
-		}
+	if w.probe != probeShadow {
+		return false
 	}
-	return false
+	if w.probeCount == 0 {
+		w.probeStart = time.Now()
+	}
+	w.probeCount++
+	if w.probeCount != w.probeSize {
+		return false
+	}
+	shadow := time.Since(w.probeStart)
+	native := w.probeNative
+	w.probeRound++
+	diff := 1 - float64(shadow)/float64(native)
+	delta := diff - w.probeMean
+	w.probeMean += delta / float64(w.probeRound)
+	w.probeM2 += delta * (diff - w.probeMean)
+	if w.probeRound >= probeRoundsMin {
+		bound := probeBound(w.probeRound, w.probeM2)
+		if w.probeMean-bound > probeMinGain {
+			w.probeRetire = true
+			w.probe = probeDecided
+		} else if w.probeMean+bound < -probeMinGain {
+			w.probe = probeDecided
+		} else if w.probeRound == probeRoundsMax {
+			w.probe = probeDecided
+		} else if bound > probeError {
+			w.probeSize = maxProbeSize(w.probeSize * 2)
+			w.probe = probeNative
+		} else {
+			w.probe = probeNative
+		}
+	} else {
+		w.probe = probeNative
+	}
+	w.probeCount = 0
+	return true
+}
+
+func maxProbeSize(size uint32) uint32 {
+	if size < probeWindowMin {
+		return probeWindowMin
+	}
+	if size > probeWindowMax {
+		return probeWindowMax
+	}
+	return size
+}
+
+func probeBound(round uint8, m2 float64) float64 {
+	if round < 2 {
+		return math.Inf(1)
+	}
+	variance := m2 / float64(round-1)
+	return probeZ * math.Sqrt(variance/float64(round))
 }
 
 // exit counts one give-up fallback exit. encoded is i.journal[journal.CellExitID]

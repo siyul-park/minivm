@@ -273,6 +273,7 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.exits = map[jit.Anchor]func(*Interpreter){}
 	out.tried = map[jit.Anchor]bool{}
 	out.live = map[jit.Anchor]jit.Entry{}
+	out.watchdogs = map[jit.Anchor]*watchdog{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)
 	out.handlers = slices.Clone(i.handlers)
