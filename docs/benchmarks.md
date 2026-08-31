@@ -38,14 +38,15 @@ independent statement with its own tier controls and memory behavior.
 
 Compare within a tier. An interpreter losing to a compiler is not a finding, and
 `threaded` beating `default` on a kernel is a statement about promotion policy, not
-about interpreters. `ClosureCounter`, `AllocationGraph`, `PermutationFlips`,
-`StructTreeWalk`, `BinaryTrees`, and `Fannkuch` currently run fastest under
-`threaded`.
+about interpreters. `ClosureCounter`, `AllocationGraph`, `PermutationFlips`, and
+`Fannkuch` currently run fastest under `threaded`.
 
-`NQueens`, `Fannkuch`, `SortStress`, and `StringBuild` moved because their
-fixtures were corrected to declare concrete slot types instead of `any`, which
-is what lets a container reach the fused `array.get` / `array.set` paths. The
-interpreter did not change; the kernels simply started exercising a path a
+`NQueens`, `Fannkuch`, `SortStress`, `StringBuild`, `StructTreeWalk`, and
+`BinaryTrees` moved because their fixtures were corrected to declare concrete
+slot types instead of `any`, which is what lets a container reach the fused
+`array.get` / `array.set` / `struct.get` paths. The two tree kernels also
+dropped a `ref.cast` that existed only to work around the `any` declaration.
+The interpreter did not change; the kernels simply started exercising a path a
 well-typed program always reaches.
 
 Allocation behavior is a first-class result. `IterativeFib`, `TypedArraySum`,
@@ -199,24 +200,24 @@ before making a performance claim.
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 160.6 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 137.5 µs | 768 | 8 |
 |  | Tengo | 280.54 µs | 458,379 | 5,114 |
 |  | GopherLua | 545.66 µs | 818,512 | 11,253 |
 |  | Goja | 448.41 µs | 558,961 | 6,149 |
 |  | gpython | 1.26 ms | 2,570,669 | 34,797 |
 |  | Yaegi | 846.99 µs | 1,422,624 | 35,306 |
-| Native | minivm `default` | 169.1 µs | 768 | 8 |
-|  | minivm `jit` | 168.3 µs | 768 | 8 |
+| Native | minivm `default` | 133.5 µs | 768 | 8 |
+|  | minivm `jit` | 135.6 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
 #### `BinaryTrees(4..6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 1.233 ms | 768 | 8 |
-|  | CPython | **991.16 µs** | 45 | 0 |
+| Interpreter | minivm `threaded` | 951.4 µs | 768 | 8 |
+|  | CPython | 991.16 µs | 45 | 0 |
 |  | gpython | 9.87 ms | 19,457,623 | 280,714 |
-| Native | minivm `default` | 1.246 ms | 768 | 8 |
-|  | minivm `jit` | 1.249 ms | 768 | 8 |
+| Native | minivm `default` | 749.5 µs | 768 | 8 |
+|  | minivm `jit` | 752.7 µs | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
 #### `SortStress(128,2)`
 
