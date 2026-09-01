@@ -438,7 +438,9 @@ func (i *Interpreter) backedge(f *frame) error {
 	// would install a native loop that stops running this hook, and the function
 	// it belongs to would never accumulate the events its own entry needs.
 	if f.addr >= 0 && f.addr < len(i.entries) && i.entries[f.addr] < i.trigger {
-		return nil
+		if live, ok := i.live[jit.Anchor{Addr: f.addr}]; !ok || live.Frontend != prof.FrontendStatic {
+			return nil
+		}
 	}
 	err := i.trace(f)
 	i.checkCool(f.addr, jit.Anchor{Addr: f.addr})
@@ -559,7 +561,11 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 				i.fr.code = nil
 				i.fr.upvals = nil
 			}
-			i.journal[journal.CellBudget] = loopBudget
+			budget := uint64(loopBudget)
+			if entry.Frontend == prof.FrontendStatic && entry.Kind != jit.EntryLoop {
+				budget = loopWarmup
+			}
+			i.journal[journal.CellBudget] = budget
 			if err := entry.Callable.Call(ctx); err != nil {
 				panic(err)
 			}

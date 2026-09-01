@@ -2317,14 +2317,18 @@ func TestInterpreter_Run(t *testing.T) {
 
 	if runtime.GOARCH == "arm64" {
 		t.Run("ARM64 in-loop branch rejoins the header natively", func(t *testing.T) {
-			const size = int32(8)
+			const size = int32(64)
 			b := program.NewBuilder()
 			b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
 			loop := b.Label()
 			odd := b.Label()
 			advance := b.Label()
 			done := b.Label()
-			b.ConstGet(types.TypedArray[int32]{0, 1, 2, 3, 4, 5, 6, 7}).Emit(instr.LOCAL_SET, 0)
+			values := make(types.TypedArray[int32], size)
+			for index := range values {
+				values[index] = int32(index)
+			}
+			b.ConstGet(values).Emit(instr.LOCAL_SET, 0)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 			b.Bind(loop)
@@ -2387,6 +2391,19 @@ func TestInterpreter_Run(t *testing.T) {
 			}
 			require.Greater(t, entries, float64(0), "expected a native entry metric")
 			require.Less(t, entries/runs, float64(8), "in-loop branch still exits the native loop")
+			traces := float64(0)
+			for _, metric := range profile.Metrics() {
+				if metric.Name != "vm_jit_compiles_total" {
+					continue
+				}
+				if jitLabel(metric.Labels, "func") == "0" &&
+					jitLabel(metric.Labels, "frontend") == "trace" &&
+					jitLabel(metric.Labels, "outcome") == "emitted" &&
+					jitLabel(metric.Labels, "ip") != "0" {
+					traces += metric.Value
+				}
+			}
+			require.Greater(t, traces, float64(0), "static entry must yield a hot loop to the trace frontend")
 		})
 
 		t.Run("ARM64 folded return leg tears down the loop frame", func(t *testing.T) {

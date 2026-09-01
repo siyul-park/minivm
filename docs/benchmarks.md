@@ -137,6 +137,8 @@ before making a performance claim.
 
 `#223` retest (2026-08-31, Apple M4 Pro, Go 1.26.2, `-benchtime=300ms -count=6`) measured `ClosureCounter(128)` at medians of `threaded` 2.60 µs, `default` 3.66 µs, and `jit` 3.66 µs, all at 64 B/op and 2 allocs/op. The adaptive throughput probe uses 32-reach warmup, 32-to-256 adaptive windows, a conservative 95% normal-approximation confidence bound after a discarded warm pair, and a bounded seven-pair maximum including that warm pair; the synthetic slower-entry fixture retires within the bounded budget, while the actual ClosureCounter still does not separate as a clear native loss. The probe therefore does not recover ClosureCounter to the threaded baseline, and no kernel-specific heuristic was added.
 
+`#222` retest (2026-09-01, Apple M4 Pro, Go 1.26.2, `-benchtime=300ms -count=6`) verified the static-entry handoff on a long-running loop fixture. The changed build kept `Control_Sieve/jit` and `Numeric_SpectralNorm/jit` within the baseline measurement envelope, with allocations unchanged. The acceptance test also observes a trace-frontend loop compile after the static entry yields, proving the specialized loop root is reachable rather than relying on the whole-function static plan alone. No standalone speedup claim is made because host drift is larger than the observed delta.
+
 #### `NQueens(7)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |

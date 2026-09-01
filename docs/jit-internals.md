@@ -394,7 +394,7 @@ A loop root is the target of a backward branch. Backward branch handlers report 
 
 Native loop entries run with the current frame and return to threaded execution through explicit safepoints or deoptimization. Loop-carried scalar locals may stay in registers when the plan can preserve their state safely; otherwise the loop uses VM stack slots.
 
-Loop roots are compiled as separate native entries and installed at `i.code[addr][header]`. A loop root never tears down its frame.
+Loop roots are compiled as separate native entries and installed at `i.code[addr][header]`. A loop root never tears down its frame. A static function or module entry that contains a loop also emits the native back-edge safepoint, but only while that entry is still a candidate for a better loop root. It uses the existing `loopWarmup` interval for the first handoff; the yield reaches `backedge`, which records the real loop state and lets the trace frontend install the specialized loop root. Once the loop root is installed, execution remains at the header and the ordinary `loopBudget` applies. If the trace cannot produce a usable loop root, normal cooling removes the extra back-edge instrumentation rather than polling every iteration indefinitely.
 
 ## Suspension
 
@@ -565,14 +565,12 @@ loop and the last branch back to it closes it, so a nested header lies inside
 that range while a sibling only follows it. Sibling loops must keep installing
 independently, which is what a rule based on mere coexistence gets wrong.
 
-Module code is excluded and keeps the arbitration it already had — a module
-loop root withdrawing the whole-module entry. Its entry runs once per execution
-rather than once per call, so the whole-module plan is the program; measured,
-withdrawing it costs `Control_Sieve` about 10%. For the same reason a side-exit
-recompile of a module loop root may still install the static fallback over a
-running recording, while off module code it may not: a side exit asks for the
-tree to be rebuilt with its leg folded in, and an answer that fell through to
-the static plan is a downgrade, not an improvement.
+Module code keeps the whole-module entry installed until a hot loop is actually
+recorded. The static module plan may therefore own the loop first, but its native
+back-edge yields through the existing `loopWarmup` cadence so `backedge` can record
+the live loop state. A usable trace loop root then installs at the header without
+requiring the whole module to be withdrawn. Side-exit recompilation keeps its
+existing rule: a static fallback must not displace a running trace recording.
 
 Native wrappers must always leave the interpreter in a valid state for threaded redispatch.
 

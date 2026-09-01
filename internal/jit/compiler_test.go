@@ -65,7 +65,7 @@ func newTestCompiler(t *testing.T, machine jit.Machine) *jit.Compiler {
 
 // loopInput builds a counting loop, whose header plan pins one carried local -
 // the rung the compiler drops first under register pressure.
-func loopInput(t *testing.T) (*jit.Input, jit.Plan) {
+func loopInput(t *testing.T) (*jit.Input, jit.Plan, jit.Plan) {
 	t.Helper()
 	b := instr.NewBuilder()
 	loop := b.Label()
@@ -90,10 +90,12 @@ func loopInput(t *testing.T) (*jit.Input, jit.Plan) {
 	plans, err := jit.StaticPlan(input)
 	require.NoError(t, err)
 	require.Len(t, plans, 2)
+	entry := plans[0]
 	header := plans[1]
+	require.Equal(t, jit.EntryFunction, entry.Kind)
 	require.Equal(t, jit.EntryLoop, header.Kind)
 	require.NotEmpty(t, header.Carried, "the fixture must pin a carried local for the ladder to have a rung to drop")
-	return input, header
+	return input, entry, header
 }
 
 func TestNew(t *testing.T) {
@@ -104,7 +106,15 @@ func TestNew(t *testing.T) {
 }
 
 func TestCompiler_Compile(t *testing.T) {
-	input, header := loopInput(t)
+	input, entry, header := loopInput(t)
+
+	t.Run("keeps a static entry's loop native", func(t *testing.T) {
+		var attempts []attempt
+		c := newTestCompiler(t, pressureMachine{attempts: &attempts})
+
+		c.Compile(input, entry.Anchor)
+		require.Equal(t, []attempt{{carried: len(entry.Carried), nativeLoop: true}}, attempts)
+	})
 
 	for _, tt := range []struct {
 		name   string
