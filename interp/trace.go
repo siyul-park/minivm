@@ -724,7 +724,7 @@ type loopSpan struct {
 
 // headers returns the loops of the function at addr, found from the targets of
 // backward branches. The scan is static and memoized per address.
-func (t *tracer) headers(i *Interpreter, addr int) []loopSpan {
+func (t *tracer) headers(instrs [][]byte, addr int) []loopSpan {
 	t.mu.Lock()
 	hs, ok := t.loops[addr]
 	t.mu.Unlock()
@@ -732,12 +732,12 @@ func (t *tracer) headers(i *Interpreter, addr int) []loopSpan {
 		return hs
 	}
 
-	// Scan the bytecode without the lock: i.instrs is immutable program data, so
+	// Scan the bytecode without the lock: instrs is immutable program data, so
 	// the scan reads no shared tracer state and never blocks a concurrent record.
 	// Only the memo write below needs the lock.
 	hs = nil
-	if addr >= 0 && addr < len(i.instrs) {
-		code := i.instrs[addr]
+	if addr >= 0 && addr < len(instrs) {
+		code := instrs[addr]
 		at := map[int]int{}
 		for ip := 0; ip < len(code); {
 			w := instr.Instruction(code[ip:]).Width()
@@ -782,11 +782,11 @@ func (t *tracer) headers(i *Interpreter, addr int) []loopSpan {
 // at inner in the function at addr. Two loops that merely follow one another
 // do not: a sibling's header lies past the end of the first one's body, while
 // a nested header lies inside it.
-func (t *tracer) encloses(i *Interpreter, addr, outer, inner int) bool {
+func (t *tracer) encloses(instrs [][]byte, addr, outer, inner int) bool {
 	if outer >= inner {
 		return false
 	}
-	for _, l := range t.headers(i, addr) {
+	for _, l := range t.headers(instrs, addr) {
 		if l.header == outer {
 			return inner <= l.end
 		}

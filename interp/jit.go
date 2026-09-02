@@ -246,7 +246,7 @@ func (i *Interpreter) swallows(a jit.Anchor, entry jit.Entry, header int) bool {
 	case jit.EntryFunction:
 		return true
 	case jit.EntryLoop:
-		return i.tracer.encloses(i, a.Addr, a.IP, header)
+		return i.tracer.encloses(i.instrs, a.Addr, a.IP, header)
 	default:
 		return false
 	}

@@ -179,7 +179,7 @@ func TestCompiler_Compile(t *testing.T) {
 			// Module code owning a loop compiles at the loop root, not at its
 			// entry: the entry runs once per execution while the loop carries
 			// the work, so the planner leaves that anchor to the loop.
-			headers := i.tracer.headers(i, 0)
+			headers := i.tracer.headers(i.instrs, 0)
 			require.NotEmpty(t, headers)
 			input, ok := i.compileSnapshot(0)
 			require.True(t, ok)
@@ -761,16 +761,16 @@ func TestARM64_Encloses(t *testing.T) {
 
 		i := New(prog, WithTick(1<<20), WithThreshold(-1))
 		defer i.Close()
-		spans := i.tracer.headers(i, 0)
+		spans := i.tracer.headers(i.instrs, 0)
 		require.Len(t, spans, 2)
 
 		outerHeader, innerHeader := spans[0].header, spans[1].header
 		if outerHeader > innerHeader {
 			outerHeader, innerHeader = innerHeader, outerHeader
 		}
-		require.True(t, i.tracer.encloses(i, 0, outerHeader, innerHeader),
+		require.True(t, i.tracer.encloses(i.instrs, 0, outerHeader, innerHeader),
 			"the outer header must enclose the nested one")
-		require.False(t, i.tracer.encloses(i, 0, innerHeader, outerHeader),
+		require.False(t, i.tracer.encloses(i.instrs, 0, innerHeader, outerHeader),
 			"containment must not run the other way")
 	})
 
@@ -799,12 +799,12 @@ func TestARM64_Encloses(t *testing.T) {
 
 		i := New(prog, WithTick(1<<20), WithThreshold(-1))
 		defer i.Close()
-		spans := i.tracer.headers(i, 0)
+		spans := i.tracer.headers(i.instrs, 0)
 		require.Len(t, spans, 2)
 
-		require.False(t, i.tracer.encloses(i, 0, spans[0].header, spans[1].header),
+		require.False(t, i.tracer.encloses(i.instrs, 0, spans[0].header, spans[1].header),
 			"a loop that merely precedes another must not enclose it")
-		require.False(t, i.tracer.encloses(i, 0, spans[1].header, spans[0].header),
+		require.False(t, i.tracer.encloses(i.instrs, 0, spans[1].header, spans[0].header),
 			"nor the other way round")
 	})
 }

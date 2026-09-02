@@ -325,7 +325,7 @@ func (i *Interpreter) settled(addr int, hits uint64) bool {
 	if hits >= i.trigger+entryWarmup {
 		return true
 	}
-	for _, l := range i.tracer.headers(i, addr) {
+	for _, l := range i.tracer.headers(i.instrs, addr) {
 		// A header at ip 0 is this very root, not a separate one to wait for.
 		if l.header != 0 && !i.tried[jit.Anchor{Addr: addr, IP: l.header}] {
 			return false
@@ -350,7 +350,7 @@ func (i *Interpreter) checkCool(addr int, root jit.Anchor) {
 	if !i.tried[root] {
 		return
 	}
-	for _, l := range i.tracer.headers(i, addr) {
+	for _, l := range i.tracer.headers(i.instrs, addr) {
 		if !i.tried[jit.Anchor{Addr: addr, IP: l.header}] {
 			return
 		}

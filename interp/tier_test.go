@@ -108,7 +108,7 @@ func TestARM64_Backedge(t *testing.T) {
 
 			i := New(prog, WithTick(1<<20), WithThreshold(tt.threshold))
 			defer i.Close()
-			headers := i.tracer.headers(i, 0)
+			headers := i.tracer.headers(i.instrs, 0)
 			require.NotEmpty(t, headers)
 			root := jit.Anchor{IP: headers[0].header}
 

@@ -538,7 +538,7 @@ func TestTracer_Headers(t *testing.T) {
 		for w := range workers {
 			go func() {
 				defer wg.Done()
-				results[w] = tracer.headers(i, 0)
+				results[w] = tracer.headers(i.instrs, 0)
 			}()
 		}
 		wg.Wait()
