@@ -502,6 +502,33 @@ func boxedTemp(raw string) string {
 	return "r" + strings.TrimPrefix(raw, "v")
 }
 
+func localStore(state *state, current step) (value, error) {
+	if state.standalone {
+		return value{op: current.op, head: current.op, handler: localSet()}, nil
+	}
+	if len(state.stack) == 0 {
+		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
+	}
+	consumer := state.stack[len(state.stack)-1]
+	if _, ok := numericKind(consumer.op); !ok {
+		return value{}, fmt.Errorf("%s cannot store %s", instr.TypeOf(current.op).Mnemonic, instr.TypeOf(consumer.op).Mnemonic)
+	}
+	result := instr.TypeOf(consumer.op).Push[0].Repr()
+	compile := []jen.Code{
+		jen.List(jen.Id("dst"), jen.Id("dstOK")).Op(":=").Id("c").Dot("local").Call(
+			add(jen.Id("start"), state.offset+1),
+			jen.Qual("github.com/siyul-park/minivm/types", "Kind"+mustKindName(result)),
+		),
+		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
+	}
+	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, jen.Id("dst"))
+	if err != nil {
+		return value{}, err
+	}
+	state.stack = nil
+	return value{op: current.op, head: consumer.head, compile: append(compile, body...)}, nil
+}
+
 func localSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(2)),
@@ -592,4 +619,23 @@ func upvalSet() jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("upvals").Index(jen.Id("idx"))).Op("=").List(jen.Id("val")),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
+}
+
+func mustKindName(kind instr.Kind) string {
+	name, ok := kindName(kind)
+	if !ok {
+		panic(fmt.Sprintf("unsupported kind %s", kind))
+	}
+	return name
+}
+
+func borrow(kind instr.Kind, boxed jen.Code) jen.Code {
+	if kind.Repr() == instr.KindI64 {
+		return jen.Id("i").Dot("borrowI64").Call(boxed)
+	}
+	name, ok := kindName(kind)
+	if !ok {
+		panic(fmt.Sprintf("unsupported borrowed kind %s", kind))
+	}
+	return jen.Add(boxed).Dot(name).Call()
 }

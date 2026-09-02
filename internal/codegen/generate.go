@@ -6,7 +6,8 @@ import (
 	"golang.org/x/tools/imports"
 )
 
-// File is one generated source file.
+// File is one generated source file. Path is relative to the repository root,
+// and Data is the caller's to write or compare; Generate retains neither.
 type File struct {
 	Path string
 	Data []byte

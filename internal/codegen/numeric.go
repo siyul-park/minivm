@@ -26,33 +26,6 @@ func arithmetic(state *state, current step) (value, error) {
 	return value{op: current.op, head: head, compile: body}, nil
 }
 
-func localStore(state *state, current step) (value, error) {
-	if state.standalone {
-		return value{op: current.op, head: current.op, handler: localSet()}, nil
-	}
-	if len(state.stack) == 0 {
-		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
-	}
-	consumer := state.stack[len(state.stack)-1]
-	if _, ok := numericKind(consumer.op); !ok {
-		return value{}, fmt.Errorf("%s cannot store %s", instr.TypeOf(current.op).Mnemonic, instr.TypeOf(consumer.op).Mnemonic)
-	}
-	result := instr.TypeOf(consumer.op).Push[0].Repr()
-	compile := []jen.Code{
-		jen.List(jen.Id("dst"), jen.Id("dstOK")).Op(":=").Id("c").Dot("local").Call(
-			add(jen.Id("start"), state.offset+1),
-			jen.Qual("github.com/siyul-park/minivm/types", "Kind"+mustKindName(result)),
-		),
-		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
-	}
-	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, jen.Id("dst"))
-	if err != nil {
-		return value{}, err
-	}
-	state.stack = nil
-	return value{op: current.op, head: consumer.head, compile: append(compile, body...)}, nil
-}
-
 // numeric emits one numeric operation from virtual and resident operands.
 func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool, local jen.Code) ([]jen.Code, error) {
 	arity, ok := arity(consumer)
@@ -441,17 +414,6 @@ func compute(op instr.Opcode, operands ...jen.Code) jen.Code {
 	}
 }
 
-func borrow(kind instr.Kind, boxed jen.Code) jen.Code {
-	if kind.Repr() == instr.KindI64 {
-		return jen.Id("i").Dot("borrowI64").Call(boxed)
-	}
-	name, ok := kindName(kind)
-	if !ok {
-		panic(fmt.Sprintf("unsupported borrowed kind %s", kind))
-	}
-	return jen.Add(boxed).Dot(name).Call()
-}
-
 func unbox(kind instr.Kind, index jen.Code) jen.Code {
 	value := jen.Id("i").Dot("stack").Index(index)
 	if kind.Repr() == instr.KindI64 {
@@ -462,12 +424,4 @@ func unbox(kind instr.Kind, index jen.Code) jen.Code {
 		panic(fmt.Sprintf("unsupported consumed kind %s", kind))
 	}
 	return value.Dot(name).Call()
-}
-
-func mustKindName(kind instr.Kind) string {
-	name, ok := kindName(kind)
-	if !ok {
-		panic(fmt.Sprintf("unsupported kind %s", kind))
-	}
-	return name
 }

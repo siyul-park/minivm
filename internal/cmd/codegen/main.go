@@ -23,7 +23,7 @@ func main() {
 func run(check bool, stdout io.Writer) error {
 	files, err := codegen.Generate()
 	if err != nil {
-		return fmt.Errorf("generate fusion: %w", err)
+		return fmt.Errorf("generate: %w", err)
 	}
 	for _, file := range files {
 		if check {

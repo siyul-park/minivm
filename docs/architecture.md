@@ -40,7 +40,7 @@ prof    → instr
 internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
 internal/journal → (leaf)
-internal/codegen → instr, types, jennifer
+internal/codegen → instr, types, jennifer, golang.org/x/tools/imports
 internal/jit → instr, types, internal/asm, pass, analysis, prof
 internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
 interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, internal/jit/arm64, pass, analysis, prof

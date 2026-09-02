@@ -28,19 +28,6 @@ func threaderType(file *jen.File) {
 	)
 }
 
-func handlerTable() jen.Code {
-	table := jen.Index(jen.Lit(256)).Func().Params(jen.Id("c").Op("*").Id("threader")).Func().Params(jen.Id("i").Op("*").Id("Interpreter"))
-	return table.ValuesFunc(func(group *jen.Group) {
-		for opcode, emit := range lowerers {
-			if emit == nil {
-				continue
-			}
-			op := instr.Opcode(opcode)
-			group.Line().Qual("github.com/siyul-park/minivm/instr", symbol(op)).Op(":").Add(lower(op))
-		}
-	})
-}
-
 func fusionTable(patterns []pattern) (jen.Code, error) {
 	var groups [256][]pattern
 	for _, pattern := range patterns {
@@ -89,6 +76,19 @@ func matchGuard(pattern pattern) jen.Code {
 		offset += width(current.op)
 	}
 	return condition
+}
+
+func handlerTable() jen.Code {
+	table := jen.Index(jen.Lit(256)).Func().Params(jen.Id("c").Op("*").Id("threader")).Func().Params(jen.Id("i").Op("*").Id("Interpreter"))
+	return table.ValuesFunc(func(group *jen.Group) {
+		for opcode, emit := range lowerers {
+			if emit == nil {
+				continue
+			}
+			op := instr.Opcode(opcode)
+			group.Line().Qual("github.com/siyul-park/minivm/instr", symbol(op)).Op(":").Add(lower(op))
+		}
+	})
 }
 
 func fallbackInit(file *jen.File) {
