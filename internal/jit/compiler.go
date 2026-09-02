@@ -104,6 +104,21 @@ func (c *Compiler) Compile(input *Input, root Anchor) Result {
 
 func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Frontend) (prof.CompileReason, error) {
 	nativeLoop := plan.Kind == EntryLoop
+	if !nativeLoop && frontend == prof.FrontendStatic {
+		// Static whole-function plans may own a hot loop before its trace root exists.
+		// Keep the same native safepoint machinery so the loop can hand off later.
+		for _, block := range plan.Blocks {
+			for _, edge := range block.Term.Edges {
+				if edge.Anchor.Addr == block.Anchor.Addr && edge.Anchor.IP <= block.Anchor.IP {
+					nativeLoop = true
+					break
+				}
+			}
+			if nativeLoop {
+				break
+			}
+		}
+	}
 	reason, err := c.emit(input, plan, code, frontend, nativeLoop)
 	if reason != prof.CompileReasonRegisterPressure {
 		return reason, err
