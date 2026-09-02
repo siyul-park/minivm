@@ -1,53 +1,10 @@
-package main
+package codegen
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/siyul-park/minivm/instr"
 )
-
-func (p pattern) key() string {
-	var key strings.Builder
-	for index, current := range p {
-		if index > 0 {
-			key.WriteByte('/')
-		}
-		fmt.Fprintf(&key, "%d", current.op)
-		if current.typ != nil {
-			fmt.Fprintf(&key, ":%t:%s", current.exclude, current.typ)
-		}
-	}
-	return key.String()
-}
-
-func (p pattern) overlaps(other pattern) bool {
-	if len(p) != len(other) {
-		return false
-	}
-	for index := range p {
-		if p[index].op != other[index].op || !p[index].overlaps(other[index]) {
-			return false
-		}
-	}
-	return true
-}
-
-func (m match) overlaps(other match) bool {
-	if m.typ == nil || other.typ == nil {
-		return true
-	}
-	if !m.exclude && !other.exclude {
-		return m.typ == other.typ
-	}
-	if m.exclude && other.exclude {
-		return true
-	}
-	if m.exclude {
-		m, other = other, m
-	}
-	return m.typ != other.typ
-}
 
 func validate(patterns []pattern) error {
 	seen := make(map[string]pattern, len(patterns))

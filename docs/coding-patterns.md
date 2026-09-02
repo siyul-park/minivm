@@ -333,6 +333,7 @@ references.
 | `interp` | VM execution state, threaded dispatch, fallback, JIT orchestration |
 | `internal/asm` | architecture-neutral assembly IR, allocation, linking, executable buffers |
 | `internal/asm/<arch>` | architecture encoding, ABI, registers, relaxation |
+| `internal/codegen` | fusion pattern catalog, pattern validation, threaded-handler emission |
 | `prof` | samples, counters, profile aggregation |
 | `pass` | generic pass lifecycle and analysis cache |
 | `analysis` | reusable facts without mutation |

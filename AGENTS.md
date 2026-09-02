@@ -10,7 +10,7 @@ Repository instructions for coding agents. Codex reads this file directly; Claud
 make init              # install goimports/godoc and go install ./...
 make test              # go test -race ./...
 make lint              # goimports -w . && go vet ./...
-make generate          # regenerate interp/threaded.go from internal/cmd/geninterp
+make generate          # regenerate interp/threaded.go from internal/cmd/codegen
 make check-generated   # fail if the generated file is stale
 make build             # build ./dist/minivm
 make fuzz              # bounded trust-boundary fuzz smoke
@@ -32,7 +32,7 @@ program.Program -> threader -> []func(*Interpreter) -> Interpreter.Run()
 
 A `program.Program` is threaded into one closure per instruction; a profiler promotes hot segments to native ARM64 and falls back to the threaded closures for anything the backend cannot lower. `docs/architecture.md` owns package boundaries and execution flow; `docs/README.md` indexes every topic document.
 
-**`interp/threaded.go` is generated.** Edit the emitters in `internal/cmd/geninterp/lower.go` (fusion patterns in `pattern.go`), then run `make generate`. Never hand-edit the generated file.
+**`interp/threaded.go` is generated.** Edit the emitters in `internal/codegen/` (one file per opcode domain; the composition engine and `lowerers` table live in `lower.go`, fusion patterns in `pattern.go`), then run `make generate`. Never hand-edit the generated file.
 
 ## Workflow
 
@@ -61,7 +61,7 @@ Do not report work complete until all of these hold:
 
 | Task | Read | Usually edit | Verify |
 |---|---|---|---|
-| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/cmd/geninterp/`, `instr/`, `internal/jit/arm64/` | `go test ./internal/cmd/geninterp ./instr ./internal/jit/arm64 ./interp` |
+| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/codegen/`, `instr/`, `internal/jit/arm64/` | `go test ./internal/codegen ./internal/cmd/codegen ./instr ./internal/jit/arm64 ./interp` |
 | Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
 | JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/jit_arm64.go`, `interp/jit_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |

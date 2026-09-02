@@ -13,8 +13,8 @@ Use this guide when adding or changing an opcode. For canonical semantics, keep 
 | Opcode value and append order | `instr/opcode.go` |
 | Mnemonic, operand widths, fixed stack effects | `instr/type.go` |
 | Static validation | `program/verify.go` |
-| Runtime lowering | `internal/cmd/geninterp/lower.go` |
-| Fusion patterns | `internal/cmd/geninterp/pattern.go` |
+| Runtime lowering | `internal/codegen/` (`array.go`, `numeric.go`, `ref.go`, … by domain) |
+| Fusion patterns | `internal/codegen/pattern.go` |
 | Generated runtime semantics | `interp/threaded.go` |
 | ARM64 native lowering | `internal/jit/arm64/` |
 | Public reference | `docs/instruction-set.md` |
@@ -68,7 +68,7 @@ Verifier changes should reject only statically malformed bytecode. Runtime traps
 
 ## Step 4 — Implement Threaded Semantics
 
-Add one opcode emitter in `internal/cmd/geninterp/lower.go`, map it once in `lowerers`, then run `make generate`. The emitter receives a `state` and must define the opcode semantics once for standalone materialization and fused composition. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and compile-time guards; they never define opcode behavior. Do not edit `interp/threaded.go` directly.
+Add one opcode emitter to the `internal/codegen` file that owns its domain (`array.go`, `map.go`, `numeric.go`, `ref.go`, `string.go`, `struct.go`, `unary.go`, `control.go`, `coroutine.go`, `call.go`, `slot.go`), map it once in the `lowerers` table in `internal/codegen/lower.go`, then run `make generate`. The emitter receives a `state` and must define the opcode semantics once for standalone materialization and fused composition. Add a pattern in `internal/codegen/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and compile-time guards; they never define opcode behavior. Do not edit `interp/threaded.go` directly.
 
 Checklist:
 
