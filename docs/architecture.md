@@ -40,6 +40,7 @@ prof    → instr
 internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
 internal/journal → (leaf)
+internal/codegen → instr, types, jennifer
 internal/jit → instr, types, internal/asm, pass, analysis, prof
 internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
 interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, internal/jit/arm64, pass, analysis, prof
@@ -49,6 +50,7 @@ transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
 cli → debug, instr, interp, prof, program, types, cobra
 cmd/minivm → cli
+internal/cmd/codegen → internal/codegen
 ```
 
 ## Package Responsibilities
@@ -67,6 +69,7 @@ cmd/minivm → cli
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
 | `internal/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
+| `internal/codegen/` | fusion pattern catalog, its validation, and the emitters that render `interp/threaded.go`; one file per opcode domain over a shared composition engine |
 | `pass/` | generic analysis and transform infrastructure |
 | `analysis/` | reusable static analyses |
 | `transform/` | optimization transforms |

@@ -10,10 +10,11 @@ Read this before changing threaded fusion patterns, generated handlers, lookahea
 
 | Concern | File |
 |---|---|
-| Opcode lowering | `internal/cmd/geninterp/lower.go` |
-| Fusion pattern catalog | `internal/cmd/geninterp/pattern.go` |
-| Source generation | `internal/cmd/geninterp/generate.go` |
-| Pattern validation | `internal/cmd/geninterp/validate.go` |
+| Fusion composition engine | `internal/codegen/lower.go` |
+| Opcode lowering by domain | `internal/codegen/array.go`, `call.go`, `control.go`, `coroutine.go`, `map.go`, `numeric.go`, `ref.go`, `slot.go`, `string.go`, `struct.go`, `unary.go` |
+| Fusion pattern catalog | `internal/codegen/pattern.go` |
+| Source generation | `internal/codegen/generate.go`, `internal/codegen/threader.go` |
+| Pattern validation | `internal/codegen/validate.go` |
 | Standalone and fused threaded handlers | `interp/threaded.go` |
 | ARM64 trace lowering | `internal/jit/arm64/` |
 | Opcode metadata | `instr/type.go` |
@@ -26,7 +27,7 @@ Every valid opcode has exactly one `lowerers` entry and one semantic emitter. Th
 
 ## Support Matrix
 
-The generator validates the concrete patterns returned by `catalog` in `internal/cmd/geninterp/pattern.go`.
+The generator validates the concrete patterns returned by `catalog` in `internal/codegen/pattern.go`.
 
 Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, constant aggregate indexes, direct non-trapping arithmetic stores to typed locals, and typed-array constants or typed-array `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` containers indexed by scalar producers. A typed-array container is proven at threading time from its declared type (`*types.ArrayType.ElemKind`) — `localTypes`, `globalTypes`, or `captureTypes` depending on the source opcode — not from its current runtime value. The same three container sources also fuse `array.set`, with a scalar index producer and a scalar value producer, scoped to the six primitive `TypedArray[T]` element kinds (`bool`, `int8`, `int32`, `int64`, `float32`, `float64`) so no store ever overwrites a ref element and `docs/memory-model.md`'s retain-new/release-old rule never applies. A fused container is borrowed, not consumed: it was never pushed, so the fused store neither retains nor releases it and leaves the operand stack unchanged, which is the same net effect the unfused three-push/three-pop sequence has. Trapping numeric operations materialize completed sources before evaluating the trap so stack ownership and instruction offsets match exact execution.
 

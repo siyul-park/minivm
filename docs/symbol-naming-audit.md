@@ -3,7 +3,7 @@
 ## Scope
 
 This audit covers every production Go package in minivm. Generated handlers
-were reviewed through `internal/cmd/geninterp`; generated output was not edited
+were reviewed through `internal/codegen`; generated output was not edited
 directly.
 
 A second round (see Round 2 below) covers the symbols the JIT
@@ -93,7 +93,7 @@ These candidates were re-reviewed and intentionally retained:
 - `interp.globalKinds` and `interp.globalDecls`: `global` distinguishes these
   facts from local, capture, stack, and result kinds; removing it weakens call
   sites in the large `Interpreter` receiver.
-- `internal/cmd/geninterp.slotHandler`, `dynamicCall`, `clearRange`,
+- `internal/codegen.slotStandalone`, `dynamicCall`, `clearRange`,
   `numericKind`, and `kindName`: each qualifier distinguishes a real generator
   role. The shorter candidates either collide, hide the predeclared `clear`, or
   lose meaning at package scope.
@@ -119,7 +119,7 @@ current `stop` field.
 | `cmd/minivm` | Only `main`; no change required. |
 | `debug` | Public API retained; private pause state normalized. |
 | `instr` | Opcode/specification symmetry retained. |
-| `internal/cmd/geninterp` | Existing qualified generator roles retained. |
+| `internal/codegen` | Bare verbs and adjectives renamed by role; see Round 3 below. |
 | `interp` | Public option/builder consumers and private runtime/JIT roles normalized. |
 | `optimize` | Package-primary constructor and pass insertion shortened. |
 | `pass` | Pipeline insertion shortened; manager APIs retained. |
@@ -224,6 +224,67 @@ These candidates were reviewed and intentionally retained:
 | `internal/asm` | New allocator files (`block`, `cfg`, `dominance`, `useIndex`, `hazard`, `crosses`) already role-named; no change. |
 | `internal/asm/arm64` | `stack.go`'s `SpillBytes`/`SaveAreaBytes`/`StackReserve`/`FrameSize` already role-named; no change. `P`/`V`/`Imm`/`Mem` retained (see Round 2 Retained Names). |
 | `interp` | JIT integration (`jit.go`, `tier.go`) already role-named; `Layout` construction call sites updated for the `internal/jit` renames. |
+
+## Round 3: Generator Package Restructuring
+
+`internal/cmd/geninterp` became the importable `internal/codegen` package plus a
+thin `internal/cmd/codegen` entry point. `lower.go` (4,496 lines, 198
+declarations) split into one file per opcode domain, mirroring
+`internal/jit/arm64/`. Generated output is unchanged apart from its header
+comment, so every rename below is generator-internal.
+
+### Round 3 Public API Changes
+
+| Before | After | Reason |
+|---|---|---|
+| `main.output` | `codegen.File` | The generated file is now the package's value type, not a command-local record. |
+| `main.generate` | `codegen.Generate` | Sole exported entry point; returns files, leaves I/O to the command. |
+| `(output).sync(check, stdout)` | `main.verify`, `main.write` | One job each instead of a boolean mode switch; both own I/O in the command. |
+
+### Round 3 Private Changes
+
+| Before | After | Reason |
+|---|---|---|
+| `handler` | `standalone` | Names which handler shape it builds. |
+| `slotHandler`, `constHandler` | `slotStandalone`, `constStandalone` | Follow `standalone`. |
+| `bind` | `standaloneLowerer` | Names the adaptation, not the verb. |
+| `source` | `slotRead` | `source` is pattern-catalog vocabulary. |
+| `ref` | `refOp` | Collided with `target.ref` and local `ref` bindings. |
+| `index`, `structIndex` | `containerGet`, `structGet` | They lower `array.get`/`struct.get`, not an index. |
+| `lookup` | `containerFallback` | It is the unfused fallback body. |
+| `bounds` (function) | `indexGuard` | Collided with `(loader).bounds`. |
+| `element` | `arrayStore` | It lowers `array.set`. |
+| `store` | `localStore` | It lowers `local.set` only. |
+| `scalar` | `arithmetic` | `scalar` names a value class, not an action. |
+| `apply` | `compute` | Builds the raw computation expression. |
+| `checked` | `trapping` | Matches the `traps` predicate. |
+| `take` | `unbox` | Pairs with `borrow`. |
+| `boxed` (function) | `boxedTemp` | Collided with `value.boxed`. |
+| `input` | `operands` | Returns operand kind and count. |
+| `count` | `backedge` | Emits the back-edge warmup counter. |
+| `direct`, `closure`, `host` | `callDirect`, `callClosure`, `callHost` | Adjectives became named call arms. |
+| `enter`, `frame`, `reuse`, `replace`, `entered` | `enterFrame`, `pushFrame`, `reuseFrame`, `replaceFrame`, `frameEntered` | One verb family for frame lifecycle. |
+| `create` | `allocClosure` | Says what is created. |
+| `declare`, `initialize`, `compile` | `threaderType`, `fallbackInit`, `compileMethod` | Name the emitted declaration. |
+| `handlers`, `fusions`, `matches` | `handlerTable`, `fusionTable`, `matchGuard` | Name the emitted value. |
+| `storeArray`, `boxArray` | `storeElem`, `boxElem` | `storeArray` was a word transposition of `arrayStore`; the pair now names the element accessors. |
+
+### Round 3 Retained Names
+
+- `compose`, `resolve`, `lower`, `lowerers`, `load`, `loader` and its methods,
+  `call`, `branch`, `numeric`, `produce`, `consume`, `materialize`, `dispatch`,
+  `dynamicCall`, `retire`, `release`, `invoke`, `arity`, `traps`, `width`,
+  `add`, `temp`, `reject`, `overflow`: each already names a generator role that
+  no shorter or more specific candidate improves.
+- Every `<opcode>()` emitter keeps its mnemonic-derived name so the `lowerers`
+  table reads as the instruction set.
+
+### Round 3 Package Coverage
+
+| Package | Result |
+|---|---|
+| `internal/codegen` | New package: composition engine in `lower.go`, one file per opcode domain, `File`/`Generate` as the only exported symbols. |
+| `internal/cmd/codegen` | Reduced to flag parsing plus `run`/`verify`/`write`. |
 
 ## Verification
 

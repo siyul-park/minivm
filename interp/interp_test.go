@@ -7325,7 +7325,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 		b.Emit(instr.ARRAY_FILL)
 		// arr.append([i+1], count=1); ARRAY_APPEND leaves the array ref on the
 		// stack for chaining (see arrayAppend in
-		// internal/cmd/geninterp/lower.go), so drop it here since arr is
+		// internal/codegen/array.go), so drop it here since arr is
 		// already reachable through local 0.
 		b.Emit(instr.LOCAL_GET, 0)
 		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
@@ -12856,7 +12856,7 @@ func arraySumUpvalue(size, repeats int32) *program.Program {
 
 // BenchmarkInterpreter_ArraySetContainerFusion measures ARRAY_SET fused onto
 // a LOCAL_GET, GLOBAL_GET, and UPVAL_GET container -- the three sources
-// element()'s isContainerSource branch (internal/cmd/geninterp/lower.go)
+// arrayStore()'s isContainerSource branch (internal/codegen/array.go)
 // specializes. Each subtest writes arr[j] = j through the fused container in
 // a nested loop instead of summing, so the timed body is dominated by
 // array.set rather than array.get; a final single pass sums the written
