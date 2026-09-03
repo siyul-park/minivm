@@ -7,11 +7,11 @@ import (
 	"io"
 	"math"
 	"reflect"
-	"time"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -34,7 +34,7 @@ type Interpreter struct {
 	natives   []unsafe.Pointer
 	tried     map[jit.Anchor]bool
 	live      map[jit.Anchor]jit.Entry
-	watchdogs map[jit.Anchor]*watchdog
+	watchdogs map[jit.Anchor]*tier.Watchdog
 	journal   []uint64
 
 	types       []types.Type
@@ -282,7 +282,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:       map[jit.Anchor]bool{},
 		live:        map[jit.Anchor]jit.Entry{},
-		watchdogs:   map[jit.Anchor]*watchdog{},
+		watchdogs:   map[jit.Anchor]*tier.Watchdog{},
 		dynamic:     map[int]bool{},
 		journal:     make([]uint64, journal.Len(opt.frame)),
 		frames:      make([]frame, opt.frame),
@@ -1038,13 +1038,7 @@ func (i *Interpreter) owns(f *frame) bool {
 // never included in the measured interpreter span.
 func (i *Interpreter) probeBoundary() {
 	for _, wd := range i.watchdogs {
-		if wd.probe == probeShadow {
-			wd.probe = probeNative
-		}
-		wd.probeCount = 0
-		wd.probeStart = time.Time{}
-		wd.probeNative = 0
-		wd.probePending = false
+		wd.Reset()
 	}
 }
 

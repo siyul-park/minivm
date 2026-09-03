@@ -7,6 +7,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
@@ -16,7 +17,7 @@ import (
 // internal/jit driver: building the compile-time-stable snapshot a Compile
 // call plans and lowers against, running Compile, and installing the
 // resulting native entries into the dispatch table. interp/tier.go owns
-// tier-up and retirement policy - counters, the watchdog, and when to
+// tier-up and retirement policy - counters, the tier.Watchdog, and when to
 // compile, cool, or retire - and drives this file's compile/install against
 // that policy. interp/deopt.go owns the native dispatch wrappers threaded
 // code hands control to and the path back into the interpreter after a trap.
@@ -259,7 +260,7 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 		// wd tracks give-up exits independent of stats: counters is a no-op
 		// under WithProfiler off (see i.counters), but a net-loss native entry
 		// must still be caught and retired without profiling enabled.
-		wd := newWatchdog(entry)
+		wd := tier.New(entry)
 		i.watchdogs[a] = wd
 		i.code[a.Addr][a.IP] = i.cycle(a, entry, stats, wd)
 	}
@@ -314,7 +315,7 @@ func (i *Interpreter) swallows(a jit.Anchor, entry jit.Entry, header int) bool {
 // It restores the shadowed threaded handler rather than cooling the function,
 // unlike retire: nothing here says the outer root fails to pay for itself,
 // only that a better root now owns the work, so the address must stay
-// instrumented and its watchdog must stay free to retire the inner root later.
+// instrumented and its tier.Watchdog must stay free to retire the inner root later.
 func (i *Interpreter) uncover(a jit.Anchor) {
 	for root, live := range i.live {
 		if root.Addr != a.Addr || root == a || live.Frontend != prof.FrontendStatic {

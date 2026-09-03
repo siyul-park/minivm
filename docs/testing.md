@@ -56,15 +56,11 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 
 | Uncovered | Why it cannot be reached publicly |
 |---|---|
-| Throughput retirement decision (`watchdog` probe, `checkRetire`/`retire` in `interp/tier.go`) | The exact timing windows are implementation detail, but actual retirement is now observable through `vm_jit_retirements_total`. Black-box tests cover both a function-entry net loss that retires and a profitable function entry that remains installed. |
 | Hot-entry counter saturation | The counter and the tier-up trigger can only reach their overflow edge by being written directly. |
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
 | Dataflow fact widening at a control-flow join (`mergeSlot` in `internal/jit`) | A slot's `refKnown`/`calleeKnown` facts are planning-internal: the backend never reads them, so nothing exports them. Their only external effect is which plans a frontend produces or rejects, which no fixture isolates from the rest of planning. |
 | Loop-invariant container selection (`hoistable` in `internal/jit`) | Reachable only through `TracePlan`, so asserting it needs a hand-built recorded trace that survives every other planning check. The recorder that produces real traces lives in `interp` and cannot be called without running the program. Covered end to end by `interp.TestARM64_HoistedContainerLoop`; the selection rule itself has no isolated public expression. |
 | A committing flush's hot-backedge codegen (`lowerer.flush` in `internal/jit/arm64`) emits no VM-slot store for a dirty carried local | The claim is about which instructions a `flush(flushCommit)` call emits into an `asm.Assembler`, which is package-private mechanics of `internal/jit/arm64` with no public accessor. It moved with the ARM64 backend from `interp/jit_test.go`'s `TestARM64_Flush` and could not become an `arm64_test` external test because it constructed the unexported `lowering`/`activation` types directly; deleted rather than kept white-box inside `internal/jit/arm64` outside its normal contract. The behavior it protected — a hot loop back-edge keeps carried locals register-authoritative — is still covered end to end by `interp.TestARM64_LoopCarriedLocals`, which observes the result rather than the emitted bytes. |
-
-Closing the first one needs either a public signal that an anchor was retired,
-or a workload that makes retirement observable through existing metrics.
 
 ### JIT Harness Migration
 

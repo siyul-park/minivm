@@ -226,7 +226,7 @@ func (l lowerer) trap(ctx *lowering, kind journal.Trap, resume int, reason prof.
 // opcode's own threaded closure once and re-enters this callable at the
 // closure's new IP (see Interpreter.bridge, dispatch). Unlike exit, it
 // carries no exit descriptor — a bridge is productive continuation, not a
-// trace-cut (see watchdog) — and the block that follows it in the plan needs
+// trace-cut (see tier.Watchdog) — and the block that follows it in the plan needs
 // no branch here: it is reached only through a fresh external entry.
 func (l lowerer) bridge(ctx *lowering, ip int) bool {
 	return l.trap(ctx, journal.TrapBridge, ip, prof.ExitNone, prof.OpcodeNone)

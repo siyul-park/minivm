@@ -43,7 +43,8 @@ internal/journal → (leaf)
 internal/codegen → instr, types, jennifer, golang.org/x/tools/imports
 internal/jit → instr, types, internal/asm, pass, analysis, prof
 internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
-interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, internal/jit/arm64, pass, analysis, prof
+internal/jit/tier → internal/jit, prof
+interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/tier, internal/journal, internal/jit/arm64, pass, analysis, prof
 debug   → interp
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -68,6 +69,7 @@ internal/cmd/codegen → internal/codegen
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
+| `internal/jit/tier/` | pure throughput/give-up retirement verdict for one installed native anchor (`Watchdog`); holds no interpreter state and never imports `interp` |
 | `internal/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `internal/codegen/` | fusion pattern catalog, its validation, and the emitters that render `interp/threaded.go`; one file per opcode domain over a shared composition engine |
 | `pass/` | generic analysis and transform infrastructure |

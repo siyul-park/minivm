@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 )
@@ -19,7 +20,7 @@ import (
 // this file dispatches; interp/tier.go owns tier-up and retirement policy.
 
 // cycle builds the native dispatch closure threaded code hands control to at
-// anchor root: it enters counters and the watchdog, seeds the journal's
+// anchor root: it enters counters and the tier.Watchdog, seeds the journal's
 // resume IP and back-edge budget, calls the native Callable, then dispatches
 // on the trap it reports. All three installed roles - function entry, module
 // entry, and loop header - share this scaffold; entry.Kind and root.Addr
@@ -56,7 +57,7 @@ import (
 // checkRetire's clearNatives is set only for EntryFunction: retiring a
 // function entry must also clear its fast-call slot in i.natives (see
 // install and retire), which a module or loop root never has.
-func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd *watchdog) func(*Interpreter) {
+func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd *tier.Watchdog) func(*Interpreter) {
 	resetFrame := entry.Kind != jit.EntryLoop
 	earlySP := entry.Kind != jit.EntryFunction
 	isFunction := entry.Kind == jit.EntryFunction
@@ -69,14 +70,13 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 	popOnReturn := isFunction || (entry.Kind == jit.EntryLoop && root.Addr != 0)
 	loopShadow := entry.Kind == jit.EntryLoop
 	return func(i *Interpreter) {
-		if wd.probe == probeShadow {
-			done := wd.shadowReach()
+		if shadow, done := wd.Reach(); shadow {
 			i.resumeShadowed(root)
 			if done {
 				if isFunction && root.Addr < len(i.natives) {
 					atomic.StorePointer(&i.natives[root.Addr], entry.Callable.Addr())
 				}
-				if wd.probeRetire {
+				if wd.Retire() {
 					i.retire(root, isFunction)
 				}
 			}
@@ -86,7 +86,7 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 		resume := uint64(0)
 		for cycles := 0; ; cycles++ {
 			stats.enter()
-			wd.enter()
+			wd.Enter()
 			ctx := i.journalPtr()
 			i.journal[journal.CellEntry] = resume
 			if resetFrame {
@@ -143,7 +143,7 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 				}
 			default:
 				stats.exit(i.journal[journal.CellExitID])
-				wd.exit(i.journal[journal.CellExitID])
+				wd.Exit(i.journal[journal.CellExitID])
 				// Record the exit as a branch so the tracer captures the leg and a
 				// hot in-loop branch recompiles the tree with the leg folded in.
 				i.exit(root)
@@ -169,7 +169,7 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 // bridge runs the one opcode native code could not lower, through its own
 // threaded closure, records the crossing on wd, and reports the IP native
 // execution may resume at. Counting here rather than at each of the three
-// wrappers keeps the tally with the crossing it measures (see watchdog).
+// wrappers keeps the tally with the crossing it measures (see tier.Watchdog).
 // The trap already handed the interpreter a fully flushed, owned operand stack
 // (see internal/jit/arm64's bridge lowering), so the closure runs exactly as
 // it would under ordinary threaded dispatch.
@@ -182,8 +182,8 @@ func (i *Interpreter) cycle(root jit.Anchor, entry jit.Entry, stats counters, wd
 // dispatch), or this dispatch has already bridged its budget of cycles — that
 // last case keeps a bridge-dense function reaching the Run loop's safepoints
 // instead of cycling here indefinitely.
-func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *watchdog, cycles int) (uint64, bool) {
-	wd.bridge()
+func (i *Interpreter) bridge(root jit.Anchor, entry jit.Entry, wd *tier.Watchdog, cycles int) (uint64, bool) {
+	wd.Bridge()
 	f := i.fr
 	if cycles >= loopBudget || f.addr != root.Addr {
 		return 0, false

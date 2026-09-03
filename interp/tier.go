@@ -3,9 +3,9 @@ package interp
 import (
 	"math"
 	"sync/atomic"
-	"time"
 
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/prof"
 )
 
@@ -14,43 +14,6 @@ type counters struct {
 	yields *prof.Counter
 	exits  []*prof.Counter
 }
-
-// watchdog counts native entries, give-up exits, and bridge cycles for one
-// installed anchor. Unlike counters, it is always live regardless of
-// i.profiler: a give-up exit is one where the entry abandoned the work it was
-// compiled for (see givesUp) rather than completing its job or leaving
-// through a healthy loop-exit edge, so a high rate of it — not a high exit rate
-// alone — is the signal that the installed entry should be retired (see
-// Interpreter.retire). A bridge cycle (see Interpreter.bridge) is productive
-// work and must never count as one, but an anchor that spends most of its
-// entries bridging pays the same deopt/re-enter cost, so it is tracked and
-// retired the same way, just through its own counter.
-type watchdog struct {
-	gaveUp  []bool // exit descriptor ID -> givesUp(reason)
-	entries uint32
-	giveUps uint32
-	bridges uint32
-
-	probe        probePhase
-	probeSize    uint32
-	probeCount   uint32
-	probeRound   uint8
-	probeStart   time.Time
-	probeNative  time.Duration
-	probeMean    float64
-	probeM2      float64
-	probeRetire  bool
-	probePending bool
-}
-
-type probePhase uint8
-
-const (
-	probeWarm probePhase = iota
-	probeNative
-	probeShadow
-	probeDecided
-)
 
 // entryWarmup is how many hot events capture an entry trace before the entry
 // compile fires. The compile is one-shot per root, so a trace has to already be
@@ -75,25 +38,6 @@ const nativeFrameLimit = 128
 // yield over many iterations while still polling for cancellation and fuel.
 const loopBudget = 1 << 13
 
-// retireWindow is the number of native entries a watchdog observes before
-// judging whether an installed anchor is paying for itself (see watchdog).
-const retireWindow = 1024
-
-// retireGiveUpThreshold is the minimum count of give-up exits (see givesUp)
-// within one retireWindow that marks the anchor as a net loss rather than a
-// healthy kernel's normal loop-exit traffic.
-const retireGiveUpThreshold = retireWindow / 4
-
-const (
-	probeWindowMin = 32
-	probeWindowMax = 256
-	probeRoundsMin = 3
-	probeRoundsMax = 6
-	probeMinGain   = 0.01
-	probeZ         = 1.96
-	probeError     = 0.05
-)
-
 func (m counters) exit(encoded uint64) {
 	if encoded == 0 {
 		return
@@ -114,145 +58,6 @@ func (m counters) yield() {
 	if m.yields != nil {
 		m.yields.Inc()
 	}
-}
-
-// newWatchdog precomputes, for each of entry's exit descriptors, whether taking
-// it means the entry gave up, so the watchdog's hot path only ever indexes a
-// []bool keyed by descriptor ID.
-func newWatchdog(entry jit.Entry) *watchdog {
-	gaveUp := make([]bool, len(entry.Exits))
-	for id, exit := range entry.Exits {
-		gaveUp[id] = givesUp(exit.Reason)
-	}
-	wd := &watchdog{gaveUp: gaveUp, probeSize: probeWindowMin}
-	if entry.Kind != jit.EntryFunction {
-		wd.probe = probeDecided
-	}
-	return wd
-}
-
-// givesUp reports whether taking this exit means the native entry abandoned the
-// work it was compiled for. A guard failure and a cold branch both say the
-// recording predicted the program wrong, and a trace cut says the code knowingly
-// stopped mid-function; each pays full bailout and re-entry for nothing. A loop
-// exit is how a loop normally ends and a terminal op is a deopt the plan
-// intended, so neither counts.
-func givesUp(reason prof.ExitReason) bool {
-	switch reason {
-	case prof.ExitTraceCut, prof.ExitColdBranch,
-		prof.ExitGuardKind, prof.ExitGuardShape, prof.ExitGuardBounds, prof.ExitGuardValue:
-		return true
-	default:
-		return false
-	}
-}
-
-// enter counts one invocation of the installed native entry.
-func (w *watchdog) enter() {
-	w.entries++
-	if w.probe == probeWarm {
-		w.probeCount++
-		if w.probeCount == probeWindowMin {
-			w.probe = probeNative
-			w.probeCount = 0
-		}
-		return
-	}
-	if w.probe != probeNative {
-		return
-	}
-	if w.probeCount == 0 {
-		w.probeStart = time.Now()
-	}
-	w.probeCount++
-	if w.probeCount == w.probeSize {
-		w.probeNative = time.Since(w.probeStart)
-		w.probe = probeShadow
-		w.probeCount = 0
-		w.probePending = true
-	}
-}
-
-// shadowReach records one shadow reach. It returns true after the final reach
-// so the caller can restore the native call-fast-path and decide the round.
-func (w *watchdog) shadowReach() bool {
-	if w.probe != probeShadow {
-		return false
-	}
-	if w.probeCount == 0 {
-		w.probeStart = time.Now()
-	}
-	w.probeCount++
-	if w.probeCount != w.probeSize {
-		return false
-	}
-	shadow := time.Since(w.probeStart)
-	native := w.probeNative
-	w.probeRound++
-	if w.probeRound == 1 {
-		w.probe = probeNative
-		w.probeCount = 0
-		return true
-	}
-	samples := w.probeRound - 1
-	diff := 1 - float64(shadow)/float64(native)
-	delta := diff - w.probeMean
-	w.probeMean += delta / float64(samples)
-	w.probeM2 += delta * (diff - w.probeMean)
-	if samples >= probeRoundsMin {
-		variance := w.probeM2 / float64(samples-1)
-		bound := probeZ * math.Sqrt(variance/float64(samples))
-		if w.probeMean-bound > probeMinGain {
-			w.probeRetire = true
-			w.probe = probeDecided
-		} else if w.probeMean+bound < -probeMinGain {
-			w.probe = probeDecided
-		} else if samples == probeRoundsMax {
-			w.probe = probeDecided
-		} else if bound > probeError {
-			w.probeSize = min(w.probeSize*2, uint32(probeWindowMax))
-			w.probe = probeNative
-		} else {
-			w.probe = probeNative
-		}
-	} else {
-		w.probe = probeNative
-	}
-	w.probeCount = 0
-	return true
-}
-
-// exit counts one give-up fallback exit. encoded is i.journal[journal.CellExitID]
-// exactly as counters.exit consumes it: the exit descriptor ID plus one, zero
-// meaning no descriptor.
-func (w *watchdog) exit(encoded uint64) {
-	if encoded == 0 {
-		return
-	}
-	id := int(encoded - 1)
-	if id >= 0 && id < len(w.gaveUp) && w.gaveUp[id] {
-		w.giveUps++
-	}
-}
-
-// bridge counts one bridge cycle (see Interpreter.bridge). It is tracked
-// separately from exit so a bridge never counts toward the give-up rate.
-func (w *watchdog) bridge() {
-	w.bridges++
-}
-
-// failed reports whether this anchor lost the window it just completed: its
-// give-up rate or bridge rate reached retireGiveUpThreshold, so it is retired
-// (see Interpreter.retire). A window shorter than retireWindow has decided
-// nothing yet; a completed one always resets every counter, so the next window
-// starts clean whichever way it went.
-func (w *watchdog) failed() bool {
-	if w.entries < retireWindow {
-		return false
-	}
-	bad := w.giveUps >= retireGiveUpThreshold || w.bridges >= retireGiveUpThreshold
-	w.entries, w.giveUps, w.bridges = 0, 0, 0
-	return bad
 }
 
 // entered records one call into the current function. Threaded handlers report
@@ -500,17 +305,23 @@ func (i *Interpreter) cool(addr int) {
 // checkRetire advances the throughput probe after a native dispatch has
 // finished, while keeping the existing give-up and bridge retirement window
 // unchanged. clearNatives is true only for a function-entry anchor.
-func (i *Interpreter) checkRetire(a jit.Anchor, wd *watchdog, clearNatives bool) {
-	if wd.probePending && clearNatives && a.Addr < len(i.natives) {
-		wd.probePending = false
+//
+// The pending native call-fast-path clear is gated only on the bounds check,
+// not on clearNatives: TakePending can only ever report true for a
+// function-entry anchor (only EntryFunction anchors run the throughput probe
+// at all, see tier.New), and clearNatives is exactly entry.Kind ==
+// EntryFunction for the same anchor at every call site, so the two are
+// already equivalent whenever the flag is set.
+func (i *Interpreter) checkRetire(a jit.Anchor, wd *tier.Watchdog, clearNatives bool) {
+	if wd.TakePending() && a.Addr < len(i.natives) {
 		atomic.StorePointer(&i.natives[a.Addr], nil)
 	}
-	if wd.probeRetire || wd.failed() {
+	if wd.Retire() {
 		i.retire(a, clearNatives)
 	}
 }
 
-// retire undoes install for anchor a once either watchdog signal finds a net
+// retire undoes install for anchor a once either tier.Watchdog signal finds a net
 // loss: the existing give-up/bridge window or the function-entry throughput
 // probe. It restores the shadowed threaded handler saved in i.exits,
 // clears a's function-entry call-fast-path slot in i.natives when

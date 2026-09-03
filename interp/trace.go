@@ -9,6 +9,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -273,7 +274,7 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.exits = map[jit.Anchor]func(*Interpreter){}
 	out.tried = map[jit.Anchor]bool{}
 	out.live = map[jit.Anchor]jit.Entry{}
-	out.watchdogs = map[jit.Anchor]*watchdog{}
+	out.watchdogs = map[jit.Anchor]*tier.Watchdog{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)
 	out.handlers = slices.Clone(i.handlers)
