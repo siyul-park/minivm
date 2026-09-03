@@ -43,10 +43,13 @@ const (
 	BackingUpval                 // deferred to a closure upval slot
 )
 
-// ElemShape is how one array element kind is stored: the concrete container
-// itab, the byte offset its data begins at, the shift from index to byte, and
-// whether the element is raw rather than boxed.
+// ElemShape is how one array element kind is stored: the element kind itself,
+// the concrete container itab, the byte offset its data begins at, the shift
+// from index to byte, and whether the element is raw rather than boxed. Kind
+// travels with the row so a caller holding only a container's itab resolves
+// the element kind from the same lookup that gives it the stride.
 type ElemShape struct {
+	Kind  types.Kind
 	Itab  uintptr
 	Base  int16
 	Scale uint8
@@ -78,30 +81,28 @@ var (
 	HeapString   = Itab(types.String(""))
 	HeapStruct   = Itab((*types.Struct)(nil))
 	HeapError    = Itab((*types.Error)(nil))
+	HeapClosure  = Itab((*types.Closure)(nil))
 )
 
 // elemShapes is the one place the element storage layout is written down.
 // arrayGet, arraySet, arrayLen, and the planner's hoist eligibility all
 // resolve through it, so a new element kind is one row rather than an edit to
 // each.
-var elemShapes = []struct {
-	kind  types.Kind
-	shape ElemShape
-}{
-	{types.KindI1, ElemShape{Itab: HeapArrayI1, Raw: true}},
-	{types.KindI8, ElemShape{Itab: HeapArrayI8, Raw: true}},
-	{types.KindI32, ElemShape{Itab: HeapArrayI32, Scale: 2, Raw: true}},
-	{types.KindI64, ElemShape{Itab: HeapArrayI64, Scale: 3, Raw: true}},
-	{types.KindF32, ElemShape{Itab: HeapArrayF32, Scale: 2, Raw: true}},
-	{types.KindF64, ElemShape{Itab: HeapArrayF64, Scale: 3, Raw: true}},
-	{types.KindRef, ElemShape{Itab: heapArrayRef, Base: int16(arrayElems)}},
+var elemShapes = []ElemShape{
+	{Kind: types.KindI1, Itab: HeapArrayI1, Raw: true},
+	{Kind: types.KindI8, Itab: HeapArrayI8, Raw: true},
+	{Kind: types.KindI32, Itab: HeapArrayI32, Scale: 2, Raw: true},
+	{Kind: types.KindI64, Itab: HeapArrayI64, Scale: 3, Raw: true},
+	{Kind: types.KindF32, Itab: HeapArrayF32, Scale: 2, Raw: true},
+	{Kind: types.KindF64, Itab: HeapArrayF64, Scale: 3, Raw: true},
+	{Kind: types.KindRef, Itab: heapArrayRef, Base: int16(arrayElems)},
 }
 
 // ElemShapeByKind resolves the storage shape of an element kind.
 func ElemShapeByKind(kind types.Kind) (ElemShape, bool) {
 	for _, row := range elemShapes {
-		if row.kind == kind {
-			return row.shape, true
+		if row.Kind == kind {
+			return row, true
 		}
 	}
 	return ElemShape{}, false
@@ -110,8 +111,8 @@ func ElemShapeByKind(kind types.Kind) (ElemShape, bool) {
 // ElemShapeByItab resolves the storage shape of a container's concrete itab.
 func ElemShapeByItab(want uintptr) (ElemShape, bool) {
 	for _, row := range elemShapes {
-		if row.shape.Itab == want {
-			return row.shape, true
+		if row.Itab == want {
+			return row, true
 		}
 	}
 	return ElemShape{}, false

@@ -65,10 +65,9 @@ func (i *Interpreter) compileSnapshot(addr int) (*jit.Input, bool) {
 	input := &jit.Input{
 		Address:   addr,
 		Function:  fn,
-		Module:    i.module,
 		Constants: i.constants,
 		Globals:   i.globalKinds(),
-		Heap:      i.heap,
+		Objects:   i.objects(),
 		Decl:      i.types,
 		// Layout is computed here, in architecture-neutral code where
 		// HostStruct, field, conversion, and coroutine are visible, so an
@@ -101,6 +100,60 @@ func (i *Interpreter) compileSnapshot(addr int) (*jit.Input, bool) {
 		input.Traces = i.tracer
 	}
 	return input, true
+}
+
+// objects resolves the heap cells a compile may name into the immutable facts
+// jit.Object records: address zero for the module body, every cell the
+// constant pool publishes, and every function the host bound at a runtime
+// address. Those are exactly the addresses a plan can reach — a static plan
+// resolves a container or a callee only through a constant, and a trace plan
+// names a callee the tracer already resolved to a function address.
+//
+// Resolving here, on the goroutine that owns the interpreter, is what lets a
+// compile run without reading heap storage execution keeps mutating: a
+// *types.Struct is recycled through a pool that rewrites its type, an array
+// header is rewritten in place, and a released slot is handed to the next
+// allocation, so neither the slot nor the object behind it is stable to read
+// from elsewhere.
+func (i *Interpreter) objects() jit.Objects {
+	objects := make(jit.Objects, len(i.constants)+len(i.dynamic)+1)
+	objects[0] = jit.Object{Fn: i.module}
+	for _, val := range i.constants {
+		if val.Kind() != types.KindRef {
+			continue
+		}
+		if object, ok := i.object(val.Ref()); ok {
+			objects[val.Ref()] = object
+		}
+	}
+	for addr := range i.dynamic {
+		if object, ok := i.object(addr); ok {
+			objects[addr] = object
+		}
+	}
+	return objects
+}
+
+// object resolves the cell at addr, and reports false when addr names none. A
+// cell carrying nothing a compile reads still resolves, because presence is
+// how a lowering tests that an address names a live cell it may retain.
+func (i *Interpreter) object(addr int) (jit.Object, bool) {
+	if addr <= 0 || addr >= len(i.heap) {
+		return jit.Object{}, false
+	}
+	var object jit.Object
+	switch val := i.heap[addr].(type) {
+	case *types.Function:
+		object.Fn = val
+	case *types.Closure:
+		object.Calls = int(val.Fn)
+	case *types.Struct:
+		object.Typ = val.Typ
+	case types.TypedArray[bool], types.TypedArray[int8], types.TypedArray[int32],
+		types.TypedArray[int64], types.TypedArray[float32], types.TypedArray[float64]:
+		object.Array = jit.Itab(val)
+	}
+	return object, true
 }
 
 // globalKinds returns the logical kinds of current global values for JIT

@@ -44,7 +44,7 @@ func TestStaticPlan(t *testing.T) {
 			Address:   1,
 			Function:  caller,
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Heap:      []types.Value{nil, nil, callee},
+			Objects:   jit.Objects{2: {Fn: callee}},
 		}
 
 		plans, err := jit.StaticPlan(input)
@@ -52,6 +52,54 @@ func TestStaticPlan(t *testing.T) {
 		require.Len(t, plans, 1)
 		require.Equal(t, uint64(0), plans[0].Blocks[0].Steps[0].Args[0])
 		require.Equal(t, 2, plans[0].Blocks[0].Steps[1].Callee)
+	})
+
+	t.Run("a constant struct resolves the field kind", func(t *testing.T) {
+		record := types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF64)))
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeF64}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.RETURN),
+			}),
+		}
+		input := &jit.Input{
+			Address:   1,
+			Function:  fn,
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   jit.Objects{2: {Typ: record.Typ}},
+		}
+
+		plans, err := jit.StaticPlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.Equal(t, types.KindF64, plans[0].Blocks[0].Steps[2].Seen.Kind())
+	})
+
+	t.Run("a constant array resolves the element kind", func(t *testing.T) {
+		array := types.TypedArray[int32]{0}
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+				instr.New(instr.RETURN),
+			}),
+		}
+		input := &jit.Input{
+			Address:   1,
+			Function:  fn,
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   jit.Objects{2: {Array: jit.Itab(array)}},
+		}
+
+		plans, err := jit.StaticPlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.Equal(t, types.KindI32, plans[0].Blocks[0].Steps[2].Seen.Kind())
 	})
 
 	t.Run("struct get resolves the field kind", func(t *testing.T) {

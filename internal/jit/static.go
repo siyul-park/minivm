@@ -10,15 +10,15 @@ import (
 
 // resolver is the read-only static evidence a static plan resolves value
 // kinds and container shapes against: the function being planned, the
-// module-wide constant, global, heap, and declared-type tables StaticPlan
-// reads from Input, and the two facts derived from them once per plan —
-// locals and declared. Every abstract-interpretation step below queries it;
-// none of it changes once StaticPlan builds it.
+// module-wide constant, global, heap-object, and declared-type tables
+// StaticPlan reads from Input, and the two facts derived from them once per
+// plan — locals and declared. Every abstract-interpretation step below
+// queries it; none of it changes once StaticPlan builds it.
 type resolver struct {
 	fn        *types.Function
 	constants []types.Boxed
 	globals   []types.Kind
-	heap      []types.Value
+	objects   Objects
 	decl      []types.Type
 
 	locals []types.Type
@@ -55,7 +55,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 		fn:        input.Function,
 		constants: input.Constants,
 		globals:   input.Globals,
-		heap:      input.Heap,
+		objects:   input.Objects,
 		decl:      input.Decl,
 		locals:    localTypes(input.Function),
 		declared:  declared,
@@ -108,7 +108,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 			if len(flow) >= 2 {
 				switch inst.Opcode() {
 				case instr.STRUCT_GET:
-					if kind, ok := structFieldKind(static.heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
+					if kind, ok := static.structFieldKind(flow[len(flow)-2], flow[len(flow)-1]); ok {
 						step.Seen = types.Zero(kind)
 					}
 				case instr.ARRAY_GET:
@@ -461,10 +461,8 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 		if value.Kind == types.KindRef {
 			value.Backing = BackingConst
 			value.Ref, value.refKnown = r.constants[idx].Ref(), true
-			if value.Ref > 0 && value.Ref < len(r.heap) {
-				if _, ok := r.heap[value.Ref].(*types.Function); ok {
-					value.callee, value.calleeKnown = value.Ref, true
-				}
+			if value.Ref > 0 && r.objects.Function(value.Ref) != nil {
+				value.callee, value.calleeKnown = value.Ref, true
 			}
 		}
 		push(value)
@@ -512,7 +510,7 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 		if len(*state) < 2 {
 			return false
 		}
-		kind, ok := structFieldKind(r.heap, (*state)[len(*state)-2], (*state)[len(*state)-1])
+		kind, ok := r.structFieldKind((*state)[len(*state)-2], (*state)[len(*state)-1])
 		if !ok || !pop(2) {
 			return false
 		}
@@ -523,11 +521,11 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 			return false
 		}
 		callee := (*state)[len(*state)-1]
-		if !callee.calleeKnown || callee.callee <= 0 || callee.callee >= len(r.heap) {
+		if !callee.calleeKnown || callee.callee <= 0 {
 			return false
 		}
-		target, ok := r.heap[callee.callee].(*types.Function)
-		if !ok || target.Typ == nil || !pop(1+len(target.Typ.Params)) {
+		target := r.objects.Function(callee.callee)
+		if target == nil || target.Typ == nil || !pop(1+len(target.Typ.Params)) {
 			return false
 		}
 		if inst.Opcode() == instr.CALL {
@@ -634,11 +632,11 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 			return false
 		}
 		callee := (*state)[len(*state)-1]
-		if !callee.refKnown || callee.Ref <= 0 || callee.Ref >= len(r.heap) {
+		if !callee.refKnown || callee.Ref <= 0 {
 			return false
 		}
-		target, ok := r.heap[callee.Ref].(*types.Function)
-		if !ok || !pop(1+len(target.Captures)) {
+		target := r.objects.Function(callee.Ref)
+		if target == nil || !pop(1+len(target.Captures)) {
 			return false
 		}
 		push(Slot{Kind: types.KindRef})
@@ -683,45 +681,30 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 }
 
 // arrayKind resolves an array's element kind. A container whose identity is
-// known resolves from the live heap cell; otherwise the declared array type
-// answers, exactly as a declared struct type answers structFieldKind. Both
-// are hints: the lowering's runtime tag and itab guards verify the shape
-// before any access, so a slot declared as an array that currently holds
-// null or a differently shaped array deopts instead of reading it.
+// known resolves from the cell the snapshot recorded there; otherwise the
+// declared array type answers, exactly as a declared struct type answers
+// structFieldKind. Both are hints: the lowering's runtime tag and itab guards
+// verify the shape before any access, so a slot declared as an array that
+// currently holds null or a differently shaped array deopts instead of being
+// read.
 func (r resolver) arrayKind(array Slot) (types.Kind, bool) {
-	if !array.refKnown || array.Ref <= 0 || array.Ref >= len(r.heap) {
+	if !array.refKnown || array.Ref <= 0 {
 		if r.declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
 			return array.atyp.ElemKind, true
 		}
 		return 0, false
 	}
-	switch r.heap[array.Ref].(type) {
-	case types.TypedArray[bool]:
-		return types.KindI1, true
-	case types.TypedArray[int8]:
-		return types.KindI8, true
-	case types.TypedArray[int32]:
-		return types.KindI32, true
-	case types.TypedArray[int64]:
-		return types.KindI64, true
-	case types.TypedArray[float32]:
-		return types.KindF32, true
-	case types.TypedArray[float64]:
-		return types.KindF64, true
-	default:
-		return 0, false
-	}
+	shape, ok := ElemShapeByItab(r.objects[array.Ref].Array)
+	return shape.Kind, ok
 }
 
 // structFieldKind resolves a STRUCT_GET result kind statically: the container
-// must carry a declared struct type (or reference a known heap struct) and
-// the field index must be a known in-bounds constant.
-func structFieldKind(heap []types.Value, container, index Slot) (types.Kind, bool) {
+// must carry a declared struct type (or reference a struct cell the snapshot
+// resolved) and the field index must be a known in-bounds constant.
+func (r resolver) structFieldKind(container, index Slot) (types.Kind, bool) {
 	typ := container.styp
-	if typ == nil && container.refKnown && container.Ref > 0 && container.Ref < len(heap) {
-		if s, ok := heap[container.Ref].(*types.Struct); ok {
-			typ = s.Typ
-		}
+	if typ == nil && container.refKnown && container.Ref > 0 {
+		typ = r.objects[container.Ref].Typ
 	}
 	if typ == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(typ.Fields) {
 		return 0, false

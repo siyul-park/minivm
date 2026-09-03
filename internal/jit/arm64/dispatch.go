@@ -500,18 +500,14 @@ func (l lowerer) fuse(ctx *lowering, ops []jit.Step, idx int) int {
 		return 0
 	}
 	ref := ctx.constants[constant].Ref()
-	if ref < 0 || ref >= len(ctx.heap) {
+	if ref <= 0 {
 		return 0
 	}
 	callee := ref
-	switch fn := ctx.heap[ref].(type) {
-	case *types.Closure:
-		callee = int(fn.Fn)
-	case *types.Function:
-	default:
-		return 0
+	if calls := ctx.objects[ref].Calls; calls != 0 {
+		callee = calls
 	}
-	if callee != consumer.Callee || jit.FunctionAt(ctx.module, ctx.heap, callee) == nil {
+	if callee != consumer.Callee || ctx.objects.Function(callee) == nil {
 		return 0
 	}
 	ctx.push(value{fn: callee, kind: types.KindRef, backing: jit.BackingConst, ref: ref})
@@ -796,17 +792,14 @@ func (l lowerer) constGetKnown(ctx *lowering, op jit.Step) bool {
 		return l.constGet(ctx, op)
 	}
 	ref := boxed.Ref()
-	if ref <= 0 || ref >= len(ctx.heap) {
+	if ref <= 0 {
 		return false
 	}
-	switch ctx.heap[ref].(type) {
-	case types.TypedArray[bool], types.TypedArray[int8], types.TypedArray[int32],
-		types.TypedArray[float32], types.TypedArray[float64]:
-		ctx.push(value{kind: types.KindRef, backing: jit.BackingConst, ref: ref})
-		return true
-	default:
+	if _, ok := ctx.elemShape(ref); !ok {
 		return l.constGet(ctx, op)
 	}
+	ctx.push(value{kind: types.KindRef, backing: jit.BackingConst, ref: ref})
+	return true
 }
 
 // constGet pushes a scalar constant as an unboxed immediate. Refs retain
@@ -836,7 +829,7 @@ func (l lowerer) constGet(ctx *lowering, op jit.Step) bool {
 		return true
 	case types.KindRef:
 		ref := v.Ref()
-		if ref < 0 || ref >= len(ctx.heap) {
+		if _, live := ctx.objects[ref]; !live {
 			return false
 		}
 		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)

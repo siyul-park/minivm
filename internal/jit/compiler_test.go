@@ -1,12 +1,15 @@
 package jit_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	asmarm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/arm64"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 
 	"github.com/stretchr/testify/require"
@@ -98,6 +101,16 @@ func loopInput(t *testing.T) (*jit.Input, jit.Plan, jit.Plan) {
 	return input, entry, header
 }
 
+// newNativeCompiler builds a compiler over the real ARM64 arch and backend,
+// so a Compile through it exercises every lowering that reads an Input.
+func newNativeCompiler(t *testing.T) *jit.Compiler {
+	t.Helper()
+	c, err := jit.New(asmarm64.New(), arm64.New())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
+	return c
+}
+
 func TestNew(t *testing.T) {
 	var attempts []attempt
 	c := newTestCompiler(t, pressureMachine{attempts: &attempts})
@@ -151,5 +164,82 @@ func TestCompiler_Compile(t *testing.T) {
 			c.Compile(input, header.Anchor)
 			require.Equal(t, tt.want, attempts)
 		})
+	}
+}
+
+// TestCompiler_CompileConcurrentHeap pins the property that makes moving
+// compilation off the interpreter's goroutine possible: an Input carries
+// facts resolved out of the heap, not the heap itself, so a Compile neither
+// observes nor races the mutation execution keeps performing on it. The
+// mutator reproduces both hazards the live view had - a released slot handed
+// to the next allocation, and a slice that grows out from under a reader -
+// against the very cells this snapshot was resolved from.
+func TestCompiler_CompileConcurrentHeap(t *testing.T) {
+	callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal([]instr.Instruction{
+		instr.New(instr.I32_CONST, 1),
+		instr.New(instr.RETURN),
+	})}
+	caller := &types.Function{
+		Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		}),
+	}
+
+	array := types.TypedArray[int32]{7}
+	heap := []types.Value{types.Null, caller, callee, array}
+	constants := []types.Boxed{types.BoxRef(2), types.BoxRef(3)}
+
+	// Resolving the cells a compile may name is the interpreter's step, taken
+	// on its own goroutine before any compile starts; this loop is that step
+	// written out.
+	objects := jit.Objects{}
+	for _, val := range constants {
+		switch cell := heap[val.Ref()].(type) {
+		case *types.Function:
+			objects[val.Ref()] = jit.Object{Fn: cell}
+		case types.TypedArray[int32]:
+			objects[val.Ref()] = jit.Object{Array: jit.Itab(cell)}
+		}
+	}
+	input := &jit.Input{Address: 1, Function: caller, Constants: constants, Objects: objects}
+
+	want := newNativeCompiler(t).Compile(input, jit.Anchor{Addr: 1})
+	require.Equal(t, prof.CompileOutcomeEmitted, want.Outcome, "the fixture must reach the backend for the concurrent runs to prove anything")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for n := 0; n < 4096; n++ {
+			array[0] = int32(n)
+			heap[2], heap[3] = types.Null, types.Null
+			heap = append(heap, types.Null)
+			heap[2], heap[3] = callee, array
+		}
+	}()
+
+	results := make([]jit.Result, 4)
+	var wg sync.WaitGroup
+	for idx := range results {
+		compiler := newNativeCompiler(t)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[idx] = compiler.Compile(input, jit.Anchor{Addr: 1})
+		}()
+	}
+	wg.Wait()
+	<-done
+
+	for _, got := range results {
+		require.Equal(t, want.Outcome, got.Outcome)
+		require.Equal(t, want.Frontend, got.Frontend)
+		require.Len(t, got.Code.Entries, len(want.Code.Entries))
 	}
 }

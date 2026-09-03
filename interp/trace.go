@@ -529,6 +529,12 @@ func (t *tracer) op(i *Interpreter, op instr.Opcode, startFP int) jit.Record {
 	case instr.CALL, instr.RETURN_CALL:
 		if i.sp > 0 {
 			st.Seen = i.stack[i.sp-1]
+			// The callee operand's shape is what tells a lowering a closure
+			// was called rather than a plain function: finish records the
+			// frame the call entered, which for a closure is already its own
+			// Fn, so the two together resolve the target without the compiler
+			// reading the closure cell back out of the live heap.
+			st.Shape = t.shape(i, i.stack[i.sp-1])
 		}
 	}
 	return st

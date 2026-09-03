@@ -74,7 +74,7 @@ func (f *activation) isLoadedAt(idx int) bool {
 }
 
 func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
-	target := jit.FunctionAt(ctx.module, ctx.heap, op.Callee)
+	target := ctx.objects.Function(op.Callee)
 	if target == nil || target.Typ == nil || ctx.count() < 1 {
 		return false
 	}
@@ -236,7 +236,7 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 	if v.kind != types.KindRef {
 		return false
 	}
-	target := jit.FunctionAt(ctx.module, ctx.heap, op.Callee)
+	target := ctx.objects.Function(op.Callee)
 	if target == nil || target.Typ == nil {
 		return false
 	}
@@ -254,14 +254,18 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 			return false
 		}
 		wantRef := op.Seen.Ref()
-		closureRef = wantRef
-		if wantRef < 0 || wantRef >= len(ctx.heap) {
+		if wantRef <= 0 {
 			return false
 		}
-		if cl, ok := ctx.heap[wantRef].(*types.Closure); ok {
-			if int(cl.Fn) != op.Callee {
-				return false
-			}
+		// The recorded shape is what says a closure was called. Callee is the
+		// frame the recorded CALL actually entered, so a closure's own Fn is
+		// already recorded there and needs no second lookup; any other
+		// observed value must be the callee function itself. A host call
+		// records the caller's own address as Callee and fails that test,
+		// which is why the shape has to be positive evidence rather than
+		// "the operand differs from Callee".
+		if op.Shape.Itab == jit.HeapClosure {
+			closureRef = wantRef
 		} else if wantRef != op.Callee {
 			return false
 		}
@@ -279,10 +283,7 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 		}
 	}
 	if len(target.Captures) > 0 {
-		if closureRef <= 0 || closureRef >= len(ctx.heap) {
-			return false
-		}
-		if _, ok := ctx.heap[closureRef].(*types.Closure); !ok {
+		if closureRef <= 0 {
 			return false
 		}
 	} else {
@@ -552,7 +553,7 @@ func (l lowerer) tailTarget(ctx *lowering, op jit.Step) (*types.Function, int, b
 	if v.kind != types.KindRef {
 		return nil, 0, false
 	}
-	target := jit.FunctionAt(ctx.module, ctx.heap, op.Callee)
+	target := ctx.objects.Function(op.Callee)
 	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
 		return nil, 0, false
 	}
@@ -565,11 +566,10 @@ func (l lowerer) tailTarget(ctx *lowering, op jit.Step) (*types.Function, int, b
 		if op.Seen.Kind() != types.KindRef {
 			return nil, 0, false
 		}
+		// target already proves Callee publishes a function, so the observed
+		// operand naming that same address is the whole check.
 		wantRef := op.Seen.Ref()
-		if wantRef != op.Callee || wantRef < 0 || wantRef >= len(ctx.heap) {
-			return nil, 0, false
-		}
-		if _, ok := ctx.heap[wantRef].(*types.Function); !ok {
+		if wantRef <= 0 || wantRef != op.Callee {
 			return nil, 0, false
 		}
 		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)

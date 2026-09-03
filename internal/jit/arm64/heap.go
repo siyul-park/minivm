@@ -29,27 +29,14 @@ func (l lowerer) arrayGetKnown(ctx *lowering, op jit.Step) bool {
 	}
 	marker := ctx.values[len(ctx.values)-2]
 	constant := marker.ref
-	if marker.backing != jit.BackingConst || constant <= 0 || constant >= len(ctx.heap) {
+	if marker.backing != jit.BackingConst || constant <= 0 {
 		return false
 	}
-
-	var kind types.Kind
-	var want uintptr
-	var scale uint8
-	switch value := ctx.heap[constant].(type) {
-	case types.TypedArray[bool]:
-		kind, want = types.KindI1, jit.Itab(value)
-	case types.TypedArray[int8]:
-		kind, want = types.KindI8, jit.Itab(value)
-	case types.TypedArray[int32]:
-		kind, want, scale = types.KindI32, jit.Itab(value), 2
-	case types.TypedArray[float32]:
-		kind, want, scale = types.KindF32, jit.Itab(value), 2
-	case types.TypedArray[float64]:
-		kind, want, scale = types.KindF64, jit.Itab(value), 3
-	default:
+	shape, ok := ctx.elemShape(constant)
+	if !ok {
 		return false
 	}
+	kind, want, scale := shape.Kind, shape.Itab, shape.Scale
 
 	pre := ctx.pre()
 	if !l.flush(ctx, flushSnapshot) {

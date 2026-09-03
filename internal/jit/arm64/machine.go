@@ -36,10 +36,9 @@ type lowering struct {
 	assembler *asm.Assembler
 	blocks    []jit.Block
 	labels    map[int]asm.Label
-	module    *types.Function
 	constants []types.Boxed
 	globals   []types.Kind
-	heap      []types.Value
+	objects   jit.Objects
 	scratch   []asm.PReg
 	layout    jit.Layout
 	head      asm.Label
@@ -133,11 +132,23 @@ func (ctx *lowering) sp() int {
 }
 
 func (ctx *lowering) opcode(ip int) int {
-	fn := jit.FunctionAt(ctx.module, ctx.heap, ctx.frame().addr)
+	fn := ctx.objects.Function(ctx.frame().addr)
 	if fn == nil || ip < 0 || ip >= len(fn.Code) {
 		return prof.OpcodeNone
 	}
 	return int(fn.Code[ip])
+}
+
+// elemShape resolves the element storage of the primitive typed array the
+// snapshot recorded at addr, and reports false where a constant container has
+// no native load: a ref array carries no primitive element, and an i64 element
+// may be heap-promoted, which is a ref rather than a value (see guardI64).
+func (ctx *lowering) elemShape(addr int) (jit.ElemShape, bool) {
+	shape, ok := jit.ElemShapeByItab(ctx.objects[addr].Array)
+	if !ok || shape.Kind == types.KindI64 {
+		return jit.ElemShape{}, false
+	}
+	return shape, true
 }
 
 // frame returns the innermost (currently executing) frame.
@@ -297,10 +308,9 @@ func (l lowerer) newLowering(input *jit.Input, a *asm.Assembler) *lowering {
 	ctx := &lowering{
 		assembler: a,
 		labels:    map[int]asm.Label{},
-		module:    input.Module,
 		constants: input.Constants,
 		globals:   input.Globals,
-		heap:      input.Heap,
+		objects:   input.Objects,
 		scratch:   l.scratch[:scratchCount],
 		layout:    input.Layout,
 		head:      a.Label(),
