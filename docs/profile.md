@@ -72,13 +72,13 @@ The threshold is independent of `WithTick`.
 
 Back-edge reports occur every eight iterations with a rotating phase. This avoids systematically observing only the last iteration of short loops.
 
-Pool members use the same threshold. A shared cache aggregates hot events so only one member compiles a root at a time.
+Pool members use the same threshold. The shared `compile.Queue` aggregates hot events across members and admits one build per function at a time, so only one member compiles a root.
 
 ## Cooling
 
 Once all entry and loop roots for a function have been attempted, the function is cooled. Cooling removes further hotness instrumentation and capture overhead while leaving any installed native code active.
 
-A later shared-module installation can reactivate a cold function.
+A later installation of code a peer published can reactivate a cold function.
 
 ## REPL
 

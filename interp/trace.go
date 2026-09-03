@@ -253,16 +253,15 @@ func (t *tracer) capture(i *Interpreter, a jit.Anchor) (result captureResult) {
 
 func (t *tracer) clone(i *Interpreter) Interpreter {
 	out := *i
-	out.compiler = nil
-	out.cache = nil
 	out.tracer = nil
 	out.hook = nil
 	out.speculative = true
-	out.threshold = -1
 	// A recording walk must not tier up. The exact tables it steps are threaded
 	// without the entry hook, but out starts as a shallow copy, so entries still
-	// aliases the live counters; dropping both the slice and the trigger keeps a
-	// recorded call from ever writing them.
+	// aliases the live counters and queue/store still alias the shared ones;
+	// dropping the slice and the trigger keeps a recorded call from writing the
+	// counters, and a negative threshold makes every queue query answer no.
+	out.threshold = -1
 	out.trigger = 0
 	out.entries = nil
 

@@ -275,7 +275,17 @@ func TestPool_Get(t *testing.T) {
 		require.NoError(t, p.Close())
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
-		require.Equal(t, float64(1), attempts)
+		// The loop header and the module entry are each attempted once across
+		// every run: the hot exit itself is recognized and never rebuilt.
+		require.Equal(t, float64(2), attempts)
+		for _, metric := range metrics.Metrics() {
+			if metric.Name != "vm_jit_compiles_total" {
+				continue
+			}
+			for _, label := range metric.Labels {
+				require.NotEqual(t, "side-exit", label.Value)
+			}
+		}
 	})
 
 	t.Run("accounts only shared cache winners across flush and recompile", func(t *testing.T) {

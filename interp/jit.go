@@ -5,8 +5,8 @@ import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
@@ -15,40 +15,59 @@ import (
 
 // This file drives an Interpreter against the architecture-neutral
 // internal/jit driver: building the compile-time-stable snapshot a Compile
-// call plans and lowers against, running Compile, and installing the
-// resulting native entries into the dispatch table. interp/tier.go owns
-// tier-up and retirement policy - counters, the tier.Watchdog, and when to
-// compile, cool, or retire - and drives this file's compile/install against
-// that policy. interp/deopt.go owns the native dispatch wrappers threaded
-// code hands control to and the path back into the interpreter after a trap.
+// call plans and lowers against, serving a claimed compile request, and
+// installing the resulting native entries into the dispatch table.
+// internal/jit/compile owns the request queue serve is claimed from and the
+// store it publishes into, both of which a pool shares and a solo interpreter
+// keeps private. interp/tier.go owns tier-up and retirement policy - counters,
+// the tier.Watchdog, and when to request a compile, cool, or retire - and
+// drives this file against that policy. interp/deopt.go owns the native
+// dispatch wrappers threaded code hands control to and the path back into the
+// interpreter after a trap.
 
-// compile lowers traces already recorded for root and installs the resulting
-// native entries. Recording belongs to the hot-event hooks and side-exit
-// handling because only those paths hold the exact runtime state for their
-// anchor.
-func (i *Interpreter) compile(root jit.Anchor) error {
+// serve compiles the claimed request, publishes what it emitted for everyone
+// sharing the store, and installs it here.
+func (i *Interpreter) serve(req compile.Request) error {
+	root := req.Root
+	i.tried[root] = true
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	if i.compiler == nil {
-		compiler, err := newCompiler()
-		if err != nil {
-			i.samples.AddMetric("vm_jit_errors_total", 1)
-			i.recordCompile(prof.TriggerHot, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
-			return err
-		}
-		i.compiler = compiler
+
+	// Every path ends the claim, so the next winner can take the queue whether
+	// this build emitted code or not.
+	var code *jit.Code
+	defer func() { i.queue.Done(root.Addr, code) }()
+
+	compiler, err := newCompiler()
+	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
+		i.recordCompile(req.Trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
+		return err
 	}
-	if i.compiler == nil {
-		i.recordCompile(prof.TriggerHot, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
+	if compiler == nil {
+		i.recordCompile(req.Trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
-	result := i.attempt(i.compiler, root, prof.TriggerHot)
+
+	result := jit.Result{Anchor: root, Outcome: prof.CompileOutcomeEmpty, Reason: prof.CompileReasonNoInput}
+	if input, ok := i.compileSnapshot(root.Addr); ok {
+		result = compiler.Compile(input, root)
+	}
+	i.recordCompile(req.Trigger, result)
 	if result.Err != nil {
-		return result.Err
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 	}
 	if result.Code == nil {
-		return nil
+		_ = compiler.Close()
+		return result.Err
 	}
-	i.install(result.Code, true)
+
+	// The store takes over the buffer the callables were linked into, because
+	// they stay executable for as long as anyone sharing the store can still
+	// dispatch into them.
+	code = result.Code
+	i.account(code)
+	i.store.Publish(code, compiler.Buffer())
+	i.sync()
 	return nil
 }
 
@@ -176,28 +195,11 @@ func (i *Interpreter) globalKinds() []types.Kind {
 	return kinds
 }
 
-// attempt runs one Compile, records the outcome under trigger, and counts any
-// compile error. Acquisition and delivery of the result stay with the caller.
-func (i *Interpreter) attempt(c *jit.Compiler, root jit.Anchor, trigger prof.Trigger) jit.Result {
-	input, ok := i.compileSnapshot(root.Addr)
-	result := jit.Result{Anchor: root, Outcome: prof.CompileOutcomeEmpty, Reason: prof.CompileReasonNoInput}
-	if ok {
-		result = c.Compile(input, root)
-	}
-	i.recordCompile(trigger, result)
-	if result.Err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
-	}
-	return result
-}
-
-// install accounts a successful Compile and rewires the dispatch table: a
-// trace entry replaces the function's first opcode handler and keeps the
-// shadowed threaded handler for guard fallback.
-func (i *Interpreter) install(mod *jit.Code, account bool) {
-	if account {
-		i.account(mod)
-	}
+// install rewires the dispatch table for every entry mod emitted: a trace
+// entry replaces the function's first opcode handler and keeps the shadowed
+// threaded handler for guard fallback. Accounting belongs to serve, which
+// knows whether this interpreter is the one that compiled mod.
+func (i *Interpreter) install(mod *jit.Code) {
 	for a, entry := range mod.Entries {
 		if a.Addr < 0 || a.Addr >= len(i.code) || a.IP < 0 || a.IP >= len(i.code[a.Addr]) || entry.Callable == nil {
 			continue
@@ -266,14 +268,26 @@ func (i *Interpreter) install(mod *jit.Code, account bool) {
 	}
 }
 
-// covered reports whether the static plan about to install at a would swallow
-// a loop root of the same function that is already dispatching. Only a static
-// plan can lose here: the trace frontend anchors a nested loop as an edge to
-// that root's own entry instead of inlining it, so a recorded plan never takes
-// an inner root's work away in the first place.
+// covered reports whether the static plan about to install at a would take
+// work away from a better root already dispatching: the recording at a itself,
+// or a loop root of the same function that a swallows. Only a static plan can
+// lose here: the trace frontend anchors a nested loop as an edge to that
+// root's own entry instead of inlining it, so a recorded plan never takes an
+// inner root's work away in the first place.
+//
+// A side exit asks for its root to be rebuilt with the exit's leg folded in,
+// and that answer is only an improvement while it is still a recording. When
+// the trace frontend can no longer plan the tree the compiler falls through to
+// the static plan (see internal/jit/compiler.go's frontend order), and
+// installing that would swap the running recording - folded legs, hoisted
+// container - for the fallback that has neither. Module code is excluded for
+// the same reason swallows excludes it.
 func (i *Interpreter) covered(a jit.Anchor, entry jit.Entry) bool {
 	if entry.Frontend != prof.FrontendStatic {
 		return false
+	}
+	if live, ok := i.live[a]; ok && a.Addr != 0 && live.Frontend == prof.FrontendTrace {
+		return true
 	}
 	for root, live := range i.live {
 		if root.Addr != a.Addr || root == a || live.Kind != jit.EntryLoop {
@@ -334,56 +348,17 @@ func (i *Interpreter) uncover(a jit.Anchor) {
 	}
 }
 
+// sync installs every code published since this interpreter last looked,
+// whether it compiled that code itself or a peer sharing the store did.
 func (i *Interpreter) sync() {
-	if i.cache == nil {
-		return
-	}
-	modules := i.cache.modules.Load()
-	if modules == nil {
-		return
-	}
-	for i.gen < len(*modules) {
-		i.install((*modules)[i.gen], false)
+	for {
+		code, ok := i.store.Code(i.gen)
+		if !ok {
+			return
+		}
+		i.install(code)
 		i.gen++
 	}
-}
-
-func (i *Interpreter) shared(root jit.Anchor, trigger prof.Trigger) error {
-	addr := root.Addr
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	compiler, err := newCompiler()
-	if err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
-		i.recordCompile(trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
-		i.cache.fail(addr)
-		return err
-	}
-	if compiler == nil {
-		i.recordCompile(trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
-		i.cache.fail(addr)
-		return nil
-	}
-	result := i.attempt(compiler, root, trigger)
-	if result.Err != nil {
-		_ = compiler.Close()
-		i.cache.fail(addr)
-		return result.Err
-	}
-	if result.Code == nil {
-		_ = compiler.Close()
-		i.cache.fail(addr)
-		return nil
-	}
-	mod := result.Code
-	i.account(mod)
-	var buf *asm.Buffer
-	if len(mod.Entries) > 0 {
-		buf = compiler.Buffer()
-	} else {
-		_ = compiler.Close()
-	}
-	i.cache.publish(addr, mod, buf)
-	return nil
 }
 
 func (i *Interpreter) counters(a jit.Anchor, entry jit.Entry) counters {

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/prof"
 )
@@ -68,7 +69,9 @@ func (i *Interpreter) entered() {
 	}
 }
 
-// hit records one hot event.
+// hit records one hot event. The count is this interpreter's own, and gates
+// entry capture and cooling; the queue keeps the count everyone sharing it
+// raised, and gates compilation.
 func (i *Interpreter) hit() error {
 	addr := i.fr.addr
 	if i.trigger == 0 || addr < 0 || addr >= len(i.entries) {
@@ -80,42 +83,53 @@ func (i *Interpreter) hit() error {
 		i.entries[addr] = hits
 	}
 	if hits <= entryWarmup || hits >= i.trigger {
-		if err := i.warm(addr, hits); err != nil {
-			return err
-		}
+		i.warm(addr, hits)
 	}
-	if i.cache != nil {
-		request, ok := i.cache.claim(addr, i.threshold)
-		if ok {
-			return i.shared(request.root, request.trigger)
-		}
+	if !i.queue.Hit(addr, i.threshold) {
+		return nil
 	}
-	return nil
+	return i.claim(addr)
 }
 
-// warm handles entry tracing and compilation once an event reaches the warmup
-// window or threshold. Entry capture records the shallowest runtime state.
+// warm handles entry tracing and requests the entry compile once an event
+// reaches the warmup window or threshold. Entry capture records the shallowest
+// runtime state.
 //
 // Only an event raised at the entry itself may capture. A back edge is a hot
 // event for the same function but stands mid-body, and recording the entry root
 // from there replays the entry instructions against loop-carried locals - a
 // state the function never reaches on entry, whose trace then plans nothing.
-func (i *Interpreter) warm(addr int, hits uint64) error {
+func (i *Interpreter) warm(addr int, hits uint64) {
 	if i.isCold(addr) {
-		return nil
+		return
 	}
 	root := jit.Anchor{Addr: addr}
 	if hits <= entryWarmup && i.fr.ip == 0 {
 		i.tracer.capture(i, root)
 	}
-	if hits >= i.trigger && i.cache == nil && !i.tried[root] && i.settled(addr, hits) {
+	if hits >= i.trigger && !i.tried[root] && i.settled(addr, hits) {
 		i.tried[root] = true
-		if err := i.compile(root); err != nil {
-			return err
-		}
+		i.queue.Add(compile.Request{Root: root, Trigger: prof.TriggerHot})
 	}
 	i.checkCool(addr, root)
-	return nil
+}
+
+// request queues a compile request and serves it here when this interpreter
+// wins the queue for its function. A solo interpreter always wins, because
+// nothing else holds its queue.
+func (i *Interpreter) request(req compile.Request) error {
+	i.queue.Add(req)
+	return i.claim(req.Root.Addr)
+}
+
+// claim serves the next request queued for addr, or does nothing when another
+// interpreter sharing the queue is already building addr.
+func (i *Interpreter) claim(addr int) error {
+	req, ok := i.queue.Claim(addr, i.threshold)
+	if !ok {
+		return nil
+	}
+	return i.serve(req)
 }
 
 // settled reports whether addr's entry root is ready to be compiled. A loop
@@ -219,11 +233,7 @@ func (i *Interpreter) trace(f *frame) error {
 	if result.trace == nil {
 		return nil
 	}
-	if i.cache != nil {
-		i.cache.request(request{root: root, trigger: prof.TriggerHot})
-		return nil
-	}
-	if err := i.compile(root); err != nil {
+	if err := i.request(compile.Request{Root: root, Trigger: prof.TriggerHot}); err != nil {
 		return err
 	}
 	// A loop header reached on the iteration that exits records the path out of
@@ -240,49 +250,22 @@ func (i *Interpreter) trace(f *frame) error {
 	return nil
 }
 
+// exit counts one arrival at a native side exit and, every time the count
+// crosses the threshold again, asks for its root to be rebuilt with the exit's
+// leg folded in. A rebuild is retried rather than attempted once, because the
+// trace tree keeps learning: a rebuild the tree could not plan at the first
+// crossing regularly plans at a later one.
+//
+// A side-exit request is the one request the queue never discards as already
+// built, because rebuilding a root that is already native is its whole point.
 func (i *Interpreter) exit(root jit.Anchor) {
 	hits := i.tracer.branch(i, root, jit.Anchor{Addr: i.fr.addr, IP: i.fr.ip})
-	if i.cache != nil {
-		if hits < exitThreshold || hits%exitThreshold != 0 {
-			return
-		}
-		// Queue a side-exit build request without disturbing an active owner.
-		i.cache.request(request{root: root, trigger: prof.TriggerSideExit})
+	if hits < exitThreshold || hits%exitThreshold != 0 {
 		return
 	}
-	if hits != exitThreshold {
-		return
+	if err := i.request(compile.Request{Root: root, Trigger: prof.TriggerSideExit}); err != nil {
+		panic(err)
 	}
-	if i.compiler == nil {
-		return
-	}
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	result := i.attempt(i.compiler, root, prof.TriggerSideExit)
-	if result.Err != nil {
-		panic(result.Err)
-	}
-	if result.Code == nil {
-		return
-	}
-	// A side exit asks for this root to be rebuilt with the exit's leg folded
-	// in, and the answer is only an improvement if it is still a recording.
-	// When the trace frontend cannot plan the tree any more the compiler falls
-	// through to the static plan (see internal/jit/compiler.go's frontend
-	// order), and installing that would swap the running recording - folded
-	// legs, hoisted container - for the fallback that has neither.
-	//
-	// Module code keeps the behaviour it had. Its loop root competes with a
-	// whole-module plan that is the program rather than one call of it, and
-	// holding the recording there costs Control_Sieve about 10%.
-	if live, ok := i.live[root]; ok && root.Addr != 0 && live.Frontend == prof.FrontendTrace {
-		if rebuilt, ok := result.Code.Entries[root]; ok && rebuilt.Frontend != prof.FrontendTrace {
-			// The code was still emitted, so it is still accounted; only the
-			// dispatch slot stays with the recording that already owns it.
-			i.account(result.Code)
-			return
-		}
-	}
-	i.install(result.Code, true)
 }
 
 // cool permanently stops instrumenting addr once every compilation root has

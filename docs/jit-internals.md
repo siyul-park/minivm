@@ -18,6 +18,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | architecture-neutral compiler IR (plan graph, dataflow facts, layout tables, recorded-trace data) | `internal/jit/` |
 | architecture-neutral compiler driver | `internal/jit` |
 | runtime tier-up mechanism (hot-event sampling, tracing, compile/install/cool/retire) | `interp/tier.go` |
+| compile request queue and published-code store shared by interpreters | `internal/jit/compile` |
 | throughput/give-up retirement verdict (pure, no interpreter state) | `internal/jit/tier` |
 | ARM64 lowering | `internal/jit/arm64/` |
 | ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
@@ -77,29 +78,50 @@ Function entry callables tear down their frame on return. Module entry callables
 
 ## Solo and Pool JIT
 
-Solo interpreters own a private `tracer` and lazily own a private `compiler`
-and `asm.Buffer`.
+Solo and pooled interpreters run one compile path. Every `Interpreter` holds a
+`compile.Queue` and a `compile.Store` (`internal/jit/compile`): the queue
+decides which root is built next, and the store holds what those builds
+publish. A solo interpreter owns both privately and simply never contends for
+its own queue; `Pool` is the only public seam that shares them.
 
-`Pool` is the only public shared-JIT seam. It owns one private `cache` and one
-private `tracer`; borrowed interpreters attach to that state and keep their
-runtime stacks, heaps, dispatch tables, and installed wrappers local.
+`Pool` owns one queue, one store, and one `tracer`. Borrowed interpreters
+attach to that state and keep their runtime stacks, heaps, dispatch tables, and
+installed wrappers local. The published native code is shared; the dispatch
+table is not.
 
-The shared cache provides:
+`interp` raises a request wherever it learns a root is worth building - the
+entry root from `warm`, a recorded loop root from `trace`, a hot side exit from
+`exit` - and then tries to claim the queue for that function. Whoever wins
+compiles, publishes, and installs; every other interpreter picks the code up
+through `sync` at its next safepoint. The queue guarantees:
 
-- trigger counts are atomic
-- one winning interpreter compiles
-- compiled modules publish immutable `asm.Callable`s
-- each interpreter installs those callables into its own dispatch table at a safepoint
+- trigger counts are atomic, and aggregate across everyone sharing the queue
+- one holder builds a function at a time
+- published builds publish immutable `asm.Callable`s
+- each interpreter installs those callables into its own dispatch table
 
-The cache claims a build's root and trigger together. Each function owns a
-coalescing queue of exact anchors rather than one pending slot: distinct loop
+`Queue.Claim` hands out a build's root and trigger together. Each function owns
+a coalescing queue of exact anchors rather than one pending slot: distinct loop
 roots are retained, duplicate requests are discarded, and a side exit arriving
-behind an active hot build remains queued because it represents newer trace work.
-Side-exit requests take priority over queued hot roots.
-Publication finishes only the claimed build and leaves queued requests cold for
-the next winner.
+behind an active hot build remains queued because it represents newer trace
+work. Side-exit requests take priority over queued hot roots. `Queue.Done`
+finishes only the claimed build and leaves queued requests for the next winner.
 
-The published native code is shared. The dispatch table remains interpreter-local.
+`Queue.Done` also records every root the build actually emitted an entry for, so
+a later hot request for one of them is discarded instead of repeating work a
+peer already did. A build that emitted nothing records nothing, so a caller that
+learns more about a root - a bounded recording it can retry deeper - may ask
+again. A side-exit request is never discarded that way: asking for a root that
+is already native to be rebuilt with the exit's leg folded in is its whole
+point.
+
+`compile.Store` is append-only and reference counted. It hands out published
+`jit.Code` by generation (`Store.Code`), and frees the `asm.Buffer`s those
+callables live in only once the last holder detaches, because a published
+mapping stays executable for as long as anyone can still dispatch into it.
+`Store.Shared` reports whether anyone but the creator ever attached; a solo
+interpreter installs its own build inline and therefore needs no per-tick poll
+for code arriving from elsewhere.
 
 ## Compiler
 
@@ -311,10 +333,10 @@ Go wrapper resolves that ID and counts the exact exit row. Zero means no
 descriptor. `journal.TrapYield` counts only a yield, and native frame overflow counts
 neither an exit nor a yield.
 
-Compile and emission ownership follows compilation ownership: a solo compiler
-records its result, while a shared cache records it only on the winning member.
-Peers install their own runtime counters without duplicating compile or emission
-rows. Collector flush preserves registered handles while moving accumulated
+Compile and emission ownership follows compilation ownership: the interpreter
+that claimed the build records its result, and with a shared queue that is the
+winning member only. Peers install their own runtime counters without
+duplicating compile or emission rows. Collector flush preserves registered handles while moving accumulated
 values to the shared profiler.
 
 ## Speculation
@@ -377,7 +399,7 @@ A cold branch edge may carry caller-continuation block IDs. The side trace body 
 
 A deferred profiled edge gets a label and canonical snapshot, shared only with an identical scheduled continuation (same block, tail, and snapshot). Static state-backed blocks share labels only through explicit block IDs, never through bytecode-anchor equality.
 
-Solo interpreters recompile a side exit when its hit count first reaches the hot-exit threshold. Pooled interpreters also rearm on later threshold multiples so a peer can recover a missed shared-cache publication.
+A side exit rearms its root's rebuild every time its hit count crosses the hot-exit threshold, not only the first time: the trace tree keeps learning, and a rebuild it could not plan at the first crossing regularly plans at a later one.
 
 Targets still deoptimize when they are unknown or unsupported.
 
@@ -553,7 +575,11 @@ that, because `retire` restores the slot but keeps its shadow entry.
 Only a static plan loses. The trace frontend anchors a nested loop as an edge
 to that root's own entry instead of inlining it, so a recording never takes an
 inner root's work away; the static loop plan is the fallback for a loop no
-trace could record (see Compiler above), so it must not displace one.
+trace could record (see Compiler above), so it must not displace one. The same
+rule covers the anchor itself: a static plan never replaces the recording live
+at the very anchor it installs into, which is what keeps a side-exit rebuild
+that fell through to the static frontend from swapping a running recording -
+folded legs, hoisted container - for the fallback that has neither.
 
 What counts as swallowing depends on the root:
 
@@ -572,8 +598,8 @@ Module code keeps the whole-module entry installed until a hot loop is actually
 recorded. The static module plan may therefore own the loop first, but its native
 back-edge yields through the existing `loopWarmup` cadence so `backedge` can record
 the live loop state. A usable trace loop root then installs at the header without
-requiring the whole module to be withdrawn. Side-exit recompilation keeps its
-existing rule: a static fallback must not displace a running trace recording.
+requiring the whole module to be withdrawn. Module code is also the one anchor
+exempt from the same-anchor rule above, for the same measured reason.
 
 Native wrappers must always leave the interpreter in a valid state for threaded redispatch.
 
@@ -628,7 +654,7 @@ When changing JIT internals:
 - keep ARM64 lowering in `internal/jit/arm64/`
 - keep the frame-journal cell, record, and trap layout in `internal/journal`, explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
-- keep shared cache, tracer, and coroutine state private behind `Pool` and `Interpreter`
+- keep the shared compile queue, store, tracer, and coroutine state private behind `Pool` and `Interpreter`
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`
 - avoid adding an abstraction unless it removes real duplication or isolates real complexity
 

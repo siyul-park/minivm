@@ -2,7 +2,6 @@ package interp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
@@ -25,9 +25,10 @@ type Interpreter struct {
 	hook        func(*Interpreter) error
 	codec       Codec
 	speculative bool
+	closed      bool
 
-	compiler  *jit.Compiler
-	cache     *cache
+	queue     *compile.Queue
+	store     *compile.Store
 	profiler  *prof.Profiler
 	samples   *prof.Collector
 	exits     map[jit.Anchor]func(*Interpreter)
@@ -117,7 +118,8 @@ type Option func(*option)
 type option struct {
 	hook      func(*Interpreter) error
 	codec     Codec
-	cache     *cache
+	queue     *compile.Queue
+	store     *compile.Store
 	tracer    *tracer
 	profiler  *prof.Profiler
 	threshold int
@@ -191,8 +193,16 @@ func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
 }
 
-func withCache(c *cache) Option {
-	return func(o *option) { o.cache = c }
+// withQueue and withStore share compile coordination with every interpreter
+// borrowed from one pool: the queue admits one build per function at a time,
+// and the store holds the code those builds publish. An interpreter given
+// neither runs the same seam privately.
+func withQueue(q *compile.Queue) Option {
+	return func(o *option) { o.queue = q }
+}
+
+func withStore(s *compile.Store) Option {
+	return func(o *option) { o.store = s }
 }
 
 // withTracer shares tracing state with interpreters for the same program.
@@ -257,11 +267,20 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		trigger = uint64(threshold)
 	}
 
+	// A store the pool already closed leaves the interpreter with a private
+	// queue and store rather than no seam at all: it still compiles for
+	// itself, it just shares nothing.
+	queue, store := opt.queue, opt.store
+	if store == nil || !store.Attach() {
+		queue, store = compile.New(len(prog.Constants)+1), compile.NewStore()
+	}
+
 	i := &Interpreter{
 		tracer:      tracer,
 		hook:        opt.hook,
 		codec:       activeCodec,
-		cache:       opt.cache,
+		queue:       queue,
+		store:       store,
 		profiler:    opt.profiler,
 		samples:     samples,
 		threshold:   threshold,
@@ -394,9 +413,6 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.fp = 1
 	i.fr = &i.frames[0]
 	i.retain(0)
-	if opt.cache != nil && !i.cache.attach() {
-		i.cache = nil
-	}
 
 	return i
 }
@@ -746,21 +762,20 @@ func (i *Interpreter) Flush() {
 	i.flush()
 }
 
+// Close releases this interpreter's hold on the store of published native
+// code, freeing its executable buffers once no other holder is left. It is
+// idempotent: a second call must not drop a hold a peer sharing the store
+// still needs.
 func (i *Interpreter) Close() error {
 	i.flush()
 	i.Reset()
 	i.arrays.clear()
 	i.structs.clear()
-	var err error
-	if i.compiler != nil {
-		err = errors.Join(err, i.compiler.Close())
-		i.compiler = nil
+	if i.closed {
+		return nil
 	}
-	if i.cache != nil {
-		err = errors.Join(err, i.cache.detach())
-		i.cache = nil
-	}
-	return err
+	i.closed = true
+	return i.store.Detach()
 }
 
 func (i *Interpreter) Reset() {
@@ -862,7 +877,7 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 	// enabled. The countdown below survives only for what genuinely needs an
 	// instruction-grained cadence: cancellation, fuel, the user hook, the user
 	// profiler, and a pool's shared-module handshake.
-	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
+	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && !i.store.Shared() {
 		for f.ip < len(code) {
 			code[f.ip](i)
 			f = i.fr
@@ -1014,13 +1029,11 @@ func (i *Interpreter) safepoint() error {
 		i.sample(f)
 	}
 
-	// Adopting a module a peer published is a matter of elapsed time, not of
-	// this member's own hotness, so sync stays on the tick. Claiming the right
-	// to compile does not: it aggregates hot events across members and is
-	// raised from the same hooks a solo interpreter compiles from (see entered).
-	if i.cache != nil {
-		i.sync()
-	}
+	// Adopting code a peer published is a matter of elapsed time, not of this
+	// interpreter's own hotness, so sync stays on the tick. Claiming the right
+	// to compile does not: it aggregates hot events across everyone sharing
+	// the queue and is raised from the hot-event hooks (see entered).
+	i.sync()
 	return nil
 }
 

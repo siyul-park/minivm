@@ -187,7 +187,7 @@ func TestCompiler_Compile(t *testing.T) {
 			compiled := compiler.Compile(input, jit.Anchor{IP: headers[0].header})
 			require.NoError(t, compiled.Err)
 			require.NotNil(t, compiled.Code, "%+v", compiled)
-			i.install(compiled.Code, false)
+			i.install(compiled.Code)
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.PopBoxed()
 			require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestCompiler_Compile(t *testing.T) {
 			compiled := compiler.Compile(input, jit.Anchor{})
 			require.NoError(t, compiled.Err)
 			require.NotNil(t, compiled.Code, "%+v", compiled)
-			i.install(compiled.Code, false)
+			i.install(compiled.Code)
 
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.PopBoxed()
@@ -276,7 +276,7 @@ func TestCompiler_Compile(t *testing.T) {
 			compiled := compiler.Compile(input, jit.Anchor{})
 			require.NoError(t, compiled.Err)
 			require.NotNil(t, compiled.Code, "%+v", compiled)
-			i.install(compiled.Code, false)
+			i.install(compiled.Code)
 
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.PopBoxed()
@@ -655,7 +655,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, result.Err)
 		mod := result.Code
 		require.NotEmpty(t, mod.Entries)
-		i.install(mod, false)
+		i.install(mod)
 
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Global(0)
@@ -718,7 +718,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, result.Err)
 		mod := result.Code
 		require.NotEmpty(t, mod.Entries)
-		native.install(mod, false)
+		native.install(mod)
 		require.NoError(t, native.Run(context.Background()))
 		got, err := native.Global(0)
 		require.NoError(t, err)

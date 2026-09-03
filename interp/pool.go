@@ -6,16 +6,17 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/program"
 )
 
 // Pool hands out Interpreter instances bound to a shared Program for use across
 // goroutines. Each Interpreter owns its runtime state; callers must borrow one
-// per goroutine via Get/Put or Run. JIT code and aggregate profile data are
-// shared through the pool cache.
+// per goroutine via Get/Put or Run. Compile coordination and published JIT
+// code are shared through the pool's queue and store.
 type Pool struct {
 	prog  *program.Program
-	cache *cache
+	store *compile.Store
 	opts  []Option
 	size  int
 
@@ -35,14 +36,15 @@ func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
 	if size <= 0 {
 		size = 1
 	}
-	cache := newCache(prog)
+	queue := compile.New(len(prog.Constants) + 1)
+	store := compile.NewStore()
 	tracer := newTracer()
-	all := make([]Option, 0, len(opts)+2)
+	all := make([]Option, 0, len(opts)+3)
 	all = append(all, opts...)
-	all = append(all, withCache(cache), withTracer(tracer))
+	all = append(all, withQueue(queue), withStore(store), withTracer(tracer))
 	return &Pool{
 		prog:  prog,
-		cache: cache,
+		store: store,
 		opts:  all,
 		size:  size,
 		idle:  make(chan *Interpreter, size),
@@ -121,7 +123,7 @@ func (p *Pool) Close() error {
 		}
 		p.live.Add(-1)
 	}
-	if err := p.cache.close(); err != nil {
+	if err := p.store.Close(); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
