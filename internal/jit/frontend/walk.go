@@ -15,9 +15,17 @@ import (
 // the facts it leaves behind, the build keeps the block it filled.
 type walk struct {
 	facts
-	b     *ssa.Builder
-	block int
-	stack []operand
+	b      *ssa.Builder
+	block  int
+	frames []frame
+	stack  []operand
+
+	// seen is what a recording observed about the instruction being
+	// translated: the container shape it ran against, the address the call it
+	// performed entered, and the value it produced. It stays zero for a plan
+	// built from bytecode alone, which resolves the same facts from constants
+	// and declared types instead.
+	seen jit.Step
 
 	ip    int
 	pre   []ssa.Value
@@ -28,8 +36,9 @@ type walk struct {
 // edges: which blocks those name is the caller's to resolve, because a span
 // knows its successors only as spans.
 func (w *walk) run(s span) (ssa.Terminator, bool) {
+	code := w.frame().fn.Code
 	for ip := s.start; ip < s.end; {
-		inst := instr.Instruction(w.fn.Code[ip:])
+		inst := instr.Instruction(code[ip:])
 		w.begin(ip)
 		switch inst.Opcode() {
 		case instr.BR:
@@ -61,7 +70,7 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 	if len(s.succs) > 0 {
 		return ssa.Terminator{Op: ssa.OpJump}, true
 	}
-	if w.addr == 0 {
+	if w.frame().addr == 0 {
 		return ssa.Terminator{Op: ssa.OpComplete}, true
 	}
 	return w.leave(), true
@@ -106,6 +115,38 @@ func (w *walk) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
 		edges[i] = ssa.Edge{Block: ids[succ], Args: args}
 	}
 	return edges, true
+}
+
+// join hands this block's operands to a successor whose parameters are already
+// fixed. A reference the successor holds owned is owned here first; one it
+// expects to borrow from storage this path owns cannot be handed over at all,
+// so the recording is left unplanned rather than retained on a path that never
+// releases it. Every other fact is a speculation the successor was laid out
+// against and reads its parameters through, so a path that does not carry it
+// cannot enter there either: unlike a fixpoint over a control-flow graph, a
+// recording is laid out once and has no join to widen at.
+func (w *walk) join(params []operand) ([]ssa.Value, bool) {
+	if len(params) != len(w.stack) {
+		return nil, false
+	}
+	args := make([]ssa.Value, len(w.stack))
+	for i := range w.stack {
+		want := params[i].fact
+		if want.kind == types.KindRef && want.backing == jit.BackingStack {
+			w.own(i)
+		}
+		got := w.stack[i].fact
+		if got.kind != types.KindRef {
+			// Only a reference derives a count from where it was loaded, so
+			// where a scalar came from is no reason to refuse the edge.
+			want.backing, want.offset = got.backing, got.offset
+		}
+		if changed, ok := want.merge(got); !ok || changed {
+			return nil, false
+		}
+		args[i] = w.stack[i].value
+	}
+	return args, true
 }
 
 // perform translates one instruction. The cases below are the opcodes whose
@@ -190,27 +231,23 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if len(w.stack) < 2 {
 			return false
 		}
-		kind, ok := w.elem(w.stack[len(w.stack)-2].fact)
+		shape, ok := w.elem(w.stack[len(w.stack)-2].fact)
 		if !ok {
 			return false
 		}
 		if op == instr.ARRAY_GET {
-			if shape, ok := jit.ElemShapeByKind(kind); ok {
-				w.guard(len(w.stack)-2, ssa.Shape{Itab: shape.Itab})
-			}
+			w.guard(len(w.stack)-2, ssa.Shape{Itab: shape.Itab})
 		}
-		return w.exec(op, 2, []fact{{kind: kind}})
+		return w.exec(op, 2, []fact{{kind: shape.Kind}})
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
 			return false
 		}
-		kind, ok := w.field(w.stack[len(w.stack)-2].fact, w.stack[len(w.stack)-1].fact)
+		kind, shape, ok := w.field(w.stack[len(w.stack)-2].fact, w.stack[len(w.stack)-1].fact)
 		if !ok {
 			return false
 		}
-		if record := w.record(w.stack[len(w.stack)-2].fact); record != nil {
-			w.guard(len(w.stack)-2, ssa.Shape{Itab: jit.HeapStruct, Typ: uintptr(unsafe.Pointer(record))})
-		}
+		w.guard(len(w.stack)-2, shape)
 		return w.exec(op, 2, []fact{{kind: kind}})
 	case instr.REF_CAST:
 		// A successful cast validates the operand's declared type in place and
@@ -229,11 +266,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if len(w.stack) == 0 {
 			return false
 		}
-		callee := w.stack[len(w.stack)-1].fact
-		if !callee.calleeKnown || callee.callee <= 0 {
-			return false
-		}
-		target := w.objects.Function(callee.callee)
+		target := w.callee(w.stack[len(w.stack)-1].fact)
 		if target == nil || target.Typ == nil {
 			return false
 		}
@@ -309,35 +342,89 @@ func (w *walk) perform(inst instr.Instruction) bool {
 	return w.exec(op, len(effect.Pop), results)
 }
 
+// elem resolves the element shape one array access is compiled against: the
+// container a recording observed, the cell the snapshot resolved for a known
+// container, or the operand's declared array type, which answers only in a
+// call-free function. All three are hints the shape guard verifies before any
+// access, so a slot declared as an array that currently holds null or a
+// differently shaped array deopts instead of being read.
+func (w *walk) elem(array fact) (jit.ElemShape, bool) {
+	if shape, ok := jit.ElemShapeByItab(w.seen.Shape.Itab); ok {
+		return shape, true
+	}
+	if array.refKnown && array.ref > 0 {
+		return jit.ElemShapeByItab(w.objects[array.ref].Array)
+	}
+	if w.declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
+		return jit.ElemShapeByKind(array.atyp.ElemKind)
+	}
+	return jit.ElemShape{}, false
+}
+
+// field resolves a struct field's kind and the shape the access reading it is
+// admitted through: the field a recording observed, or the one a container
+// carrying a struct type answers for a known in-bounds constant index.
+func (w *walk) field(container, index fact) (types.Kind, ssa.Shape, bool) {
+	if w.seen.Shape.Itab != 0 {
+		kind := w.seen.Seen.Kind()
+		if _, ok := typ(kind); !ok {
+			return 0, ssa.Shape{}, false
+		}
+		return kind, ssa.Shape{Itab: w.seen.Shape.Itab, Typ: w.seen.Shape.Typ, Host: w.seen.Shape.Field}, true
+	}
+	record := w.record(container)
+	if record == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(record.Fields) {
+		return 0, ssa.Shape{}, false
+	}
+	return record.Fields[index.val].Kind, ssa.Shape{Itab: jit.HeapStruct, Typ: uintptr(unsafe.Pointer(record))}, true
+}
+
+// record resolves the struct type a container carries: the one its declared
+// type or a ref.cast states, or the one the snapshot recorded for a constant
+// cell.
+func (w *walk) record(container fact) *types.StructType {
+	if container.styp != nil {
+		return container.styp
+	}
+	if container.refKnown && container.ref > 0 {
+		return w.objects[container.ref].Typ
+	}
+	return nil
+}
+
+// callee resolves the function a call enters: the one a recording observed it
+// enter, or the constant the operand carries. A recording names the frame the
+// call actually entered, which for a host call is the caller's own address, so
+// the observed operand has to be positive evidence - the callee itself, or the
+// closure whose body that address is.
+func (w *walk) callee(operand fact) *types.Function {
+	if addr := w.seen.Callee; addr > 0 {
+		if w.seen.Shape.Itab == jit.HeapClosure ||
+			(w.seen.Seen.Kind() == types.KindRef && w.seen.Seen.Ref() == addr) {
+			return w.objects.Function(addr)
+		}
+		return nil
+	}
+	if operand.calleeKnown && operand.callee > 0 {
+		return w.objects.Function(operand.callee)
+	}
+	return nil
+}
+
 // load pushes what a slot holds. A ref takes no retain and records the slot its
 // count is deferred to, so a container loop pays no retain and release per
 // element.
 func (w *walk) load(space ssa.Space, index int) bool {
-	var out fact
-	switch space {
-	case ssa.SpaceLocal:
-		if index >= len(w.slots) {
-			return false
-		}
-		out = holds(w.slots[index])
-	case ssa.SpaceUpval:
-		if index >= len(w.fn.Captures) {
-			return false
-		}
-		out = holds(w.fn.Captures[index])
-	default:
-		if index >= len(w.globals) {
-			return false
-		}
-		out = fact{kind: w.globals[index]}
+	slot, out, ok := w.addressed(space, index)
+	if !ok {
+		return false
 	}
-	out.backing, out.offset = backing(space), index
 	t, ok := typ(out.kind)
 	if !ok {
 		return false
 	}
 	value := w.b.Value(t)
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: space, Index: index}, Results: []ssa.Value{value}})
+	w.b.Add(w.block, ssa.Operation{Op: ssa.OpLoad, Slot: slot, Results: []ssa.Value{value}})
 	w.push(value, out)
 	return true
 }
@@ -351,17 +438,21 @@ func (w *walk) store(space ssa.Space, index int, pop bool) bool {
 	if len(w.stack) == 0 {
 		return false
 	}
+	slot, out, ok := w.addressed(space, index)
+	if !ok {
+		return false
+	}
 	top := len(w.stack) - 1
 	if w.stack[top].kind == types.KindRef {
 		w.own(top)
-		w.detach(backing(space), index)
+		w.detach(out.backing, out.offset)
 		if !pop {
 			w.retain(w.stack[top].value)
 		}
 	}
 	w.b.Add(w.block, ssa.Operation{
 		Op:    ssa.OpStore,
-		Slot:  ssa.Slot{Space: space, Index: index},
+		Slot:  slot,
 		Args:  []ssa.Value{w.stack[top].value},
 		State: w.deopt(),
 	})
@@ -369,6 +460,37 @@ func (w *walk) store(space ssa.Space, index int, pop bool) bool {
 		w.stack = w.stack[:top]
 	}
 	return true
+}
+
+// addressed resolves the storage a slot opcode names and what is known about
+// the value in it. A local belongs to the innermost frame, so its deferred
+// reference count is named by the absolute slot an inlined frame's own local
+// sits at, which is what keeps two frames' local zero apart.
+func (w *walk) addressed(space ssa.Space, index int) (ssa.Slot, fact, bool) {
+	fr := w.frame()
+	slot := ssa.Slot{Space: space, Index: index}
+	var out fact
+	switch space {
+	case ssa.SpaceLocal:
+		if index >= len(fr.slots) {
+			return slot, out, false
+		}
+		slot.Base = fr.base
+		out = holds(fr.slots[index])
+		out.backing, out.offset = jit.BackingLocal, fr.base+index
+	case ssa.SpaceUpval:
+		if index >= len(fr.fn.Captures) {
+			return slot, out, false
+		}
+		out = holds(fr.fn.Captures[index])
+		out.backing, out.offset = jit.BackingUpval, index
+	default:
+		if index >= len(w.globals) {
+			return slot, out, false
+		}
+		out = fact{kind: w.globals[index], backing: jit.BackingGlobal, offset: index}
+	}
+	return slot, out, true
 }
 
 // pool pushes a constant. A ref constant is an ownership-neutral marker whose
@@ -498,6 +620,100 @@ func (w *walk) leave() ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args}
 }
 
+// enter inlines one call: the callee reference is consumed, the arguments
+// under it become the new frame's parameters, its remaining locals start
+// cleared, and the caller records where it resumes once the frame returns.
+//
+// Only a callee whose every slot is scalar inlines. A fresh frame sits over
+// whatever words the frame that last occupied that stack region left behind,
+// and a slot write is a release of what it replaces, so filling a reference
+// slot would drop a count this frame never took. Captures stay out for a
+// second reason: an inlined frame reaches its upvalues through the closure
+// reference it was called with, which a Slot cannot name.
+func (w *walk) enter(addr, resume int, target *types.Function) bool {
+	if target.Typ == nil || len(target.Captures) > 0 {
+		return false
+	}
+	slots := target.Declared()
+	params := len(target.Typ.Params)
+	if len(w.stack) < params+1 {
+		return false
+	}
+	for _, kind := range types.Kinds(slots) {
+		switch kind {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+		default:
+			return false
+		}
+	}
+
+	w.release(w.stack[len(w.stack)-1])
+	w.stack = w.stack[:len(w.stack)-1]
+	caller := w.frame()
+	caller.ip = resume
+	base := caller.base + len(caller.slots) + (len(w.stack) - caller.origin) - params
+	// The arguments move into the new frame before it becomes the innermost
+	// one, so a deopt among them still resumes at the call in the caller, with
+	// the operands the call started with.
+	for i := params - 1; i >= 0; i-- {
+		w.b.Add(w.block, ssa.Operation{
+			Op:    ssa.OpStore,
+			Slot:  ssa.Slot{Space: ssa.SpaceLocal, Base: base, Index: i},
+			Args:  []ssa.Value{w.stack[len(w.stack)-1].value},
+			State: w.deopt(),
+		})
+		w.stack = w.stack[:len(w.stack)-1]
+	}
+	for i := params; i < len(slots); i++ {
+		kind := slots[i].Kind()
+		zero := w.b.Value(ssa.TypeOf(kind))
+		w.b.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: types.Zero(kind), Results: []ssa.Value{zero}})
+		w.b.Add(w.block, ssa.Operation{
+			Op:    ssa.OpStore,
+			Slot:  ssa.Slot{Space: ssa.SpaceLocal, Base: base, Index: i},
+			Args:  []ssa.Value{zero},
+			State: w.deopt(),
+		})
+	}
+	after := -1
+	w.frames = append(w.frames, frame{
+		fn: target, addr: addr, slots: slots,
+		base: base, origin: len(w.stack), after: &after,
+	})
+	return true
+}
+
+// stitch closes an inlined frame: its results move onto the caller's operand
+// stack, owned first because the caller adopts what it is handed, and every
+// operand the retiring frame leaves under them is released. The frame holds no
+// reference slot to release with it, which is what enter admits.
+func (w *walk) stitch() bool {
+	fr := w.frame()
+	n := fr.returns()
+	if len(w.stack)-fr.origin < n {
+		return false
+	}
+	for i := len(w.stack) - n; i < len(w.stack); i++ {
+		w.own(i)
+	}
+	results := append([]operand(nil), w.stack[len(w.stack)-n:]...)
+	for _, o := range w.stack[fr.origin : len(w.stack)-n] {
+		w.release(o)
+	}
+	w.stack = append(w.stack[:fr.origin], results...)
+	w.frames = w.frames[:len(w.frames)-1]
+	return true
+}
+
+// exit abandons native execution, resuming the interpreter at ip in the
+// innermost frame. The interpreter adopts the operand stack it is handed, so
+// every reference still borrowed from storage is owned first.
+func (w *walk) exit(ip int) {
+	w.begin(ip)
+	w.adopt()
+	w.b.Term(w.block, ssa.Terminator{Op: ssa.OpExit, State: w.deopt()})
+}
+
 // guard admits only a container of the shape the plan resolved for it, so the
 // access after it may load through that shape. It refines the operand in place:
 // everything after reads the guarded value, while the state the guard resumes
@@ -581,12 +797,19 @@ func (w *walk) deopt() ssa.Value {
 	if w.state != ssa.NoValue {
 		return w.state
 	}
+	frames := make([]ssa.Frame, len(w.frames))
+	for i, fr := range w.frames {
+		stack := w.pre[fr.origin:]
+		ip := fr.ip
+		if i+1 < len(w.frames) {
+			stack = w.pre[fr.origin:w.frames[i+1].origin]
+		} else {
+			ip = w.ip
+		}
+		frames[i] = ssa.Frame{Addr: fr.addr, Base: fr.base, IP: ip, Returns: fr.returns(), Stack: stack}
+	}
 	w.state = w.b.Value(ssa.TypeState)
-	w.b.Add(w.block, ssa.Operation{
-		Op:      ssa.OpState,
-		Frames:  []ssa.Frame{{Addr: w.addr, IP: w.ip, Returns: w.returns(), Stack: w.pre}},
-		Results: []ssa.Value{w.state},
-	})
+	w.b.Add(w.block, ssa.Operation{Op: ssa.OpState, Frames: frames, Results: []ssa.Value{w.state}})
 	return w.state
 }
 
@@ -595,22 +818,20 @@ func (w *walk) push(value ssa.Value, out fact) {
 	w.stack = append(w.stack, operand{value: value, fact: out})
 }
 
-// returns is how many results the function hands back.
-func (w *walk) returns() int {
-	if w.fn.Typ == nil {
-		return 0
-	}
-	return len(w.fn.Typ.Returns)
+// frame is the activation being translated, the innermost one.
+func (w *walk) frame() *frame {
+	return &w.frames[len(w.frames)-1]
 }
 
-// backing is where a value loaded from space derives its reference count.
-func backing(space ssa.Space) jit.Backing {
-	switch space {
-	case ssa.SpaceGlobal:
-		return jit.BackingGlobal
-	case ssa.SpaceUpval:
-		return jit.BackingUpval
-	default:
-		return jit.BackingLocal
+// returns is how many results the innermost frame hands back.
+func (w *walk) returns() int {
+	return w.frame().returns()
+}
+
+// returns is how many results the function this frame runs hands back.
+func (fr frame) returns() int {
+	if fr.fn.Typ == nil {
+		return 0
 	}
+	return len(fr.fn.Typ.Returns)
 }

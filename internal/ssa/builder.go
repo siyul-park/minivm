@@ -37,6 +37,15 @@ func (b *Builder) Value(t Type) Value {
 	return Value(len(b.types) - 1)
 }
 
+// Type returns the type v was reserved with, or the invalid zero Type when v
+// is not a value of this builder.
+func (b *Builder) Type(v Value) Type {
+	if v <= NoValue || int(v) >= len(b.types) {
+		return 0
+	}
+	return b.types[v]
+}
+
 // Add appends op to block.
 func (b *Builder) Add(block int, op Operation) {
 	b.blocks[block].Ops = append(b.blocks[block].Ops, op)

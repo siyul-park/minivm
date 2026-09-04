@@ -1,30 +1,45 @@
 package frontend
 
 import (
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
 
-// facts is the read-only static evidence a plan resolves value kinds and
-// container shapes against: the function being planned, the module-wide
-// constant, global, heap-object, and declared-type tables the snapshot carries,
-// and the two facts derived from them once per plan. Nothing here changes while
-// a function is planned.
+// facts is the read-only evidence a plan resolves value kinds and container
+// shapes against: the module-wide constant, global, heap-object, and
+// declared-type tables the snapshot carries, plus the one fact derived from
+// them once per plan. Nothing here changes while a function is planned.
 type facts struct {
-	fn        *types.Function
-	addr      int
 	constants []types.Boxed
 	globals   []types.Kind
 	objects   jit.Objects
 	decl      []types.Type
-	slots     []types.Type
 	// declared reports whether a declared array type may answer elem. It holds
 	// only in a call-free function: the general array path combined with a
 	// native call corrupted native state, and while that cause is fixed the
 	// wider planning it buys measured worse (see docs/jit-internals.md).
 	declared bool
+}
+
+// frame is one activation a walk translates in: the function it runs, the
+// address that function is published at, the slots it declares, the VM stack
+// floor it sits on relative to the entry frame, and the operand-stack index
+// its own operands start at. A plan built from bytecode has exactly one; a
+// recording pushes one more per callee it inlined.
+type frame struct {
+	fn     *types.Function
+	addr   int
+	slots  []types.Type
+	base   int
+	origin int
+	// ip is where this frame resumes once the call it is suspended on
+	// returns, meaningful only while an inner frame is on top of it.
+	ip int
+	// after is the block the caller carries on in once this frame returns,
+	// shared with every recording that can return into it. It is nil for the
+	// entry frame, which returns out of the function instead.
+	after *int
 }
 
 // fact is what the forward walk knows about one operand: its kind, where its
@@ -59,8 +74,8 @@ type operand struct {
 // cannot model an opcode, when two paths reach one span with stacks that cannot
 // meet, or when a span is unreachable from the function entry: none of those
 // leave a function this frontend can plan.
-func (f facts) resolve(spans []span) ([][]fact, bool) {
-	if len(f.fn.Handlers) > 0 {
+func (f facts) resolve(entry frame, spans []span) ([][]fact, bool) {
+	if len(entry.fn.Handlers) > 0 {
 		return nil, false
 	}
 	states := make([][]fact, len(spans))
@@ -70,7 +85,7 @@ func (f facts) resolve(spans []span) ([][]fact, bool) {
 	for len(work) > 0 {
 		id := work[len(work)-1]
 		work = work[:len(work)-1]
-		exit, ok := f.trace(spans[id], states[id])
+		exit, ok := f.transfer(entry, spans[id], states[id])
 		if !ok {
 			return nil, false
 		}
@@ -105,21 +120,21 @@ func (f facts) resolve(spans []span) ([][]fact, bool) {
 	return states, true
 }
 
-// trace returns the facts one span leaves behind. It runs the same walk that
-// emits the block, into a function thrown away here, so the transfer function
-// and the translation can never disagree about an opcode's effect.
-func (f facts) trace(s span, entry []fact) ([]fact, bool) {
+// transfer returns the facts one span leaves behind. It runs the same walk
+// that emits the block, into a function thrown away here, so the transfer
+// function and the translation can never disagree about an opcode's effect.
+func (f facts) transfer(fr frame, s span, in []fact) ([]fact, bool) {
 	b := ssa.New("")
 	block := b.Block()
-	stack := make([]operand, len(entry))
-	for i, e := range entry {
+	stack := make([]operand, len(in))
+	for i, e := range in {
 		t, ok := typ(e.kind)
 		if !ok {
 			return nil, false
 		}
 		stack[i] = operand{value: b.Param(block, t), fact: e}
 	}
-	w := &walk{facts: f, b: b, block: block, stack: stack}
+	w := &walk{facts: f, b: b, block: block, frames: []frame{fr}, stack: stack}
 	if _, ok := w.run(s); !ok {
 		return nil, false
 	}
@@ -128,6 +143,14 @@ func (f facts) trace(s span, entry []fact) ([]fact, bool) {
 		out[i] = o.fact
 	}
 	return out, true
+}
+
+// widen drops the compile-time identities one path observed, leaving what every
+// path reaching a block agrees on: the value's kind and where its reference
+// count lives. A block more than one recording enters reads its parameters
+// through their facts, so it may state only what each of them carries.
+func (f fact) widen() fact {
+	return fact{kind: f.kind, backing: f.backing, offset: f.offset}
 }
 
 // merge narrows a fact to what it and src agree on, reporting whether it
@@ -164,46 +187,6 @@ func (f *fact) merge(src fact) (bool, bool) {
 		changed = true
 	}
 	return changed, true
-}
-
-// elem resolves an array's element kind. A container whose identity is known
-// resolves from the cell the snapshot recorded there; otherwise its declared
-// array type answers, and only in a call-free function. Both are hints the
-// shape guard verifies before any access, so a slot declared as an array that
-// currently holds null or a differently shaped array deopts instead of being
-// read.
-func (f facts) elem(array fact) (types.Kind, bool) {
-	if !array.refKnown || array.ref <= 0 {
-		if f.declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
-			return array.atyp.ElemKind, true
-		}
-		return 0, false
-	}
-	shape, ok := jit.ElemShapeByItab(f.objects[array.ref].Array)
-	return shape.Kind, ok
-}
-
-// field resolves a struct field's kind: the container must carry a struct type
-// and the field index must be a known in-bounds constant.
-func (f facts) field(container, index fact) (types.Kind, bool) {
-	typ := f.record(container)
-	if typ == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(typ.Fields) {
-		return 0, false
-	}
-	return typ.Fields[index.val].Kind, true
-}
-
-// record resolves the struct type a container carries: the one its declared
-// type or a ref.cast states, or the one the snapshot recorded for a constant
-// cell.
-func (f facts) record(container fact) *types.StructType {
-	if container.styp != nil {
-		return container.styp
-	}
-	if container.refKnown && container.ref > 0 {
-		return f.objects[container.ref].Typ
-	}
-	return nil
 }
 
 // holds reads what a slot's declared type states about the value in it.

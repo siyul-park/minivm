@@ -26,7 +26,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
 | Asynchronous compilation | `compile.TestWithAsync`, `compile.TestQueue_Close`, `interp.TestPool_Get`, `interp.TestPool_Close` | a build overlapping the goroutine that claimed it, adoption at a safepoint, and shutdown with builds in flight, all under `-race` |
 | Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
-| Frontend equivalence | `frontend.TestStatic` | the SSA static frontend accepts exactly the roots `jit.StaticPlan` accepts, every function it emits passes `ssa.Verify`, and its block graph matches the plan's, over a written corpus and over generated well-typed functions |
+| Frontend equivalence | `frontend.TestStatic`, `frontend.TestTrace`, `interp.TestFrontend_Trace` | each SSA frontend accepts exactly the roots its `jit` plan counterpart accepts, every function it emits passes `ssa.Verify`, and its block graph matches the plan's - for `Static` over a written corpus and generated well-typed functions, for `Trace` over hand-built recorded trees and over trees the real recorder produced |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
 
@@ -47,7 +47,7 @@ condition that removes it (`docs/coding-patterns.md` §1.1).
 | File | Why it is white-box | Removal condition |
 |---|---|---|
 | `interp/tier_test.go` | Ties private `nativeFrameLimit` (declared in `interp/tier.go`) to the ARM64 invoke trampoline's stack reserve and total frame size via `arm64.StackReserve`/`arm64.FrameSize`, which own the byte arithmetic (`internal/asm/arm64/stack.go`), and reads `abi_arm64.s`'s two literals directly to compare against them (`TestARM64_StackReserve`); the complementary half of that reserve invariant — that `abi_arm64.s`'s own two literals agree with each other — needs no private interp state and lives as an ordinary external test, `arm64.TestFrameSize` (`internal/asm/arm64/stack_test.go`). Also reads install bookkeeping (`tried`, `exits`) and the loop spans `tracer.headers` computes, which no metric separates from "not attempted" (`TestARM64_Backedge`). | None known. `nativeFrameLimit`, `tried`, `exits`, and the tier-up policy driving them are interp-private mechanics with no contract to move with the ARM64 backend, which already lives in `internal/jit/arm64`. |
-| `interp/jit_test.go` | Drives `jit.Compiler.Compile` against a snapshot only the private `Interpreter.compileSnapshot` can build (constants, globals, resolved heap objects, declared types, and the `HostStruct`/`field`/`conversion`/`coroutine` layout offsets `jit.Layout` needs), installs the result with the private `Interpreter.install`, and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `jit.Exit`) and splicing frame state to force a specific exit; also reads install bookkeeping (`tried`, `exits`, `live`) and the loop spans `tracer.headers` computes, which no metric separates one root swallowing another from a sibling that merely follows it (`TestARM64_Encloses`). | None known. `newCompiler`, `compileSnapshot`, `journalPtr`, `install`, `tried`, `exits`, and the loop/call dispatch wrappers are interp-private mechanics with no contract to move with the ARM64 backend, which already lives in `internal/jit/arm64`. |
+| `interp/jit_test.go` | Drives `jit.Compiler.Compile` and `frontend.Trace` against a snapshot only the private `Interpreter.compileSnapshot` can build (constants, globals, resolved heap objects, declared types, and the `HostStruct`/`field`/`conversion`/`coroutine` layout offsets `jit.Layout` needs), installs the result with the private `Interpreter.install`, and calls the compiled callable directly with `journalPtr`, asserting the native trap encoding (`journal.CellTrap`, `journal.CellExitID`, `jit.Exit`) and splicing frame state to force a specific exit; also reads install bookkeeping (`tried`, `exits`, `live`) and the loop spans `tracer.headers` computes, which no metric separates one root swallowing another from a sibling that merely follows it (`TestARM64_Encloses`). `TestFrontend_Trace` additionally needs recordings only the private `tracer.capture` can produce - it clones a running interpreter and single-steps its threaded closures - so the trace frontend's differential against `jit.TracePlan` over real trees lives here rather than beside `internal/jit/frontend`. | None known. `newCompiler`, `compileSnapshot`, `journalPtr`, `install`, `tried`, `exits`, and the loop/call dispatch wrappers are interp-private mechanics with no contract to move with the ARM64 backend, which already lives in `internal/jit/arm64`. |
 | `interp/trace_test.go` | Calls `tracer.capture` without `Run`, which is the only way to prove speculative capture snapshots a container instead of mutating the live heap. Any public path runs the real instructions too, so the isolation claim is unobservable by construction. | None known. The recorder stays in `interp`, and the claim is only provable from inside it. |
 
 ### Known Coverage Gaps
@@ -95,8 +95,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 3 | 3 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
-| `internal/jit/frontend` | 1 | 1 | 0 | 0 |
-| `internal/ssa` | 18 | 18 | 0 | 0 |
+| `internal/jit/frontend` | 2 | 2 | 0 | 0 |
+| `internal/ssa` | 19 | 19 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
@@ -314,6 +314,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/graph/dominance.go` | `TestDominance_Dominates` | ✅ |
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
+| `internal/jit/frontend/trace.go` | `TestTrace` | ✅ |
 | `internal/ssa/value.go` | `TestTypeOf` | ✅ |
 | `internal/ssa/value.go` | `TestType_String` | ✅ |
 | `internal/ssa/operation.go` | `TestOp_String` | ✅ |
@@ -327,6 +328,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/builder.go` | `TestBuilder_Block` | ✅ |
 | `internal/ssa/builder.go` | `TestBuilder_Param` | ✅ |
 | `internal/ssa/builder.go` | `TestBuilder_Value` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Type` | ✅ |
 | `internal/ssa/builder.go` | `TestBuilder_Add` | ✅ |
 | `internal/ssa/builder.go` | `TestBuilder_Term` | ✅ |
 | `internal/ssa/builder.go` | `TestBuilder_Build` | ✅ |

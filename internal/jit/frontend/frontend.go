@@ -1,8 +1,11 @@
-// Package frontend plans native code from bytecode alone. It turns the
-// compile-time snapshot of one function into the SSA a backend lowers,
-// resolving element kinds, field kinds, and call targets from constants and
-// declared types rather than from a recorded trace, and bridging the opcodes
-// no backend lowers to the interpreter instead of giving the function up.
+// Package frontend plans native code, in the two forms one compile-time
+// snapshot can be planned from. Static reads bytecode alone, resolving element
+// kinds, field kinds, and call targets from constants and declared types, and
+// bridging the opcodes no backend lowers to the interpreter instead of giving
+// the function up. Trace reads what a recording observed, which resolves the
+// same facts from what actually ran and specializes the path it took, inlining
+// the callees it entered. Both translate one operation the same way, into the
+// SSA a backend lowers, and neither reads anything but the snapshot.
 package frontend
 
 import (
@@ -22,15 +25,13 @@ func Static(input *jit.Input, root jit.Anchor) (*ssa.Function, error) {
 		return nil, nil
 	}
 	f := facts{
-		fn:        input.Function,
-		addr:      input.Address,
 		constants: input.Constants,
 		globals:   input.Globals,
 		objects:   input.Objects,
 		decl:      input.Decl,
-		slots:     input.Function.Declared(),
 		declared:  !calls(input.Function.Code),
 	}
+	entry := frame{fn: input.Function, addr: input.Address, slots: input.Function.Declared()}
 	// Module entry does not implement the framed native-call ABI, and a
 	// call-free function is also the only one a declared array type may answer
 	// for (see facts.elem), so one test settles both.
@@ -43,27 +44,27 @@ func Static(input *jit.Input, root jit.Anchor) (*ssa.Function, error) {
 		return nil, err
 	}
 	spans := split(input.Function.Code, blocks)
-	entry, ok := enter(spans, root, input.Installed)
+	at, ok := enter(spans, root, input.Installed)
 	if !ok {
 		return nil, nil
 	}
-	states, ok := f.resolve(spans)
+	states, ok := f.resolve(entry, spans)
 	if !ok {
 		return nil, nil
 	}
-	return f.build(spans, states, entry), nil
+	return f.build(entry, spans, states, at), nil
 }
 
 // build emits the blocks entry reaches, entry first, and returns the assembled
 // function, or nil for the same reason Static returns nothing: a span whose
 // operands or successors cannot be represented leaves the function unplanned.
-func (f facts) build(spans []span, states [][]fact, entry int) *ssa.Function {
-	order := reach(spans, entry)
+func (f facts) build(entry frame, spans []span, states [][]fact, at int) *ssa.Function {
+	order := reach(spans, at)
 	ids := make([]int, len(spans))
 	for i := range ids {
 		ids[i] = -1
 	}
-	b := ssa.New(fmt.Sprintf("%d:%d", f.addr, spans[entry].start))
+	b := ssa.New(fmt.Sprintf("%d:%d", entry.addr, spans[at].start))
 	for _, id := range order {
 		ids[id] = b.Block()
 	}
@@ -79,7 +80,7 @@ func (f facts) build(spans []span, states [][]fact, entry int) *ssa.Function {
 			}
 			stack[i] = operand{value: b.Param(ids[id], t), fact: e}
 		}
-		w := &walk{facts: f, b: b, block: ids[id], stack: stack}
+		w := &walk{facts: f, b: b, block: ids[id], frames: []frame{entry}, stack: stack}
 		term, ok := w.run(spans[id])
 		if !ok {
 			return nil

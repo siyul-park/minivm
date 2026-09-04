@@ -45,7 +45,7 @@ func op(f *Function, o Operation) string {
 	case OpConst:
 		args = append(args, o.Const.String())
 	case OpLoad, OpStore:
-		args = append(args, fmt.Sprintf("%s[%d]", o.Slot.Space, o.Slot.Index))
+		args = append(args, slot(o.Slot))
 	case OpState:
 		for _, frame := range o.Frames {
 			args = append(args, fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]}",
@@ -79,6 +79,15 @@ func term(f *Function, t Terminator) string {
 		fmt.Fprintf(&sb, " state v%d", t.State)
 	}
 	return sb.String()
+}
+
+// slot renders the storage an operation reads or writes, naming the frame
+// floor a local counts from only when it is not the entry frame's.
+func slot(s Slot) string {
+	if s.Base != 0 {
+		return fmt.Sprintf("%s[%d+%d]", s.Space, s.Base, s.Index)
+	}
+	return fmt.Sprintf("%s[%d]", s.Space, s.Index)
 }
 
 // shape renders the speculated container facts an operation is compiled

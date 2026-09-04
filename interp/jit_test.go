@@ -9,8 +9,10 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/frontend"
 	"github.com/siyul-park/minivm/internal/jit/tier"
 	"github.com/siyul-park/minivm/internal/journal"
+	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -808,4 +810,156 @@ func TestARM64_Encloses(t *testing.T) {
 		require.False(t, i.tracer.encloses(i.instrs, 0, spans[1].header, spans[0].header),
 			"nor the other way round")
 	})
+}
+
+// TestFrontend_Trace drives the SSA trace frontend against recordings the real
+// recorder produced, which no test outside interp can obtain: capture clones a
+// running interpreter and single-steps its threaded closures, and the snapshot
+// a plan is built from is assembled from interpreter-private state. It asserts
+// the same three claims frontend.TestTrace makes over hand-built trees - the
+// frontend plans no root jit.TracePlan refuses, every function it emits
+// verifies, and the two block graphs agree - over trees nobody wrote down.
+func TestFrontend_Trace(t *testing.T) {
+	build := func(emit func(b *instr.Builder)) []instr.Instruction {
+		b := instr.NewBuilder()
+		emit(b)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		return instrs
+	}
+	counter := func(body func(b *instr.Builder)) []instr.Instruction {
+		return build(func(b *instr.Builder) {
+			head, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0).Emit(instr.GLOBAL_SET, 0)
+			b.Bind(head)
+			b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(done)
+			body(b)
+			b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.GLOBAL_SET, 0)
+			b.Br(head)
+			b.Bind(done)
+		})
+	}
+	callee := types.NewFunctionBuilder(&types.FunctionType{
+		Params:  []types.Type{types.TypeI32},
+		Returns: []types.Type{types.TypeI32},
+	}).Emit(
+		instr.New(instr.LOCAL_GET, 0),
+		instr.New(instr.I32_CONST, 1),
+		instr.New(instr.I32_ADD),
+		instr.New(instr.RETURN),
+	).MustBuild()
+
+	for _, tc := range []struct {
+		name string
+		prog *program.Program
+	}{
+		{
+			name: "counting loop",
+			prog: program.New(counter(func(b *instr.Builder) {}), program.WithGlobals(types.TypeI32)),
+		},
+		{
+			name: "loop calling a function",
+			prog: program.New(counter(func(b *instr.Builder) {
+				b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+			}), program.WithGlobals(types.TypeI32), program.WithConstants(callee)),
+		},
+		{
+			name: "loop reading an array",
+			prog: program.New(counter(func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+			}), program.WithGlobals(types.TypeI32), program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
+		},
+		{
+			name: "straight-line array read",
+			prog: program.New(build(func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+			}), program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracer := newTracer()
+			i := New(tc.prog, withTracer(tracer), WithThreshold(-1))
+			defer i.Close()
+
+			tracer.capture(i, jit.Anchor{})
+			for _, span := range tracer.headers(i.instrs, 0) {
+				tracer.capture(i, jit.Anchor{IP: span.header})
+			}
+			input, ok := i.compileSnapshot(0)
+			require.True(t, ok)
+
+			plans, err := jit.TracePlan(input)
+			require.NoError(t, err)
+			roots := map[jit.Anchor]jit.Plan{}
+			for _, plan := range plans {
+				roots[plan.Anchor] = plan
+			}
+			anchors := tracer.Anchors(0)
+			require.NotEmpty(t, anchors)
+
+			emitted := 0
+			for _, ip := range anchors {
+				anchor := jit.Anchor{IP: ip}
+				fn := frontend.Trace(input, anchor)
+				if fn == nil {
+					continue
+				}
+				emitted++
+				plan, planned := roots[anchor]
+				require.True(t, planned, "anchor %+v is not a root the plan takes", anchor)
+				require.NoError(t, ssa.Verify(fn), "anchor %+v\n%s", anchor, ssa.Format(fn))
+				require.Equal(t, blocks(plan), succs(fn), "anchor %+v\n%s", anchor, ssa.Format(fn))
+			}
+			require.NotZero(t, emitted, "no root planned from %d recordings", len(anchors))
+			require.Equal(t, len(roots), emitted, "every root the plan takes must still be planned")
+		})
+	}
+}
+
+// blocks is a trace plan's block graph in breadth-first order from its root,
+// with a node of its own for every edge that leaves the plan - which is the
+// block the SSA lays out for exactly that exit.
+func blocks(plan jit.Plan) [][]int {
+	ids := map[int]int{plan.Root: 0}
+	queue := []int{plan.Root}
+	var out [][]int
+	for n := 0; n < len(queue); n++ {
+		var edges []int
+		if queue[n] != jit.NoBlock {
+			for _, edge := range plan.Blocks[queue[n]].Term.Edges {
+				node, ok := ids[edge.Index]
+				if edge.Index == jit.NoBlock || !ok {
+					node = len(queue)
+					queue = append(queue, edge.Index)
+					if edge.Index != jit.NoBlock {
+						ids[edge.Index] = node
+					}
+				}
+				edges = append(edges, node)
+			}
+		}
+		out = append(out, edges)
+	}
+	return out
+}
+
+// succs is an SSA function's block graph in the same breadth-first numbering.
+func succs(fn *ssa.Function) [][]int {
+	ids := map[int]int{0: 0}
+	queue := []int{0}
+	var out [][]int
+	for n := 0; n < len(queue); n++ {
+		var edges []int
+		for _, succ := range fn.Succ(queue[n]) {
+			node, ok := ids[succ]
+			if !ok {
+				node = len(queue)
+				ids[succ] = node
+				queue = append(queue, succ)
+			}
+			edges = append(edges, node)
+		}
+		out = append(out, edges)
+	}
+	return out
 }

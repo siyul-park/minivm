@@ -56,6 +56,22 @@ func TestBuilder_Value(t *testing.T) {
 	})
 }
 
+func TestBuilder_Type(t *testing.T) {
+	t.Run("reports the type a value was reserved with", func(t *testing.T) {
+		b := ssa.New("f")
+		value := b.Value(ssa.TypeF32)
+		param := b.Param(b.Block(), ssa.TypeRef)
+		require.Equal(t, ssa.TypeF32, b.Type(value))
+		require.Equal(t, ssa.TypeRef, b.Type(param))
+	})
+
+	t.Run("reports no type for a value this builder never reserved", func(t *testing.T) {
+		b := ssa.New("f")
+		require.Zero(t, b.Type(ssa.NoValue))
+		require.Zero(t, b.Type(b.Value(ssa.TypeI32)+1))
+	})
+}
+
 func TestBuilder_Add(t *testing.T) {
 	t.Run("appends instructions in order", func(t *testing.T) {
 		b := ssa.New("f")

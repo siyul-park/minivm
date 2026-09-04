@@ -21,9 +21,13 @@ type Space uint8
 
 // Slot names one interpreter storage location an OpLoad reads or an OpStore
 // writes. A slot is interpreter-visible state: a deopt resumes with whatever
-// the stores before it left there.
+// the stores before it left there. Base is the frame floor Index counts from,
+// the same offset from the entry frame Frame.Base names, so a local of a frame
+// a frontend inlined is distinguishable from the entry frame's own. Only
+// SpaceLocal is frame-relative; a global and an upvalue leave it zero.
 type Slot struct {
 	Space Space
+	Base  int
 	Index int
 }
 
