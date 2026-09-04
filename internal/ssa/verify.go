@@ -229,8 +229,8 @@ func performs(f *Function, o Operation) error {
 			return fmt.Errorf("%w: %s pushes %s where it yields %s", ErrType, o.name(), got, want)
 		}
 	}
-	if o.Code == instr.SELECT && (f.Type(o.Args[1]) != f.Type(o.Args[2]) || f.Type(o.Results[0]) != f.Type(o.Args[1])) {
-		return fmt.Errorf("%w: %s selects between %s and %s", ErrType, o.name(), f.Type(o.Args[1]), f.Type(o.Args[2]))
+	if o.Code == instr.SELECT && (f.Type(o.Args[0]) != f.Type(o.Args[1]) || f.Type(o.Results[0]) != f.Type(o.Args[0])) {
+		return fmt.Errorf("%w: %s selects between %s and %s", ErrType, o.name(), f.Type(o.Args[0]), f.Type(o.Args[1]))
 	}
 	return nil
 }

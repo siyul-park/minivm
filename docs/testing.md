@@ -26,6 +26,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
 | Asynchronous compilation | `compile.TestWithAsync`, `compile.TestQueue_Close`, `interp.TestPool_Get`, `interp.TestPool_Close` | a build overlapping the goroutine that claimed it, adoption at a safepoint, and shutdown with builds in flight, all under `-race` |
 | Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
+| Frontend equivalence | `frontend.TestStatic` | the SSA static frontend accepts exactly the roots `jit.StaticPlan` accepts, every function it emits passes `ssa.Verify`, and its block graph matches the plan's, over a written corpus and over generated well-typed functions |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
 
@@ -61,6 +62,7 @@ proxy double (`docs/coding-patterns.md` §12.2, §12.3).
 | Trace-tree attribution to the true entry IP | Requires driving compilation at a fabricated frame IP. |
 | Dataflow fact widening at a control-flow join (`mergeSlot` in `internal/jit`) | A slot's `refKnown`/`calleeKnown` facts are planning-internal: the backend never reads them, so nothing exports them. Their only external effect is which plans a frontend produces or rejects, which no fixture isolates from the rest of planning. |
 | Loop-invariant container selection (`hoistable` in `internal/jit`) | Reachable only through `TracePlan`, so asserting it needs a hand-built recorded trace that survives every other planning check. The recorder that produces real traces lives in `interp` and cannot be called without running the program. Covered end to end by `interp.TestARM64_HoistedContainerLoop`; the selection rule itself has no isolated public expression. |
+| `jit.Bridgeable`'s own top-level test | The predicate became exported so `internal/jit/frontend` could ask the same capability question the plan asks, and `internal/jit/static_test.go` is the file that owns it. Its answer is asserted indirectly by every bridged case in `frontend.TestStatic` and `jit.TestStaticPlan`. |
 | A committing flush's hot-backedge codegen (`lowerer.flush` in `internal/jit/arm64`) emits no VM-slot store for a dirty carried local | The claim is about which instructions a `flush(flushCommit)` call emits into an `asm.Assembler`, which is package-private mechanics of `internal/jit/arm64` with no public accessor. It moved with the ARM64 backend from `interp/jit_test.go`'s `TestARM64_Flush` and could not become an `arm64_test` external test because it constructed the unexported `lowering`/`activation` types directly; deleted rather than kept white-box inside `internal/jit/arm64` outside its normal contract. The behavior it protected — a hot loop back-edge keeps carried locals register-authoritative — is still covered end to end by `interp.TestARM64_LoopCarriedLocals`, which observes the result rather than the emitted bytes. |
 
 ### JIT Harness Migration
@@ -93,6 +95,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 3 | 3 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
+| `internal/jit/frontend` | 1 | 1 | 0 | 0 |
 | `internal/ssa` | 18 | 18 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
@@ -310,6 +313,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/graph/dominance.go` | `TestNewDominance` | ✅ |
 | `internal/graph/dominance.go` | `TestDominance_Dominates` | ✅ |
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
+| `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
 | `internal/ssa/value.go` | `TestTypeOf` | ✅ |
 | `internal/ssa/value.go` | `TestType_String` | ✅ |
 | `internal/ssa/operation.go` | `TestOp_String` | ✅ |

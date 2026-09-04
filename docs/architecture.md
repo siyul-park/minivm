@@ -44,6 +44,7 @@ Everything else is `OpExec` carrying an `instr.Opcode`, and `Code` is meaningful
 - `instr` should remain leaf-like: it owns opcode facts and learns nothing about SSA, guards, deoptimization, or the JIT.
 - `internal/graph` must remain a leaf: no minivm imports at all.
 - `internal/ssa` must not import `interp`, `internal/jit`, `internal/asm`, or any backend.
+- `internal/jit/frontend` must not import `interp`, `internal/asm`, or any backend: it reads a compile-time snapshot and emits SSA, and nothing else.
 - `types` must not import `interp`.
 - Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
 - `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
@@ -67,6 +68,7 @@ internal/jit → instr, types, internal/asm, pass, analysis, prof
 internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
 internal/jit/tier → internal/jit, prof
 internal/ssa → instr, types, internal/graph
+internal/jit/frontend → instr, types, analysis, internal/jit, internal/ssa
 internal/jit/compile → internal/asm, internal/jit, prof
 interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/compile, internal/jit/tier, internal/journal, internal/jit/arm64, pass, analysis, prof
 debug   → interp
@@ -94,6 +96,7 @@ internal/cmd/codegen → internal/codegen
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
+| `internal/jit/frontend/` | bytecode-to-SSA static frontend: the forward fixpoint that resolves element kinds, field kinds, call targets, and dynamic arities from constants and declared types, the block layout a bridged opcode splits, and the emission of one `ssa.Function` per plannable root |
 | `internal/jit/tier/` | pure throughput/give-up retirement verdict for one installed native anchor (`Watchdog`); holds no interpreter state and never imports `interp` |
 | `internal/ssa/` | SSA intermediate representation over minivm's value and opcode vocabulary: `Operation` nodes reusing `instr.Opcode`, block-parameter control flow, the interpreter-state value a deoptimization resumes into, speculation guards, explicit reference ownership, and the `Builder`, `Verify`, and `Format` that build, check, and print it; satisfies `internal/graph.Graph` |
 | `internal/jit/compile/` | compile coordination shared by the interpreters running one program: the `Queue` that admits one build per function, coalesces the `Job`s raised for it, and decides whether that build runs on the claiming goroutine or on its own worker, plus the reference-counted `Store` of published `jit.Code` and its executable buffers; never imports `interp` |

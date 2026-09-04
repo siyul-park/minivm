@@ -127,7 +127,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 			case instr.RETURN:
 				target.Term = Terminator{Kind: TerminateReturn, IP: ip}
 			default:
-				if bridgeable(inst.Opcode()) {
+				if Bridgeable(inst.Opcode()) {
 					// The backend cannot lower this opcode, so it ends the block as
 					// a bridge: interp runs its own threaded closure once and
 					// re-enters natively at next (see TerminateBridge). The
@@ -143,7 +143,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 			if !static.applyStep(&flow, inst) {
 				return nil, nil
 			}
-			if bridgeable(inst.Opcode()) {
+			if Bridgeable(inst.Opcode()) {
 				result.Blocks = append(result.Blocks, target)
 				target = Block{Anchor: Anchor{Addr: input.Address, IP: next}, Bridge: true}
 				target.State = append([]Slot{}, flow...)
@@ -192,6 +192,35 @@ func StaticPlan(input *Input) ([]Plan, error) {
 		plans = append(plans, header)
 	}
 	return plans, nil
+}
+
+// Bridgeable reports whether op is an opcode the ARM64 backend cannot lower
+// natively but the threaded closure can still perform exactly once: the
+// static planner ends its block on op instead of rejecting the whole
+// function (see TerminateBridge), and a backend's bridge deopts to run op's
+// own threaded closure before resuming native execution at the following
+// block. An opcode already lowered natively (for example ARRAY_GET or
+// STRUCT_SET) MUST NOT appear here: a bridge is strictly the fallback for
+// opcodes with no native lowering. YIELD and RESUME are excluded even though
+// the backend cannot lower them either: suspension cannot resume mid-frame
+// into native code (see docs/jit-internals.md, Suspension), so they keep
+// their unconditional terminal-fallback treatment instead of becoming a
+// bridge.
+func Bridgeable(op instr.Opcode) bool {
+	switch op {
+	case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.ARRAY_SLICE, instr.ARRAY_DELETE,
+		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+		instr.MAP_NEW, instr.MAP_NEW_DEFAULT, instr.MAP_DELETE, instr.MAP_CLEAR,
+		instr.REF_NEW, instr.REF_SET, instr.CLOSURE_NEW, instr.STRING_NEW_UTF32,
+		instr.STRING_ENCODE_UTF32, instr.STRING_ITER,
+		instr.MAP_LEN, instr.MAP_GET, instr.MAP_LOOKUP, instr.MAP_KEYS, instr.MAP_ITER,
+		instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET,
+		instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW,
+		instr.REF_TEST, instr.REF_CAST:
+		return true
+	default:
+		return false
+	}
 }
 
 // prune returns the plan rooted at root: the blocks reachable from it,
@@ -288,35 +317,6 @@ func headers(blocks []Block) []int {
 	}
 	sort.Ints(out)
 	return out
-}
-
-// bridgeable reports whether op is an opcode the ARM64 backend cannot lower
-// natively but the threaded closure can still perform exactly once: the
-// static planner ends its block on op instead of rejecting the whole
-// function (see TerminateBridge), and a backend's bridge deopts to run op's
-// own threaded closure before resuming native execution at the following
-// block. An opcode already lowered natively (for example ARRAY_GET or
-// STRUCT_SET) MUST NOT appear here: a bridge is strictly the fallback for
-// opcodes with no native lowering. YIELD and RESUME are excluded even though
-// the backend cannot lower them either: suspension cannot resume mid-frame
-// into native code (see docs/jit-internals.md, Suspension), so they keep
-// their unconditional terminal-fallback treatment instead of becoming a
-// bridge.
-func bridgeable(op instr.Opcode) bool {
-	switch op {
-	case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.ARRAY_SLICE, instr.ARRAY_DELETE,
-		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
-		instr.MAP_NEW, instr.MAP_NEW_DEFAULT, instr.MAP_DELETE, instr.MAP_CLEAR,
-		instr.REF_NEW, instr.REF_SET, instr.CLOSURE_NEW, instr.STRING_NEW_UTF32,
-		instr.STRING_ENCODE_UTF32, instr.STRING_ITER,
-		instr.MAP_LEN, instr.MAP_GET, instr.MAP_LOOKUP, instr.MAP_KEYS, instr.MAP_ITER,
-		instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET,
-		instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW,
-		instr.REF_TEST, instr.REF_CAST:
-		return true
-	default:
-		return false
-	}
 }
 
 func (r resolver) planStates(blocks []*analysis.BasicBlock) ([][]Slot, bool) {
@@ -543,7 +543,7 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 	case instr.REF_CAST:
 		// A successful cast validates the operand's declared type in place
 		// and leaves the same boxed value on the stack; its kind never
-		// changes. REF_CAST is bridged (see bridgeable), so the resume
+		// changes. REF_CAST is bridged (see Bridgeable), so the resume
 		// block's operand is a fresh retain taken by retainDeferred, not the
 		// pre-cast operand's backing slot; push a new BackingStack slot
 		// instead of mutating the existing one in place, or the resume block
@@ -644,7 +644,7 @@ func (r resolver) applyStep(state *[]Slot, inst instr.Instruction) bool {
 	case instr.ARRAY_APPEND:
 		// ARRAY_APPEND's value count is a runtime i32 on top of the values;
 		// the array reference below the values is never popped, so it stays
-		// on the stack afterward. ARRAY_APPEND is bridged (see bridgeable),
+		// on the stack afterward. ARRAY_APPEND is bridged (see Bridgeable),
 		// so that surviving operand is a fresh retain taken by
 		// retainDeferred after the bridge, not the pre-append operand's
 		// backing slot (see the same note on REF_CAST above): replace it
