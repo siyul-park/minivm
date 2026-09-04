@@ -143,3 +143,10 @@ func addSucc(b *block, target int) {
 	}
 	b.succ = append(b.succ, target)
 }
+
+// Len, Succ, and Pred satisfy internal/graph.Graph, letting the rewriter
+// hand cfg straight to that package's dominance and loop-header
+// computations without allocating an adapter.
+func (g *cfg) Len() int         { return len(g.blocks) }
+func (g *cfg) Succ(b int) []int { return g.blocks[b].succ }
+func (g *cfg) Pred(b int) []int { return g.blocks[b].pred }

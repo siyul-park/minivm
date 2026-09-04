@@ -1,5 +1,7 @@
 package asm
 
+import "github.com/siyul-park/minivm/internal/graph"
+
 // hazard names one self-referencing redefinition governed by a loop: an
 // instruction that both reads and writes the same vreg, in a block some
 // loop header dominates. header is that loop header's block index; at is
@@ -30,7 +32,7 @@ type hazard struct {
 // depends on a redefinition surviving to a later iteration.
 func carryHazards(insts []Instruction, g *cfg, dom *dominance, count int) [][]hazard {
 	out := make([][]hazard, count)
-	headers := loopHeaders(g, dom)
+	headers := graph.LoopHeaders(g, dom.Dominance)
 	if len(headers) == 0 {
 		return out
 	}
@@ -52,25 +54,8 @@ func carryHazards(insts []Instruction, g *cfg, dom *dominance, count int) [][]ha
 		}
 		id := dst.ID()
 		for _, h := range headers {
-			if dom.blockDominates(h, g.of[i]) {
+			if dom.Dominates(h, g.of[i]) {
 				out[id] = append(out[id], hazard{header: h, at: i})
-			}
-		}
-	}
-	return out
-}
-
-// loopHeaders returns the block index of every block some back-edge
-// targets: b->s is a back-edge, and s a loop header, exactly when s
-// dominates b — the standard definition of a natural loop.
-func loopHeaders(g *cfg, dom *dominance) []int {
-	seen := make(map[int]bool)
-	var out []int
-	for b := range g.blocks {
-		for _, s := range g.blocks[b].succ {
-			if !seen[s] && dom.blockDominates(s, b) {
-				seen[s] = true
-				out = append(out, s)
 			}
 		}
 	}

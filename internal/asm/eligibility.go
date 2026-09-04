@@ -43,7 +43,7 @@ func (r *rewriter) crosses(at int, id int32) bool {
 		return true
 	}
 	for _, h := range r.hazards[id] {
-		if h.at > at && h.at <= s.last && !r.dom.blockDominates(h.header, r.dom.cfg.of[at]) {
+		if h.at > at && h.at <= s.last && !r.dom.Dominates(h.header, r.dom.cfg.of[at]) {
 			return true
 		}
 	}

@@ -19,9 +19,10 @@ import (
 //
 // run is a single forward pass over the instruction stream. Spill
 // eligibility alone consults a control-flow graph built once up front (see
-// block.go, dominance.go, uses.go): whether a store actually dominates
-// every reload, rather than a flat last-use index whose only question was
-// "did a label sit in between." Register-release timing keeps the flat
+// block.go, dominance.go, uses.go), whose dominance and loop-header facts
+// come from internal/graph: whether a store actually dominates every
+// reload, rather than a flat last-use index whose only question was "did a
+// label sit in between." Register-release timing keeps the flat
 // index — see dead — since spilling is the one decision where a wrong
 // answer merely declines a spill, while a wrong release can silently evict
 // an unrelated pinned value. Spilling inserts reload/store instructions and

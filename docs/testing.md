@@ -91,6 +91,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm` | 37 | 37 | 0 | 0 |
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
+| `internal/graph` | 3 | 3 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
@@ -305,6 +306,9 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/arm64/instr.go` | `TestUXTB` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
 | `internal/asm/arm64/instr.go` | `TestUXTH` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
 | `internal/asm/arm64/instr.go` | `TestUXTW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
+| `internal/graph/dominance.go` | `TestNewDominance` | ✅ |
+| `internal/graph/dominance.go` | `TestDominance_Dominates` | ✅ |
+| `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
 | `cli/cli.go` | `TestRoot` | ✅ |
 | `cli/cli.go` | `TestWithFS` | ✅ |
 | `cli/fs.go` | `TestOS` | ✅ |

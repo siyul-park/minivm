@@ -24,6 +24,7 @@ For detailed behavior, follow the related topic docs instead of duplicating the 
 ## Boundary Rules
 
 - `instr` should remain leaf-like.
+- `internal/graph` must remain a leaf: no minivm imports at all.
 - `types` must not import `interp`.
 - Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
 - `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
@@ -37,8 +38,10 @@ Import direction: `A → B` means `A` imports `B`.
 types   → instr
 program → instr, types
 prof    → instr
+internal/asm → internal/graph
 internal/asm/amd64 → internal/asm
 internal/asm/arm64 → internal/asm
+internal/graph → (leaf)
 internal/journal → (leaf)
 internal/codegen → instr, types, jennifer, golang.org/x/tools/imports
 internal/jit → instr, types, internal/asm, pass, analysis, prof
@@ -66,6 +69,7 @@ internal/cmd/codegen → internal/codegen
 | `debug/` | bytecode-level debugger API |
 | `prof/` | execution samples and JIT metrics |
 | `internal/asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
+| `internal/graph/` | node-indexed directed-graph facts — dominance and natural loop headers — computed over a caller-supplied `Graph`, independent of any IR |
 | `internal/asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
