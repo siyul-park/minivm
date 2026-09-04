@@ -10,7 +10,7 @@ import (
 
 // site is where a value is defined: the block holding its definition and the
 // position within it, -1 for a block parameter and otherwise the index of the
-// defining instruction.
+// defining operation.
 type site struct {
 	block int
 	index int
@@ -19,8 +19,8 @@ type site struct {
 var (
 	// ErrForm reports a structural defect: no entry block, an unreachable
 	// block, an operand, result, or edge count an operation cannot have, an
-	// operation used where it is not one, or an edge naming a block that does
-	// not exist.
+	// operation used where it is not one, an undefined opcode, or an edge
+	// naming a block that does not exist.
 	ErrForm = errors.New("malformed function")
 	// ErrDefine reports a value that is not defined exactly once.
 	ErrDefine = errors.New("value not defined exactly once")
@@ -55,18 +55,18 @@ func Verify(f *Function) error {
 		if err := params(f, id); err != nil {
 			return fmt.Errorf("blk%d: %w", id, err)
 		}
-		for i, in := range block.Insts {
-			if err := instruction(f, sites, in); err != nil {
-				return fmt.Errorf("blk%d inst %d: %w", id, i, err)
+		for i, op := range block.Ops {
+			if err := operation(f, sites, op); err != nil {
+				return fmt.Errorf("blk%d op %d: %w", id, i, err)
 			}
-			if err := uses(f, sites, dom, site{id, i}, operands(in)); err != nil {
-				return fmt.Errorf("blk%d inst %d: %w", id, i, err)
+			if err := uses(f, sites, dom, site{id, i}, operands(op)); err != nil {
+				return fmt.Errorf("blk%d op %d: %w", id, i, err)
 			}
 		}
 		if err := terminator(f, sites, block.Term); err != nil {
 			return fmt.Errorf("blk%d term: %w", id, err)
 		}
-		if err := uses(f, sites, dom, site{id, len(block.Insts)}, ends(block.Term)); err != nil {
+		if err := uses(f, sites, dom, site{id, len(block.Ops)}, ends(block.Term)); err != nil {
 			return fmt.Errorf("blk%d term: %w", id, err)
 		}
 	}
@@ -96,8 +96,8 @@ func define(f *Function) ([]site, error) {
 				return nil, err
 			}
 		}
-		for i, in := range block.Insts {
-			for _, v := range in.Results {
+		for i, op := range block.Ops {
+			for _, v := range op.Results {
 				if err := claim(v, site{id, i}); err != nil {
 					return nil, err
 				}
@@ -134,110 +134,131 @@ func params(f *Function, block int) error {
 	return nil
 }
 
-// instruction checks in's operand, result, and state shape against what its
-// operation admits.
-func instruction(f *Function, sites []site, in Instruction) error {
-	args, results := len(in.Args), len(in.Results)
+// operation checks o's operand, result, and state shape against what its
+// operation admits. An operation the bytecode names is checked against that
+// opcode's own stack effect; the rest are the shapes the IR itself defines.
+//
+// An operation resumes into an interpreter state exactly when control can leave
+// it: a bridge runs in the interpreter, an opcode that enters a function runs
+// code that can leave, and every overwrite of a slot or of heap contents
+// releases the reference it replaced. The replaced value decides that, not the
+// stored one, so the test is the storage written and never the operand's type.
+func operation(f *Function, sites []site, o Operation) error {
+	args, results := len(o.Args), len(o.Results)
 	deopts := false
-	switch in.Op {
+	switch o.Op {
 	case OpConst, OpLoad:
 		if args != 0 || results != 1 {
-			return counted(in.Op, args, results)
+			return counted(o.name(), args, results)
 		}
-	case OpPure:
-		typ := instr.TypeOf(in.Code)
-		if args == 0 || results != 1 || (typ.Pop != nil && args != len(typ.Pop)) {
-			return counted(in.Op, args, results)
+	case OpExec, OpBridge:
+		if err := performs(f, o); err != nil {
+			return err
 		}
-	case OpSelect:
-		if args != 3 || results != 1 {
-			return counted(in.Op, args, results)
-		}
+		deopts = o.Op == OpBridge || o.Code.Writes(instr.Frame) ||
+			(o.Code.Reads(instr.Heap) && o.Code.Writes(instr.Heap))
 	case OpStore:
 		if args != 1 || results != 0 {
-			return counted(in.Op, args, results)
+			return counted(o.name(), args, results)
 		}
-		deopts = f.Type(in.Args[0]) == TypeRef
-	case OpRead:
-		if args == 0 || results != 1 {
-			return counted(in.Op, args, results)
-		}
-	case OpWrite:
-		if args < 2 || results != 0 {
-			return counted(in.Op, args, results)
-		}
-		deopts = f.Type(in.Args[args-1]) == TypeRef
-	case OpCall:
-		if args == 0 {
-			return counted(in.Op, args, results)
-		}
-		deopts = true
-	case OpBridge:
 		deopts = true
 	case OpGuardKind, OpGuardShape:
 		if args != 1 || results != 1 {
-			return counted(in.Op, args, results)
-		}
-		deopts = true
-	case OpGuardValue:
-		if args != 2 || results != 1 {
-			return counted(in.Op, args, results)
+			return counted(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardBounds:
 		if args != 2 || results != 0 {
-			return counted(in.Op, args, results)
+			return counted(o.name(), args, results)
+		}
+		deopts = true
+	case OpGuardValue:
+		if args != 2 || results != 1 {
+			return counted(o.name(), args, results)
 		}
 		deopts = true
 	case OpRetain, OpRelease:
 		if args != 1 || results != 0 {
-			return counted(in.Op, args, results)
+			return counted(o.name(), args, results)
 		}
-		deopts = in.Op == OpRelease
+		deopts = o.Op == OpRelease
 	case OpState:
 		if args != 0 || results != 1 {
-			return counted(in.Op, args, results)
+			return counted(o.name(), args, results)
 		}
-		if len(in.Frames) == 0 {
-			return fmt.Errorf("%w: %s carries no frame", ErrState, in.Op)
+		if len(o.Frames) == 0 {
+			return fmt.Errorf("%w: %s carries no frame", ErrState, o.name())
 		}
 	default:
-		return fmt.Errorf("%w: %s is not an instruction", ErrForm, in.Op)
+		return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
 	}
-	if _, err := resume(f, sites, in.State, in.Op, deopts); err != nil {
+	if _, err := resume(f, sites, o.State, o.name(), deopts); err != nil {
 		return err
 	}
-	return typed(f, in)
+	return typed(f, o)
 }
 
-// typed checks that in's results and operands carry types its operation can
+// performs checks o against the stack effect of the opcode it performs: one
+// argument per popped kind and one result per pushed kind, each of a type that
+// kind accepts. Args run in the reverse of Pop, bottom of the stack first. An
+// opcode with no statically fixed effect fixes no shape here either, exactly as
+// program.Verify leaves it to context, so only a call's callee is required.
+// A select is the one opcode with a rule of its own: SSA gives every value one
+// type, so its arms and result must agree, which its KindAny effect cannot say.
+func performs(f *Function, o Operation) error {
+	if !instr.Valid(o.Code) {
+		return fmt.Errorf("%w: %s performs no opcode", ErrForm, o.Op)
+	}
+	typ := instr.TypeOf(o.Code)
+	if typ.Pop == nil && typ.Push == nil {
+		if o.Code.Writes(instr.Frame) && len(o.Args) == 0 {
+			return counted(o.name(), len(o.Args), len(o.Results))
+		}
+		return nil
+	}
+	if len(o.Args) != len(typ.Pop) || len(o.Results) != len(typ.Push) {
+		return counted(o.name(), len(o.Args), len(o.Results))
+	}
+	for i, want := range typ.Pop {
+		if got := f.Type(o.Args[len(o.Args)-1-i]); !accepts(got, want) {
+			return fmt.Errorf("%w: %s pops %s where it wants %s", ErrType, o.name(), got, want)
+		}
+	}
+	for i, want := range typ.Push {
+		if got := f.Type(o.Results[i]); !accepts(got, want) {
+			return fmt.Errorf("%w: %s pushes %s where it yields %s", ErrType, o.name(), got, want)
+		}
+	}
+	if o.Code == instr.SELECT && (f.Type(o.Args[1]) != f.Type(o.Args[2]) || f.Type(o.Results[0]) != f.Type(o.Args[1])) {
+		return fmt.Errorf("%w: %s selects between %s and %s", ErrType, o.name(), f.Type(o.Args[1]), f.Type(o.Args[2]))
+	}
+	return nil
+}
+
+// typed checks that o's results and operands carry types its operation can
 // produce and consume, and that only OpState traffics in interpreter state.
-func typed(f *Function, in Instruction) error {
-	for _, v := range in.Results {
+func typed(f *Function, o Operation) error {
+	for _, v := range o.Results {
 		if f.Type(v) == 0 {
 			return fmt.Errorf("%w: result v%d has no type", ErrType, v)
 		}
-		if (f.Type(v) == TypeState) != (in.Op == OpState) {
-			return fmt.Errorf("%w: %s cannot produce %s", ErrType, in.Op, f.Type(v))
+		if (f.Type(v) == TypeState) != (o.Op == OpState) {
+			return fmt.Errorf("%w: %s cannot produce %s", ErrType, o.name(), f.Type(v))
 		}
 	}
-	for _, v := range in.Args {
+	for _, v := range o.Args {
 		if f.Type(v) == TypeState {
-			return fmt.Errorf("%w: %s cannot consume %s", ErrType, in.Op, TypeState)
+			return fmt.Errorf("%w: %s cannot consume %s", ErrType, o.name(), TypeState)
 		}
 	}
-	switch in.Op {
+	switch o.Op {
 	case OpGuardShape, OpGuardValue:
-		if f.Type(in.Results[0]) != f.Type(in.Args[0]) {
-			return fmt.Errorf("%w: %s refines %s into %s", ErrType, in.Op, f.Type(in.Args[0]), f.Type(in.Results[0]))
-		}
-	case OpSelect:
-		if f.Type(in.Args[1]) != f.Type(in.Args[2]) || f.Type(in.Results[0]) != f.Type(in.Args[1]) {
-			return fmt.Errorf("%w: %s selects between %s and %s", ErrType, in.Op, f.Type(in.Args[1]), f.Type(in.Args[2]))
+		if f.Type(o.Results[0]) != f.Type(o.Args[0]) {
+			return fmt.Errorf("%w: %s refines %s into %s", ErrType, o.name(), f.Type(o.Args[0]), f.Type(o.Results[0]))
 		}
 	case OpRetain, OpRelease:
-		if f.Type(in.Args[0]) != TypeRef {
-			return fmt.Errorf("%w: %s owns %s", ErrType, in.Op, f.Type(in.Args[0]))
+		if f.Type(o.Args[0]) != TypeRef {
+			return fmt.Errorf("%w: %s owns %s", ErrType, o.name(), f.Type(o.Args[0]))
 		}
 	}
 	return nil
@@ -251,27 +272,27 @@ func terminator(f *Function, sites []site, t Terminator) error {
 	switch t.Op {
 	case OpJump:
 		if args != 0 || edges != 1 {
-			return counted(t.Op, args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpBranch:
 		if args != 1 || edges != 2 {
-			return counted(t.Op, args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpTable:
 		if args != 1 || edges == 0 {
-			return counted(t.Op, args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpReturn:
 		if edges != 0 {
-			return counted(t.Op, args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpComplete:
 		if args != 0 || edges != 0 {
-			return counted(t.Op, args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpExit, OpSuspend:
 		if args != 0 || edges != 0 {
-			return counted(t.Op, args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 		deopts = true
 	default:
@@ -282,7 +303,7 @@ func terminator(f *Function, sites []site, t Terminator) error {
 			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Op, edge.Block)
 		}
 	}
-	state, err := resume(f, sites, t.State, t.Op, deopts)
+	state, err := resume(f, sites, t.State, t.Op.String(), deopts)
 	if err != nil {
 		return err
 	}
@@ -292,23 +313,23 @@ func terminator(f *Function, sites []site, t Terminator) error {
 	return nil
 }
 
-// resume returns the state instruction v names, requiring one exactly when op
-// can deoptimize and rejecting one it cannot resume into.
-func resume(f *Function, sites []site, v Value, op Op, deopts bool) (Instruction, error) {
+// resume returns the state operation v names, requiring one exactly when the
+// operation named name can deoptimize and rejecting one it cannot resume into.
+func resume(f *Function, sites []site, v Value, name string, deopts bool) (Operation, error) {
 	if !deopts {
 		if v != NoValue {
-			return Instruction{}, fmt.Errorf("%w: %s cannot resume into v%d", ErrState, op, v)
+			return Operation{}, fmt.Errorf("%w: %s cannot resume into v%d", ErrState, name, v)
 		}
-		return Instruction{}, nil
+		return Operation{}, nil
 	}
 	if v <= NoValue || int(v) >= len(sites) || f.Type(v) != TypeState {
-		return Instruction{}, fmt.Errorf("%w: %s resumes into v%d", ErrState, op, v)
+		return Operation{}, fmt.Errorf("%w: %s resumes into v%d", ErrState, name, v)
 	}
 	def := sites[v]
-	if def.index < 0 || f.blocks[def.block].Insts[def.index].Op != OpState {
-		return Instruction{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
+	if def.index < 0 || f.blocks[def.block].Ops[def.index].Op != OpState {
+		return Operation{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
 	}
-	return f.blocks[def.block].Insts[def.index], nil
+	return f.blocks[def.block].Ops[def.index], nil
 }
 
 // uses checks that every value at reaches is defined and dominated there.
@@ -331,15 +352,15 @@ func uses(f *Function, sites []site, dom *graph.Dominance, at site, vs []Value) 
 	return nil
 }
 
-// operands returns every value in reads: its arguments, the stacks its frames
+// operands returns every value o reads: its arguments, the stacks its frames
 // hold, and the state it resumes into.
-func operands(in Instruction) []Value {
-	vs := append([]Value(nil), in.Args...)
-	for _, frame := range in.Frames {
+func operands(o Operation) []Value {
+	vs := append([]Value(nil), o.Args...)
+	for _, frame := range o.Frames {
 		vs = append(vs, frame.Stack...)
 	}
-	if in.State != NoValue {
-		vs = append(vs, in.State)
+	if o.State != NoValue {
+		vs = append(vs, o.State)
 	}
 	return vs
 }
@@ -357,7 +378,25 @@ func ends(t Terminator) []Value {
 	return vs
 }
 
-// counted reports an operand, result, or edge count op cannot have.
-func counted(op Op, in, out int) error {
-	return fmt.Errorf("%w: %s takes %d and yields %d", ErrForm, op, in, out)
+// accepts reports whether a value of type t may stand where an opcode's stack
+// effect wants kind k. KindAny admits any type, and i1 and i8 are admitted
+// wherever the i32 they are computed as is wanted, exactly as program.Verify
+// admits them.
+func accepts(t Type, k instr.Kind) bool {
+	return k == instr.KindAny || repr(TypeOf(k)) == repr(t)
+}
+
+// repr reduces a type to the type it is computed and stored as, stating
+// instr.Kind.Repr in the vocabulary a value is typed in.
+func repr(t Type) Type {
+	if t == TypeI1 || t == TypeI8 {
+		return TypeI32
+	}
+	return t
+}
+
+// counted reports an operand, result, or edge count the operation named name
+// cannot have.
+func counted(name string, in, out int) error {
+	return fmt.Errorf("%w: %s takes %d and yields %d", ErrForm, name, in, out)
 }

@@ -29,7 +29,7 @@ func TestFunction_Succ(t *testing.T) {
 		b := ssa.New("f")
 		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Instruction{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
 		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
 		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
@@ -47,7 +47,7 @@ func TestFunction_Pred(t *testing.T) {
 		b := ssa.New("f")
 		entry, join := b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Instruction{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
 		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
 
@@ -61,7 +61,7 @@ func TestFunction_Pred(t *testing.T) {
 		entry, header, done := b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI32)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-		b.Add(header, ssa.Instruction{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
+		b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: header}, {Block: done}}})
 		b.Term(done, ssa.Terminator{Op: ssa.OpComplete})
 
@@ -82,7 +82,7 @@ func TestFunction_Block(t *testing.T) {
 
 		block := b.Build().Block(entry)
 		require.Equal(t, []ssa.Value{param}, block.Params)
-		require.Empty(t, block.Insts)
+		require.Empty(t, block.Ops)
 		require.Equal(t, ssa.OpReturn, block.Term.Op)
 	})
 }
@@ -92,7 +92,7 @@ func TestFunction_Type(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		v := b.Value(ssa.TypeF64)
-		b.Add(entry, ssa.Instruction{Op: ssa.OpConst, Const: types.BoxF64(1.5), Results: []ssa.Value{v}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxF64(1.5), Results: []ssa.Value{v}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		require.Equal(t, ssa.TypeF64, b.Build().Type(v))
 	})

@@ -62,8 +62,8 @@ func TestBuilder_Add(t *testing.T) {
 		entry := b.Block()
 		one := b.Value(ssa.TypeI32)
 		doubled := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Instruction{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Instruction{Op: ssa.OpPure, Code: instr.I32_ADD, Args: []ssa.Value{one, one}, Results: []ssa.Value{doubled}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{one, one}, Results: []ssa.Value{doubled}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{doubled}})
 
 		require.Equal(t,

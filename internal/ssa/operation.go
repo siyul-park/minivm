@@ -7,11 +7,13 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Op is what an Instruction or a Terminator does. Pure computation keeps its
-// bytecode identity in Code rather than being restated here, so this set
-// names only what the bytecode has no word for: the interpreter state a deopt
-// resumes into, the speculation guards that must fail before an operation
-// runs, explicit reference ownership, and control flow.
+// Op is what an Operation or a Terminator does. The guest instruction set is
+// this IR's computation vocabulary: an operation the bytecode names is OpExec
+// carrying that instr.Opcode, and every static fact about it is asked of instr.
+// An Op of its own exists only where the guest has no word - a compile-time
+// value or an interpreter slot, whose opcode identity the decoded Const or Slot
+// subsumes; the block graph's own control flow; and what only an optimizing
+// compiler has, from speculation guards to the state a deopt resumes into.
 type Op uint8
 
 // Space is the interpreter storage a Slot names.
@@ -25,7 +27,7 @@ type Slot struct {
 	Index int
 }
 
-// Shape is the speculated container fact one heap instruction is compiled
+// Shape is the speculated container fact one heap operation is compiled
 // against: a guard admits only this shape, and the access lowered after it
 // loads through it. Itab is the concrete heap type identity, Typ the struct
 // type pointer a struct carries, and Host the Go kind a *HostStruct field
@@ -52,12 +54,18 @@ type Frame struct {
 	Stack   []Value
 }
 
-// Instruction is one operation inside a Block. Only the fields its Op names
+// Operation is one step inside a Block: a definition in a value graph, with no
+// byte offset, no width, and no encoding. It is the same instruction that
+// instr.Instruction encodes, in the other of the two forms, and it takes MLIR's
+// noun rather than that one's so a reader can tell which form they hold. The
+// frontend that decodes one into the other is the only place a raw operand
+// becomes a Slot, a Const, a Shape, or an edge. Only the fields its Op names
 // carry meaning; the rest stay zero.
-type Instruction struct {
+type Operation struct {
 	Op Op
-	// Code is the bytecode operation an OpPure, OpRead, OpWrite, OpCall, or
-	// OpBridge performs.
+	// Code is the bytecode operation an OpExec or OpBridge performs. Its
+	// instr.Type states the operation's stack effect, and Args holds what it
+	// pops in the reverse of that order, bottom of the stack first.
 	Code   instr.Opcode
 	Slot   Slot
 	Const  types.Boxed
@@ -65,7 +73,7 @@ type Instruction struct {
 	Frames []Frame
 
 	Args []Value
-	// State is the interpreter state this instruction deoptimizes into, or
+	// State is the interpreter state this operation deoptimizes into, or
 	// NoValue when it cannot deoptimize.
 	State   Value
 	Results []Value
@@ -92,22 +100,20 @@ type Edge struct {
 const (
 	// OpConst materializes a compile-time value: a numeric literal, a null
 	// ref, or a constant-pool entry, all of which are fixed once a program is
-	// loaded.
+	// loaded. Const decides which, so the six bytecode opcodes that encode one
+	// are not restated here.
 	OpConst Op = iota
-	// OpPure computes Code over its arguments with no effect the interpreter
-	// can observe.
-	OpPure
-	OpSelect
+	// OpExec performs Code over its arguments: whatever that opcode computes,
+	// reads, writes, or calls. Whether it is pure, overwrites a container, or
+	// enters another function is instr's answer to give, not a distinction
+	// this set repeats.
+	OpExec
+	// OpLoad reads Slot and OpStore writes it. Slot decides which storage, so
+	// the eight bytecode opcodes over locals, globals, and upvalues are not
+	// restated here, and a tee, which is one opcode doing both, splits into
+	// the two operations it is.
 	OpLoad
 	OpStore
-	// OpRead reads a heap container through Shape: an element, a field, a
-	// length, or a payload.
-	OpRead
-	// OpWrite stores into a heap container through Shape. The stored value is
-	// the last argument.
-	OpWrite
-	// OpCall enters another function. The callee is the first argument.
-	OpCall
 	// OpGuardKind admits only a value whose runtime kind is the result's
 	// type.
 	OpGuardKind
@@ -153,20 +159,12 @@ func (o Op) String() string {
 	switch o {
 	case OpConst:
 		return "const"
-	case OpPure:
-		return "pure"
-	case OpSelect:
-		return "select"
+	case OpExec:
+		return "exec"
 	case OpLoad:
 		return "load"
 	case OpStore:
 		return "store"
-	case OpRead:
-		return "read"
-	case OpWrite:
-		return "write"
-	case OpCall:
-		return "call"
 	case OpGuardKind:
 		return "guard.kind"
 	case OpGuardShape:
@@ -212,5 +210,18 @@ func (s Space) String() string {
 		return "upval"
 	default:
 		return "invalid"
+	}
+}
+
+// name is how an operation is written: the mnemonic of the opcode it performs,
+// or the name of the operation the IR invented.
+func (o Operation) name() string {
+	switch o.Op {
+	case OpExec:
+		return instr.TypeOf(o.Code).Mnemonic
+	case OpBridge:
+		return o.Op.String() + " " + instr.TypeOf(o.Code).Mnemonic
+	default:
+		return o.Op.String()
 	}
 }

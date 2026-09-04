@@ -273,10 +273,11 @@ const (
 
 const opcodeCount = STRING_ITER + 1
 
-// IsBranch reports whether op encodes an intra-function control-flow branch
-// (BR / BR_IF / BR_TABLE). Unconditional terminators like RETURN and
-// UNREACHABLE are not branches.
-func (op Opcode) IsBranch() bool {
+// isBranch reports whether op names its branch targets in its own operands
+// (BR / BR_IF / BR_TABLE), which is what decoding and labelling need. A control
+// transfer that names no target - RETURN, THROW, UNREACHABLE - is not one;
+// Writes(Branch) covers those.
+func isBranch(op Opcode) bool {
 	switch op {
 	case BR, BR_IF, BR_TABLE:
 		return true

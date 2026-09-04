@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-
-	"github.com/siyul-park/minivm/instr"
 )
 
 // Format renders f as text: one line per block header, naming its parameters
-// and the predecessors that reach it, then one indented line per instruction
-// and a last line for the terminator. It is the readable form every later
-// phase is tested against.
+// and the predecessors that reach it, then one indented line per operation and
+// a last line for the terminator. It is the readable form every later phase is
+// tested against.
 func Format(f *Function) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "func %s\n", f.name)
@@ -25,49 +23,42 @@ func Format(f *Function) string {
 			fmt.Fprintf(&sb, " <-- (%s)", strings.Join(names, ", "))
 		}
 		sb.WriteString("\n")
-		for _, in := range block.Insts {
-			fmt.Fprintf(&sb, "\t%s\n", inst(f, in))
+		for _, o := range block.Ops {
+			fmt.Fprintf(&sb, "\t%s\n", op(f, o))
 		}
 		fmt.Fprintf(&sb, "\t%s\n", term(f, block.Term))
 	}
 	return sb.String()
 }
 
-// inst renders one instruction as "results = operation operands", dropping
-// the halves it has none of.
-func inst(f *Function, in Instruction) string {
+// op renders one operation as "results = name operands", dropping the halves
+// it has none of.
+func op(f *Function, o Operation) string {
 	var sb strings.Builder
-	if len(in.Results) > 0 {
-		fmt.Fprintf(&sb, "%s = ", defs(f, in.Results))
+	if len(o.Results) > 0 {
+		fmt.Fprintf(&sb, "%s = ", defs(f, o.Results))
 	}
-	switch in.Op {
-	case OpPure, OpRead, OpWrite, OpCall:
-		sb.WriteString(instr.TypeOf(in.Code).Mnemonic)
-	case OpBridge:
-		fmt.Fprintf(&sb, "%s %s", in.Op, instr.TypeOf(in.Code).Mnemonic)
-	default:
-		sb.WriteString(in.Op.String())
-	}
+	sb.WriteString(o.name())
 
-	var ops []string
-	switch in.Op {
+	var args []string
+	switch o.Op {
 	case OpConst:
-		ops = append(ops, in.Const.String())
+		args = append(args, o.Const.String())
 	case OpLoad, OpStore:
-		ops = append(ops, fmt.Sprintf("%s[%d]", in.Slot.Space, in.Slot.Index))
+		args = append(args, fmt.Sprintf("%s[%d]", o.Slot.Space, o.Slot.Index))
 	case OpState:
-		for _, frame := range in.Frames {
-			ops = append(ops, fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]}",
+		for _, frame := range o.Frames {
+			args = append(args, fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]}",
 				frame.Addr, frame.Base, frame.IP, frame.Returns, strings.Join(refs(frame.Stack), ", ")))
 		}
 	}
-	ops = append(ops, refs(in.Args)...)
-	if len(ops) > 0 {
-		fmt.Fprintf(&sb, " %s", strings.Join(ops, ", "))
+	args = append(args, refs(o.Args)...)
+	if len(args) > 0 {
+		fmt.Fprintf(&sb, " %s", strings.Join(args, ", "))
 	}
-	sb.WriteString(shape(in.Shape))
-	if in.State != NoValue {
-		fmt.Fprintf(&sb, " state v%d", in.State)
+	sb.WriteString(shape(o.Shape))
+	if o.State != NoValue {
+		fmt.Fprintf(&sb, " state v%d", o.State)
 	}
 	return sb.String()
 }
@@ -77,12 +68,12 @@ func inst(f *Function, in Instruction) string {
 func term(f *Function, t Terminator) string {
 	var sb strings.Builder
 	sb.WriteString(t.Op.String())
-	ops := refs(t.Args)
+	args := refs(t.Args)
 	for _, edge := range t.Edges {
-		ops = append(ops, fmt.Sprintf("blk%d(%s)", edge.Block, strings.Join(refs(edge.Args), ", ")))
+		args = append(args, fmt.Sprintf("blk%d(%s)", edge.Block, strings.Join(refs(edge.Args), ", ")))
 	}
-	if len(ops) > 0 {
-		fmt.Fprintf(&sb, " %s", strings.Join(ops, ", "))
+	if len(args) > 0 {
+		fmt.Fprintf(&sb, " %s", strings.Join(args, ", "))
 	}
 	if t.State != NoValue {
 		fmt.Fprintf(&sb, " state v%d", t.State)
@@ -90,7 +81,7 @@ func term(f *Function, t Terminator) string {
 	return sb.String()
 }
 
-// shape renders the speculated container facts an instruction is compiled
+// shape renders the speculated container facts an operation is compiled
 // against, omitting every fact it does not carry.
 func shape(s Shape) string {
 	var sb strings.Builder

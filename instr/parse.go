@@ -154,7 +154,7 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 			return nil, fmt.Errorf("line %d: unknown mnemonic: %q", line, fields[0])
 		}
 
-		if op.IsBranch() {
+		if isBranch(op) {
 			inst, brefs, err := parseBranch(op, fields[0], fields[1:], lt, line)
 			if err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)

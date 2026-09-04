@@ -492,7 +492,7 @@ func (l lowerer) fuse(ctx *lowering, ops []jit.Step, idx int) int {
 		width += operand
 	}
 	if consumer.IP != source.IP+width || source.Op != instr.CONST_GET ||
-		!instr.IsCall(consumer.Op) {
+		!consumer.Op.Writes(instr.Frame) {
 		return 0
 	}
 	constant := int(source.Args[0])

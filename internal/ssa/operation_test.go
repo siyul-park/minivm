@@ -11,13 +11,9 @@ func TestOp_String(t *testing.T) {
 	t.Run("names every operation", func(t *testing.T) {
 		names := map[ssa.Op]string{
 			ssa.OpConst:       "const",
-			ssa.OpPure:        "pure",
-			ssa.OpSelect:      "select",
+			ssa.OpExec:        "exec",
 			ssa.OpLoad:        "load",
 			ssa.OpStore:       "store",
-			ssa.OpRead:        "read",
-			ssa.OpWrite:       "write",
-			ssa.OpCall:        "call",
 			ssa.OpGuardKind:   "guard.kind",
 			ssa.OpGuardShape:  "guard.shape",
 			ssa.OpGuardBounds: "guard.bounds",

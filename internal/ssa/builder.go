@@ -37,9 +37,9 @@ func (b *Builder) Value(t Type) Value {
 	return Value(len(b.types) - 1)
 }
 
-// Add appends inst to block.
-func (b *Builder) Add(block int, inst Instruction) {
-	b.blocks[block].Insts = append(b.blocks[block].Insts, inst)
+// Add appends op to block.
+func (b *Builder) Add(block int, op Operation) {
+	b.blocks[block].Ops = append(b.blocks[block].Ops, op)
 }
 
 // Term ends block with term, replacing any terminator already set.

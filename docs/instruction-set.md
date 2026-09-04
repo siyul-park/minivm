@@ -11,7 +11,7 @@ Use this document when adding, changing, debugging, or testing bytecode instruct
 | Concern | File |
 |---|---|
 | opcode byte values | `instr/opcode.go` |
-| mnemonic, operand widths, fixed stack effects | `instr/type.go` |
+| mnemonic, operand widths, fixed stack effects, machine effects | `instr/type.go` |
 | dynamic verification rules | `program/verify.go` |
 | runtime semantics | `interp/threaded.go` |
 | ARM64 lowering | `internal/jit/arm64/` |
@@ -69,6 +69,27 @@ Narrow result rules:
 - comparisons, `eqz`, `ref.test`, `ref.eq`, and `ref.ne` produce `i1`
 - `i32.and`, `i32.or`, and `i32.xor` preserve a shared narrow kind for `i1`/`i8`
 - other arithmetic widens narrow operands to `i32`
+
+## Machine Effects
+
+`instr.Type` states what an opcode touches outside the operand stack, as two `Effect` sets that every opcode declares: `Reads` and `Writes`.
+
+| Effect | Meaning |
+|---|---|
+| `Local` | the running frame's local slots |
+| `Global` | the module's globals |
+| `Upval` | the running closure's captured upvalues |
+| `Heap` | the contents of a heap container |
+| `Frame` | the call frame chain: the opcode enters a function named on the operand stack |
+| `Branch` | the instruction pointer, moved other than by falling through |
+
+Query them with `op.Reads(effect)` and `op.Writes(effect)`. Rules:
+
+- allocating a container writes `Heap`; overwriting the contents of one both reads and writes it, which is where a replaced reference is released
+- only `call` and `return_call` write `Frame`; resuming a coroutine pushes no frame
+- `op.IsPure()` is derived, not declared: an opcode that reads nothing, writes nothing, and pushes at least one value computes from its operands alone, so a consumer may number, fold, or reorder it
+
+A new opcode declares its effects in the same table entry as its stack effect. Consumers ask `instr`; they must not re-derive an effect from an opcode list.
 
 ## Opcode Reference
 

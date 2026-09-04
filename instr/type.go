@@ -6,7 +6,8 @@ package instr
 // ends on top. A KindAny entry matches or yields any kind. When both Pop and
 // Push are nil the opcode has no statically fixed effect (its effect depends on
 // operands, constants, declared types, or the runtime stack) and a verifier
-// must resolve it from context.
+// must resolve it from context. Reads and Writes state what the opcode touches
+// beyond that stack, and every opcode declares both.
 //
 // Boolean-producing opcodes (comparisons, *.eqz, ref.test/is_null/eq/ne, and
 // the string comparisons) push KindI1 so the verifier tracks the boolean type;
@@ -17,71 +18,73 @@ type Type struct {
 	Widths   []int
 	Pop      []Kind
 	Push     []Kind
-	Flags    Flag
+	Reads    Effect
+	Writes   Effect
 }
 
-// Flag records the properties of an opcode that consumers outside the decoder
-// keep asking about. They are static facts about the instruction, so they live
-// with the rest of its metadata rather than being re-derived from opcode lists
-// at each use site.
-type Flag uint8
+// Effect names one part of the machine an opcode touches beyond the operand
+// stack, which Pop and Push already describe. Every opcode states its Reads and
+// Writes, so an opcode that touches nothing says so by holding neither - and is
+// pure by that fact rather than by a bit of its own.
+type Effect uint8
 
 const (
-	// FlagCall transfers control into another function.
-	FlagCall Flag = 1 << iota
-	// FlagLocalWrite assigns the local slot named by the first operand.
-	FlagLocalWrite
-	// FlagContainerStore writes an element or field into a heap container.
-	FlagContainerStore
+	// Local is the running frame's local slots.
+	Local Effect = 1 << iota
+	// Global is the module's globals.
+	Global
+	// Upval is the running closure's captured upvalues.
+	Upval
+	// Heap is the contents of a heap container. Allocating one writes Heap;
+	// overwriting the contents of one both reads and writes it, which is where
+	// a replaced reference is released.
+	Heap
+	// Frame is the call frame chain: an opcode that writes it enters a
+	// function named on the operand stack, and the interpreter pushes a frame
+	// the callee's return tears down. Resuming a suspended coroutine is not
+	// one, because no frame is pushed for it.
+	Frame
+	// Branch is the instruction pointer, moved other than by falling through.
+	Branch
 )
-
-// IsCall reports whether op transfers control into another function.
-func IsCall(op Opcode) bool { return TypeOf(op).Flags&FlagCall != 0 }
-
-// WritesLocal reports whether op assigns the local slot its first operand names.
-func WritesLocal(op Opcode) bool { return TypeOf(op).Flags&FlagLocalWrite != 0 }
-
-// StoresContainer reports whether op writes an element or field into a heap
-// container.
-func StoresContainer(op Opcode) bool { return TypeOf(op).Flags&FlagContainerStore != 0 }
 
 var types = map[Opcode]Type{
 	NOP:         {Mnemonic: "nop"},
-	UNREACHABLE: {Mnemonic: "unreachable"},
+	UNREACHABLE: {Mnemonic: "unreachable", Writes: Branch},
 
 	DROP: {Mnemonic: "drop", Pop: []Kind{KindAny}},
 	DUP:  {Mnemonic: "dup"},
 	SWAP: {Mnemonic: "swap"},
 
-	BR:       {Mnemonic: "br", Widths: []int{2}},
-	BR_IF:    {Mnemonic: "br_if", Widths: []int{2}, Pop: []Kind{KindI32}},
-	BR_TABLE: {Mnemonic: "br_table", Widths: []int{-2, 2}, Pop: []Kind{KindI32}},
+	BR:       {Mnemonic: "br", Widths: []int{2}, Writes: Branch},
+	BR_IF:    {Mnemonic: "br_if", Widths: []int{2}, Pop: []Kind{KindI32}, Writes: Branch},
+	BR_TABLE: {Mnemonic: "br_table", Widths: []int{-2, 2}, Pop: []Kind{KindI32}, Writes: Branch},
 
-	SELECT: {Mnemonic: "select"},
+	SELECT: {Mnemonic: "select", Pop: []Kind{KindI32, KindAny, KindAny}, Push: []Kind{KindAny}},
 
-	CALL:        {Mnemonic: "call", Flags: FlagCall},
-	RETURN:      {Mnemonic: "return"},
-	RETURN_CALL: {Mnemonic: "return_call", Flags: FlagCall},
+	CALL:        {Mnemonic: "call", Reads: Global | Upval | Heap, Writes: Global | Upval | Heap | Frame | Branch},
+	RETURN:      {Mnemonic: "return", Writes: Branch},
+	RETURN_CALL: {Mnemonic: "return_call", Reads: Global | Upval | Heap, Writes: Global | Upval | Heap | Frame | Branch},
 
-	YIELD:      {Mnemonic: "yield", Pop: []Kind{KindAny}, Push: []Kind{KindAny}},
-	RESUME:     {Mnemonic: "resume", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindRef}},
-	CORO_DONE:  {Mnemonic: "coro.done", Pop: []Kind{KindRef}, Push: []Kind{KindI1}},
-	CORO_VALUE: {Mnemonic: "coro.value", Pop: []Kind{KindRef}, Push: []Kind{KindAny}},
+	YIELD:      {Mnemonic: "yield", Pop: []Kind{KindAny}, Push: []Kind{KindAny}, Writes: Branch},
+	RESUME:     {Mnemonic: "resume", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap | Branch},
+	CORO_DONE:  {Mnemonic: "coro.done", Pop: []Kind{KindRef}, Push: []Kind{KindI1}, Reads: Heap},
+	CORO_VALUE: {Mnemonic: "coro.value", Pop: []Kind{KindRef}, Push: []Kind{KindAny}, Reads: Heap},
 
-	GLOBAL_GET: {Mnemonic: "global.get", Widths: []int{2}, Push: []Kind{KindAny}},
-	GLOBAL_SET: {Mnemonic: "global.set", Widths: []int{2}, Pop: []Kind{KindAny}},
-	GLOBAL_TEE: {Mnemonic: "global.tee", Widths: []int{2}},
+	GLOBAL_GET: {Mnemonic: "global.get", Widths: []int{2}, Push: []Kind{KindAny}, Reads: Global},
+	GLOBAL_SET: {Mnemonic: "global.set", Widths: []int{2}, Pop: []Kind{KindAny}, Writes: Global},
+	GLOBAL_TEE: {Mnemonic: "global.tee", Widths: []int{2}, Writes: Global},
 
-	LOCAL_GET: {Mnemonic: "local.get", Widths: []int{1}},
-	LOCAL_SET: {Mnemonic: "local.set", Widths: []int{1}, Pop: []Kind{KindAny}, Flags: FlagLocalWrite},
-	LOCAL_TEE: {Mnemonic: "local.tee", Widths: []int{1}, Flags: FlagLocalWrite},
+	LOCAL_GET: {Mnemonic: "local.get", Widths: []int{1}, Reads: Local},
+	LOCAL_SET: {Mnemonic: "local.set", Widths: []int{1}, Pop: []Kind{KindAny}, Writes: Local},
+	LOCAL_TEE: {Mnemonic: "local.tee", Widths: []int{1}, Writes: Local},
 
 	CONST_GET: {Mnemonic: "const.get", Widths: []int{2}},
 
 	REF_NULL: {Mnemonic: "ref.null", Push: []Kind{KindRef}},
 
-	REF_TEST: {Mnemonic: "ref.test", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindI1}},
-	REF_CAST: {Mnemonic: "ref.cast", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindAny}},
+	REF_TEST: {Mnemonic: "ref.test", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindI1}, Reads: Heap},
+	REF_CAST: {Mnemonic: "ref.cast", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindAny}, Reads: Heap},
 
 	REF_IS_NULL: {Mnemonic: "ref.is_null", Pop: []Kind{KindRef}, Push: []Kind{KindI1}},
 	REF_EQ:      {Mnemonic: "ref.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
@@ -251,65 +254,65 @@ var types = map[Opcode]Type{
 
 	F64_REINTERPRET_I64: {Mnemonic: "f64.reinterpret_i64", Pop: []Kind{KindI64}, Push: []Kind{KindF64}},
 
-	STRING_NEW_UTF32: {Mnemonic: "string.new_utf32", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
+	STRING_NEW_UTF32: {Mnemonic: "string.new_utf32", Pop: []Kind{KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
 
-	STRING_LEN:    {Mnemonic: "string.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
-	STRING_CONCAT: {Mnemonic: "string.concat", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindRef}},
+	STRING_LEN:    {Mnemonic: "string.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}, Reads: Heap},
+	STRING_CONCAT: {Mnemonic: "string.concat", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
 
-	STRING_EQ: {Mnemonic: "string.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
-	STRING_NE: {Mnemonic: "string.ne", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
-	STRING_LT: {Mnemonic: "string.lt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
-	STRING_GT: {Mnemonic: "string.gt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
-	STRING_LE: {Mnemonic: "string.le", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
-	STRING_GE: {Mnemonic: "string.ge", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	STRING_EQ: {Mnemonic: "string.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}, Reads: Heap},
+	STRING_NE: {Mnemonic: "string.ne", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}, Reads: Heap},
+	STRING_LT: {Mnemonic: "string.lt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}, Reads: Heap},
+	STRING_GT: {Mnemonic: "string.gt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}, Reads: Heap},
+	STRING_LE: {Mnemonic: "string.le", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}, Reads: Heap},
+	STRING_GE: {Mnemonic: "string.ge", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}, Reads: Heap},
 
-	STRING_ENCODE_UTF32: {Mnemonic: "string.encode_utf32", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
-	STRING_ITER:         {Mnemonic: "string.iter", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
+	STRING_ENCODE_UTF32: {Mnemonic: "string.encode_utf32", Pop: []Kind{KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
+	STRING_ITER:         {Mnemonic: "string.iter", Pop: []Kind{KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
 
-	ARRAY_NEW:         {Mnemonic: "array.new", Widths: []int{2}, Pop: []Kind{KindI32, KindAny}, Push: []Kind{KindRef}},
-	ARRAY_NEW_DEFAULT: {Mnemonic: "array.new_default", Widths: []int{2}, Pop: []Kind{KindI32}, Push: []Kind{KindRef}},
+	ARRAY_NEW:         {Mnemonic: "array.new", Widths: []int{2}, Pop: []Kind{KindI32, KindAny}, Push: []Kind{KindRef}, Writes: Heap},
+	ARRAY_NEW_DEFAULT: {Mnemonic: "array.new_default", Widths: []int{2}, Pop: []Kind{KindI32}, Push: []Kind{KindRef}, Writes: Heap},
 
-	ARRAY_LEN:    {Mnemonic: "array.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
-	ARRAY_GET:    {Mnemonic: "array.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
-	ARRAY_SET:    {Mnemonic: "array.set", Pop: []Kind{KindAny, KindI32, KindRef}, Flags: FlagContainerStore},
-	ARRAY_FILL:   {Mnemonic: "array.fill", Pop: []Kind{KindI32, KindAny, KindI32, KindRef}},
-	ARRAY_COPY:   {Mnemonic: "array.copy", Pop: []Kind{KindI32, KindI32, KindRef, KindI32, KindRef}},
-	ARRAY_APPEND: {Mnemonic: "array.append"},
-	ARRAY_DELETE: {Mnemonic: "array.delete", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
-	ARRAY_SLICE:  {Mnemonic: "array.slice", Pop: []Kind{KindI32, KindI32, KindRef}, Push: []Kind{KindRef}},
+	ARRAY_LEN:    {Mnemonic: "array.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}, Reads: Heap},
+	ARRAY_GET:    {Mnemonic: "array.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}, Reads: Heap},
+	ARRAY_SET:    {Mnemonic: "array.set", Pop: []Kind{KindAny, KindI32, KindRef}, Reads: Heap, Writes: Heap},
+	ARRAY_FILL:   {Mnemonic: "array.fill", Pop: []Kind{KindI32, KindAny, KindI32, KindRef}, Reads: Heap, Writes: Heap},
+	ARRAY_COPY:   {Mnemonic: "array.copy", Pop: []Kind{KindI32, KindI32, KindRef, KindI32, KindRef}, Reads: Heap, Writes: Heap},
+	ARRAY_APPEND: {Mnemonic: "array.append", Reads: Heap, Writes: Heap},
+	ARRAY_DELETE: {Mnemonic: "array.delete", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}, Reads: Heap, Writes: Heap},
+	ARRAY_SLICE:  {Mnemonic: "array.slice", Pop: []Kind{KindI32, KindI32, KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
 
-	STRUCT_NEW:         {Mnemonic: "struct.new", Widths: []int{2}},
-	STRUCT_NEW_DEFAULT: {Mnemonic: "struct.new_default", Widths: []int{2}, Push: []Kind{KindRef}},
+	STRUCT_NEW:         {Mnemonic: "struct.new", Widths: []int{2}, Writes: Heap},
+	STRUCT_NEW_DEFAULT: {Mnemonic: "struct.new_default", Widths: []int{2}, Push: []Kind{KindRef}, Writes: Heap},
 
-	STRUCT_GET: {Mnemonic: "struct.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}},
-	STRUCT_SET: {Mnemonic: "struct.set", Pop: []Kind{KindAny, KindI32, KindRef}, Flags: FlagContainerStore},
+	STRUCT_GET: {Mnemonic: "struct.get", Pop: []Kind{KindI32, KindRef}, Push: []Kind{KindAny}, Reads: Heap},
+	STRUCT_SET: {Mnemonic: "struct.set", Pop: []Kind{KindAny, KindI32, KindRef}, Reads: Heap, Writes: Heap},
 
-	MAP_NEW:         {Mnemonic: "map.new", Widths: []int{2}},
-	MAP_NEW_DEFAULT: {Mnemonic: "map.new_default", Widths: []int{2}, Pop: []Kind{KindI32}, Push: []Kind{KindRef}},
+	MAP_NEW:         {Mnemonic: "map.new", Widths: []int{2}, Writes: Heap},
+	MAP_NEW_DEFAULT: {Mnemonic: "map.new_default", Widths: []int{2}, Pop: []Kind{KindI32}, Push: []Kind{KindRef}, Writes: Heap},
 
-	MAP_LEN:    {Mnemonic: "map.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
-	MAP_GET:    {Mnemonic: "map.get", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny}},
-	MAP_LOOKUP: {Mnemonic: "map.lookup", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny, KindI1}},
-	MAP_SET:    {Mnemonic: "map.set", Pop: []Kind{KindAny, KindAny, KindRef}},
-	MAP_DELETE: {Mnemonic: "map.delete", Pop: []Kind{KindAny, KindRef}},
-	MAP_CLEAR:  {Mnemonic: "map.clear", Pop: []Kind{KindRef}},
-	MAP_KEYS:   {Mnemonic: "map.keys", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
-	MAP_ITER:   {Mnemonic: "map.iter", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
+	MAP_LEN:    {Mnemonic: "map.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}, Reads: Heap},
+	MAP_GET:    {Mnemonic: "map.get", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny}, Reads: Heap},
+	MAP_LOOKUP: {Mnemonic: "map.lookup", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny, KindI1}, Reads: Heap},
+	MAP_SET:    {Mnemonic: "map.set", Pop: []Kind{KindAny, KindAny, KindRef}, Reads: Heap, Writes: Heap},
+	MAP_DELETE: {Mnemonic: "map.delete", Pop: []Kind{KindAny, KindRef}, Reads: Heap, Writes: Heap},
+	MAP_CLEAR:  {Mnemonic: "map.clear", Pop: []Kind{KindRef}, Reads: Heap, Writes: Heap},
+	MAP_KEYS:   {Mnemonic: "map.keys", Pop: []Kind{KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
+	MAP_ITER:   {Mnemonic: "map.iter", Pop: []Kind{KindRef}, Push: []Kind{KindRef}, Reads: Heap, Writes: Heap},
 
-	REF_NEW: {Mnemonic: "ref.new", Pop: []Kind{KindAny}, Push: []Kind{KindRef}},
-	REF_GET: {Mnemonic: "ref.get", Pop: []Kind{KindRef}, Push: []Kind{KindAny}},
-	REF_SET: {Mnemonic: "ref.set", Pop: []Kind{KindAny, KindRef}},
+	REF_NEW: {Mnemonic: "ref.new", Pop: []Kind{KindAny}, Push: []Kind{KindRef}, Writes: Heap},
+	REF_GET: {Mnemonic: "ref.get", Pop: []Kind{KindRef}, Push: []Kind{KindAny}, Reads: Heap},
+	REF_SET: {Mnemonic: "ref.set", Pop: []Kind{KindAny, KindRef}, Reads: Heap, Writes: Heap},
 
-	CLOSURE_NEW: {Mnemonic: "closure.new"},
+	CLOSURE_NEW: {Mnemonic: "closure.new", Writes: Heap},
 
-	THROW: {Mnemonic: "throw", Pop: []Kind{KindAny}},
+	THROW: {Mnemonic: "throw", Pop: []Kind{KindAny}, Writes: Branch},
 
-	ERROR_NEW:  {Mnemonic: "error.new", Pop: []Kind{KindI32, KindAny}, Push: []Kind{KindRef}},
-	ERROR_GET:  {Mnemonic: "error.get", Pop: []Kind{KindRef}, Push: []Kind{KindAny}},
-	ERROR_CODE: {Mnemonic: "error.code", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
+	ERROR_NEW:  {Mnemonic: "error.new", Pop: []Kind{KindI32, KindAny}, Push: []Kind{KindRef}, Writes: Heap},
+	ERROR_GET:  {Mnemonic: "error.get", Pop: []Kind{KindRef}, Push: []Kind{KindAny}, Reads: Heap},
+	ERROR_CODE: {Mnemonic: "error.code", Pop: []Kind{KindRef}, Push: []Kind{KindI32}, Reads: Heap},
 
-	UPVAL_GET: {Mnemonic: "upval.get", Widths: []int{1}},
-	UPVAL_SET: {Mnemonic: "upval.set", Widths: []int{1}, Pop: []Kind{KindAny}},
+	UPVAL_GET: {Mnemonic: "upval.get", Widths: []int{1}, Reads: Upval},
+	UPVAL_SET: {Mnemonic: "upval.set", Widths: []int{1}, Pop: []Kind{KindAny}, Writes: Upval},
 }
 
 func TypeOf(op Opcode) Type {
@@ -323,4 +326,19 @@ func TypeOf(op Opcode) Type {
 func Valid(op Opcode) bool {
 	_, ok := types[op]
 	return ok
+}
+
+// Reads reports whether op reads effect.
+func (op Opcode) Reads(effect Effect) bool { return TypeOf(op).Reads&effect != 0 }
+
+// Writes reports whether op writes effect.
+func (op Opcode) Writes(effect Effect) bool { return TypeOf(op).Writes&effect != 0 }
+
+// IsPure reports whether op computes its results from its operand values
+// alone: it touches no other part of the machine and yields at least one
+// value, so two occurrences with equal operands compute equal results and a
+// consumer may number, fold, or reorder them.
+func (op Opcode) IsPure() bool {
+	t := TypeOf(op)
+	return t.Reads == 0 && t.Writes == 0 && len(t.Push) > 0
 }

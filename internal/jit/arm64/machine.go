@@ -329,7 +329,7 @@ func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
 	ctx.leaf = true
 	for _, block := range plan.Blocks {
 		for _, step := range block.Steps {
-			if instr.IsCall(step.Op) {
+			if step.Op.Writes(instr.Frame) {
 				ctx.leaf = false
 			}
 		}

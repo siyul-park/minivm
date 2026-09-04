@@ -79,7 +79,7 @@ func StaticPlan(input *Input) ([]Plan, error) {
 			inst := instr.Instruction(input.Function.Code[ip:])
 			next := ip + inst.Width()
 			step := Step{Op: inst.Opcode(), Args: Args(inst), Fn: input.Address, IP: ip}
-			if instr.IsCall(inst.Opcode()) && len(flow) > 0 {
+			if inst.Opcode().Writes(instr.Frame) && len(flow) > 0 {
 				callee := flow[len(flow)-1]
 				if callee.calleeKnown {
 					step.Callee = callee.callee
@@ -726,7 +726,7 @@ func localTypes(fn *types.Function) []types.Type {
 func callFree(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
-		if instr.IsCall(inst.Opcode()) {
+		if inst.Opcode().Writes(instr.Frame) {
 			return false
 		}
 		ip += inst.Width()

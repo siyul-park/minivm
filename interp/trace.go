@@ -203,7 +203,7 @@ func (t *tracer) capture(i *Interpreter, a jit.Anchor) (result captureResult) {
 
 		t.finish(&clone, &st, op)
 		tr.Ops = append(tr.Ops, st)
-		if instr.IsCall(op) {
+		if op.Writes(instr.Frame) {
 			hasCall = true
 		}
 		// A backward edge to a different header starts a distinct loop trace.
@@ -802,7 +802,7 @@ func (t *tracer) encloses(instrs [][]byte, addr, outer, inner int) bool {
 }
 
 func (t *tracer) reason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
-	if instr.IsCall(op) && i.sp > 0 {
+	if op.Writes(instr.Frame) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
 			return prof.CaptureReasonNone
 		}

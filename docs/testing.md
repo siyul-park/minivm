@@ -12,7 +12,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 |---|---|
 | test shape and naming | `docs/coding-patterns.md` §12 |
 | public API behavior | production owner test matching the defining file |
-| opcode metadata and mnemonic | `instr/type.go` and `TestValid` |
+| opcode metadata, mnemonic, and machine effects | `instr/type.go` and `TestValid` |
 | verifier policy | `program/verify.go` and `TestVerify/defines_a_policy_for_every_opcode` |
 | runtime opcode corpus | `interp/interp_test.go` `runTests` and `TestInterpreter_Run/covers_every_runtime_opcode` |
 | backend support | `docs/instruction-set.md` |
@@ -96,7 +96,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa` | 18 | 18 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
-| `instr` | 44 | 44 | 0 | 0 |
+| `instr` | 43 | 43 | 0 | 0 |
 | `interp` | 83 | 83 | 0 | 0 |
 | `optimize` | 4 | 4 | 0 | 0 |
 | `pass` | 9 | 9 | 0 | 0 |
@@ -312,8 +312,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
 | `internal/ssa/value.go` | `TestTypeOf` | ✅ |
 | `internal/ssa/value.go` | `TestType_String` | ✅ |
-| `internal/ssa/instruction.go` | `TestOp_String` | ✅ |
-| `internal/ssa/instruction.go` | `TestSpace_String` | ✅ |
+| `internal/ssa/operation.go` | `TestOp_String` | ✅ |
+| `internal/ssa/operation.go` | `TestSpace_String` | ✅ |
 | `internal/ssa/function.go` | `TestFunction_Len` | ✅ |
 | `internal/ssa/function.go` | `TestFunction_Succ` | ✅ |
 | `internal/ssa/function.go` | `TestFunction_Pred` | ✅ |
@@ -373,7 +373,6 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `instr/kind.go` | `TestKind_Repr` | ✅ |
 | `instr/kind.go` | `TestKind_Size` | ✅ |
 | `instr/kind.go` | `TestKind_String` | ✅ |
-| `instr/opcode.go` | `TestOpcode_IsBranch` | ✅ |
 | `instr/parse.go` | `TestParse` | ✅ |
 | `instr/parse.go` | `TestParseAll` | ✅ |
 | `instr/parse.go` | `TestParseI16` | ✅ |
@@ -390,6 +389,9 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `instr/parse.go` | `TestReadU8` | ✅ |
 | `instr/type.go` | `TestTypeOf` | ✅ |
 | `instr/type.go` | `TestValid` | ✅ |
+| `instr/type.go` | `TestOpcode_Reads` | ✅ |
+| `instr/type.go` | `TestOpcode_Writes` | ✅ |
+| `instr/type.go` | `TestOpcode_IsPure` | ✅ |
 | `interp/codec.go` | `TestNewRegistry` | ✅ |
 | `interp/codec.go` | `TestRegistry_Marshal` | ✅ |
 | `interp/codec.go` | `TestRegistry_Unmarshal` | ✅ |

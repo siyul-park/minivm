@@ -351,7 +351,7 @@ func (g *numbering) step(ip int, inst instr.Instruction) bool {
 		return false
 	}
 
-	if isPure(op) {
+	if op.IsPure() {
 		return g.pure(ip, end, inst)
 	}
 
@@ -554,26 +554,6 @@ func (g *numbering) kindOf(slot int) instr.Kind {
 		return instr.KindAny
 	}
 	return g.locals[slot].Kind()
-}
-
-// isPure reports whether op is a deterministic, side-effect-free, non-allocating
-// value computation: the numeric ALU/compare/convert ops (whose operands and
-// result are all numeric) plus the reference comparisons.
-func isPure(op instr.Opcode) bool {
-	switch op {
-	case instr.REF_EQ, instr.REF_NE, instr.REF_IS_NULL:
-		return true
-	}
-	t := instr.TypeOf(op)
-	if len(t.Pop) == 0 || len(t.Push) != 1 || !t.Push[0].IsNumeric() {
-		return false
-	}
-	for _, k := range t.Pop {
-		if !k.IsNumeric() {
-			return false
-		}
-	}
-	return true
 }
 
 // commutative reports whether op's two operands may be reordered without

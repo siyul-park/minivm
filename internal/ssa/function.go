@@ -18,12 +18,12 @@ type Function struct {
 	preds  [][]int
 }
 
-// Block is one straight-line span of instructions ending in a Terminator.
-// Params are the values its predecessors pass on their edges; the entry
-// block's params are the operands live when the function is entered.
+// Block is one straight-line run of operations ending in a Terminator. Params
+// are the values its predecessors pass on their edges; the entry block's
+// params are the operands live when the function is entered.
 type Block struct {
 	Params []Value
-	Insts  []Instruction
+	Ops    []Operation
 	Term   Terminator
 }
 

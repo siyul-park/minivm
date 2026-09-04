@@ -136,10 +136,10 @@ func hoistable(fn *types.Function, blocks []Block) *Hoist {
 	banned := make([]bool, len(locals))
 	for _, block := range blocks {
 		for _, step := range block.Steps {
-			if instr.IsCall(step.Op) {
+			if step.Op.Writes(instr.Frame) {
 				return nil
 			}
-			if instr.WritesLocal(step.Op) {
+			if step.Op.Writes(instr.Local) {
 				if local := int(step.Args[0]); local < len(banned) {
 					banned[local] = true
 				}

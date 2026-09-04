@@ -21,9 +21,27 @@ For detailed behavior, follow the related topic docs instead of duplicating the 
 | Debugger and REPL | `debugging.md`, `guides/repl.md` |
 | Platforms and build constraints | `compatibility.md` |
 
+## Instruction Representations
+
+An instruction exists in three forms, one per level. Each level owns exactly one complete operation vocabulary, and no operation is declared at two levels.
+
+| Level | Form | Operation vocabulary |
+|---|---|---|
+| guest bytecode | `instr.Instruction` — bytes at an offset in a function body, decoded on demand and patched in place | `instr.Opcode`, owned by `instr`, which also owns every static fact about it |
+| mid-level IR | `ssa.Operation` — a definition in a value graph, with no position, no width, and no encoding | `instr.Opcode` reused whole, carried in `Code`; `ssa.Op` adds only what the guest ISA cannot express |
+| machine IR | `asm.Instruction` — a four-operand virtual-register row | the architecture package's own, opaque to `asm` (`arm64.Op`) |
+
+`ssa.Op` earns an entry only when the guest ISA has no word for the operation:
+
+- the opcode's identity is subsumed by the decoded operand the IR holds instead — `OpConst` by `Const`, `OpLoad` and `OpStore` by `Slot`
+- the block graph's own control flow — `OpJump`, `OpBranch`, `OpTable`, `OpReturn`, `OpComplete`
+- what only an optimizing compiler has — `OpGuardKind`, `OpGuardShape`, `OpGuardBounds`, `OpGuardValue`, `OpRetain`, `OpRelease`, `OpState`, `OpBridge`, `OpExit`, `OpSuspend`
+
+Everything else is `OpExec` carrying an `instr.Opcode`, and `Code` is meaningful for exactly `OpExec` and `OpBridge`. Decoding a raw operand into a `Slot`, a `Const`, a `Shape`, or an edge belongs to the frontend that lowers bytecode into the IR, and nowhere else.
+
 ## Boundary Rules
 
-- `instr` should remain leaf-like.
+- `instr` should remain leaf-like: it owns opcode facts and learns nothing about SSA, guards, deoptimization, or the JIT.
 - `internal/graph` must remain a leaf: no minivm imports at all.
 - `internal/ssa` must not import `interp`, `internal/jit`, `internal/asm`, or any backend.
 - `types` must not import `interp`.
@@ -77,7 +95,7 @@ internal/cmd/codegen → internal/codegen
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
 | `internal/jit/tier/` | pure throughput/give-up retirement verdict for one installed native anchor (`Watchdog`); holds no interpreter state and never imports `interp` |
-| `internal/ssa/` | SSA intermediate representation for minivm's value and opcode vocabulary: block-parameter control flow, the interpreter-state value a deoptimization resumes into, speculation guards, explicit reference ownership, and the `Builder`, `Verify`, and `Format` that build, check, and print it; satisfies `internal/graph.Graph` |
+| `internal/ssa/` | SSA intermediate representation over minivm's value and opcode vocabulary: `Operation` nodes reusing `instr.Opcode`, block-parameter control flow, the interpreter-state value a deoptimization resumes into, speculation guards, explicit reference ownership, and the `Builder`, `Verify`, and `Format` that build, check, and print it; satisfies `internal/graph.Graph` |
 | `internal/jit/compile/` | compile coordination shared by the interpreters running one program: the `Queue` that admits one build per function, coalesces the `Job`s raised for it, and decides whether that build runs on the claiming goroutine or on its own worker, plus the reference-counted `Store` of published `jit.Code` and its executable buffers; never imports `interp` |
 | `internal/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `internal/codegen/` | fusion pattern catalog, its validation, and the emitters that render `interp/threaded.go`; one file per opcode domain over a shared composition engine |

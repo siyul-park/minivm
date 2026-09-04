@@ -83,7 +83,7 @@ func carried(fn *types.Function, blocks []Block) []int {
 			}
 		}
 		for _, step := range block.Steps {
-			if instr.IsCall(step.Op) {
+			if step.Op.Writes(instr.Frame) {
 				return nil
 			}
 			if !inside {
