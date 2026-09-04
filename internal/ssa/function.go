@@ -27,6 +27,12 @@ type Block struct {
 	Term   Terminator
 }
 
+// Name returns the function's name, as given to New. It carries no meaning
+// beyond identifying the function in a Format dump.
+func (f *Function) Name() string {
+	return f.name
+}
+
 // Len returns the number of blocks.
 func (f *Function) Len() int {
 	return len(f.blocks)

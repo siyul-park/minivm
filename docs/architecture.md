@@ -44,6 +44,7 @@ Everything else is `OpExec` carrying an `instr.Opcode`, and `Code` is meaningful
 - `instr` should remain leaf-like: it owns opcode facts and learns nothing about SSA, guards, deoptimization, or the JIT.
 - `internal/graph` must remain a leaf: no minivm imports at all.
 - `internal/ssa` must not import `interp`, `internal/jit`, `internal/asm`, or any backend.
+- `internal/ssa/opt` must not import `interp`, `internal/jit`, `internal/asm`, or any backend either: every pass it runs must stay correct over a function with no guard or deopt state at all, not only one a JIT frontend produced.
 - `internal/jit/frontend` must not import `interp`, `internal/asm`, or any backend: it reads a compile-time snapshot and emits SSA, and nothing else.
 - `types` must not import `interp`.
 - Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
@@ -68,6 +69,7 @@ internal/jit → instr, types, internal/asm, pass, analysis, prof
 internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
 internal/jit/tier → internal/jit, prof
 internal/ssa → instr, types, internal/graph
+internal/ssa/opt → instr, types, internal/graph, internal/ssa, pass
 internal/jit/frontend → instr, types, analysis, internal/jit, internal/ssa
 internal/jit/compile → internal/asm, internal/jit, prof
 interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/compile, internal/jit/tier, internal/journal, internal/jit/arm64, pass, analysis, prof
@@ -99,6 +101,7 @@ internal/cmd/codegen → internal/codegen
 | `internal/jit/frontend/` | the two SSA frontends over one snapshot: `Static`, the forward fixpoint that resolves element kinds, field kinds, call targets, and dynamic arities from constants and declared types plus the block layout a bridged opcode splits; `Trace`, which resolves the same facts from what a recording observed, lays that recording out as a block chain, folds the continuations recorded at its hot exits in, and inlines the callees it entered; and the one operation-level translation both drive |
 | `internal/jit/tier/` | pure throughput/give-up retirement verdict for one installed native anchor (`Watchdog`); holds no interpreter state and never imports `interp` |
 | `internal/ssa/` | SSA intermediate representation over minivm's value and opcode vocabulary: `Operation` nodes reusing `instr.Opcode`, block-parameter control flow, the interpreter-state value a deoptimization resumes into, speculation guards, explicit reference ownership, and the `Builder`, `Verify`, and `Format` that build, check, and print it; satisfies `internal/graph.Graph` |
+| `internal/ssa/opt/` | `pass.Pipeline[*ssa.Function]` and its four passes: constant folding, dominator-tree-scoped common subexpression elimination, redundant guard elimination, and liveness-based dead code elimination; correct over a function with no guard or deopt state as well as one a JIT frontend produced, since it knows nothing of `internal/jit` |
 | `internal/jit/compile/` | compile coordination shared by the interpreters running one program: the `Queue` that admits one build per function, coalesces the `Job`s raised for it, and decides whether that build runs on the claiming goroutine or on its own worker, plus the reference-counted `Store` of published `jit.Code` and its executable buffers; never imports `interp` |
 | `internal/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `internal/codegen/` | fusion pattern catalog, its validation, and the emitters that render `interp/threaded.go`; one file per opcode domain over a shared composition engine |

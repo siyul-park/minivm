@@ -4,9 +4,9 @@ How minivm analyses, transforms, and optimization pipelines work.
 
 ## When to Read
 
-Use this document when changing `analysis/`, `transform/`, `optimize/`, or `pass/`.
+Use this document when changing `analysis/`, `transform/`, `optimize/`, `pass/`, or `internal/ssa/opt/`.
 
-For bytecode semantics, see `docs/instruction-set.md`. For branch and handler validity, see `docs/verification.md`.
+For bytecode semantics, see `docs/instruction-set.md`. For branch and handler validity, see `docs/verification.md`. For the SSA IR itself and JIT contracts, see `docs/jit-internals.md`.
 
 ## Summary
 
@@ -35,6 +35,7 @@ Design rules:
 | transforms | `transform/` |
 | optimizer levels | `optimize/` |
 | branch and handler repair | `transform/rewrite.go` |
+| SSA optimizer pipeline and passes | `internal/ssa/opt/` |
 
 ## Core Model
 
@@ -249,6 +250,25 @@ Skipped intentionally:
 
 - float identities, because IEEE-754 makes them unsafe
 - annihilators such as `x * 0` or `x & 0`, because they would need to drop a live left operand
+
+## SSA Optimizer
+
+`internal/ssa/opt` is a second pass system over `*ssa.Function`, reusing `pass.Pass`, `pass.Analysis`, `pass.Manager`, and `pass.Pipeline` exactly as `optimize` does over `*program.Program` - no second pipeline abstraction exists. `opt.New()` builds a fixed four-pass pipeline: `FoldPass`, `CSEPass`, `GuardPass`, then `DCEPass`, run in that order because CSE has to unify a repeated load's value before a guard built on each read is recognizably the same guard, and DCE has to run last to sweep up whatever folding, deduplicating, and guard elimination leave behind (an operand a fold made unused, an `OpState` a removed guard no longer resumes into).
+
+Every pass here must stay correct and useful on a function with no JIT-specific fact at all, not only one `internal/jit/frontend` produced with guards and deopt state - `internal/ssa/opt` does not import `internal/jit`, so nothing in it may assume one is present.
+
+| Pass | Collapses | Mechanism |
+|---|---|---|
+| `FoldPass` | an `OpExec` whose opcode is `IsPure()` and whose arguments are all `OpConst` | direct per-operation rewrite, no rebuild - decodes each `types.Boxed` argument into its native Go type and computes with ordinary operators |
+| `CSEPass` | two `OpConst` or pure `OpExec` operations with equal value, related by dominance | `dedup`, keyed by opcode and argument identity |
+| `GuardPass` | two guards of the same kind admitting the same fact over the same operand, related by dominance | `dedup`, keyed by guard kind, operand, and the admitted fact (target kind, shape, bounds, or specialized value) |
+| `DCEPass` | an operation with no live result and no effect, and any block unreachable from the entry | mark-sweep liveness seeded from every operation instr's effect model says runs unconditionally, propagated backward through every value an operation reads - including an `OpState`'s own frame stacks |
+
+`CSEPass` and `GuardPass` share one engine (`dedup` in `internal/ssa/opt/dedup.go`): a dominator-tree-scoped hash-consing table, walked in the dominator tree's own preorder so a key one block establishes stays visible to every block it dominates and is forgotten once that whole subtree is done. This is the SSA counterpart of `GVNAnalysis`, and is far smaller than it: a value here is its own definition, so identity is free, and dominance alone - no available-expression dataflow, no per-block value renumbering, no stable-versus-opaque story for mutable loads - decides what one definition may stand in for.
+
+`GuardPass` has no bytecode counterpart; a guard is a fact only a JIT frontend's speculation invents. It is the pass `docs/jit-internals.md`'s "Heap Reads and Mutations" section describes as still needed: a repeated heap access re-emits and re-guards independently today, and running `CSEPass` first is what makes the second access's guard operand equal the first's.
+
+The eventual plan is to delete `transform`'s `FoldPass`, `AlgebraicPass`, `DCEPass`, and `GVNPass` in favor of these four, once a bytecode-to-SSA-to-bytecode route exists to run them over `*program.Program` too. Nothing calls `internal/ssa/opt` yet: it has no consumer in `internal/jit` or elsewhere, and both that bytecode route and the JIT's own use of this pipeline are future work.
 
 ## Rewrite Rules
 

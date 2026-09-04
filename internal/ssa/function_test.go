@@ -11,6 +11,15 @@ import (
 
 var _ graph.Graph = (*ssa.Function)(nil)
 
+func TestFunction_Name(t *testing.T) {
+	t.Run("returns the name given to New", func(t *testing.T) {
+		b := ssa.New("gcd")
+		entry := b.Block()
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		require.Equal(t, "gcd", b.Build().Name())
+	})
+}
+
 func TestFunction_Len(t *testing.T) {
 	t.Run("counts the blocks built", func(t *testing.T) {
 		b := ssa.New("f")

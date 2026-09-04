@@ -93,10 +93,11 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm` | 37 | 37 | 0 | 0 |
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
-| `internal/graph` | 3 | 3 | 0 | 0 |
+| `internal/graph` | 4 | 4 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 2 | 2 | 0 | 0 |
-| `internal/ssa` | 19 | 19 | 0 | 0 |
+| `internal/ssa` | 20 | 20 | 0 | 0 |
+| `internal/ssa/opt` | 11 | 11 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
@@ -312,6 +313,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/arm64/instr.go` | `TestUXTW` | Shared: `TestEncoder_Encode` / `TestInstructionFactories` |
 | `internal/graph/dominance.go` | `TestNewDominance` | ✅ |
 | `internal/graph/dominance.go` | `TestDominance_Dominates` | ✅ |
+| `internal/graph/dominance.go` | `TestDominance_IDom` | ✅ |
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
 | `internal/jit/frontend/trace.go` | `TestTrace` | ✅ |
@@ -319,6 +321,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/value.go` | `TestType_String` | ✅ |
 | `internal/ssa/operation.go` | `TestOp_String` | ✅ |
 | `internal/ssa/operation.go` | `TestSpace_String` | ✅ |
+| `internal/ssa/function.go` | `TestFunction_Name` | ✅ |
 | `internal/ssa/function.go` | `TestFunction_Len` | ✅ |
 | `internal/ssa/function.go` | `TestFunction_Succ` | ✅ |
 | `internal/ssa/function.go` | `TestFunction_Pred` | ✅ |
@@ -334,6 +337,17 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/builder.go` | `TestBuilder_Build` | ✅ |
 | `internal/ssa/verify.go` | `TestVerify` | ✅ |
 | `internal/ssa/format.go` | `TestFormat` | ✅ |
+| `internal/ssa/opt/opt.go` | `TestNew` | ✅ |
+| `internal/ssa/opt/opt.go` | `TestOptimizer_Optimize` | ✅ |
+| `internal/ssa/opt/opt.go` | `TestOptimizer_Add` | ✅ |
+| `internal/ssa/opt/fold.go` | `TestNewFoldPass` | ✅ |
+| `internal/ssa/opt/fold.go` | `TestFoldPass_Run` | ✅ |
+| `internal/ssa/opt/cse.go` | `TestNewCSEPass` | ✅ |
+| `internal/ssa/opt/cse.go` | `TestCSEPass_Run` | ✅ |
+| `internal/ssa/opt/guard.go` | `TestNewGuardPass` | ✅ |
+| `internal/ssa/opt/guard.go` | `TestGuardPass_Run` | ✅ |
+| `internal/ssa/opt/dce.go` | `TestNewDCEPass` | ✅ |
+| `internal/ssa/opt/dce.go` | `TestDCEPass_Run` | ✅ |
 | `cli/cli.go` | `TestRoot` | ✅ |
 | `cli/cli.go` | `TestWithFS` | ✅ |
 | `cli/fs.go` | `TestOS` | ✅ |

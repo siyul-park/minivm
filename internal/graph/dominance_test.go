@@ -100,3 +100,42 @@ func TestDominance_Dominates(t *testing.T) {
 		require.True(t, d.Dominates(0, 4))
 	})
 }
+
+func TestDominance_IDom(t *testing.T) {
+	t.Run("the entry has no immediate dominator", func(t *testing.T) {
+		g := newFixture(2, [][2]int{{0, 1}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, -1, d.IDom(0))
+	})
+
+	t.Run("an unreachable node has no immediate dominator", func(t *testing.T) {
+		g := newFixture(2, nil)
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, -1, d.IDom(1))
+	})
+
+	t.Run("a join's immediate dominator is the nearest common ancestor of its arms, not either arm", func(t *testing.T) {
+		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
+		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, 0, d.IDom(1))
+		require.Equal(t, 0, d.IDom(2))
+		require.Equal(t, 0, d.IDom(3), "neither sibling arm dominates the join, so its idom is their common ancestor")
+	})
+
+	t.Run("a loop body's immediate dominator is its header, not the back edge", func(t *testing.T) {
+		// 0 -> 1 (header), 1 -> 2 (body), 2 -> 1 (back edge), 2 -> 3 (exit).
+		g := newFixture(4, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, 1, d.IDom(2))
+		require.Equal(t, 2, d.IDom(3))
+	})
+}
