@@ -71,7 +71,7 @@ internal/cmd/codegen → internal/codegen
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
 | `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
 | `internal/jit/tier/` | pure throughput/give-up retirement verdict for one installed native anchor (`Watchdog`); holds no interpreter state and never imports `interp` |
-| `internal/jit/compile/` | compile coordination shared by the interpreters running one program: the `Queue` that admits one build per function and coalesces the requests raised for it, and the reference-counted `Store` of published `jit.Code` and its executable buffers; never imports `interp` |
+| `internal/jit/compile/` | compile coordination shared by the interpreters running one program: the `Queue` that admits one build per function, coalesces the `Job`s raised for it, and decides whether that build runs on the claiming goroutine or on its own worker, plus the reference-counted `Store` of published `jit.Code` and its executable buffers; never imports `interp` |
 | `internal/journal/` | frame-journal cell, record, and trap layout shared by the interpreter and native code |
 | `internal/codegen/` | fusion pattern catalog, its validation, and the emitters that render `interp/threaded.go`; one file per opcode domain over a shared composition engine |
 | `pass/` | generic analysis and transform infrastructure |
@@ -142,10 +142,11 @@ A typical execution follows this path:
 | `stack` | operand stack |
 | `heap`, `rc`, `free`, `trial`, `work` | heap storage, exact counts, reusable slots, and cycle-collection scratch |
 | `globals` | global slots |
-| `queue` | compile requests, coalesced and admitted one build per function |
+| `queue` | compile jobs, coalesced and admitted one build per function |
 | `store` | published native code this interpreter installs from |
+| `builds` | outcomes of the builds this interpreter claimed, parked until it adopts them |
 
-Each `Interpreter` is single-goroutine-owned during use. A solo interpreter owns its `queue` and `store` privately; `Pool` lets multiple goroutines borrow separate interpreters that share one of each, so a build any of them wins is installed by all of them. Dispatch tables and installed wrappers stay interpreter-local either way.
+Each `Interpreter` is single-goroutine-owned during use. A solo interpreter owns its `queue` and `store` privately and compiles inline, holding no extra goroutine and paying no poll for one; `Pool` lets multiple goroutines borrow separate interpreters that share one of each, and its queue serves every claimed build on a worker, so a build any of them wins runs off the interpreter that asked for it and is installed by all of them at a safepoint. Dispatch tables and installed wrappers stay interpreter-local either way.
 
 ## Key Invariants
 
@@ -187,7 +188,9 @@ For plain functions, `addr == ref`. For closures, `addr` points to the function 
 
 The interpreter requests native compilation through `jit.Compiler.Compile(input, root)` only, handing it a snapshot it built rather than itself. The compiler runs the static and trace frontends internally; both produce the same flat, backend-neutral plan with block-ID edges, and installation depends only on the entry ABI kind.
 
-- A compile reads only the snapshot, never live interpreter state: `jit.Input` carries constants, globals, and declared types that a loaded program fixes, immutable published traces, and `jit.Objects`, the heap addresses a plan can name resolved to immutable facts on the interpreter's own goroutine.
+- A compile reads only the snapshot, never live interpreter state: `jit.Input` carries constants, globals, and declared types that a loaded program fixes, immutable published traces, and `jit.Objects`, the heap addresses a plan can name resolved to immutable facts on the interpreter's own goroutine. That is what lets the compile itself run on a worker.
+- Recording a trace, building the snapshot, and installing an entry stay on the interpreter's own goroutine; only `Compile` and the publish that follows it may run elsewhere.
+- No build may still be running when the executable buffers it publishes into are freed: `Pool.Close` stops the worker before any holder detaches, and `Interpreter.Close` waits for the builds it claimed before dropping its own hold.
 - Native code is speculative and guarded.
 - Blocks with declared entry state carry no register state across edges; stack and dirty locals are materialized in VM memory.
 - Native-call slots are fixed for an interpreter lifetime and published atomically on function-entry installation.

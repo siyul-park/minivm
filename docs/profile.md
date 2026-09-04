@@ -74,6 +74,8 @@ Back-edge reports occur every eight iterations with a rotating phase. This avoid
 
 Pool members use the same threshold. The shared `compile.Queue` aggregates hot events across members and admits one build per function at a time, so only one member compiles a root.
 
+A pool's queue runs that build on its own worker, so native code becomes available some instructions after the hot event that asked for it; the member adopts it at its next tick. A solo interpreter compiles inline and installs immediately. Either way the compile and emission rows belong to the member that claimed the build, and are recorded by it rather than by the worker, so a member that only installs what a peer published adds neither.
+
 ## Cooling
 
 Once all entry and loop roots for a function have been attempted, the function is cooled. Cooling removes further hotness instrumentation and capture overhead while leaving any installed native code active.
@@ -89,7 +91,7 @@ A later installation of code a peer published can reactivate a cold function.
 - Keep sampling and JIT hotness independent.
 - Keep normal execution free of sampling overhead unless `WithTick` work is required.
 - Keep profile aggregation deterministic.
-- Keep pool-local and shared state separate.
+- Keep pool-local and shared state separate; a worker may compile and publish, but only the interpreter that claimed a build records its rows.
 - Preserve exact-sampling behavior for debugging and REPL reporting.
 
 ## Related Docs

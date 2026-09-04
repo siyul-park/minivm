@@ -29,6 +29,7 @@ type Interpreter struct {
 
 	queue     *compile.Queue
 	store     *compile.Store
+	builds    *builds
 	profiler  *prof.Profiler
 	samples   *prof.Collector
 	exits     map[jit.Anchor]func(*Interpreter)
@@ -194,9 +195,13 @@ func WithFuel(val uint64) Option {
 }
 
 // withQueue and withStore share compile coordination with every interpreter
-// borrowed from one pool: the queue admits one build per function at a time,
-// and the store holds the code those builds publish. An interpreter given
-// neither runs the same seam privately.
+// borrowed from one pool: the queue admits one build per function at a time
+// and serves it on its worker, and the store holds the code those builds
+// publish. They are given together, which is what makes a build that finished
+// on the worker reach its interpreter: a shared store is exactly what stops
+// dispatch from skipping safepoints (see Store.Shared and dispatch). An
+// interpreter given neither runs the same seam privately, inline and with no
+// worker at all.
 func withQueue(q *compile.Queue) Option {
 	return func(o *option) { o.queue = q }
 }
@@ -281,6 +286,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		codec:       activeCodec,
 		queue:       queue,
 		store:       store,
+		builds:      &builds{},
 		profiler:    opt.profiler,
 		samples:     samples,
 		threshold:   threshold,
@@ -766,7 +772,17 @@ func (i *Interpreter) Flush() {
 // code, freeing its executable buffers once no other holder is left. It is
 // idempotent: a second call must not drop a hold a peer sharing the store
 // still needs.
+//
+// A build this interpreter claimed may still be running on the queue's worker.
+// It publishes into the store and parks its outcome here, so Close waits for it
+// and records what it produced before dropping a hold that may be the last one;
+// installing that code into a dispatch table nothing will run again would not
+// be worth it.
 func (i *Interpreter) Close() error {
+	i.builds.wait()
+	// A compile error reaches Run through the safepoint that adopts it. Close
+	// reports only what releasing resources failed at.
+	_ = i.adopt()
 	i.flush()
 	i.Reset()
 	i.arrays.clear()
@@ -1029,12 +1045,13 @@ func (i *Interpreter) safepoint() error {
 		i.sample(f)
 	}
 
-	// Adopting code a peer published is a matter of elapsed time, not of this
-	// interpreter's own hotness, so sync stays on the tick. Claiming the right
-	// to compile does not: it aggregates hot events across everyone sharing
-	// the queue and is raised from the hot-event hooks (see entered).
-	i.sync()
-	return nil
+	// Adopting what a build finished elsewhere - a peer's published code, or
+	// this interpreter's own build served on the queue's worker - is a matter
+	// of elapsed time, not of this interpreter's own hotness, so sync stays on
+	// the tick. Claiming the right to compile does not: it aggregates hot
+	// events across everyone sharing the queue and is raised from the hot-event
+	// hooks (see entered).
+	return i.sync()
 }
 
 func (i *Interpreter) owns(f *frame) bool {

@@ -13,9 +13,12 @@ import (
 // Pool hands out Interpreter instances bound to a shared Program for use across
 // goroutines. Each Interpreter owns its runtime state; callers must borrow one
 // per goroutine via Get/Put or Run. Compile coordination and published JIT
-// code are shared through the pool's queue and store.
+// code are shared through the pool's queue and store, and that queue serves
+// every claimed build on its own worker, so a borrower keeps executing while
+// its compile runs.
 type Pool struct {
 	prog  *program.Program
+	queue *compile.Queue
 	store *compile.Store
 	opts  []Option
 	size  int
@@ -36,7 +39,7 @@ func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
 	if size <= 0 {
 		size = 1
 	}
-	queue := compile.New(len(prog.Constants) + 1)
+	queue := compile.New(len(prog.Constants)+1, compile.WithAsync())
 	store := compile.NewStore()
 	tracer := newTracer()
 	all := make([]Option, 0, len(opts)+3)
@@ -44,6 +47,7 @@ func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
 	all = append(all, withQueue(queue), withStore(store), withTracer(tracer))
 	return &Pool{
 		prog:  prog,
+		queue: queue,
 		store: store,
 		opts:  all,
 		size:  size,
@@ -106,6 +110,12 @@ func (p *Pool) Put(i *Interpreter) {
 // Close releases every idle Interpreter and prevents further Get/Put. Outstanding
 // Interpreters are closed on their next Put. Close is idempotent; errors from
 // individual Interpreter closures are aggregated via errors.Join.
+//
+// The worker is stopped first, and stopping it finishes every build already
+// handed to it, so nothing is still compiling or publishing by the time a
+// holder detaches and the executable buffers are freed. An outstanding
+// Interpreter keeps compiling for itself afterwards, inline on its own
+// goroutine, and its own Close waits for whatever it still has in flight.
 func (p *Pool) Close() error {
 	p.mu.Lock()
 	if p.closed {
@@ -115,6 +125,8 @@ func (p *Pool) Close() error {
 	p.closed = true
 	close(p.idle)
 	p.mu.Unlock()
+
+	p.queue.Close()
 
 	var errs []error
 	for i := range p.idle {

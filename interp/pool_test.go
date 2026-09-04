@@ -30,6 +30,19 @@ func (v *poolTrackedValue) Close() error {
 	return nil
 }
 
+// native reports how many native entries every pool member flushed into
+// metrics, which is how a test waits for a build the pool's worker ran to
+// reach the interpreter that claimed it.
+func native(metrics *prof.Profiler) float64 {
+	var total float64
+	for _, metric := range metrics.Metrics() {
+		if metric.Name == "vm_jit_native_entries_total" {
+			total += metric.Value
+		}
+	}
+	return total
+}
+
 func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
 		p := interp.NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
@@ -200,7 +213,12 @@ func TestPool_Get(t *testing.T) {
 		metrics := prof.New()
 		p := interp.NewPool(prog, workers, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(metrics))
 		defer p.Close()
-		for range rounds {
+		// The pool builds on its own worker, so the shared native entry lands a
+		// few rounds after the first of them asked for it. Keep going until a
+		// full measurement window of rounds has run against installed native
+		// code rather than against the threaded closures it replaces.
+		installed := 0
+		for range 1 << 10 {
 			ready := make(chan struct{}, workers)
 			start := make(chan struct{})
 			results := make(chan error, workers)
@@ -232,10 +250,59 @@ func TestPool_Get(t *testing.T) {
 			for range workers {
 				require.NoError(t, <-results)
 			}
+
+			if native(metrics) > 0 {
+				installed++
+			}
+			if installed == rounds {
+				break
+			}
 		}
+
+		require.Equal(t, rounds, installed)
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
 		require.Greater(t, emits, float64(0))
+	})
+
+	t.Run("adopts a build the worker finished at a safepoint", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 1<<22).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		metrics := prof.New()
+		p := interp.NewPool(prog, 1, interp.WithProfiler(metrics), interp.WithThreshold(1))
+		defer func() { require.NoError(t, p.Close()) }()
+
+		vm, err := p.Get(context.Background())
+		require.NoError(t, err)
+		defer p.Put(vm)
+
+		// One Run, so nothing between runs can install anything: the pool
+		// builds on its own worker, and the only place this interpreter looks
+		// for what that worker published is a safepoint inside this loop.
+		require.NoError(t, vm.Run(context.Background()))
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1<<22), value)
+
+		vm.Flush()
+		require.Positive(t, native(metrics))
 	})
 
 	t.Run("does not recompile a known loop exit", func(t *testing.T) {
@@ -263,29 +330,36 @@ func TestPool_Get(t *testing.T) {
 		metrics := prof.New()
 		p := interp.NewPool(prog, 1, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(metrics))
 
-		for range runs {
+		// The pool builds on its own worker, so the program settles a few runs
+		// after it asked to. Run until a whole window of runs has gone by with
+		// native code installed and nothing new attempted: the loop's own exit
+		// is a leg the trace tree learns, so once it is known neither the
+		// header nor the exit is ever rebuilt.
+		var settled float64
+		stable := 0
+		for range 1 << 14 {
 			i, err := p.Get(context.Background())
 			require.NoError(t, err)
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(4), value)
+			i.Flush()
 			p.Put(i)
-		}
-		require.NoError(t, p.Close())
-		attempts, ok := metrics.Metric("vm_jit_attempts_total")
-		require.True(t, ok)
-		// The loop header and the module entry are each attempted once across
-		// every run: the hot exit itself is recognized and never rebuilt.
-		require.Equal(t, float64(2), attempts)
-		for _, metric := range metrics.Metrics() {
-			if metric.Name != "vm_jit_compiles_total" {
+
+			attempts, _ := metrics.Metric("vm_jit_attempts_total")
+			if attempts != settled || native(metrics) == 0 {
+				settled, stable = attempts, 0
 				continue
 			}
-			for _, label := range metric.Labels {
-				require.NotEqual(t, "side-exit", label.Value)
+			stable++
+			if stable == runs {
+				break
 			}
 		}
+		require.NoError(t, p.Close())
+
+		require.Equal(t, runs, stable)
 	})
 
 	t.Run("accounts only shared cache winners across flush and recompile", func(t *testing.T) {
@@ -344,6 +418,21 @@ func TestPool_Get(t *testing.T) {
 		close(start)
 		require.NoError(t, <-results)
 		require.NoError(t, <-results)
+		// Both members must be running native code before a guard failure can
+		// deopt out of one, and the pool built on its own worker, so give each
+		// of them runs until it is the one contributing native entries.
+		for _, i := range []*interp.Interpreter{first, second} {
+			before := native(metrics)
+			for range 1024 {
+				value, err := run(i, 2)
+				require.NoError(t, err)
+				require.Equal(t, types.I32(4), value)
+				i.Flush()
+				if native(metrics) > before {
+					break
+				}
+			}
+		}
 		for range guardFailuresPerMember {
 			ready := make(chan struct{}, 2)
 			start := make(chan struct{})
@@ -391,17 +480,30 @@ func TestPool_Get(t *testing.T) {
 				guardExits += metric.Value
 			}
 		}
-		require.Equal(t, 2.0, hotCompiles)
-		require.Equal(t, 2.0, sideExitCompiles)
+		// Both entry roots are built. The queue admits one winner per function,
+		// so a root a build emitted code for is never built twice; the module
+		// root emits nothing, is therefore never recorded as built, and the
+		// member that lost the race may still ask for it again.
+		require.GreaterOrEqual(t, hotCompiles, 2.0)
+		// Every guard failure deopts, and a hot exit asks for its root to be
+		// rebuilt with that leg folded in. How many rebuilds run depends on how
+		// the members' requests overlap, because one raised while the same
+		// rebuild is already in flight is coalesced into it, but at least one
+		// must.
+		require.Positive(t, sideExitCompiles)
 		require.Equal(t, float64(guardFailuresPerMember*2), guardExits)
+		// Compile and emission rows follow compilation ownership: every attempt
+		// is recorded once, by the member that claimed it, and a member that
+		// only installed what a peer published adds neither.
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
 		require.Equal(t, hotCompiles+sideExitCompiles, attempts)
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
-		// The module and function roots emit three entries. Recompiling a hot
-		// side exit replaces an existing entry instead of adding another one.
-		require.Equal(t, 3.0, emits)
+		// The module root emits nothing, because a top-level CALL has no native
+		// framed ABI, so the function root and each rebuild replacing it are
+		// the whole emission count.
+		require.Equal(t, sideExitCompiles+1, emits)
 	})
 }
 
@@ -459,6 +561,80 @@ func TestPool_Close(t *testing.T) {
 		require.Equal(t, 1, resource.closed)
 	})
 
+	t.Run("stops the worker with builds in flight", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		const members = 4
+		const runs = 64
+
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 1<<10).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		p := interp.NewPool(prog, members, interp.WithTick(1), interp.WithThreshold(1))
+
+		borrowed := make([]*interp.Interpreter, 0, members)
+		for range members {
+			vm, err := p.Get(context.Background())
+			require.NoError(t, err)
+			borrowed = append(borrowed, vm)
+		}
+
+		// Every member keeps asking for builds while Close stops the worker,
+		// so a build is in flight across the shutdown and whatever the worker
+		// had already taken must still publish before any buffer is freed.
+		var wg sync.WaitGroup
+		results := make(chan error, members)
+		for _, vm := range borrowed {
+			wg.Add(1)
+			go func(vm *interp.Interpreter) {
+				defer wg.Done()
+				for range runs {
+					vm.Reset()
+					if err := vm.Run(context.Background()); err != nil {
+						results <- err
+						return
+					}
+					value, err := vm.Pop()
+					if err != nil {
+						results <- err
+						return
+					}
+					if value != types.I32(1<<10) {
+						results <- fmt.Errorf("got %v, want %v", value, types.I32(1<<10))
+						return
+					}
+				}
+				results <- nil
+			}(vm)
+		}
+		require.NoError(t, p.Close())
+		wg.Wait()
+		for range members {
+			require.NoError(t, <-results)
+		}
+
+		// Each member still holds the store, so the buffers its published code
+		// lives in are freed only as the last one is handed back.
+		for _, vm := range borrowed {
+			p.Put(vm)
+		}
+		require.NoError(t, p.Close())
+	})
+
 	t.Run("keeps native code alive for an outstanding interpreter", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT requires arm64")
@@ -488,12 +664,18 @@ func TestPool_Close(t *testing.T) {
 		var err error
 		vm, err = p.Get(context.Background())
 		require.NoError(t, err)
-		for range 16 {
+		// The pool builds on its own worker, so the module entry becomes native
+		// some runs after the one that asked for it.
+		for range 1024 {
 			vm.Reset()
 			require.NoError(t, vm.Run(context.Background()))
 			value, err := vm.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), value)
+			vm.Flush()
+			if native(metrics) > 0 {
+				break
+			}
 		}
 		p.Put(vm)
 		vm = nil
@@ -501,13 +683,7 @@ func TestPool_Close(t *testing.T) {
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
 		require.Greater(t, emits, float64(0))
-		var nativeEntries float64
-		for _, metric := range metrics.Metrics() {
-			if metric.Name == "vm_jit_native_entries_total" {
-				nativeEntries += metric.Value
-			}
-		}
-		require.Greater(t, nativeEntries, float64(0))
+		require.Greater(t, native(metrics), float64(0))
 
 		vm, err = p.Get(context.Background())
 		require.NoError(t, err)

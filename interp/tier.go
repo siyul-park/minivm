@@ -91,7 +91,7 @@ func (i *Interpreter) hit() error {
 	return i.claim(addr)
 }
 
-// warm handles entry tracing and requests the entry compile once an event
+// warm handles entry tracing and queues the entry compile once an event
 // reaches the warmup window or threshold. Entry capture records the shallowest
 // runtime state.
 //
@@ -109,27 +109,27 @@ func (i *Interpreter) warm(addr int, hits uint64) {
 	}
 	if hits >= i.trigger && !i.tried[root] && i.settled(addr, hits) {
 		i.tried[root] = true
-		i.queue.Add(compile.Request{Root: root, Trigger: prof.TriggerHot})
+		i.queue.Add(compile.Job{Root: root, Trigger: prof.TriggerHot})
 	}
 	i.checkCool(addr, root)
 }
 
-// request queues a compile request and serves it here when this interpreter
-// wins the queue for its function. A solo interpreter always wins, because
-// nothing else holds its queue.
-func (i *Interpreter) request(req compile.Request) error {
-	i.queue.Add(req)
-	return i.claim(req.Root.Addr)
+// submit queues a compile job and serves it here when this interpreter wins
+// the queue for its function. A solo interpreter always wins, because nothing
+// else holds its queue.
+func (i *Interpreter) submit(job compile.Job) error {
+	i.queue.Add(job)
+	return i.claim(job.Root.Addr)
 }
 
-// claim serves the next request queued for addr, or does nothing when another
+// claim serves the next job queued for addr, or does nothing when another
 // interpreter sharing the queue is already building addr.
 func (i *Interpreter) claim(addr int) error {
-	req, ok := i.queue.Claim(addr, i.threshold)
+	job, ok := i.queue.Claim(addr, i.threshold)
 	if !ok {
 		return nil
 	}
-	return i.serve(req)
+	return i.serve(job)
 }
 
 // settled reports whether addr's entry root is ready to be compiled. A loop
@@ -233,7 +233,7 @@ func (i *Interpreter) trace(f *frame) error {
 	if result.trace == nil {
 		return nil
 	}
-	if err := i.request(compile.Request{Root: root, Trigger: prof.TriggerHot}); err != nil {
+	if err := i.submit(compile.Job{Root: root, Trigger: prof.TriggerHot}); err != nil {
 		return err
 	}
 	// A loop header reached on the iteration that exits records the path out of
@@ -256,14 +256,14 @@ func (i *Interpreter) trace(f *frame) error {
 // trace tree keeps learning: a rebuild the tree could not plan at the first
 // crossing regularly plans at a later one.
 //
-// A side-exit request is the one request the queue never discards as already
-// built, because rebuilding a root that is already native is its whole point.
+// A side-exit job is the one job the queue never discards as already built,
+// because rebuilding a root that is already native is its whole point.
 func (i *Interpreter) exit(root jit.Anchor) {
 	hits := i.tracer.branch(i, root, jit.Anchor{Addr: i.fr.addr, IP: i.fr.ip})
 	if hits < exitThreshold || hits%exitThreshold != 0 {
 		return
 	}
-	if err := i.request(compile.Request{Root: root, Trigger: prof.TriggerSideExit}); err != nil {
+	if err := i.submit(compile.Job{Root: root, Trigger: prof.TriggerSideExit}); err != nil {
 		panic(err)
 	}
 }

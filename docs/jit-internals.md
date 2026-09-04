@@ -18,7 +18,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | architecture-neutral compiler IR (plan graph, dataflow facts, layout tables, recorded-trace data) | `internal/jit/` |
 | architecture-neutral compiler driver | `internal/jit` |
 | runtime tier-up mechanism (hot-event sampling, tracing, compile/install/cool/retire) | `interp/tier.go` |
-| compile request queue and published-code store shared by interpreters | `internal/jit/compile` |
+| compile job queue, its execution mode, and the published-code store shared by interpreters | `internal/jit/compile` |
 | throughput/give-up retirement verdict (pure, no interpreter state) | `internal/jit/tier` |
 | ARM64 lowering | `internal/jit/arm64/` |
 | ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
@@ -80,18 +80,19 @@ Function entry callables tear down their frame on return. Module entry callables
 
 Solo and pooled interpreters run one compile path. Every `Interpreter` holds a
 `compile.Queue` and a `compile.Store` (`internal/jit/compile`): the queue
-decides which root is built next, and the store holds what those builds
-publish. A solo interpreter owns both privately and simply never contends for
-its own queue; `Pool` is the only public seam that shares them.
+decides which root is built next and where that build runs, and the store holds
+what those builds publish. A solo interpreter owns both privately and simply
+never contends for its own queue; `Pool` is the only public seam that shares
+them.
 
 `Pool` owns one queue, one store, and one `tracer`. Borrowed interpreters
 attach to that state and keep their runtime stacks, heaps, dispatch tables, and
 installed wrappers local. The published native code is shared; the dispatch
 table is not.
 
-`interp` raises a request wherever it learns a root is worth building - the
-entry root from `warm`, a recorded loop root from `trace`, a hot side exit from
-`exit` - and then tries to claim the queue for that function. Whoever wins
+`interp` raises a `compile.Job` wherever it learns a root is worth building -
+the entry root from `warm`, a recorded loop root from `trace`, a hot side exit
+from `exit` - and then tries to claim the queue for that function. Whoever wins
 compiles, publishes, and installs; every other interpreter picks the code up
 through `sync` at its next safepoint. The queue guarantees:
 
@@ -104,28 +105,70 @@ through `sync` at its next safepoint. The queue guarantees:
 a coalescing queue of exact anchors rather than one pending slot: distinct loop
 roots are retained, duplicate requests are discarded, and a side exit arriving
 behind an active hot build remains queued because it represents newer trace
-work. Side-exit requests take priority over queued hot roots. `Queue.Done`
-finishes only the claimed build and leaves queued requests for the next winner.
+work. Side-exit jobs take priority over queued hot roots. `Queue.Done`
+finishes only the claimed build and leaves queued jobs for the next winner.
 
 `Queue.Done` also records every root the build actually emitted an entry for, so
 a later hot request for one of them is discarded instead of repeating work a
 peer already did. A build that emitted nothing records nothing, so a caller that
 learns more about a root - a bounded recording it can retry deeper - may ask
-again. A side-exit request is never discarded that way: asking for a root that
-is already native to be rebuilt with the exit's leg folded in is its whole
-point.
+again. A side-exit job is never discarded that way: asking for a root that is
+already native to be rebuilt with the exit's leg folded in is its whole point.
+
+### Where a build runs
+
+`Queue.Serve` runs the build a caller claimed, and the queue's construction
+decides where. `compile.New(size)` runs it on the goroutine that claimed it;
+`compile.New(size, compile.WithAsync())` hands it to one worker goroutine and
+returns at once. `Pool` builds the async queue; a solo interpreter builds the
+inline one, so it holds no extra goroutine and polls for nothing. Both modes
+drive one seam: the interpreter resolves everything only it can produce, calls
+`Serve`, and then adopts through `sync`, which finds the result already parked
+when the build ran inline and finds it at a later safepoint when the worker ran
+it.
+
+What may leave the interpreter's goroutine is exactly `jit.Compiler.Compile`
+and the `Store.Publish` that follows it, because both read only the immutable
+snapshot and the store's own synchronized state. Trace recording cannot:
+`tracer.capture` clones the running interpreter and single-steps its threaded
+closures. Building the snapshot cannot: only the interpreter can read its own
+private state. Installing cannot: `i.code`, `i.natives`, `i.cold`, `i.live`,
+and the installed wrappers are interpreter-local, and so is the `prof.Collector`
+the outcome is recorded into.
+
+A finished build parks its `jit.Result` in `interp`'s `builds`, and `sync`
+records it - the attempt's compile row, its emission rows, and any compile
+error, which reaches `Run` through the safepoint that adopted it. A pool member
+already reaches a safepoint every tick because `Store.Shared` is true for it,
+which is why the worker needs no second polling mechanism; `withQueue` and
+`withStore` are given together for exactly that reason.
+
+A build parks its outcome before it publishes its code, and `sync` adopts what
+is parked before it installs what is published, so a native entry never starts
+counting dispatches before the build that emitted it was recorded. The claim
+ends after the publish, so a peer that learns the root is built finds its code,
+and the build's registration ends last, so a `Close` waiting on it knows
+nothing is still publishing into the store.
+
+Shutdown is ordered so no build outlives the memory it publishes into.
+`Queue.Close` stops the worker only after it has drained every build already
+handed to it, so each one still ends its claim and publishes or frees the
+buffer it linked into; a build claimed after `Close` runs on the claiming
+goroutine. `Pool.Close` calls it before any interpreter detaches from the
+store, and `Interpreter.Close` waits for the builds it claimed, records their
+outcomes, and only then drops its own hold. Both are idempotent.
 
 `compile.Store` is append-only and reference counted. It hands out published
 `jit.Code` by generation (`Store.Code`), and frees the `asm.Buffer`s those
 callables live in only once the last holder detaches, because a published
 mapping stays executable for as long as anyone can still dispatch into it.
 `Store.Shared` reports whether anyone but the creator ever attached; a solo
-interpreter installs its own build inline and therefore needs no per-tick poll
-for code arriving from elsewhere.
+interpreter builds inline into a store nobody else holds and therefore needs no
+per-tick poll for code arriving from elsewhere.
 
 ## Compiler
 
-`jit.Compiler` lives in `internal/jit`. The interpreter builds the read-only `jit.Input` snapshot itself (`Interpreter.compileSnapshot` in `interp/jit.go`) and calls `Compile(input, root)`, receiving a `jit.Code`; it does not select or inspect a compilation strategy. Passing a snapshot rather than the interpreter is what keeps the dependency one-way: `internal/jit` never imports `interp`. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
+`jit.Compiler` lives in `internal/jit`. The interpreter builds the read-only `jit.Input` snapshot itself (`Interpreter.compileSnapshot` in `interp/jit.go`) and calls `Compile(input, root)` — on its own goroutine or on the queue's worker, see Solo and Pool JIT — receiving a `jit.Code`; it does not select or inspect a compilation strategy. Passing a snapshot rather than the interpreter is what keeps the dependency one-way: `internal/jit` never imports `interp`. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
 
 Nothing an `Input` carries is storage the interpreter keeps mutating. `Constants`, `Globals`, and `Decl` are fixed once a program is loaded, a published `Trace` is immutable, and `Objects` (`jit.Objects`, a `map[int]Object`) replaces what used to be a live `[]types.Value` heap view: `Interpreter.objects` resolves address zero to the module body, every cell the constant pool publishes, and every function the host bound at a runtime address into the immutable facts a compile reads off them — the `*types.Function` published there, the `*types.StructType` a struct carries, the concrete itab of a primitive typed array, and the address a closure calls. Those are the only addresses a plan can reach: a static plan resolves a container or a callee only through a constant, and a trace plan names a callee the tracer already resolved to a function address. Resolving them on the interpreter's own goroutine is what makes a compile safe to run elsewhere — a `*types.Struct` is recycled through a pool that rewrites its type, an array header is rewritten in place, and a released slot is handed to the next allocation, so neither a heap slot nor the object behind it is stable to read from another goroutine. A resolved address stays present in the map even when its cell carries no fact, so a lowering that only needs to know an address named a live cell tests for membership. `TestCompiler_CompileConcurrentHeap` compiles on four goroutines against a heap another goroutine keeps overwriting and growing.
 
@@ -335,8 +378,11 @@ neither an exit nor a yield.
 
 Compile and emission ownership follows compilation ownership: the interpreter
 that claimed the build records its result, and with a shared queue that is the
-winning member only. Peers install their own runtime counters without
-duplicating compile or emission rows. Collector flush preserves registered handles while moving accumulated
+winning member only. That holds when the build ran on the queue's worker too -
+the result is parked and recorded by the claiming interpreter at its next
+safepoint, never by the worker, because a `prof.Collector` belongs to one
+interpreter. Peers install their own runtime counters without duplicating
+compile or emission rows. Collector flush preserves registered handles while moving accumulated
 values to the shared profiler.
 
 ## Speculation
@@ -551,7 +597,9 @@ If any of these appears in an inlined callee frame, the trace aborts.
 
 ## Installation
 
-Compiled modules install into the threaded dispatch table.
+Compiled modules install into the threaded dispatch table, always on the
+goroutine that owns it: `Interpreter.sync`, reached from a safepoint or from
+`serve` itself when the queue built inline.
 
 Entry wrappers and loop wrappers differ:
 

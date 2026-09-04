@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func hot(addr, ip int) compile.Request {
-	return compile.Request{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerHot}
+func hot(addr, ip int) compile.Job {
+	return compile.Job{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerHot}
 }
 
-func sideExit(addr, ip int) compile.Request {
-	return compile.Request{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerSideExit}
+func sideExit(addr, ip int) compile.Job {
+	return compile.Job{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerSideExit}
 }
 
 func code(roots ...jit.Anchor) *jit.Code {
@@ -24,6 +24,33 @@ func code(roots ...jit.Anchor) *jit.Code {
 		c.Entries[root] = jit.Entry{}
 	}
 	return c
+}
+
+func TestWithAsync(t *testing.T) {
+	q := compile.New(4, compile.WithAsync())
+	defer q.Close()
+
+	q.Add(hot(1, 0))
+	_, ok := q.Claim(1, 0)
+	require.True(t, ok)
+
+	hold := make(chan struct{})
+	ran := make(chan struct{})
+	q.Serve(func() {
+		<-hold
+		close(ran)
+		q.Done(1, nil)
+	})
+
+	// Serve has returned while the build is still parked on hold, so the build
+	// is running on a goroutine that is not this one.
+	select {
+	case <-ran:
+		require.Fail(t, "the build ran on the calling goroutine")
+	default:
+	}
+	close(hold)
+	<-ran
 }
 
 func TestNew(t *testing.T) {
@@ -205,13 +232,13 @@ func TestQueue_Claim(t *testing.T) {
 		q.Add(hot(1, 0))
 
 		var wg sync.WaitGroup
-		claims := make(chan compile.Request, callers)
+		claims := make(chan compile.Job, callers)
 		for range callers {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if req, ok := q.Claim(1, 0); ok {
-					claims <- req
+				if job, ok := q.Claim(1, 0); ok {
+					claims <- job
 				}
 			}()
 		}
@@ -220,6 +247,45 @@ func TestQueue_Claim(t *testing.T) {
 
 		require.Len(t, claims, 1)
 		require.Equal(t, hot(1, 0), <-claims)
+	})
+}
+
+func TestQueue_Serve(t *testing.T) {
+	t.Run("runs the build on the calling goroutine", func(t *testing.T) {
+		q := compile.New(4)
+		q.Add(hot(1, 0))
+		_, ok := q.Claim(1, 0)
+		require.True(t, ok)
+
+		ran := false
+		q.Serve(func() {
+			ran = true
+			q.Done(1, nil)
+		})
+
+		require.True(t, ran, "a queue with no worker must finish the build before Serve returns")
+		q.Add(hot(1, 4))
+		_, ok = q.Claim(1, 0)
+		require.True(t, ok, "the build ended its claim")
+	})
+
+	t.Run("runs the build on the worker", func(t *testing.T) {
+		q := compile.New(4, compile.WithAsync())
+		defer q.Close()
+		q.Add(hot(1, 0))
+		_, ok := q.Claim(1, 0)
+		require.True(t, ok)
+
+		ran := make(chan struct{})
+		q.Serve(func() {
+			q.Done(1, nil)
+			close(ran)
+		})
+
+		<-ran
+		q.Add(hot(1, 4))
+		_, ok = q.Claim(1, 0)
+		require.True(t, ok, "the build ended its claim")
 	})
 }
 
@@ -278,5 +344,70 @@ func TestQueue_Done(t *testing.T) {
 		rebuild, ok := q.Claim(1, 0)
 		require.True(t, ok, "rebuilding a native root with the exit's leg folded in is the point")
 		require.Equal(t, sideExit(1, 4), rebuild)
+	})
+}
+
+func TestQueue_Close(t *testing.T) {
+	t.Run("is idempotent with no worker to stop", func(t *testing.T) {
+		q := compile.New(4)
+
+		q.Close()
+		q.Close()
+	})
+
+	t.Run("finishes every build already handed to the worker", func(t *testing.T) {
+		q := compile.New(4, compile.WithAsync())
+		q.Add(hot(1, 0))
+		_, ok := q.Claim(1, 0)
+		require.True(t, ok)
+		q.Add(hot(2, 0))
+		_, ok = q.Claim(2, 0)
+		require.True(t, ok)
+
+		started := make(chan struct{})
+		hold := make(chan struct{})
+		var mu sync.Mutex
+		var ran []int
+		q.Serve(func() {
+			close(started)
+			<-hold
+			mu.Lock()
+			ran = append(ran, 1)
+			mu.Unlock()
+			q.Done(1, nil)
+		})
+		q.Serve(func() {
+			mu.Lock()
+			ran = append(ran, 2)
+			mu.Unlock()
+			q.Done(2, nil)
+		})
+
+		// The worker is inside the first build with the second still queued
+		// behind it, so Close can only return once it has drained both.
+		<-started
+		go close(hold)
+		q.Close()
+		q.Close()
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.Equal(t, []int{1, 2}, ran)
+	})
+
+	t.Run("runs a later build on the calling goroutine", func(t *testing.T) {
+		q := compile.New(4, compile.WithAsync())
+		q.Add(hot(1, 0))
+		_, ok := q.Claim(1, 0)
+		require.True(t, ok)
+		q.Close()
+
+		ran := false
+		q.Serve(func() {
+			ran = true
+			q.Done(1, nil)
+		})
+
+		require.True(t, ran, "a closed queue has no worker left to hand the build to")
 	})
 }

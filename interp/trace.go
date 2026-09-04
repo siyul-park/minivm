@@ -272,6 +272,7 @@ func (t *tracer) clone(i *Interpreter) Interpreter {
 	out.backedges = make([]bool, len(i.backedges))
 	out.exits = map[jit.Anchor]func(*Interpreter){}
 	out.tried = map[jit.Anchor]bool{}
+	out.builds = &builds{}
 	out.live = map[jit.Anchor]jit.Entry{}
 	out.watchdogs = map[jit.Anchor]*tier.Watchdog{}
 	out.journal = slices.Clone(i.journal)

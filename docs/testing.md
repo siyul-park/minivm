@@ -24,6 +24,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Public contract | production-matched package test file | exported constructors, functions, methods, options, errors, and lifecycle behavior |
 | Runtime specification | `interp.TestInterpreter_Run` | one visible bytecode fixture per opcode behavior, including traps and ownership |
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
+| Asynchronous compilation | `compile.TestWithAsync`, `compile.TestQueue_Close`, `interp.TestPool_Get`, `interp.TestPool_Close` | a build overlapping the goroutine that claimed it, adoption at a safepoint, and shutdown with builds in flight, all under `-race` |
 | Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
@@ -90,7 +91,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm` | 37 | 37 | 0 | 0 |
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
-| `internal/jit/compile` | 12 | 12 | 0 | 0 |
+| `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 44 | 44 | 0 | 0 |

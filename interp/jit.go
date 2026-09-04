@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -15,60 +16,141 @@ import (
 
 // This file drives an Interpreter against the architecture-neutral
 // internal/jit driver: building the compile-time-stable snapshot a Compile
-// call plans and lowers against, serving a claimed compile request, and
-// installing the resulting native entries into the dispatch table.
-// internal/jit/compile owns the request queue serve is claimed from and the
-// store it publishes into, both of which a pool shares and a solo interpreter
-// keeps private. interp/tier.go owns tier-up and retirement policy - counters,
-// the tier.Watchdog, and when to request a compile, cool, or retire - and
-// drives this file against that policy. interp/deopt.go owns the native
-// dispatch wrappers threaded code hands control to and the path back into the
-// interpreter after a trap.
+// call plans and lowers against, serving a claimed compile job, and installing
+// the resulting native entries into the dispatch table.
+// internal/jit/compile owns the job queue serve is claimed from, the store it
+// publishes into, and whether the build runs here or on a worker; a pool
+// shares all three and a solo interpreter keeps them private. interp/tier.go
+// owns tier-up and retirement policy - counters, the tier.Watchdog, and when
+// to request a compile, cool, or retire - and drives this file against that
+// policy. interp/deopt.go owns the native dispatch wrappers threaded code
+// hands control to and the path back into the interpreter after a trap.
 
-// serve compiles the claimed request, publishes what it emitted for everyone
-// sharing the store, and installs it here.
-func (i *Interpreter) serve(req compile.Request) error {
-	root := req.Root
-	i.tried[root] = true
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
+// builds is the handoff between a build and the interpreter that claimed it.
+// The build may run on the queue's worker, but recording its profile rows and
+// installing its code belong to the claiming interpreter, whose collector and
+// dispatch table nothing else may touch, so a finished build parks here until
+// that interpreter reaches a safepoint (see sync).
+type builds struct {
+	done   []build
+	parked atomic.Bool
 
-	// Every path ends the claim, so the next winner can take the queue whether
-	// this build emitted code or not.
-	var code *jit.Code
-	defer func() { i.queue.Done(root.Addr, code) }()
+	wg sync.WaitGroup
+	mu sync.Mutex
+}
 
-	compiler, err := newCompiler()
-	if err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
-		i.recordCompile(req.Trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
-		return err
-	}
-	if compiler == nil {
-		i.recordCompile(req.Trigger, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
+// build is one finished compile: what the compiler produced and the event
+// that asked for it.
+type build struct {
+	result  jit.Result
+	trigger prof.Trigger
+}
+
+// start registers a claimed build, so wait holds until it ends.
+func (b *builds) start() {
+	b.wg.Add(1)
+}
+
+// push parks a finished build's outcome for the next take.
+func (b *builds) push(next build) {
+	b.mu.Lock()
+	b.done = append(b.done, next)
+	b.parked.Store(true)
+	b.mu.Unlock()
+}
+
+// end releases the registration start took, once the build has published
+// everything it produced.
+func (b *builds) end() {
+	b.wg.Done()
+}
+
+// take removes and returns every build parked since the last call. Nothing
+// parked answers from the flag alone, because every safepoint asks and almost
+// none of them find anything.
+func (b *builds) take() []build {
+	if !b.parked.Load() {
 		return nil
 	}
 
-	result := jit.Result{Anchor: root, Outcome: prof.CompileOutcomeEmpty, Reason: prof.CompileReasonNoInput}
-	if input, ok := i.compileSnapshot(root.Addr); ok {
-		result = compiler.Compile(input, root)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	done := b.done
+	b.done = nil
+	b.parked.Store(false)
+	return done
+}
+
+// wait blocks until every claimed build has ended, which is what lets a
+// closing interpreter drop its hold on the store knowing nothing is still
+// publishing into it.
+func (b *builds) wait() {
+	b.wg.Wait()
+}
+
+// serve compiles the claimed job. Only what this interpreter alone can
+// produce is resolved here: the compile-time snapshot, which reads private
+// runtime state, and the compiler the build links into. The build itself runs
+// wherever the queue puts it, so the sync below adopts it immediately when the
+// queue ran it inline and a later safepoint adopts it when a worker did.
+func (i *Interpreter) serve(job compile.Job) error {
+	root := job.Root
+	i.tried[root] = true
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	i.builds.start()
+
+	compiler, err := newCompiler()
+	switch {
+	case err != nil:
+		i.reject(job, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err})
+	case compiler == nil:
+		i.reject(job, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeRejected, Reason: prof.CompileReasonBackendUnavailable})
+	default:
+		input, ok := i.compileSnapshot(root.Addr)
+		if !ok {
+			_ = compiler.Close()
+			i.reject(job, jit.Result{Anchor: root, Outcome: prof.CompileOutcomeEmpty, Reason: prof.CompileReasonNoInput})
+			break
+		}
+		i.queue.Serve(func() { i.compile(job, compiler, input) })
 	}
-	i.recordCompile(req.Trigger, result)
-	if result.Err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
-	}
+	return i.sync()
+}
+
+// compile runs one claimed build and is the only part of serve that may run
+// off this interpreter's own goroutine. It reads the immutable snapshot and
+// publishes what it emitted for everyone sharing the store; it touches no
+// dispatch table, counter, or runtime state, all of which stay with the
+// interpreter that adopts the outcome.
+func (i *Interpreter) compile(job compile.Job, compiler *jit.Compiler, input *jit.Input) {
+	result := compiler.Compile(input, job.Root)
+	// Park the outcome before publishing the code. sync adopts what is parked
+	// before it installs what is published, so a native entry never starts
+	// counting dispatches before the build that emitted it was recorded.
+	i.builds.push(build{result: result, trigger: job.Trigger})
 	if result.Code == nil {
 		_ = compiler.Close()
-		return result.Err
+	} else {
+		// The store takes over the buffer the callables were linked into,
+		// because they stay executable for as long as anyone sharing the store
+		// can still dispatch into them.
+		i.store.Publish(result.Code, compiler.Buffer())
 	}
+	// The claim ends after the publish, so a peer that learns the root is built
+	// finds its code; the registration ends last, so a Close waiting on it
+	// knows nothing is still publishing into the store.
+	i.queue.Done(job.Root.Addr, result.Code)
+	i.builds.end()
+}
 
-	// The store takes over the buffer the callables were linked into, because
-	// they stay executable for as long as anyone sharing the store can still
-	// dispatch into them.
-	code = result.Code
-	i.account(code)
-	i.store.Publish(code, compiler.Buffer())
-	i.sync()
-	return nil
+// reject ends a claim nothing was built for. The outcome is still this
+// interpreter's to record, so it parks like any other, and the next winner can
+// take the queue.
+func (i *Interpreter) reject(job compile.Job, result jit.Result) {
+	i.builds.push(build{result: result, trigger: job.Trigger})
+	i.queue.Done(job.Root.Addr, nil)
+	i.builds.end()
 }
 
 // compileSnapshot builds the compile-time-stable view of addr's function that
@@ -348,17 +430,46 @@ func (i *Interpreter) uncover(a jit.Anchor) {
 	}
 }
 
-// sync installs every code published since this interpreter last looked,
-// whether it compiled that code itself or a peer sharing the store did.
-func (i *Interpreter) sync() {
+// sync adopts everything waiting for this interpreter, and is where a compile
+// that ran elsewhere rejoins the goroutine owning the counters and the
+// dispatch table: it records the outcome of every build this interpreter
+// claimed, then installs every code published since it last looked, whether it
+// compiled that code itself or a peer sharing the store did.
+func (i *Interpreter) sync() error {
+	err := i.adopt()
 	for {
 		code, ok := i.store.Code(i.gen)
 		if !ok {
-			return
+			return err
 		}
 		i.install(code)
 		i.gen++
 	}
+}
+
+// adopt records the outcome of every build this interpreter claimed. Compile
+// and emission rows follow compilation ownership whatever goroutine ran the
+// build, and a prof.Collector is owned by one interpreter, so they are
+// recorded here rather than where the build finished. It returns the first
+// compile error, which reaches Run through the safepoint that adopted it.
+func (i *Interpreter) adopt() error {
+	var err error
+	for _, done := range i.builds.take() {
+		if done.result.Err != nil {
+			i.samples.AddMetric("vm_jit_errors_total", 1)
+			if err == nil {
+				err = done.result.Err
+			}
+		}
+		if done.result.Code != nil {
+			i.account(done.result.Code)
+		}
+		if i.profiler != nil {
+			a := done.result.Anchor
+			i.samples.RecordCompile(a.Addr, a.IP, done.trigger, done.result.Frontend, done.result.Outcome, done.result.Reason)
+		}
+	}
+	return err
 }
 
 func (i *Interpreter) counters(a jit.Anchor, entry jit.Entry) counters {
@@ -385,12 +496,6 @@ func (i *Interpreter) account(mod *jit.Code) {
 	}
 	for a, entry := range mod.Entries {
 		i.samples.RecordEmit(a.Addr, a.IP, entry.Kind.Profile(), entry.Frontend, entry.Bytes)
-	}
-}
-
-func (i *Interpreter) recordCompile(trigger prof.Trigger, result jit.Result) {
-	if i.profiler != nil {
-		i.samples.RecordCompile(result.Anchor.Addr, result.Anchor.IP, trigger, result.Frontend, result.Outcome, result.Reason)
 	}
 }
 
