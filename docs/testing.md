@@ -93,6 +93,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 3 | 3 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
+| `internal/ssa` | 18 | 18 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 44 | 44 | 0 | 0 |
@@ -309,6 +310,24 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/graph/dominance.go` | `TestNewDominance` | ✅ |
 | `internal/graph/dominance.go` | `TestDominance_Dominates` | ✅ |
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
+| `internal/ssa/value.go` | `TestTypeOf` | ✅ |
+| `internal/ssa/value.go` | `TestType_String` | ✅ |
+| `internal/ssa/instruction.go` | `TestOp_String` | ✅ |
+| `internal/ssa/instruction.go` | `TestSpace_String` | ✅ |
+| `internal/ssa/function.go` | `TestFunction_Len` | ✅ |
+| `internal/ssa/function.go` | `TestFunction_Succ` | ✅ |
+| `internal/ssa/function.go` | `TestFunction_Pred` | ✅ |
+| `internal/ssa/function.go` | `TestFunction_Block` | ✅ |
+| `internal/ssa/function.go` | `TestFunction_Type` | ✅ |
+| `internal/ssa/builder.go` | `TestNew` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Block` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Param` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Value` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Add` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Term` | ✅ |
+| `internal/ssa/builder.go` | `TestBuilder_Build` | ✅ |
+| `internal/ssa/verify.go` | `TestVerify` | ✅ |
+| `internal/ssa/format.go` | `TestFormat` | ✅ |
 | `cli/cli.go` | `TestRoot` | ✅ |
 | `cli/cli.go` | `TestWithFS` | ✅ |
 | `cli/fs.go` | `TestOS` | ✅ |
