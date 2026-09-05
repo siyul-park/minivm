@@ -184,6 +184,7 @@ func agrees(t *testing.T, input *jit.Input) (int, int) {
 		require.Equal(t, want, got, "anchor %+v\n%s", anchor, ssa.Format(fn))
 		owns(t, plan, blocks, fn, ids)
 		adopts(t, fn)
+		targets(t, fn)
 	}
 	return len(roots), emitted
 }
@@ -263,6 +264,50 @@ func adopts(t *testing.T, fn *ssa.Function) {
 			owned(blk.Term.State)
 		}
 	}
+}
+
+// targets checks the rule every call shares: its callee operand resolves to a
+// compile-time reference, which is the whole of what a lowering needs to reach
+// the function it enters. A static call carries the constant itself; a
+// speculated one carries the observed reference through the guard admitting it,
+// so both are read through the one question asked here.
+func targets(t *testing.T, fn *ssa.Function) {
+	t.Helper()
+	for id := 0; id < fn.Len(); id++ {
+		for _, op := range fn.Block(id).Ops {
+			if op.Op != ssa.OpExec || !op.Code.Writes(instr.Frame) {
+				continue
+			}
+			require.NotEmpty(t, op.Args, "a call names no callee\n%s", ssa.Format(fn))
+			// The callee is popped first, so it is the last of the arguments
+			// an operation holds bottom of the stack first.
+			at := op.Args[len(op.Args)-1]
+			callee, ok := defines(fn, at)
+			require.True(t, ok, "v%d is a block parameter, not a callee\n%s", at, ssa.Format(fn))
+			if callee.Op == ssa.OpGuardValue {
+				callee, ok = defines(fn, callee.Args[1])
+				require.True(t, ok, "v%d admits a block parameter\n%s", at, ssa.Format(fn))
+			}
+			require.Equal(t, ssa.OpConst, callee.Op, "v%d does not resolve to a reference\n%s", at, ssa.Format(fn))
+			require.Equal(t, types.KindRef, callee.Const.Kind(), "v%d does not resolve to a reference\n%s", at, ssa.Format(fn))
+			require.Positive(t, callee.Const.Ref(), "v%d resolves to no heap cell\n%s", at, ssa.Format(fn))
+		}
+	}
+}
+
+// defines returns the operation defining v, and false for a block parameter,
+// which no operation defines.
+func defines(fn *ssa.Function, v ssa.Value) (ssa.Operation, bool) {
+	for id := 0; id < fn.Len(); id++ {
+		for _, op := range fn.Block(id).Ops {
+			for _, result := range op.Results {
+				if result == v {
+					return op, true
+				}
+			}
+		}
+	}
+	return ssa.Operation{}, false
 }
 
 // fixture is one planning input together with the name its case runs under.

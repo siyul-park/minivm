@@ -207,8 +207,8 @@ func (r *replay) run(item work) bool {
 				if len(w.stack) == 0 {
 					return false
 				}
-				target := w.callee(w.stack[len(w.stack)-1].fact)
-				if target == nil || !w.enter(op.Callee, op.IP+inst.Width(), target) {
+				addr, target := w.callee(len(w.stack) - 1)
+				if target == nil || !w.enter(addr, op.IP+inst.Width(), target) {
 					return false
 				}
 				continue

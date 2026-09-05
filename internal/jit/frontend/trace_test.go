@@ -31,6 +31,7 @@ func TestTrace(t *testing.T) {
 				}
 				require.NoError(t, ssa.Verify(fn), "anchor %+v\n%s", anchor, ssa.Format(fn))
 				adopts(t, fn)
+				targets(t, fn)
 				if tc.diverges {
 					continue
 				}
@@ -155,6 +156,8 @@ func recordings(t *testing.T) []recording {
 	add("entry is partial", ending(t, jit.StatusPartial, 0))
 	add("call is inlined", inlined(t, 1))
 	add("nested call is inlined", inlined(t, 2))
+	add("observed callee is guarded and entered", observed(t, true))
+	add("observed callee is guarded and called", observed(t, false))
 	add("legs fold hottest first", ordered(t))
 
 	branched := inlinedBranch(t)
@@ -333,7 +336,7 @@ func inlined(t *testing.T, depth int) recording {
 			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 			Code: assemble(t, func(b *instr.Builder) {
 				if next > 0 {
-					b.Emit(instr.CONST_GET, uint64(next-1)).Emit(instr.CALL).Emit(instr.RETURN)
+					b.Emit(instr.CONST_GET, uint64(next)).Emit(instr.CALL).Emit(instr.RETURN)
 					return
 				}
 				b.Emit(instr.I32_CONST, 5).Emit(instr.RETURN)
@@ -383,6 +386,56 @@ func inlined(t *testing.T, depth int) recording {
 		Objects:   objects,
 	}
 	return recording{input: input, anchors: []jit.Anchor{{Addr: 1}}}
+}
+
+// observed records a call whose callee is no constant: the caller loads it from
+// a global, so the reference it enters is only what the recording saw there and
+// a guard is what admits it. A recording that steps into the callee inlines it;
+// one that steps over the call - as it does for the recursion here - leaves the
+// call itself, which is where a lowering reads the callee back off the guard.
+func observed(t *testing.T, enters bool) recording {
+	t.Helper()
+	body := func(b *instr.Builder) {
+		b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+	}
+	caller := &types.Function{
+		Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, body),
+	}
+	objects := jit.Objects{1: {Fn: caller}}
+	target, addr := caller, 1
+	if enters {
+		target, addr = &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 5).Emit(instr.RETURN) }),
+		}, 2
+		objects[2] = jit.Object{Fn: target}
+	}
+	outer := offsets(caller.Code)
+
+	rec := &tape{}
+	rec.at(caller, 1, outer[0], 0)
+	rec.at(caller, 1, outer[1], 0).Seen = types.BoxRef(addr)
+	if enters {
+		for _, ip := range offsets(target.Code) {
+			rec.at(target, addr, ip, 1)
+		}
+	}
+	rec.at(caller, 1, outer[2], 0)
+
+	root := jit.Anchor{Addr: 1}
+	return recording{
+		input: &jit.Input{
+			Traces: fakeTraces{trees: map[jit.Anchor]*jit.Tree{
+				root: {Root: &jit.Trace{Anchor: root, Ops: rec.ops, Status: jit.StatusReturned}},
+			}},
+			Address:  1,
+			Function: caller,
+			Globals:  []types.Kind{types.KindRef},
+			Objects:  objects,
+		},
+		anchors: []jit.Anchor{root},
+	}
 }
 
 // inlinedBranch records a conditional branch inside an inlined callee, with a

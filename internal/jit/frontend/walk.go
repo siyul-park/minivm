@@ -266,8 +266,8 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if len(w.stack) == 0 {
 			return false
 		}
-		target := w.callee(w.stack[len(w.stack)-1].fact)
-		if target == nil || target.Typ == nil {
+		_, target := w.callee(len(w.stack) - 1)
+		if target == nil {
 			return false
 		}
 		var results []fact
@@ -392,23 +392,47 @@ func (w *walk) record(container fact) *types.StructType {
 	return nil
 }
 
-// callee resolves the function a call enters: the one a recording observed it
-// enter, or the constant the operand carries. A recording names the frame the
-// call actually entered, which for a host call is the caller's own address, so
-// the observed operand has to be positive evidence - the callee itself, or the
-// closure whose body that address is.
-func (w *walk) callee(operand fact) *types.Function {
-	if addr := w.seen.Callee; addr > 0 {
-		if w.seen.Shape.Itab == jit.HeapClosure ||
-			(w.seen.Seen.Kind() == types.KindRef && w.seen.Seen.Ref() == addr) {
-			return w.objects.Function(addr)
+// callee resolves the function a call enters and pins its operand to the
+// reference naming it, answering with the address that function is published
+// at. A constant operand already names one; a recorded operand is a runtime
+// value, so a guard admitting only the reference the recording observed is what
+// makes it a compile-time fact. Everything reading the operand after that -
+// this walk, and a lowering resolving the call's target - reads a value that
+// certainly holds that reference, which is the one question a static call and a
+// speculated one both answer through.
+//
+// The reference is the whole answer, so a call whose operand names anything the
+// snapshot does not resolve to a function is left unplanned: a host function, a
+// coroutine, and a closure allocated at runtime all name no function here.
+func (w *walk) callee(at int) (int, *types.Function) {
+	o := w.stack[at]
+	ref, observed := o.ref, false
+	if !o.refKnown {
+		if o.kind != types.KindRef || w.seen.Seen.Kind() != types.KindRef {
+			return 0, nil
 		}
-		return nil
+		ref, observed = w.seen.Seen.Ref(), true
 	}
-	if operand.calleeKnown && operand.callee > 0 {
-		return w.objects.Function(operand.callee)
+	if ref <= 0 {
+		return 0, nil
 	}
-	return nil
+	target := w.objects.Function(ref)
+	if target == nil || target.Typ == nil {
+		return 0, nil
+	}
+	if observed {
+		want := w.b.Value(ssa.TypeRef)
+		w.b.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(ref), Results: []ssa.Value{want}})
+		value := w.b.Value(ssa.TypeRef)
+		w.b.Add(w.block, ssa.Operation{
+			Op:      ssa.OpGuardValue,
+			Args:    []ssa.Value{o.value, want},
+			State:   w.deopt(),
+			Results: []ssa.Value{value},
+		})
+		w.stack[at].value = value
+	}
+	return ref, target
 }
 
 // load pushes what a slot holds. A ref takes no retain and records the slot its
@@ -494,8 +518,8 @@ func (w *walk) addressed(space ssa.Space, index int) (ssa.Slot, fact, bool) {
 }
 
 // pool pushes a constant. A ref constant is an ownership-neutral marker whose
-// retain stays with the pool, and one naming a heap function is a call target
-// the backend can reach without a recorded trace.
+// retain stays with the pool, and the reference it carries is what resolves the
+// container it accesses or the function it calls without a recorded trace.
 func (w *walk) pool(index int) bool {
 	if index >= len(w.constants) {
 		return false
@@ -505,9 +529,6 @@ func (w *walk) pool(index int) bool {
 	if out.kind == types.KindRef {
 		out.backing = jit.BackingConst
 		out.ref, out.refKnown = boxed.Ref(), true
-		if out.ref > 0 && w.objects.Function(out.ref) != nil {
-			out.callee, out.calleeKnown = out.ref, true
-		}
 	}
 	return w.constant(boxed, out)
 }
@@ -768,6 +789,12 @@ func (w *walk) detach(from jit.Backing, offset int) {
 // instruction resumes with as well, because that is the same stack entry and
 // the count the interpreter will release when it adopts it: every own runs
 // before its instruction pops or pushes, so at names one entry in both.
+//
+// A state already materialized stays as it was and stops being this
+// instruction's: it was emitted before the retain and resumes into a stack that
+// did not hold it yet, which is exactly what its cold path retains. Everything
+// after the retain resumes into a stack that does, so the next deopt
+// materializes that one.
 func (w *walk) own(at int) {
 	o := &w.stack[at]
 	if o.kind != types.KindRef || o.backing == jit.BackingStack {
@@ -777,6 +804,7 @@ func (w *walk) own(at int) {
 	o.backing, o.offset = jit.BackingStack, 0
 	if at < len(w.pre) {
 		w.pre[at] = *o
+		w.state = ssa.NoValue
 	}
 }
 
@@ -804,8 +832,9 @@ func (w *walk) begin(ip int) {
 }
 
 // deopt materializes the interpreter state the current instruction resumes
-// into. One instruction needs at most one, so a guard and the access it admits
-// share it.
+// into. One instruction needs at most one for as long as the operands it
+// resumes with hold still, so a guard and the access it admits share it unless
+// a retain between them changed what the stack owns (see own).
 func (w *walk) deopt() ssa.Value {
 	if w.state != ssa.NoValue {
 		return w.state

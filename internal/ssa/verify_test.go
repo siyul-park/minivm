@@ -141,6 +141,37 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
+	t.Run("accepts a call reaching its callee through the reference a guard admits", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		slot := b.Value(ssa.TypeRef)
+		want := b.Value(ssa.TypeRef)
+		callee := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{slot}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(2), Results: []ssa.Value{want}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, want}, State: state, Results: []ssa.Value{callee}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
+	t.Run("rejects a guard admitting a value no observation fixed", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		slot := b.Value(ssa.TypeRef)
+		want := b.Value(ssa.TypeRef)
+		callee := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{slot}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Results: []ssa.Value{want}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, want}, State: state, Results: []ssa.Value{callee}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{callee}})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
+	})
+
 	t.Run("rejects an interpreter state on an operation that cannot resume", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

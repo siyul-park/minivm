@@ -9,6 +9,7 @@ import (
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
+	"github.com/siyul-park/minivm/types"
 )
 
 func TestNewGuardPass(t *testing.T) {
@@ -112,8 +113,9 @@ func TestGuardPass_Run(t *testing.T) {
 	t.Run("collapses a repeated value guard specializing to the same observed value", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		value, observed := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
+		value, observed := b.Param(entry, ssa.TypeI32), b.Value(ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{observed}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{value, observed}, State: state, Results: []ssa.Value{first}})

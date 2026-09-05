@@ -85,7 +85,8 @@ type Operation struct {
 	Op Op
 	// Code is the bytecode operation an OpExec or OpBridge performs. Its
 	// instr.Type states the operation's stack effect, and Args holds what it
-	// pops in the reverse of that order, bottom of the stack first.
+	// pops in the reverse of that order, bottom of the stack first - so a
+	// call's callee, which it pops first, is the last of them.
 	Code   instr.Opcode
 	Slot   Slot
 	Const  types.Boxed
@@ -142,7 +143,10 @@ const (
 	// OpGuardBounds admits only an index below a length.
 	OpGuardBounds
 	// OpGuardValue admits only a value equal to the second argument, the
-	// observed value a specialization was recorded against.
+	// observed value a specialization was recorded against. That argument is
+	// a compile-time value, because an observation is one: everything reading
+	// the result reads a value that certainly holds it, which is how a
+	// speculated call reaches the same constant callee a static one does.
 	OpGuardValue
 	OpRetain
 	OpRelease

@@ -44,7 +44,9 @@ type frame struct {
 
 // fact is what the forward walk knows about one operand: its kind, where its
 // reference count lives, and the compile-time identities that let a container,
-// a callee, or a dynamic arity resolve statically. Ownership is explicit in the
+// a callee, or a dynamic arity resolve statically. A reference is one such
+// identity: knowing which cell an operand names resolves the container it
+// accesses and the function it calls alike. Ownership is explicit in the
 // emitted IR, but deciding where a retain belongs still needs the borrowed
 // value's source, which backing and offset name.
 type fact struct {
@@ -52,14 +54,12 @@ type fact struct {
 	backing jit.Backing
 	offset  int
 
-	ref         int
-	refKnown    bool
-	callee      int
-	calleeKnown bool
-	styp        *types.StructType
-	atyp        *types.ArrayType
-	val         int32
-	valKnown    bool
+	ref      int
+	refKnown bool
+	styp     *types.StructType
+	atyp     *types.ArrayType
+	val      int32
+	valKnown bool
 }
 
 // operand is one value on the abstract operand stack: the SSA value holding it,
@@ -188,10 +188,6 @@ func (f *fact) merge(src fact) (bool, bool) {
 	}
 	if f.refKnown && (!src.refKnown || f.ref != src.ref) {
 		f.ref, f.refKnown = 0, false
-		changed = true
-	}
-	if f.calleeKnown && (!src.calleeKnown || f.callee != src.callee) {
-		f.callee, f.calleeKnown = 0, false
 		changed = true
 	}
 	if f.styp != nil && f.styp != src.styp {

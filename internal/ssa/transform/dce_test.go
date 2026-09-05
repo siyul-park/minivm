@@ -145,7 +145,7 @@ func TestDCEPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, Results: []ssa.Value{length}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{zero, length}, State: state, Results: []ssa.Value{refined}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{length, zero}, State: state, Results: []ssa.Value{refined}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))

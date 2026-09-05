@@ -176,6 +176,9 @@ func operation(f *Function, sites []site, o Operation) error {
 		if args != 2 || results != 1 {
 			return counted(o.name(), args, results)
 		}
+		if !constant(f, sites, o.Args[1]) {
+			return fmt.Errorf("%w: %s admits v%d, which is no observation", ErrForm, o.name(), o.Args[1])
+		}
 		deopts = true
 	case OpRetain, OpRelease:
 		if args != 1 || results != 0 {
@@ -337,6 +340,19 @@ func resume(f *Function, sites []site, v Value, name string, deopts bool) (Opera
 		return Operation{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
 	}
 	return f.blocks[def.block].Ops[def.index], nil
+}
+
+// constant reports whether v is a compile-time value. The value a guard admits
+// is one by definition - a specialization is compiled against what was
+// observed - and it is what makes the guard worth its deopt: everything after
+// it reads an operand that certainly holds a constant, so a lowering resolves
+// a speculated callee, index, or shape exactly where it resolves a static one.
+func constant(f *Function, sites []site, v Value) bool {
+	if v <= NoValue || int(v) >= len(sites) {
+		return false
+	}
+	def := sites[v]
+	return def.index >= 0 && f.blocks[def.block].Ops[def.index].Op == OpConst
 }
 
 // uses checks that every value at reaches is defined and dominated there.
