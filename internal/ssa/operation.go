@@ -46,16 +46,34 @@ type Shape struct {
 
 // Frame is one interpreter frame an OpState materializes: the function slot
 // it runs in, its base offset from the entry frame, the IP it resumes at, the
-// result count its teardown uses, and the operands live on its stack, bottom
-// first. The chain is multi-frame because a frontend may inline callees into
-// one native frame, and the interpreter has to be handed every frame that
-// inlining hid.
+// result count its teardown uses, the operands live on its stack, bottom
+// first, and the local slots whose content no longer lives in the frame. The
+// chain is multi-frame because a frontend may inline callees into one native
+// frame, and the interpreter has to be handed every frame that inlining hid.
 type Frame struct {
 	Addr    int
 	Base    int
 	IP      int
 	Returns int
 	Stack   []Operand
+	Locals  []Local
+}
+
+// Local is one of a frame's local slots a promotion emptied: the slot's index
+// within the frame, and the value that slot must be written back with before
+// the interpreter reads it again. A frame names only the slots something
+// promoted; every other local is still in the frame, kept there by the stores
+// that are still in the code.
+//
+// It carries no ownership mark, unlike an Operand, because only a reference is
+// ever owned and no reference is ever promoted: taking a ref out of its slot
+// takes the slot's reference count with it, and nothing in this IR states
+// where that count then lives (see docs/jit-internals.md, Reference
+// Ownership). Verify holds the invariant, so the absent mark is a rule rather
+// than an omission.
+type Local struct {
+	Index int
+	Value Value
 }
 
 // Operand is one entry on a frame's operand stack: the value it holds, and

@@ -143,7 +143,7 @@ O1  FoldPass, DCEPass
 O2  FoldPass, CSEPass, GuardPass, DCEPass
     DedupPass
 
-O3  FoldPass, ForwardPass, CSEPass, GuardPass, HoistPass, DCEPass
+O3  FoldPass, PromotePass, ForwardPass, CSEPass, GuardPass, HoistPass, DCEPass
     DedupPass
 ```
 
@@ -232,6 +232,43 @@ Skipped intentionally:
   would remove is what re-tags it. The bytecode `AlgebraicPass` this replaced applied the
   identity unconditionally and turned an `I32(0)` into an `F64(0)` at O2.
 
+`PromotePass` turns an entry-frame local slot into values: every load reads whatever the
+last store left, and a merge point takes a block parameter for it. It is textbook mem2reg -
+Cytron's iterated dominance frontier over the slot's store blocks (`graph.Frontier`) decides
+where a parameter goes, and a dominator-tree walk renames every access - and it is what
+`ForwardPass` deliberately cannot do, since forwarding drops availability at every
+multi-predecessor block and so gives a loop-carried local back its per-iteration load,
+store, and boxing.
+
+A slot qualifies only when nothing but `OpLoad` and `OpStore` names it, which the IR gives
+for free: `LOCAL_GET`, `LOCAL_SET`, and `LOCAL_TEE` are the only opcodes `instr`'s effect
+model says read or write `Local`, and a call writes `Global`, `Upval`, `Heap`, and `Frame`
+but never the caller's own locals. Four things disqualify one: a `Slot.Base` that is not
+the entry frame's, accesses that disagree on a type, a reference (whose slot holds the
+reference count of what is in it, and `ssa.Local` has no ownership mark to say where that
+count went - the same reason `internal/jit/arm64`'s `carry` takes scalars only), and no
+store at all (a read-only slot already has one definition everywhere, so promoting it only
+makes the value live across every block that reads it, which the emitter has to home in a
+fresh local). A function that bridges a local opcode to the interpreter declines outright,
+since a bridge reads the frame the promotion emptied.
+
+A promoted local is no longer where the interpreter looks for it, so every `OpState`'s
+entry frame gains an `ssa.Local` per promoted slot: the value that slot must be written
+back with before a deopt resumes. That is what `internal/jit/arm64`'s `commitCarried`
+already does for a carried register - write it to its VM slot on the paths that hand
+control back, and nowhere else - rather than leaving a store in front of every guard,
+store, and call, which would put more stores on the hot path than the loads removed.
+`internal/jit/backend`'s `Exit` resolves those into `Deopt.Slots` entries at
+`Frame.Base + Local.Index`, below the frame's own operands, so the flush stays in ascending
+slot order. A function with no `OpState` at all - every function the ahead-of-time
+optimizer sees, since bytecode does not deoptimize - has nothing to name.
+
+The entry block loads each promoted slot once, which is the reaching definition every other
+one starts from. A function whose entry block is itself a loop header gets a fresh entry
+block in front of it so that load runs once per entry; an entry that both has predecessors
+and takes parameters is declined, since a block in front of it has no operands to pass on.
+This is the only place the pass grows the block graph, and it never splits an edge.
+
 `ForwardPass` replaces a load with the value an earlier load of the same slot already
 produced, which is the textbook redundant-load elimination and what `CSEPass` needs in
 front of it: a value in SSA is its own definition, so two reads of one local are two
@@ -251,18 +288,19 @@ and one more slot than reading back the slot the program itself named.
 
 ## SSA Transformation Policies
 
-`internal/ssa/transform` is a second pass system over `*ssa.Function`, reusing `pass.Pass`, `pass.Analysis`, `pass.Manager`, and `pass.Pipeline` exactly as the top-level `transform` and `optimize` do over `*program.Program` - no second pipeline abstraction exists. Its role in `docs/coding-patterns.md` §6 is the top-level `transform`'s role, not `optimize`'s: it owns one transformation policy per pass and exposes no composer. A caller builds its own `pass.Pipeline[*ssa.Function]` and adds `FoldPass`, `ForwardPass`, `CSEPass`, `GuardPass`, `HoistPass`, then `DCEPass`, in that order, because Forward has to make a repeated read one value before CSE can see a computation over it as one computation, CSE has to unify a repeated load's value before a guard built on each read is recognizably the same guard, DCE has to run last to sweep up whatever folding, deduplicating, guard elimination, and hoisting leave behind (an operand a fold made unused, an `OpState` a removed guard no longer resumes into), and Hoist reads best once Fold and CSE have already canonicalized the function, so it moves one instance of an invariant computation rather than a would-be duplicate. None of that is a correctness requirement for `HoistPass` specifically, though: it never unifies a value (only `CSEPass` and `GuardPass`'s shared `dedup` does that) and never moves a guard or anything else that carries deopt state (only `GuardPass`'s target), so it is sound wherever it runs in the sequence - unlike `GuardPass`, whose placement after `CSEPass` is load-bearing. `internal/ssa/transform/transform_test.go`'s `TestPassOrder` composes exactly this pipeline and asserts the ordering facts end to end. `optimize` owns the leveled, user-facing composition of these passes, over `*program.Program` through `transform.SSAPass`, so `internal/ssa/transform` never grows an `Optimizer`-shaped composer that would only duplicate `optimize.Optimizer`'s shape.
+`internal/ssa/transform` is a second pass system over `*ssa.Function`, reusing `pass.Pass`, `pass.Analysis`, `pass.Manager`, and `pass.Pipeline` exactly as the top-level `transform` and `optimize` do over `*program.Program` - no second pipeline abstraction exists. Its role in `docs/coding-patterns.md` §6 is the top-level `transform`'s role, not `optimize`'s: it owns one transformation policy per pass and exposes no composer. A caller builds its own `pass.Pipeline[*ssa.Function]` and adds `FoldPass`, `PromotePass`, `ForwardPass`, `CSEPass`, `GuardPass`, `HoistPass`, then `DCEPass`, in that order, because Promote and Forward have to make a repeated read one value before CSE can see a computation over it as one computation, CSE has to unify a repeated load's value before a guard built on each read is recognizably the same guard, DCE has to run last to sweep up whatever folding, deduplicating, guard elimination, and hoisting leave behind (an operand a fold made unused, an `OpState` a removed guard no longer resumes into), and Hoist reads best once Fold and CSE have already canonicalized the function, so it moves one instance of an invariant computation rather than a would-be duplicate. None of that is a correctness requirement for `HoistPass` specifically, though: it never unifies a value (only `CSEPass` and `GuardPass`'s shared `dedup` does that) and never moves a guard or anything else that carries deopt state (only `GuardPass`'s target), so it is sound wherever it runs in the sequence - unlike `GuardPass`, whose placement after `CSEPass` is load-bearing. `internal/ssa/transform/transform_test.go`'s `TestPassOrder` composes exactly this pipeline and asserts the ordering facts end to end. `optimize` owns the leveled, user-facing composition of these passes, over `*program.Program` through `transform.SSAPass`, so `internal/ssa/transform` never grows an `Optimizer`-shaped composer that would only duplicate `optimize.Optimizer`'s shape.
 
 Every pass here must stay correct and useful on a function with no JIT-specific fact at all, not only one `internal/jit/frontend` produced with guards and deopt state - `internal/ssa/transform` does not import `internal/jit`, so nothing in it may assume one is present.
 
 | Pass | Collapses | Mechanism |
 |---|---|---|
 | `FoldPass` | an `OpExec` whose opcode is `IsPure()` and whose arguments are all `OpConst`, or whose right argument alone makes it an identity or a shift | decodes each `types.Boxed` argument into its native Go type and computes with ordinary operators; an identity aliases the result onto the left argument, a strength reduction adds the shift amount as a new `OpConst` |
+| `PromotePass` | every `OpLoad` and `OpStore` of an entry-frame local slot that is stored at least once, holds no reference, and is read back at the type it was written | mem2reg: a block parameter at the iterated dominance frontier of the slot's stores (`graph.Frontier`), then a dominator-tree walk renaming each access to the definition reaching it |
 | `ForwardPass` | an `OpLoad` a dominating `OpLoad` of the same `Slot` already performed, with nothing in between writing that storage | a dominator-tree walk carrying the value held in each slot, cleared at a block more than one edge reaches and at every operation `instr`'s effect model says writes that space |
 | `CSEPass` | two `OpConst` or pure `OpExec` operations with equal value, related by dominance | `dedup`, keyed by opcode and argument identity |
 | `GuardPass` | two guards of the same kind admitting the same fact over the same operand, related by dominance | `dedup`, keyed by guard kind, operand, and the admitted fact (target kind, shape, bounds, or specialized value) |
 | `HoistPass` | an `OpConst`, or a pure and non-trapping `OpExec`, every one of whose arguments is defined outside a loop it sits in (or was itself just hoisted) | loop-invariant code motion: moves the operation into the loop's preheader when one already exists, never by splitting an edge to build one |
-| `DCEPass` | an operation with no live result and no effect, and any block unreachable from the entry | mark-sweep liveness seeded from every operation instr's effect model says runs unconditionally, propagated backward through every value an operation reads - including an `OpState`'s own frame stacks |
+| `DCEPass` | an operation with no live result and no effect, and any block unreachable from the entry | mark-sweep liveness seeded from every operation instr's effect model says runs unconditionally, propagated backward through every value an operation reads - including an `OpState`'s own frame stacks and promoted locals |
 
 `CSEPass` and `GuardPass` share one engine (`dedup` in `internal/ssa/transform/dedup.go`): a dominator-tree-scoped hash-consing table, walked in the dominator tree's own preorder so a key one block establishes stays visible to every block it dominates and is forgotten once that whole subtree is done. This is the SSA counterpart of the bytecode global value numbering minivm used to carry, and is far smaller than it: a value here is its own definition, so identity is free, and dominance alone - no available-expression dataflow, no per-block value renumbering, no stable-versus-opaque story for mutable loads - decides what one definition may stand in for.
 
@@ -327,6 +365,8 @@ Asserted in `TestSSAPass_Run`:
   reaches.
 - `ForwardPass` then `CSEPass` collapse a computation repeated over reloaded operands, and
   the emitter writes the shared value into one fresh local with `LOCAL_TEE`.
+- `PromotePass` carries a loop counter held in a local out of its slot and back through the
+  emitter as bytecode that still runs the same way.
 
 ## Rewrite Rules
 

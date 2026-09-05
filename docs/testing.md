@@ -95,12 +95,12 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm` | 39 | 39 | 0 | 0 |
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
-| `internal/graph` | 4 | 4 | 0 | 0 |
+| `internal/graph` | 5 | 5 | 0 | 0 |
 | `internal/jit/backend` | 10 | 10 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 3 | 3 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
-| `internal/ssa/transform` | 12 | 12 | 0 | 0 |
+| `internal/ssa/transform` | 14 | 14 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
@@ -317,6 +317,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/graph/dominance.go` | `TestNewDominance` | ✅ |
 | `internal/graph/dominance.go` | `TestDominance_Dominates` | ✅ |
 | `internal/graph/dominance.go` | `TestDominance_IDom` | ✅ |
+| `internal/graph/dominance.go` | `TestFrontier` | ✅ |
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestBody` | ✅ |
@@ -353,6 +354,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/format.go` | `TestFormat` | ✅ |
 | `internal/ssa/transform/fold.go` | `TestNewFoldPass` | ✅ |
 | `internal/ssa/transform/fold.go` | `TestFoldPass_Run` | ✅ |
+| `internal/ssa/transform/promote.go` | `TestNewPromotePass` | ✅ |
+| `internal/ssa/transform/promote.go` | `TestPromotePass_Run` | ✅ |
 | `internal/ssa/transform/forward.go` | `TestNewForwardPass` | ✅ |
 | `internal/ssa/transform/forward.go` | `TestForwardPass_Run` | ✅ |
 | `internal/ssa/transform/cse.go` | `TestNewCSEPass` | ✅ |

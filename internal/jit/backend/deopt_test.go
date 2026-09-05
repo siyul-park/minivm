@@ -53,7 +53,7 @@ func TestCompiler_Exit(t *testing.T) {
 			ID:     0,
 			Resume: 20,
 			SP:     7,
-			Stack: []backend.Flush{
+			Slots: []backend.Flush{
 				{Value: live[0], Slot: 2},
 				{Value: live[1], Slot: 3},
 				{Value: live[2], Slot: 5},
@@ -65,6 +65,43 @@ func TestCompiler_Exit(t *testing.T) {
 			},
 		}}, m.deopts)
 		require.Equal(t, []jit.Exit{{Reason: prof.ExitGuardKind, Opcode: int(instr.ARRAY_GET)}}, code.Exits)
+	})
+
+	t.Run("boxes a promoted local into the frame slot it came out of", func(t *testing.T) {
+		// The function occupies two stack slots, so its own locals are slots 0
+		// and 1 and its operands start at 2: a promoted local is written below
+		// the operands it shares a frame with, which keeps the whole flush in
+		// ascending slot order.
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+		}
+
+		b := ssa.New("f")
+		entry := b.Block()
+		counter := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{counter}})
+		live := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(8), Results: []ssa.Value{live}})
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
+			{Addr: 1, IP: 5, Returns: 1, Stack: []ssa.Operand{{Value: live}}, Locals: []ssa.Local{{Index: 1, Value: counter}}},
+		}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{live}, State: state, Results: []ssa.Value{b.Value(ssa.TypeI32)}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		f := b.Build()
+		require.NoError(t, ssa.Verify(f))
+
+		m := &machine{guard: prof.ExitGuardKind, opcode: int(instr.ARRAY_GET)}
+		input := &jit.Input{Objects: jit.Objects{1: {Fn: fn}}}
+		_, ok := backend.Compile(m, asm.New(arm64.New()), input, f)
+		require.True(t, ok)
+
+		require.Equal(t, []backend.Flush{
+			{Value: counter, Slot: 1},
+			{Value: live, Slot: 2},
+		}, m.deopts[0].Slots)
+		require.Equal(t, 3, m.deopts[0].SP, "a promoted local sits under the operands, so it moves no stack pointer")
 	})
 
 	t.Run("registers no descriptor for an exit that reports none", func(t *testing.T) {
@@ -86,7 +123,7 @@ func TestCompiler_Exit(t *testing.T) {
 		code, ok := backend.Compile(m, asm.New(arm64.New()), input, f)
 		require.True(t, ok)
 
-		require.Equal(t, []backend.Deopt{{ID: -1, Resume: 7, SP: 1, Stack: []backend.Flush{{Value: v, Slot: 0}}, Frames: []backend.Record{{Addr: 1, IP: 7}}}}, m.deopts)
+		require.Equal(t, []backend.Deopt{{ID: -1, Resume: 7, SP: 1, Slots: []backend.Flush{{Value: v, Slot: 0}}, Frames: []backend.Record{{Addr: 1, IP: 7}}}}, m.deopts)
 		require.Empty(t, code.Exits)
 	})
 

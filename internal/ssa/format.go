@@ -48,8 +48,12 @@ func op(f *Function, o Operation) string {
 		args = append(args, slot(o.Slot))
 	case OpState:
 		for _, frame := range o.Frames {
-			args = append(args, fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]}",
-				frame.Addr, frame.Base, frame.IP, frame.Returns, strings.Join(stack(frame.Stack), ", ")))
+			at := fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]",
+				frame.Addr, frame.Base, frame.IP, frame.Returns, strings.Join(stack(frame.Stack), ", "))
+			if len(frame.Locals) > 0 {
+				at += fmt.Sprintf(" locals=[%s]", strings.Join(locals(frame.Locals), ", "))
+			}
+			args = append(args, at+"}")
 		}
 	}
 	args = append(args, refs(o.Args)...)
@@ -124,6 +128,16 @@ func stack(os []Operand) []string {
 		if o.Owned {
 			names[i] += " owned"
 		}
+	}
+	return names
+}
+
+// locals names the local slots a promotion emptied, each with the value the
+// frame must be written back with.
+func locals(ls []Local) []string {
+	names := make([]string, len(ls))
+	for i, l := range ls {
+		names[i] = fmt.Sprintf("%d=v%d", l.Index, l.Value)
 	}
 	return names
 }

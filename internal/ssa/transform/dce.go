@@ -18,13 +18,14 @@ import (
 // release, or a bridge runs for what it does, not for what it returns, so
 // none of them is ever pruned even with zero uses of its result. From those
 // roots, liveness runs backward through every value an operation reads - its
-// arguments, an OpState's own frame stacks, and the state any of the above
-// resumes into - so a value named only inside a live deopt's frame chain is
-// exactly as live as one an ordinary argument names, and a pure operation
-// feeding a live guard or store survives by that chain even though it is not
-// itself a root. An OpState that nothing still live resumes into is pruned
-// like anything else; running GuardPass first is what leaves one behind for
-// this pass to sweep up, once the guard that alone resumed into it is gone.
+// arguments, an OpState's own frame stacks and promoted locals, and the state
+// any of the above resumes into - so a value named only inside a live deopt's
+// frame chain is exactly as live as one an ordinary argument names, and a pure
+// operation feeding a live guard or store survives by that chain even though
+// it is not itself a root. An OpState that nothing still live resumes into is
+// pruned like anything else; running GuardPass first is what leaves one
+// behind for this pass to sweep up, once the guard that alone resumed into it
+// is gone.
 //
 // A block parameter is never pruned in this phase: dropping an unread one
 // would also have to drop the matching argument from every predecessor's
@@ -78,7 +79,7 @@ type site struct {
 // every operation instr's effect model says runs unconditionally is a root,
 // every terminator's operands are roots, and liveness is then propagated
 // backward from each root's own operands - including an OpState's frame
-// stacks - to whatever defines them.
+// stacks and promoted locals - to whatever defines them.
 func liveOps(fn *ssa.Function, blocks []int) map[site]bool {
 	defs := map[ssa.Value]site{}
 	for _, b := range blocks {
@@ -107,6 +108,9 @@ func liveOps(fn *ssa.Function, blocks []int) map[site]bool {
 		for _, fr := range op.Frames {
 			for _, o := range fr.Stack {
 				push(o.Value)
+			}
+			for _, l := range fr.Locals {
+				push(l.Value)
 			}
 		}
 		push(op.State)

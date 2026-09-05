@@ -232,6 +232,51 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Equal(t, want, values)
 	})
 
+	t.Run("carries a promoted loop counter through the round trip", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(ssapass.NewPromotePass())
+		pipeline.Add(ssapass.NewDCEPass())
+
+		// A counter that lives in local 1 is read and written on every
+		// iteration. Promotion turns it into a value carried on the back edge,
+		// and the emitter has to write that value back out as bytecode a
+		// bytecode machine still runs the same way.
+		counting := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Locals(types.TypeI32)
+		head, done := counting.Label(), counting.Label()
+		counting.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
+		counting.Bind(head)
+		counting.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S))
+		counting.BrIf(done)
+		counting.Emit(
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 1),
+		)
+		counting.Br(head)
+		counting.Bind(done)
+		counting.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN))
+		fn := counting.MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 6), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		want, wantErr := outcome(t, prog)
+		got := duplicate(prog)
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+
+		counted := got.Constants[0].(*types.Function)
+		require.NotEqual(t, instr.Format(fn.Code), instr.Format(counted.Code))
+
+		values, message := outcome(t, got)
+		require.Equal(t, wantErr, message)
+		require.Equal(t, want, values)
+	})
+
 	t.Run("declines a branch its own layout would put out of range", func(t *testing.T) {
 		// Blocks come back in the order the SSA holds them, which is the
 		// order control reaches them from the entry rather than the order the
@@ -287,6 +332,7 @@ func TestSSAPass_Run(t *testing.T) {
 func optimizing() *pass.Pipeline[*ssa.Function] {
 	pipeline := pass.NewPipeline[*ssa.Function]()
 	pipeline.Add(ssapass.NewFoldPass())
+	pipeline.Add(ssapass.NewPromotePass())
 	pipeline.Add(ssapass.NewCSEPass())
 	pipeline.Add(ssapass.NewGuardPass())
 	pipeline.Add(ssapass.NewHoistPass())

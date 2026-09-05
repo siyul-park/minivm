@@ -69,6 +69,19 @@ func (r *rebuilder) stack(os []ssa.Operand) []ssa.Operand {
 	return out
 }
 
+// locals translates the local slots one frame is written back with. A slot
+// keeps its index: renumbering a value never moves it to another frame.
+func (r *rebuilder) locals(ls []ssa.Local) []ssa.Local {
+	if len(ls) == 0 {
+		return nil
+	}
+	out := make([]ssa.Local, len(ls))
+	for i, l := range ls {
+		out[i] = ssa.Local{Index: l.Index, Value: r.value(l.Value)}
+	}
+	return out
+}
+
 // alias records that old now reads back as at: at is at's own renumbering
 // when old survives, or the survivor standing in for old when a pass elides
 // old's defining operation.
@@ -76,8 +89,9 @@ func (r *rebuilder) alias(old, at ssa.Value) {
 	r.values[old] = at
 }
 
-// operation returns op with every value it reads - its arguments, the frames
-// an OpState carries, and the state it resumes into - translated through the
+// operation returns op with every value it reads - its arguments, the stacks
+// and promoted locals the frames an OpState carries hold, and the state it
+// resumes into - translated through the
 // rebuilder's current substitution. Its results are left as op's own old
 // values; a caller that keeps op still has to allocate and alias their
 // replacements itself.
@@ -86,7 +100,7 @@ func (r *rebuilder) operation(op ssa.Operation) ssa.Operation {
 	if len(op.Frames) > 0 {
 		frames := make([]ssa.Frame, len(op.Frames))
 		for i, fr := range op.Frames {
-			fr.Stack = r.stack(fr.Stack)
+			fr.Stack, fr.Locals = r.stack(fr.Stack), r.locals(fr.Locals)
 			frames[i] = fr
 		}
 		op.Frames = frames

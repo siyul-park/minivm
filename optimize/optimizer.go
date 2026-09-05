@@ -61,9 +61,11 @@ func (o *Optimizer) Add(p pass.Pass[*program.Program]) {
 // transformation policies, run over each function through the
 // bytecode-to-SSA-to-bytecode route: O1 folds and sweeps what folding leaves
 // behind, O2 adds the dominance-scoped common-subexpression elimination and
-// the guard elimination that rides on it, and O3 adds the redundant-load
-// forwarding that makes a repeated read one value and the loop-invariant code
-// motion that only reads well once the rest has canonicalized the function.
+// the guard elimination that rides on it, and O3 adds the local promotion that
+// turns a slot read and written only through itself into values, the
+// redundant-load forwarding that makes a repeated read of what is left one
+// value, and the loop-invariant code motion that only reads well once the rest
+// has canonicalized the function.
 // DedupPass follows the route at every level: a constant pool is a
 // whole-program concern no per-function IR has a counterpart for, and it has
 // the folded constants the route interned to collect.
@@ -74,8 +76,8 @@ func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 	case O2:
 		return route(ssapass.NewFoldPass(), ssapass.NewCSEPass(), ssapass.NewGuardPass(), ssapass.NewDCEPass())
 	case O3:
-		return route(ssapass.NewFoldPass(), ssapass.NewForwardPass(), ssapass.NewCSEPass(),
-			ssapass.NewGuardPass(), ssapass.NewHoistPass(), ssapass.NewDCEPass())
+		return route(ssapass.NewFoldPass(), ssapass.NewPromotePass(), ssapass.NewForwardPass(),
+			ssapass.NewCSEPass(), ssapass.NewGuardPass(), ssapass.NewHoistPass(), ssapass.NewDCEPass())
 	default:
 		return nil
 	}

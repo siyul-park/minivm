@@ -99,6 +99,26 @@ func TestFormat(t *testing.T) {
 			"\texit state v2\n", ssa.Format(f))
 	})
 
+	t.Run("names the local slots a deopt frame is written back with", func(t *testing.T) {
+		b := ssa.New("promoted")
+		entry := b.Block()
+		counter := b.Value(ssa.TypeI32)
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{counter}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
+			{Addr: 1, Locals: []ssa.Local{{Index: 2, Value: counter}}},
+		}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+
+		f := b.Build()
+		require.NoError(t, ssa.Verify(f))
+		require.Equal(t, "func promoted\n"+
+			"blk0: ()\n"+
+			"\tv1:i32 = const 7\n"+
+			"\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[] locals=[2=v1]}\n"+
+			"\texit state v2\n", ssa.Format(f))
+	})
+
 	t.Run("prints every other operation form", func(t *testing.T) {
 		b := ssa.New("forms")
 		entry, stop, give, end := b.Block(), b.Block(), b.Block(), b.Block()

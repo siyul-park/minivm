@@ -7,9 +7,9 @@ import (
 )
 
 // Deopt is one deoptimization resolved out of the frame chain an OpState
-// carries: where the interpreter picks execution up, which VM stack slot each
-// live operand must be boxed into and whether that operand already owns its
-// reference count, and the frame records the journal is handed so Go can
+// carries: where the interpreter picks execution up, which VM slot each value
+// the interpreter reads back must be boxed into and whether it already owns
+// its reference count, and the frame records the journal is handed so Go can
 // rebuild the call chain native inlining hid. It states what native code
 // writes, never how - the stores and the retains are the machine's.
 type Deopt struct {
@@ -25,20 +25,23 @@ type Deopt struct {
 	// SP is the interpreter stack pointer journal.CellSP carries, as a delta
 	// from the entry frame's base: the top of the innermost frame's operands.
 	SP int
-	// Stack is every live operand of every frame with the slot it belongs in,
-	// outermost frame first and each frame's stack bottom first, which is
-	// ascending slot order.
-	Stack []Flush
+	// Slots is every value the interpreter must find in a VM slot on resuming,
+	// with the slot it belongs in: each frame's promoted locals, then its live
+	// operands, outermost frame first and each run in slot order, which is
+	// ascending slot order overall.
+	Slots []Flush
 	// Frames are the journal frame records, innermost first, which is the
 	// order journal.At indexes them in and the interpreter reads them back in.
 	Frames []Record
 }
 
-// Flush is one live operand and the VM stack slot, as a delta from the entry
-// frame's base, native code must box it into before returning. Owned reports
-// that the operand already carries the reference count the interpreter adopts
-// on resuming; a borrowed one derives its count from storage the interpreter
-// is about to leave behind, so the cold path retains it before it returns.
+// Flush is one value and the VM slot, as a delta from the entry frame's base,
+// native code must box it into before returning: a frame local a promotion
+// took out of the frame, or a live operand. Owned reports that the value
+// already carries the reference count the interpreter adopts on resuming; a
+// borrowed one derives its count from storage the interpreter is about to
+// leave behind, so the cold path retains it before it returns. Only an operand
+// is ever owned, since no reference is ever promoted (see ssa.Local).
 type Flush struct {
 	Value ssa.Value
 	Slot  int
@@ -69,8 +72,11 @@ func (c *Compiler) Exit(v ssa.Value, reason prof.ExitReason, opcode int) Deopt {
 	d := Deopt{ID: -1, Resume: op.Frames[len(op.Frames)-1].IP, Frames: make([]Record, 0, len(op.Frames))}
 	for _, frame := range op.Frames {
 		floor := frame.Base + c.slots[frame.Addr]
+		for _, local := range frame.Locals {
+			d.Slots = append(d.Slots, Flush{Value: local.Value, Slot: frame.Base + local.Index})
+		}
 		for i, operand := range frame.Stack {
-			d.Stack = append(d.Stack, Flush{Value: operand.Value, Slot: floor + i, Owned: operand.Owned})
+			d.Slots = append(d.Slots, Flush{Value: operand.Value, Slot: floor + i, Owned: operand.Owned})
 		}
 		d.SP = floor + len(frame.Stack)
 	}

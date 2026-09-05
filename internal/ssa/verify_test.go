@@ -215,6 +215,56 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
+	t.Run("accepts a frame written back with a promoted local", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		count := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Locals: []ssa.Local{{Index: 0, Value: count}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
+	t.Run("rejects a promoted local holding a reference", func(t *testing.T) {
+		// A promoted local carries no ownership mark, so a reference in one
+		// names a count nothing accounts for.
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		array := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Locals: []ssa.Local{{Index: 0, Value: array}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
+	})
+
+	t.Run("rejects a promoted local naming no slot of its frame", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		count := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Locals: []ssa.Local{{Index: -1, Value: count}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
+	})
+
+	t.Run("rejects a promoted local its definition does not dominate", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, arm, join := b.Block(), b.Block(), b.Block()
+		cond := b.Value(ssa.TypeI1)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: arm}, {Block: join}}})
+		count := b.Value(ssa.TypeI32)
+		b.Add(arm, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
+		b.Term(arm, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		state := b.Value(ssa.TypeState)
+		b.Add(join, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Locals: []ssa.Local{{Index: 0, Value: count}}}}, Results: []ssa.Value{state}})
+		b.Term(join, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDominate)
+	})
+
 	t.Run("rejects an interpreter state with no frame", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

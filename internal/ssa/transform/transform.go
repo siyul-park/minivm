@@ -1,6 +1,6 @@
 // Package transform holds internal/ssa's transformation policies, one pass
-// per concern - FoldPass, ForwardPass, CSEPass, GuardPass, HoistPass, and
-// DCEPass - and is the only implementation of each: an ahead-of-time
+// per concern - FoldPass, PromotePass, ForwardPass, CSEPass, GuardPass,
+// HoistPass, and DCEPass - and is the only implementation of each: an ahead-of-time
 // optimizer reaches them over bytecode through transform.SSAPass, and a
 // compile reaches them over the same IR it lowers. It knows only ssa, graph,
 // pass, instr, and types - never the JIT itself - so every pass here is
@@ -11,9 +11,10 @@
 // This package composes nothing: a caller builds its own
 // pass.Pipeline[*ssa.Function] from the passes it needs, in the order it
 // needs them. FoldPass must run before CSEPass sees a folded constant;
-// ForwardPass must run before CSEPass, because a computation over a slot read
-// twice is two computations until the second read is the first read's own
-// value; CSEPass must run before GuardPass, because a guard's operand is only
+// PromotePass and ForwardPass must run before CSEPass, because a computation
+// over a slot read twice is two computations until the second read is the
+// first read's own value - PromotePass making that so across a merge, where
+// ForwardPass by construction cannot; CSEPass must run before GuardPass, because a guard's operand is only
 // recognizably equal to an earlier guard's once CSEPass has unified the
 // values they read; DCEPass runs last, because every earlier pass can leave
 // behind an operation - a folded computation's now-unused operands, a

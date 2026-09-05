@@ -49,6 +49,46 @@ func TestNewDominance(t *testing.T) {
 	})
 }
 
+func TestFrontier(t *testing.T) {
+	t.Run("names the join each arm of a diamond stops being the only definition at", func(t *testing.T) {
+		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
+		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
+
+		f := graph.Frontier(g, graph.NewDominance(g))
+
+		require.Equal(t, [][]int{nil, {3}, {3}, nil}, f,
+			"the entry dominates the join, so nothing it defines needs merging there")
+	})
+
+	t.Run("names a loop header as the frontier of every block its body reaches it from", func(t *testing.T) {
+		// 0 -> 1, 1 -> 2, 2 -> 3, 3 -> 1, 2 -> 4.
+		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 3}, {3, 1}, {2, 4}})
+
+		f := graph.Frontier(g, graph.NewDominance(g))
+
+		require.Equal(t, [][]int{nil, {1}, {1}, {1}, nil}, f,
+			"the header is where a definition made anywhere in the body meets the one the preheader made")
+	})
+
+	t.Run("leaves a graph with no join empty", func(t *testing.T) {
+		// 0 -> 1 -> 2.
+		g := newFixture(3, [][2]int{{0, 1}, {1, 2}})
+
+		f := graph.Frontier(g, graph.NewDominance(g))
+
+		require.Equal(t, [][]int{nil, nil, nil}, f)
+	})
+
+	t.Run("leaves out a join only unreachable nodes reach", func(t *testing.T) {
+		// 0 -> 1; 2 -> 1 and 3 -> 1 are unreachable from the entry.
+		g := newFixture(4, [][2]int{{0, 1}, {2, 1}, {3, 1}})
+
+		f := graph.Frontier(g, graph.NewDominance(g))
+
+		require.Equal(t, [][]int{nil, nil, nil, nil}, f)
+	})
+}
+
 func TestDominance_Dominates(t *testing.T) {
 	t.Run("entry dominates every node reachable through a diamond, but neither arm dominates the join", func(t *testing.T) {
 		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.

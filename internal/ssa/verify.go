@@ -198,6 +198,16 @@ func operation(f *Function, sites []site, o Operation) error {
 					return fmt.Errorf("%w: %s owns %s", ErrType, o.name(), f.Type(operand.Value))
 				}
 			}
+			for _, local := range frame.Locals {
+				if local.Index < 0 {
+					return fmt.Errorf("%w: %s promotes local %d", ErrState, o.name(), local.Index)
+				}
+				// A promoted local carries no ownership mark, so a reference
+				// in one names a count nothing accounts for (see Local).
+				if f.Type(local.Value) == TypeRef {
+					return fmt.Errorf("%w: %s promotes %s", ErrType, o.name(), TypeRef)
+				}
+			}
 		}
 	default:
 		return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
@@ -375,13 +385,16 @@ func uses(f *Function, sites []site, dom *graph.Dominance, at site, vs []Value) 
 	return nil
 }
 
-// reads returns every value o reads: its arguments, the stacks its frames
-// hold, and the state it resumes into.
+// reads returns every value o reads: its arguments, the stacks and promoted
+// locals its frames hold, and the state it resumes into.
 func reads(o Operation) []Value {
 	vs := append([]Value(nil), o.Args...)
 	for _, frame := range o.Frames {
 		for _, operand := range frame.Stack {
 			vs = append(vs, operand.Value)
+		}
+		for _, local := range frame.Locals {
+			vs = append(vs, local.Value)
 		}
 	}
 	if o.State != NoValue {

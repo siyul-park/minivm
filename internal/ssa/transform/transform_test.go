@@ -13,7 +13,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// TestPassOrder composes this package's four passes into a caller-owned
+// TestPassOrder composes this package's passes into a caller-owned
 // pipeline, exactly as internal/jit or a future bytecode-to-SSA route would,
 // and asserts the ordering fact this package itself no longer enforces:
 // CSEPass must run before GuardPass, because a guard's operand is only
