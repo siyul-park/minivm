@@ -97,7 +97,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 2 | 2 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
-| `internal/ssa/transform` | 8 | 8 | 0 | 0 |
+| `internal/ssa/transform` | 10 | 10 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
@@ -345,6 +345,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/transform/guard.go` | `TestGuardPass_Run` | ✅ |
 | `internal/ssa/transform/dce.go` | `TestNewDCEPass` | ✅ |
 | `internal/ssa/transform/dce.go` | `TestDCEPass_Run` | ✅ |
+| `internal/ssa/transform/hoist.go` | `TestNewHoistPass` | ✅ |
+| `internal/ssa/transform/hoist.go` | `TestHoistPass_Run` | ✅ |
 | `cli/cli.go` | `TestRoot` | ✅ |
 | `cli/cli.go` | `TestWithFS` | ✅ |
 | `cli/fs.go` | `TestOS` | ✅ |
