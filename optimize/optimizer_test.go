@@ -2,58 +2,20 @@ package optimize_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/ssa"
+	ssapass "github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/optimize"
+	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
-
-func TestWithSSA(t *testing.T) {
-	// The addition is dead: the bytecode passes fold it and keep the folded
-	// constant, because dropping a value the code pushes is not something a
-	// peephole over an operand stack can decide. Over SSA it is ordinary
-	// liveness, so the route removes the whole phrase.
-	build := func() *program.Program {
-		return program.New(
-			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 5),
-					instr.New(instr.RETURN),
-				).MustBuild(),
-			),
-		)
-	}
-
-	bytecode, err := optimize.New(optimize.O1).Optimize(build())
-	require.NoError(t, err)
-	routed, err := optimize.New(optimize.O1, optimize.WithSSA()).Optimize(build())
-	require.NoError(t, err)
-	require.NoError(t, program.Verify(routed))
-
-	kept := routed.Constants[0].(*types.Function)
-	require.NotEqual(t, instr.Format(bytecode.Constants[0].(*types.Function).Code), instr.Format(kept.Code))
-	require.Equal(t, instr.Format(instr.Marshal([]instr.Instruction{
-		instr.New(instr.I32_CONST, 5),
-		instr.New(instr.RETURN),
-	})), instr.Format(kept.Code))
-
-	vm := interp.New(routed)
-	defer vm.Close()
-	require.NoError(t, vm.Run(context.Background()))
-	value, err := vm.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(5), value)
-}
 
 func TestNew(t *testing.T) {
 	optimizer := optimize.New(optimize.O2)
@@ -74,6 +36,41 @@ func TestOptimizer_Optimize(t *testing.T) {
 		result, err := o.Optimize(prog)
 		require.NoError(t, err)
 		require.Equal(t, prog.String(), result.String())
+	})
+
+	t.Run("O1 folds a constant window and drops what nothing reads", func(t *testing.T) {
+		// The addition is dead. Folding alone would keep the folded constant,
+		// because dropping a value the code pushes is not something a peephole
+		// over an operand stack can decide; over SSA it is ordinary liveness,
+		// so the whole phrase goes.
+		prog := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 5),
+					instr.New(instr.RETURN),
+				).MustBuild(),
+			),
+		)
+
+		optimized, err := optimize.New(optimize.O1).Optimize(prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(optimized))
+		require.Equal(t, instr.Format(instr.Marshal([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.RETURN),
+		})), instr.Format(optimized.Constants[0].(*types.Function).Code))
+
+		vm := interp.New(optimized)
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), value)
 	})
 
 	t.Run("O1", func(t *testing.T) {
@@ -307,8 +304,12 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 
+		// Both arms drop what they compute, so the redundancy is not captured
+		// and reloaded but removed outright, and only the merge's own addition
+		// survives.
 		fn := optimized.Constants[0].(*types.Function)
-		require.Len(t, fn.Locals, 1, "merge redundancy captured into a fresh local")
+		require.Empty(t, fn.Locals)
+		require.Equal(t, 1, strings.Count(instr.Format(fn.Code), "i32.add"))
 
 		beforeVM := interp.New(before)
 		defer beforeVM.Close()
@@ -450,8 +451,11 @@ func TestOptimizer_Level(t *testing.T) {
 }
 
 func TestOptimizer_Add(t *testing.T) {
+	pipeline := pass.NewPipeline[*ssa.Function]()
+	pipeline.Add(ssapass.NewFoldPass())
+
 	o := optimize.New(optimize.O0)
-	o.Add(transform.NewFoldPass())
+	o.Add(transform.NewSSAPass(pipeline))
 
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),

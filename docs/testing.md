@@ -89,7 +89,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 
 | Package | Exported owners | Owned | Shared family | Missing |
 |---|---:|---:|---:|---:|
-| `analysis` | 5 | 5 | 0 | 0 |
+| `analysis` | 3 | 3 | 0 | 0 |
 | `internal/asm` | 37 | 37 | 0 | 0 |
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
@@ -97,16 +97,16 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 3 | 3 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
-| `internal/ssa/transform` | 10 | 10 | 0 | 0 |
+| `internal/ssa/transform` | 12 | 12 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
 | `interp` | 83 | 83 | 0 | 0 |
-| `optimize` | 5 | 5 | 0 | 0 |
+| `optimize` | 4 | 4 | 0 | 0 |
 | `pass` | 9 | 9 | 0 | 0 |
 | `prof` | 22 | 22 | 0 | 0 |
 | `program` | 25 | 25 | 0 | 0 |
-| `transform` | 12 | 12 | 0 | 0 |
+| `transform` | 4 | 4 | 0 | 0 |
 | `types` | 171 | 171 | 0 | 0 |
 
 ### Symbol Matrix
@@ -116,8 +116,6 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `analysis/blocks.go` | `TestBlocksAnalysis_Run` | ✅ |
 | `analysis/blocks.go` | `TestBlocks` | ✅ |
 | `analysis/blocks.go` | `TestNewBlocksAnalysis` | ✅ |
-| `analysis/gvn.go` | `TestGVNAnalysis_Run` | ✅ |
-| `analysis/gvn.go` | `TestNewGVNAnalysis` | ✅ |
 | `internal/asm/assembler.go` | `TestNew` | ✅ |
 | `internal/asm/assembler.go` | `TestAssembler_Reg` | ✅ |
 | `internal/asm/assembler.go` | `TestAssembler_Label` | ✅ |
@@ -340,6 +338,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/format.go` | `TestFormat` | ✅ |
 | `internal/ssa/transform/fold.go` | `TestNewFoldPass` | ✅ |
 | `internal/ssa/transform/fold.go` | `TestFoldPass_Run` | ✅ |
+| `internal/ssa/transform/forward.go` | `TestNewForwardPass` | ✅ |
+| `internal/ssa/transform/forward.go` | `TestForwardPass_Run` | ✅ |
 | `internal/ssa/transform/cse.go` | `TestNewCSEPass` | ✅ |
 | `internal/ssa/transform/cse.go` | `TestCSEPass_Run` | ✅ |
 | `internal/ssa/transform/guard.go` | `TestNewGuardPass` | ✅ |
@@ -495,7 +495,6 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/pool.go` | `TestPool_Close` | ✅ |
 | `interp/pool.go` | `TestPool_Get` | ✅ |
 | `interp/pool.go` | `TestPool_Put` | ✅ |
-| `optimize/optimizer.go` | `TestWithSSA` | ✅ |
 | `optimize/optimizer.go` | `TestNew` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Add` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Level` | ✅ |
@@ -556,16 +555,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `program/verify.go` | `TestVerify` | ✅ |
 | `program/verify.go` | `TestVerifyError_Error` | ✅ |
 | `program/verify.go` | `TestVerifyError_Unwrap` | ✅ |
-| `transform/as.go` | `TestAlgebraicPass_Run` | ✅ |
-| `transform/as.go` | `TestNewAlgebraicPass` | ✅ |
 | `transform/cd.go` | `TestDedupPass_Run` | ✅ |
 | `transform/cd.go` | `TestNewDedupPass` | ✅ |
-| `transform/cf.go` | `TestFoldPass_Run` | ✅ |
-| `transform/cf.go` | `TestNewFoldPass` | ✅ |
-| `transform/dce.go` | `TestDCEPass_Run` | ✅ |
-| `transform/dce.go` | `TestNewDCEPass` | ✅ |
-| `transform/gvn.go` | `TestGVNPass_Run` | ✅ |
-| `transform/gvn.go` | `TestNewGVNPass` | ✅ |
 | `transform/ssa.go` | `TestNewSSAPass` | ✅ |
 | `transform/ssa.go` | `TestSSAPass_Run` | ✅ |
 | `types/array.go` | `TestArrayType_Cast` | ✅ |

@@ -7,11 +7,10 @@ import (
 
 // DCEPass removes what running the function can never need: a block nothing
 // reaches from the entry, and an operation whose result nothing live reads
-// and which instr's effect model says does nothing on its own. It is the SSA
-// counterpart of transform.DCEPass, though the two do not overlap - the
-// bytecode pass repairs branch offsets and exception tables a byte-shifting
-// deletion invalidates, none of which exists here, where a deletion is just
-// one fewer operation in a rebuilt block.
+// and which instr's effect model says does nothing on its own. Deleting is
+// all it does: branch offsets and exception tables, which a byte-shifting
+// deletion over bytecode has to repair, do not exist here, where a deletion is
+// just one fewer operation in a rebuilt block.
 //
 // instr's effect model, not a value's own use count, decides what survives
 // regardless of it: an OpExec that reads or writes anything (op.Code is not

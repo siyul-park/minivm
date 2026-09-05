@@ -22,9 +22,9 @@ import (
 // A function it cannot take the whole way round comes back untouched. The
 // frontend declines what bytecode alone cannot resolve, the emitter declines
 // what SSA cannot be written back as, and either answer leaves the function
-// exactly as it was - which is the same bargain transform.GVNPass strikes when
-// a rewrite would not fit its encoding, and what docs/coding-patterns.md §7.1
-// requires of any pass that moves bytecode offsets.
+// exactly as it was, which is what docs/coding-patterns.md §7.1 requires of any
+// pass that moves bytecode offsets: a rewrite that cannot preserve every
+// position-sensitive structure leaves the function alone.
 type SSAPass struct {
 	pipeline *pass.Pipeline[*ssa.Function]
 }

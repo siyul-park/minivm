@@ -18,15 +18,21 @@ func NewDedupPass() *DedupPass {
 }
 
 func (p *DedupPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
-	fns := functions(prog)
+	// Every function whose code names a constant or a type: the top-level
+	// body, then each function the pool holds.
+	codes := [][]byte{prog.Code}
+	for _, v := range prog.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			codes = append(codes, fn.Code)
+		}
+	}
 
 	constants := prog.Constants
 	typs := prog.Types
 
 	constUsed := make([]bool, len(constants))
 	typeUsed := make([]bool, len(typs))
-	for _, fn := range fns {
-		code := fn.Code
+	for _, code := range codes {
 		ip := 0
 		for ip < len(code) {
 			inst := instr.Instruction(code[ip:])
@@ -67,8 +73,7 @@ func (p *DedupPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved,
 		typs = nil
 	}
 
-	for _, fn := range fns {
-		code := fn.Code
+	for _, code := range codes {
 		ip := 0
 		for ip < len(code) {
 			inst := instr.Instruction(code[ip:])

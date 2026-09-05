@@ -16,6 +16,7 @@ package frontend
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
@@ -63,7 +64,14 @@ func Static(input *jit.Input, root jit.Anchor) (*ssa.Function, error) {
 	if input.Address == 0 && calls(input.Function.Code) {
 		return nil, nil
 	}
-	return translate(m, input.Address, input.Function, root.IP, input.Installed)
+	f, whole, err := translate(m, input.Address, input.Function, root.IP, input.Installed)
+	if err != nil || !whole {
+		// A native compile is checked against jit.StaticPlan, which refuses a
+		// function holding a span nothing reaches, so this one refuses it too
+		// rather than compile a block graph the plan does not have.
+		return nil, err
+	}
+	return f, nil
 }
 
 // Body returns the SSA for the whole of fn, published at addr. Address zero is
@@ -74,14 +82,18 @@ func Body(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
 	if fn == nil {
 		return nil, nil
 	}
-	return translate(m, addr, fn, 0, false)
+	f, _, err := translate(m, addr, fn, 0, false)
+	return f, err
 }
 
 // translate lays out fn's spans, resolves the operand facts every one of them
-// is entered with, and emits the blocks the span at ip reaches.
-func translate(m Module, addr int, fn *types.Function, ip int, installed bool) (*ssa.Function, error) {
+// is entered with, and emits the blocks the span at ip reaches. It also reports
+// whether execution reaches every span there is: one it does not is dead code
+// and is simply left out, which is what an optimizer wants of a whole function
+// and what a native compile must refuse.
+func translate(m Module, addr int, fn *types.Function, ip int, installed bool) (*ssa.Function, bool, error) {
 	if len(fn.Code) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	f := facts{
 		constants: m.Constants,
@@ -92,19 +104,19 @@ func translate(m Module, addr int, fn *types.Function, ip int, installed bool) (
 	}
 	blocks, err := analysis.Blocks(fn)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	spans := split(fn.Code, blocks)
 	at, ok := enter(spans, ip, installed)
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
 	entry := frame{fn: fn, addr: addr, slots: fn.Declared()}
-	states, ok := f.resolve(entry, spans)
+	states, seen, ok := f.resolve(entry, spans)
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
-	return f.build(entry, spans, states, at), nil
+	return f.build(entry, spans, states, at), !slices.Contains(seen, false), nil
 }
 
 // build emits the blocks entry reaches, entry first, and returns the assembled

@@ -4,9 +4,9 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 
-	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	ssapass "github.com/siyul-park/minivm/internal/ssa/transform"
@@ -85,135 +85,108 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NotZero(t, rewritten)
 	})
 
-	t.Run("folds what transform.FoldPass folds, and three windows it misses", func(t *testing.T) {
+	t.Run("folds a window every pure opcode computes from constants alone", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
 		pipeline.Add(ssapass.NewFoldPass())
 		pipeline.Add(ssapass.NewDCEPass())
 
-		bytecode := pass.NewPipeline[*program.Program]()
-		bytecode.Add(transform.NewFoldPass())
-		bytecode.Add(transform.NewDCEPass())
-
-		// transform/cf.go writes one case per opcode by hand and has i32.xor,
-		// i32.and, and i32.or without their i64 counterparts. The SSA pass
-		// reaches the whole family through instr's own purity, so it folds the
-		// three windows the hand-written table left out. Its answer is the one
-		// the interpreter computes, which every window below is run to check.
-		missed := map[instr.Opcode]bool{instr.I64_XOR: true, instr.I64_AND: true, instr.I64_OR: true}
-
-		folded := 0
+		folded := map[instr.Opcode]bool{}
 		for _, window := range constant(t) {
 			prog := program.New(window.code)
 			require.NoError(t, program.Verify(prog))
 			values, message := outcome(t, prog)
 
-			want := duplicate(prog)
-			_, err := bytecode.Run(managed(), want)
-			require.NoError(t, err)
-
 			got := duplicate(prog)
-			_, err = transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
-
-			if missed[window.op] {
-				require.Equal(t, instr.Format(prog.Code), instr.Format(want.Code), "cf.go has no case for this opcode")
-				require.Less(t, len(got.Code), len(prog.Code), "the SSA pass folds it")
-			} else {
-				require.Equal(t, instr.Format(want.Code), instr.Format(got.Code), instr.Format(prog.Code))
-				require.Equal(t, want.Constants, got.Constants, instr.Format(prog.Code))
-			}
 			if len(got.Code) < len(prog.Code) {
-				folded++
+				folded[window.op] = true
 			}
 
 			routed, routedMessage := outcome(t, got)
 			require.Equal(t, message, routedMessage, instr.Format(prog.Code))
 			require.Equal(t, values, routed, instr.Format(prog.Code))
 		}
-		require.NotZero(t, folded)
+		// The fold reaches the whole pure family through instr's own purity
+		// rather than one hand-written case per opcode, so the i64 bitwise
+		// windows fold exactly as their i32 counterparts do.
+		for _, op := range []instr.Opcode{
+			instr.I32_XOR, instr.I32_AND, instr.I32_OR,
+			instr.I64_XOR, instr.I64_AND, instr.I64_OR,
+		} {
+			require.True(t, folded[op], instr.TypeOf(op).Mnemonic)
+		}
 	})
 
-	t.Run("drops the padding transform.DCEPass drops", func(t *testing.T) {
+	t.Run("drops the padding an offset-preserving rewrite left behind", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
 		pipeline.Add(ssapass.NewDCEPass())
-		code := []instr.Instruction{instr.New(instr.NOP), instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}
 
-		want := program.New(code)
-		_, err := transform.NewDCEPass().Run(managed(), want)
-		require.NoError(t, err)
-
-		got := program.New(code)
-		_, err = transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		got := program.New([]instr.Instruction{instr.New(instr.NOP), instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)})
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
-		require.Equal(t, instr.Format(want.Code), instr.Format(got.Code))
+		require.Equal(t, instr.Format(instr.Marshal([]instr.Instruction{instr.New(instr.I32_CONST, 1)})), instr.Format(got.Code))
 	})
 
-	t.Run("drops a computation nothing reads, which transform.DCEPass keeps", func(t *testing.T) {
+	t.Run("drops a computation nothing reads", func(t *testing.T) {
 		// Whether an operand stack still needs a value it pushed is not a
 		// question a peephole over bytecode can answer; over SSA it is the
 		// same liveness every other operation is judged by.
 		pipeline := pass.NewPipeline[*ssa.Function]()
 		pipeline.Add(ssapass.NewDCEPass())
-		code := []instr.Instruction{
+
+		got := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD), instr.New(instr.DROP),
-		}
-
-		want := program.New(code)
-		_, err := transform.NewDCEPass().Run(managed(), want)
-		require.NoError(t, err)
-		require.Equal(t, instr.Format(instr.Marshal(code)), instr.Format(want.Code))
-
-		got := program.New(code)
-		_, err = transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		})
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		require.Empty(t, got.Code)
 	})
 
-	t.Run("declines a block nothing reaches, which transform.DCEPass drops", func(t *testing.T) {
+	t.Run("drops a block nothing reaches", func(t *testing.T) {
 		// The frontend resolves operand facts as a fixpoint over the edges
-		// execution takes, and a block no edge reaches never gets one, so the
-		// whole function is declined rather than the block dropped.
+		// execution takes, and a block no edge reaches never gets one. It is
+		// left without a state and simply not emitted, so the block goes and
+		// the function stays.
 		pipeline := pass.NewPipeline[*ssa.Function]()
 		pipeline.Add(ssapass.NewDCEPass())
-		build := func() *program.Program {
-			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
-			done := fn.Label()
-			fn.Emit(instr.New(instr.I32_CONST, 1))
-			fn.Br(done)
-			fn.Emit(instr.New(instr.I32_CONST, 2), instr.New(instr.DROP))
-			fn.Bind(done).Emit(instr.New(instr.RETURN))
-			return program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			}, program.WithConstants(fn.MustBuild()))
-		}
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
+		done := fn.Label()
+		fn.Emit(instr.New(instr.I32_CONST, 1))
+		fn.Br(done)
+		fn.Emit(instr.New(instr.I32_CONST, 2), instr.New(instr.DROP))
+		fn.Bind(done).Emit(instr.New(instr.RETURN))
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(fn.MustBuild()))
+		require.NoError(t, program.Verify(prog))
 
-		want := build()
-		_, err := transform.NewDCEPass().Run(managed(), want)
+		want, wantErr := outcome(t, prog)
+		got := duplicate(prog)
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
 		require.NoError(t, err)
-		require.NotContains(t, instr.Format(want.Constants[0].(*types.Function).Code), "i32.const 0x00000002")
+		require.NoError(t, program.Verify(got))
+		require.NotContains(t, instr.Format(got.Constants[0].(*types.Function).Code), "i32.const 0x00000002")
 
-		got := build()
-		before := got.String()
-		preserved, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
-		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
-		require.Equal(t, before, got.String())
+		values, message := outcome(t, got)
+		require.Equal(t, wantErr, message)
+		require.Equal(t, want, values)
 	})
 
-	t.Run("eliminates a repeated computation, but not a repeated load", func(t *testing.T) {
+	t.Run("eliminates a repeated computation over a repeated load", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(ssapass.NewForwardPass())
 		pipeline.Add(ssapass.NewCSEPass())
 		pipeline.Add(ssapass.NewDCEPass())
 
-		// The one addition over two loads is computed twice here and once by
-		// transform.GVNPass, which knows a local nothing reassigns holds the
-		// same value at both reads. CSEPass numbers definitions rather than
-		// storage, and two OpLoads of one slot are two definitions, so the
-		// additions over them are not equal computations to it.
+		// CSEPass numbers definitions rather than storage, and two loads of one
+		// slot are two definitions, so the additions over them are not equal
+		// computations to it until ForwardPass has made the second read of each
+		// slot the first read's own value.
 		reloaded := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32, types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
@@ -222,8 +195,8 @@ func TestSSAPass_Run(t *testing.T) {
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
 			instr.New(instr.I32_ADD), instr.New(instr.RETURN),
 		).MustBuild()
-		// One load feeding both additions is one definition, which is exactly
-		// what CSEPass collapses.
+		// One load feeding both multiplications is one definition already,
+		// which CSEPass collapses on its own.
 		shared := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
@@ -244,18 +217,15 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
-		require.Equal(t, instr.Format(reloaded.Code), instr.Format(got.Constants[0].(*types.Function).Code))
-		require.NotEqual(t, instr.Format(shared.Code), instr.Format(got.Constants[1].(*types.Function).Code))
-		require.Len(t, got.Constants[1].(*types.Function).Locals, 1)
+		first := got.Constants[0].(*types.Function)
+		require.NotEqual(t, instr.Format(reloaded.Code), instr.Format(first.Code))
+		require.Len(t, first.Locals, 1)
+		require.Equal(t, 2, strings.Count(instr.Format(first.Code), "i32.add"))
 
-		// transform.GVNPass eliminates the one the route leaves, which is the
-		// gap between them: it carries a value number across a reload, and
-		// nothing in internal/ssa/transform forwards a load yet.
-		numbered := duplicate(prog)
-		_, err = transform.NewGVNPass().Run(managed(), numbered)
-		require.NoError(t, err)
-		require.NotEqual(t, instr.Format(reloaded.Code), instr.Format(numbered.Constants[0].(*types.Function).Code))
-		require.Len(t, numbered.Constants[0].(*types.Function).Locals, 1)
+		second := got.Constants[1].(*types.Function)
+		require.NotEqual(t, instr.Format(shared.Code), instr.Format(second.Code))
+		require.Len(t, second.Locals, 1)
+		require.Equal(t, 1, strings.Count(instr.Format(second.Code), "i32.mul"))
 
 		values, message := outcome(t, got)
 		require.Equal(t, wantErr, message)
@@ -265,18 +235,18 @@ func TestSSAPass_Run(t *testing.T) {
 	t.Run("declines a branch its own layout would put out of range", func(t *testing.T) {
 		// Blocks come back in the order the SSA holds them, which is the
 		// order control reaches them from the entry rather than the order the
-		// bytecode laid them out, and the one phrase needing a local is five
+		// bytecode laid them out, and the one phrase needing a local is three
 		// bytes longer emitted than written. A branch that just reaches its
 		// target in the original therefore just fails to in the emitted
-		// layout. transform.GVNPass leaves a function alone on the same
-		// overflow; so does this.
+		// layout, so the route leaves the function alone rather than emit a
+		// branch that no longer reaches.
 		for _, tc := range []struct {
 			name    string
 			pad     int
 			expects pass.Preserved
 		}{
-			{name: "within reach", pad: 32745, expects: pass.PreserveNone()},
-			{name: "out of reach", pad: 32748, expects: pass.PreserveAll()},
+			{name: "within reach", pad: 32748, expects: pass.PreserveNone()},
+			{name: "out of reach", pad: 32751, expects: pass.PreserveAll()},
 		} {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
@@ -322,14 +292,6 @@ func optimizing() *pass.Pipeline[*ssa.Function] {
 	pipeline.Add(ssapass.NewHoistPass())
 	pipeline.Add(ssapass.NewDCEPass())
 	return pipeline
-}
-
-// managed returns a manager holding the analyses the bytecode passes request.
-func managed() *pass.Manager {
-	m := pass.NewManager()
-	pass.Register(m, analysis.NewBlocksAnalysis())
-	pass.Register(m, analysis.NewGVNAnalysis())
-	return m
 }
 
 // programs are the bytecode shapes the route is expected to take whole: every

@@ -70,13 +70,17 @@ type operand struct {
 }
 
 // resolve gives every span the facts its operands carry on entry, as the least
-// fixpoint over the edges execution takes. It reports false when the walk
-// cannot model an opcode, when two paths reach one span with stacks that cannot
-// meet, or when a span is unreachable from the function entry: none of those
-// leave a function this frontend can plan.
-func (f facts) resolve(entry frame, spans []span) ([][]fact, bool) {
+// fixpoint over the edges execution takes, and reports which spans that
+// fixpoint reached. It reports false when the walk cannot model an opcode or
+// when two paths reach one span with stacks that cannot meet: neither leaves a
+// function this frontend can plan.
+//
+// A span the fixpoint never reaches is left without a state rather than
+// refused. It is dead code, and build simply does not emit it; whether a
+// function is allowed to hold one at all is the caller's rule, not this one's.
+func (f facts) resolve(entry frame, spans []span) ([][]fact, []bool, bool) {
 	if len(entry.fn.Handlers) > 0 {
-		return nil, false
+		return nil, nil, false
 	}
 	states := make([][]fact, len(spans))
 	seen := make([]bool, len(spans))
@@ -87,7 +91,7 @@ func (f facts) resolve(entry frame, spans []span) ([][]fact, bool) {
 		work = work[:len(work)-1]
 		exit, ok := f.transfer(entry, spans[id], states[id])
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
 		for _, succ := range spans[id].flow {
 			if !seen[succ] {
@@ -97,13 +101,13 @@ func (f facts) resolve(entry frame, spans []span) ([][]fact, bool) {
 				continue
 			}
 			if len(states[succ]) != len(exit) {
-				return nil, false
+				return nil, nil, false
 			}
 			changed := false
 			for i := range exit {
 				moved, ok := states[succ][i].merge(exit[i])
 				if !ok {
-					return nil, false
+					return nil, nil, false
 				}
 				changed = changed || moved
 			}
@@ -112,12 +116,7 @@ func (f facts) resolve(entry frame, spans []span) ([][]fact, bool) {
 			}
 		}
 	}
-	for id := range states {
-		if !seen[id] {
-			return nil, false
-		}
-	}
-	return states, true
+	return states, seen, true
 }
 
 // transfer returns the facts one span leaves behind. It runs the same walk

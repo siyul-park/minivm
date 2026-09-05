@@ -10,9 +10,9 @@ import (
 // CSEPass collapses a pure computation into an equal one a dominating
 // operation already performed: two operations of the same opcode over the
 // same arguments, related by dominance, become one. It is the SSA
-// counterpart of analysis.GVNAnalysis plus transform.GVNPass, and is
-// dramatically smaller than either, because most of what that pair computes
-// - within-block value numbering, an available-expression dataflow to carry
+// counterpart of the bytecode global value numbering minivm used to carry,
+// and is dramatically smaller than it, because most of what that computed -
+// within-block value numbering, an available-expression dataflow to carry
 // numbers across block boundaries, and a conservative story for which
 // mutable loads are even nameable across blocks - is not this pass's problem
 // to solve. It is the IR's own: a value here is its definition, so identity
@@ -22,13 +22,12 @@ import (
 //
 // Eligibility is exactly instr's own purity, as OpExec states it, plus
 // OpConst, which the frontend never expresses as an OpExec: an OpLoad reads
-// mutable interpreter storage and never collapses across even a straight-line
-// run of code without knowing no store to that storage intervened, a
-// dataflow problem this phase leaves for the eventual redundant-load pass;
-// nothing that can deoptimize is ever eligible, since a pure OpExec or
-// OpConst never carries state to begin with (ssa.Verify rejects one that
-// does), so this pass never has to reason about a frame that might reference
-// the value it is about to elide.
+// mutable interpreter storage, and whether a store to that storage intervened
+// is ForwardPass's question, not this one's - run it first and a repeated read
+// is already one value here. Nothing that can deoptimize is ever eligible,
+// since a pure OpExec or OpConst never carries state to begin with
+// (ssa.Verify rejects one that does), so this pass never has to reason about a
+// frame that might reference the value it is about to elide.
 type CSEPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*CSEPass)(nil)

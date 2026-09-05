@@ -8,11 +8,9 @@ import "github.com/siyul-park/minivm/internal/ssa"
 // has already decided that value now stands for. A pass that only renumbers
 // aliases every old value to its own new one; a pass that also elides an
 // operation aliases its old result to whichever surviving value now stands in
-// for it instead. Every pass in this package that removes or merges anything
-// - cse.go and guard.go through dedup, dce.go on its own - shares this one
-// construction; fold.go needs none of it, since it only ever replaces one
-// operation with another at the same result and never removes or renumbers
-// anything.
+// for it instead. Every pass in this package shares this one
+// construction: cse.go and guard.go through dedup, dce.go, fold.go, and
+// forward.go alike.
 type rebuilder struct {
 	b      *ssa.Builder
 	blocks map[int]int

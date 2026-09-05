@@ -48,8 +48,12 @@ type emitter struct {
 	homed map[ssa.Value]bool
 	home  map[ssa.Value]int
 
-	added  []types.Type
-	code   []instr.Instruction
+	added []types.Type
+	code  []instr.Instruction
+	// begin is where the block being emitted starts, which is as far back as
+	// a peephole may reach: every earlier instruction is another block's, and
+	// a branch may target the boundary between them.
+	begin  int
 	starts []int
 	fixes  []fix
 	stack  []ssa.Value
@@ -246,7 +250,7 @@ func (e *emitter) walk() bool {
 	e.code, e.fixes, e.blame = nil, nil, ssa.NoValue
 	e.starts = make([]int, e.fn.Len())
 	for id := range e.fn.Len() {
-		e.starts[id] = len(e.code)
+		e.starts[id], e.begin = len(e.code), len(e.code)
 		if !e.open(id) {
 			return false
 		}
@@ -505,8 +509,18 @@ func (e *emitter) link() ([]byte, bool) {
 	return instr.Marshal(e.code), true
 }
 
-// write appends one instruction.
+// write appends one instruction, folding a store the very next read reads
+// back into the one opcode bytecode has for both: LOCAL_SET n, LOCAL_GET n is
+// LOCAL_TEE n. A value stored into its home and used again straight away is
+// what every homed result looks like, so the fold is what keeps a home from
+// costing an instruction the bytecode it came from never spent.
 func (e *emitter) write(inst instr.Instruction) {
+	if inst.Opcode() == instr.LOCAL_GET && len(e.code) > e.begin {
+		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == inst.Operand(0) {
+			e.code[len(e.code)-1] = instr.New(instr.LOCAL_TEE, inst.Operand(0))
+			return
+		}
+	}
 	e.code = append(e.code, inst)
 }
 

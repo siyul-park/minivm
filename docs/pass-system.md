@@ -34,7 +34,6 @@ Design rules:
 | analyses | `analysis/` |
 | transforms | `transform/` |
 | optimizer levels | `optimize/` |
-| branch and handler repair | `transform/rewrite.go` |
 | bytecode to SSA and back | `transform/ssa.go`, `transform/emit.go` |
 | SSA transformation policies (one per pass, no composer) | `internal/ssa/transform/` |
 
@@ -131,48 +130,44 @@ Rules:
 
 ## Optimizer Levels
 
-`optimize.New(level)` registers required analyses and builds a cumulative pipeline.
+`optimize.New(level)` registers the shared analyses and builds a cumulative pipeline.
+Every rewrite of a function's own code is one of `internal/ssa/transform`'s policies, run
+over each of a program's functions through `transform.SSAPass`:
 
 ```text
 O0  no transforms
 
-O1  FoldPass
+O1  FoldPass, DCEPass
     DedupPass
 
-O2  FoldPass
-    AlgebraicPass
+O2  FoldPass, CSEPass, GuardPass, DCEPass
     DedupPass
-    DCEPass
 
-O3  FoldPass
-    AlgebraicPass
-    GVNPass
+O3  FoldPass, ForwardPass, CSEPass, GuardPass, HoistPass, DCEPass
     DedupPass
-    DCEPass
 ```
+
+O1 folds and sweeps up what folding leaves behind, O2 adds the dominance-scoped
+common-subexpression elimination and the guard elimination that rides on it, and O3 adds
+the redundant-load forwarding that makes a repeated read one value and the
+loop-invariant code motion that reads best once the rest has canonicalized the function.
+`DedupPass` follows the route at every level: a constant pool is a whole-program concern
+no per-function IR has a counterpart for, and it collects the constants the route
+interned while folding.
 
 `Optimize(prog)` runs the configured pipeline. `Add(p)` appends a custom transform.
 
-`optimize.New(level, optimize.WithSSA())` appends the level's SSA passes, run over every
-function through `transform.SSAPass`:
-
-```text
-O1  FoldPass, DCEPass
-O2  FoldPass, CSEPass, GuardPass, DCEPass
-O3  FoldPass, CSEPass, GuardPass, HoistPass, DCEPass
-```
-
-They are off by default only while `transform` still owns the bytecode passes: running
-both does the work twice, and the SSA passes do not yet subsume them (see the route's
-own section below). The option goes away with the bytecode passes it defers to. One
-`pass.Manager` serves both unit types, and `transform.SSAPass` builds no pipeline of its
-own - `optimize` composes the `pass.Pipeline[*ssa.Function]` and hands it over.
+One `pass.Manager` serves both unit types, and `transform.SSAPass` builds no pipeline of
+its own - `optimize` composes the `pass.Pipeline[*ssa.Function]` and hands it over.
 
 Because analyses are invalidated between transforms, each pass receives fresh analysis data.
 
 ## Basic Blocks
 
-`BlocksAnalysis` is shared by the optimizer and JIT.
+`analysis.Blocks` computes the control-flow blocks of one function, for the JIT frontends
+and for `transform.SSAPass` through them. `BlocksAnalysis` wraps it as a `pass.Analysis`,
+which `optimize` registers so a transform added through `Optimizer.Add` can request it;
+no pass a level composes does.
 
 Each block contains:
 
@@ -194,10 +189,9 @@ it as a virtual exit for any function, top-level or not. `program.Verify` is the
 sole owner of whether that virtual exit is legal, and it only accepts one for
 top-level code (slot `0`); a function body that branches to its own end is
 malformed. `BlocksAnalysis` stays permissive because the JIT needs the
-same CFG shape regardless of scope; `DCEPass` additionally
-re-checks scope before repairing a branch offset, since blind relocation
-would otherwise silently propagate a target that verification would have
-rejected.
+same CFG shape regardless of scope; the emitter re-derives every branch offset from the
+layout it produced and declines a function whose top-level exit it cannot spell, so no
+pass relocates a target verification would have rejected.
 
 `BR`, `BR_IF`, and `BR_TABLE` targets are computed once in `instr.Targets`
 and reused by `program.Verify` and `BlocksAnalysis`, so the same
@@ -205,89 +199,78 @@ arithmetic is not duplicated at each call site.
 
 Keep these boundary rules consistent with the JIT and verifier.
 
-## Global Value Numbering
+## Redundancy and Folding
 
-`GVNAnalysis` finds redundant pure computations within and across basic blocks.
+There is one implementation of each of these, over SSA, in
+`internal/ssa/transform`; the sections below describe what they do to bytecode once
+`transform.SSAPass` has taken it round.
 
-It abstractly interprets the operand stack and assigns value numbers to computed values.
-
-Candidate operations are side-effect-free and non-allocating numeric operations, plus reference comparisons.
-
-The analysis is conservative across blocks:
-
-- constants are stable
-- constant-pool values are stable
-- null refs are stable
-- locals never reassigned are stable
-- heap loads, globals, upvalues, and reassigned locals are opaque across blocks
-
-Opaque values do not match across blocks, but may still match within their own block.
-
-## Constant Folding
-
-`FoldPass` folds small constant windows.
+`FoldPass` replaces a pure operation with the result its arguments already decide:
 
 ```text
-CONST CONST OP -> CONST result
-```
-
-The folded instruction is right-aligned in the original byte range. The unused left side is padded with `NOP`.
-
-Supported folds include numeric arithmetic, bitwise operations, comparisons, `I32_EQZ`, numeric conversions, and string `CONST_GET` operations.
-
-Comparison folds produce `i1`, matching runtime comparison results. Because there is no `i1` immediate, folded booleans are interned in the constant pool and emitted with `CONST_GET`.
-
-## Algebraic Simplification
-
-`AlgebraicPass` performs integer peepholes where the right operand is a constant.
-
-Supported identities:
-
-```text
-x + 0  -> x
-x - 0  -> x
-x * 1  -> x
-x / 1  -> x
-x | 0  -> x
-x ^ 0  -> x
-x & -1 -> x
-x << 0 -> x
-x >> 0 -> x
-```
-
-Supported strength reductions:
-
-```text
+const, const, op   -> const              // whatever the opcode computes
+x + 0, x - 0, x | 0, x ^ 0, x << 0, x >> 0, x & -1, x * 1, x / 1  -> x
 x * 2^n -> x << n
 x / 2^n -> x >> n   // unsigned division only
 ```
 
+Folding a whole window and reducing one operand short of a constant are the same policy,
+so they are the same pass. Comparison folds produce `i1`, matching runtime comparison
+results; because there is no `i1` immediate, folded booleans are interned in the constant
+pool and emitted with `CONST_GET`.
+
 Skipped intentionally:
 
 - float identities, because IEEE-754 makes them unsafe
-- annihilators such as `x * 0` or `x & 0`, because they would need to drop a live left operand
+- annihilators such as `x * 0` or `x & 0`, whose left argument would have to be dropped
+  along with them, which is `DCEPass`'s judgement rather than this pass's
+- a division or remainder by a folded zero, whose trap belongs to the interpreter
+- an identity whose left argument is not a value some opcode computed. An identity hands
+  that argument back, and with it its representation. A slot is zero-filled rather than
+  written with its declared type's zero, so an unwritten `i32` local reads back as a raw
+  `Boxed(0)` whose kind is `f64` (`docs/memory-model.md`); the arithmetic the identity
+  would remove is what re-tags it. The bytecode `AlgebraicPass` this replaced applied the
+  identity unconditionally and turned an `I32(0)` into an `F64(0)` at O2.
+
+`ForwardPass` replaces a load with the value an earlier load of the same slot already
+produced, which is the textbook redundant-load elimination and what `CSEPass` needs in
+front of it: a value in SSA is its own definition, so two reads of one local are two
+definitions and every computation over them is two computations. A forwarded value is
+invalidated by an `OpStore` to the same slot, by an `OpExec` or `OpBridge` whose opcode
+`instr`'s effect model says writes that storage - a call writes `Global` and `Upval` but
+never the caller's `Local` - and by reaching a block more than one edge reaches, which is
+also what makes a loop safe, since a header always has at least two predecessors. Nothing
+else can: a guard and every other deoptimizing operation resume the interpreter with the
+slot's committed value, which the stores this pass never removes have already written
+there.
+
+A store starts no availability of its own. Bytecode already keeps that value in the slot
+the store wrote, so forwarding a later load onto the stored value only makes it live
+across the store, which the emitter then homes in a fresh local - one more instruction
+and one more slot than reading back the slot the program itself named.
 
 ## SSA Transformation Policies
 
-`internal/ssa/transform` is a second pass system over `*ssa.Function`, reusing `pass.Pass`, `pass.Analysis`, `pass.Manager`, and `pass.Pipeline` exactly as the top-level `transform` and `optimize` do over `*program.Program` - no second pipeline abstraction exists. Its role in `docs/coding-patterns.md` §6 is the top-level `transform`'s role, not `optimize`'s: it owns one transformation policy per pass and exposes no composer. A caller builds its own `pass.Pipeline[*ssa.Function]` and adds `FoldPass`, `CSEPass`, `GuardPass`, `HoistPass`, then `DCEPass`, in that order, because CSE has to unify a repeated load's value before a guard built on each read is recognizably the same guard, DCE has to run last to sweep up whatever folding, deduplicating, guard elimination, and hoisting leave behind (an operand a fold made unused, an `OpState` a removed guard no longer resumes into), and Hoist reads best once Fold and CSE have already canonicalized the function, so it moves one instance of an invariant computation rather than a would-be duplicate. None of that is a correctness requirement for `HoistPass` specifically, though: it never unifies a value (only `CSEPass` and `GuardPass`'s shared `dedup` does that) and never moves a guard or anything else that carries deopt state (only `GuardPass`'s target), so it is sound wherever it runs in the sequence - unlike `GuardPass`, whose placement after `CSEPass` is load-bearing. `internal/ssa/transform/transform_test.go`'s `TestPassOrder` composes exactly this pipeline and asserts the ordering facts end to end. `optimize` will own the leveled, user-facing composition of these passes once a bytecode-to-SSA-to-bytecode route exists to run them over `*program.Program`; until then, composition stays the caller's, so `internal/ssa/transform` never grows an `Optimizer`-shaped composer that would only duplicate `optimize.Optimizer`'s shape.
+`internal/ssa/transform` is a second pass system over `*ssa.Function`, reusing `pass.Pass`, `pass.Analysis`, `pass.Manager`, and `pass.Pipeline` exactly as the top-level `transform` and `optimize` do over `*program.Program` - no second pipeline abstraction exists. Its role in `docs/coding-patterns.md` §6 is the top-level `transform`'s role, not `optimize`'s: it owns one transformation policy per pass and exposes no composer. A caller builds its own `pass.Pipeline[*ssa.Function]` and adds `FoldPass`, `ForwardPass`, `CSEPass`, `GuardPass`, `HoistPass`, then `DCEPass`, in that order, because Forward has to make a repeated read one value before CSE can see a computation over it as one computation, CSE has to unify a repeated load's value before a guard built on each read is recognizably the same guard, DCE has to run last to sweep up whatever folding, deduplicating, guard elimination, and hoisting leave behind (an operand a fold made unused, an `OpState` a removed guard no longer resumes into), and Hoist reads best once Fold and CSE have already canonicalized the function, so it moves one instance of an invariant computation rather than a would-be duplicate. None of that is a correctness requirement for `HoistPass` specifically, though: it never unifies a value (only `CSEPass` and `GuardPass`'s shared `dedup` does that) and never moves a guard or anything else that carries deopt state (only `GuardPass`'s target), so it is sound wherever it runs in the sequence - unlike `GuardPass`, whose placement after `CSEPass` is load-bearing. `internal/ssa/transform/transform_test.go`'s `TestPassOrder` composes exactly this pipeline and asserts the ordering facts end to end. `optimize` owns the leveled, user-facing composition of these passes, over `*program.Program` through `transform.SSAPass`, so `internal/ssa/transform` never grows an `Optimizer`-shaped composer that would only duplicate `optimize.Optimizer`'s shape.
 
 Every pass here must stay correct and useful on a function with no JIT-specific fact at all, not only one `internal/jit/frontend` produced with guards and deopt state - `internal/ssa/transform` does not import `internal/jit`, so nothing in it may assume one is present.
 
 | Pass | Collapses | Mechanism |
 |---|---|---|
-| `FoldPass` | an `OpExec` whose opcode is `IsPure()` and whose arguments are all `OpConst` | direct per-operation rewrite, no rebuild - decodes each `types.Boxed` argument into its native Go type and computes with ordinary operators |
+| `FoldPass` | an `OpExec` whose opcode is `IsPure()` and whose arguments are all `OpConst`, or whose right argument alone makes it an identity or a shift | decodes each `types.Boxed` argument into its native Go type and computes with ordinary operators; an identity aliases the result onto the left argument, a strength reduction adds the shift amount as a new `OpConst` |
+| `ForwardPass` | an `OpLoad` a dominating `OpLoad` of the same `Slot` already performed, with nothing in between writing that storage | a dominator-tree walk carrying the value held in each slot, cleared at a block more than one edge reaches and at every operation `instr`'s effect model says writes that space |
 | `CSEPass` | two `OpConst` or pure `OpExec` operations with equal value, related by dominance | `dedup`, keyed by opcode and argument identity |
 | `GuardPass` | two guards of the same kind admitting the same fact over the same operand, related by dominance | `dedup`, keyed by guard kind, operand, and the admitted fact (target kind, shape, bounds, or specialized value) |
 | `HoistPass` | an `OpConst`, or a pure and non-trapping `OpExec`, every one of whose arguments is defined outside a loop it sits in (or was itself just hoisted) | loop-invariant code motion: moves the operation into the loop's preheader when one already exists, never by splitting an edge to build one |
 | `DCEPass` | an operation with no live result and no effect, and any block unreachable from the entry | mark-sweep liveness seeded from every operation instr's effect model says runs unconditionally, propagated backward through every value an operation reads - including an `OpState`'s own frame stacks |
 
-`CSEPass` and `GuardPass` share one engine (`dedup` in `internal/ssa/transform/dedup.go`): a dominator-tree-scoped hash-consing table, walked in the dominator tree's own preorder so a key one block establishes stays visible to every block it dominates and is forgotten once that whole subtree is done. This is the SSA counterpart of `GVNAnalysis`, and is far smaller than it: a value here is its own definition, so identity is free, and dominance alone - no available-expression dataflow, no per-block value renumbering, no stable-versus-opaque story for mutable loads - decides what one definition may stand in for.
+`CSEPass` and `GuardPass` share one engine (`dedup` in `internal/ssa/transform/dedup.go`): a dominator-tree-scoped hash-consing table, walked in the dominator tree's own preorder so a key one block establishes stays visible to every block it dominates and is forgotten once that whole subtree is done. This is the SSA counterpart of the bytecode global value numbering minivm used to carry, and is far smaller than it: a value here is its own definition, so identity is free, and dominance alone - no available-expression dataflow, no per-block value renumbering, no stable-versus-opaque story for mutable loads - decides what one definition may stand in for.
 
 `GuardPass` has no bytecode counterpart; a guard is a fact only a JIT frontend's speculation invents. It is the pass `docs/jit-internals.md`'s "Heap Reads and Mutations" section describes as still needed: a repeated heap access re-emits and re-guards independently today, and running `CSEPass` first is what makes the second access's guard operand equal the first's.
 
 `HoistPass` (`internal/ssa/transform/hoist.go`) is the general loop-invariant code motion `docs/jit-internals.md`'s "No hoist, no carry" paragraph always said belonged in an optimizer rather than in the trace frontend: it uses `internal/graph`'s dominance and `LoopHeaders` directly, over any function, not only a trace-compiled one. It is deliberately narrower than that paragraph once envisioned, though. Eligibility is `OpConst` or a pure, non-trapping `OpExec` - never a guard, an `OpLoad`, an `OpStore`, or anything else that reads or writes `Local`, `Global`, `Upval`, `Heap`, `Frame`, or `Branch`, and never an integer division or remainder, whose zero-divisor fault could otherwise fire on a loop trip count of zero that the original program never reached. Every one of the four guards always carries deopt state (`ssa.Verify`'s own `resume()` rule), and that state names a frame chain and stack valid at the guard's original position, not at a point before the loop ran - `HoistPass` refuses anything that carries state outright rather than try to reconstruct one that would be. It hoists only into a preheader that already exists (the loop header's one predecessor from outside the loop) and never splits an edge to build one. See `internal/ssa/transform/hoist.go`'s own documentation for the full argument, including which of `hoistable`'s three restrictions in `internal/jit/traceplan.go` were backend representation artifacts and which - the ban on ref-array containers - is a real hazard that belongs to retain/release pairing instead, still deferred.
 
-The eventual plan is to delete `transform`'s `FoldPass`, `AlgebraicPass`, `DCEPass`, and `GVNPass` in favor of these five. `transform.SSAPass` is the route that makes that possible; the JIT's own use of these passes is still future work.
+These six are the only implementation of each policy: `transform`'s own `FoldPass`, `AlgebraicPass`, `DCEPass`, and `GVNPass`, together with `analysis`'s `GVNAnalysis` and the branch-and-handler rewriter they shared, are gone, and `optimize` reaches these instead through `transform.SSAPass`. The JIT's own use of them is still future work.
 
 ## Bytecode to SSA and Back
 
@@ -321,39 +304,37 @@ A declined function comes back byte for byte as it was; nothing is ever emitted 
 |---|---|
 | `UNREACHABLE` anywhere in the function | the IR has no operation for it, so the trap would be lost |
 | an opcode carrying an immediate operand (`REF_TEST`, `REF_CAST`, `ARRAY_NEW`, `ARRAY_NEW_DEFAULT`, `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `MAP_NEW`, `MAP_NEW_DEFAULT`) | the IR resolves what the operand meant and keeps no way to spell it again |
-| a block nothing reaches | the frontend's fact fixpoint runs over the edges execution takes and never gives one a state |
 | a protected region, an unresolved callee, an operand kind no opcode can pop | the frontend declines them already |
 | a module value needing a local | a module's locals sit on the operand stack a caller reads results off, so one more of them is one more result |
 | a local slot past 255, a constant slot past 65535 | the operand widths `LOCAL_*` and `CONST_GET` encode them in |
 | a branch offset outside signed 16 bits | blocks come back in the order the SSA holds them, not the order the bytecode laid them out, so a branch that just reached its target may not |
 
-### Where it differs from the bytecode passes
+A block nothing reaches is not on that list. `frontend.resolve` leaves a span its fixpoint
+never entered without a state and `build` simply does not emit it, so the block goes and the
+function stays. `frontend.Static` still refuses such a function outright, because the block
+graph a native compile emits is checked against `jit.StaticPlan`'s, which refuses one too;
+`frontend.Body` is the only caller that drops the block instead.
 
-Measured against `transform`'s own passes over the same inputs, in `TestSSAPass_Run`:
+### What it gains over a peephole
 
-- `internal/ssa/transform.FoldPass` folds `i64.xor`, `i64.and`, and `i64.or`, which
-  `transform/cf.go` writes one case per opcode by hand and left out. Every other window over
-  every pure opcode folds identically, constant pool included.
-- `internal/ssa/transform.DCEPass` drops a computation nothing reads; `transform.DCEPass`
-  cannot, because whether an operand stack still needs a value it pushed is not a question a
-  peephole over bytecode answers.
-- `transform.DCEPass` drops a block nothing reaches; the route declines the function instead.
-- `internal/ssa/transform.CSEPass` collapses a repeated pure computation over one shared
-  definition; it does not collapse one whose operands are reloaded, which is most of what
-  `transform.GVNPass` eliminates. Nothing in `internal/ssa/transform` forwards a redundant
-  load yet, and that pass is what the route still needs before `GVNPass` can be deleted.
+Asserted in `TestSSAPass_Run`:
+
+- `FoldPass` reaches the whole pure family through `instr`'s own purity rather than one
+  hand-written case per opcode, so `i64.xor`, `i64.and`, and `i64.or` fold exactly as their
+  i32 counterparts do.
+- `DCEPass` drops a computation nothing reads, which whether an operand stack still needs a
+  value it pushed is not a question a peephole over bytecode answers, and a block nothing
+  reaches.
+- `ForwardPass` then `CSEPass` collapse a computation repeated over reloaded operands, and
+  the emitter writes the shared value into one fresh local with `LOCAL_TEE`.
 
 ## Rewrite Rules
 
-Any pass that changes bytecode length must repair all position-sensitive data.
-
-Repair at least:
+Any pass that changes bytecode length must repair all position-sensitive data:
 
 - branch offsets
 - branch table targets
-- exception handler starts
-- exception handler ends
-- exception handler catch targets
+- exception handler starts, ends, and catch targets
 
 Check separately:
 
@@ -363,13 +344,14 @@ Check separately:
 - handler depths
 - signed 16-bit branch reachability
 
-If repair cannot preserve behavior, leave the function unchanged.
-
-Prefer a safe no-op over a risky rewrite.
+If repair cannot preserve behavior, leave the function unchanged. Prefer a safe no-op over a
+risky rewrite.
 
 `transform.SSAPass` re-emits rather than repairs, which is the same rule at its limit: it
 computes every branch offset from the layout it produced and declines the whole function when
-one no longer fits its operand.
+one no longer fits its operand. It is the only transform that moves an offset at all, so no
+in-place repair mechanism survives - a new offset-moving pass must re-emit or repair
+everything above.
 
 ## Maintenance Notes
 

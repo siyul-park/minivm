@@ -2,6 +2,7 @@ package transform
 
 import (
 	"math"
+	"math/bits"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
@@ -9,27 +10,37 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// FoldPass folds a pure operation whose arguments are all compile-time
-// constants into the constant its opcode computes: the SSA counterpart of
-// transform.FoldPass. It runs over any function this package's four passes
-// accept - one carrying JIT guards and deopt state or one with neither - since
-// the gate is instr's own op.Code.IsPure(), which is already false for
-// anything the JIT alone would add (a guard, a bridge, a retain or release are
-// none of them OpExec) and for anything that touches Local, Global, Upval,
-// Heap, Frame, or Branch. That leaves exactly the same closed family
-// transform.FoldPass folds by hand for bytecode - integer and float
-// arithmetic, comparisons, eqz, and the narrowing conversions - which this
-// pass computes by decoding each argument's types.Boxed into the typed value
-// (I32, I64, F32, F64 are Go's own numeric types under another name) and
-// letting Go's native operators do the arithmetic, rather than re-deriving it
-// from raw bits the way the bytecode pass must.
+// FoldPass replaces a pure operation with the result its arguments already
+// decide: the constant its opcode computes when every argument is one, the
+// left argument itself when the right one makes the opcode an identity, and a
+// shift when it makes a multiply or a divide one. All three are the same
+// policy - an operation whose answer is known before it runs does not run -
+// which is why the algebraic identities live here rather than in a pass of
+// their own.
+//
+// It runs over any function this package's passes accept, one carrying JIT
+// guards and deopt state or one with neither, since the gate is instr's own
+// op.Code.IsPure(), which is already false for anything the JIT alone would
+// add (a guard, a bridge, a retain or release are none of them OpExec) and
+// for anything that touches Local, Global, Upval, Heap, Frame, or Branch.
+// That leaves exactly the closed family transform's bytecode passes folded by
+// hand - integer and float arithmetic, comparisons, eqz, and the narrowing
+// conversions - which this pass computes by decoding each argument's
+// types.Boxed into the typed value (I32, I64, F32, F64 are Go's own numeric
+// types under another name) and letting Go's native operators do the
+// arithmetic, rather than re-deriving it from raw bits the way a pass over
+// bytecode must.
 //
 // A division or remainder whose divisor folds to zero is left as a runtime
-// operation, matching transform.FoldPass: the interpreter's own trap for that
-// case is not this pass's to pre-empt. An i64 arithmetic or shift result that
-// does not survive types.BoxI64's NaN-boxed round trip is left unfolded too -
-// every i64 OpConst the frontend builds is already round-trip-safe, so a
-// result that is not would silently corrupt the value if boxed anyway.
+// operation: the interpreter's own trap for that case is not this pass's to
+// pre-empt. An i64 arithmetic or shift result that does not survive
+// types.BoxI64's NaN-boxed round trip is left unfolded too - every i64
+// OpConst the frontend builds is already round-trip-safe, so a result that is
+// not would silently corrupt the value if boxed anyway. Float identities are
+// left alone as well, because IEEE-754's NaN and signed zero make them
+// unsound, and so are annihilators such as x*0, whose result is known but
+// whose left argument would have to be dropped along with them - which is
+// DCEPass's judgement to make, not this pass's.
 type FoldPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*FoldPass)(nil)
@@ -40,47 +51,164 @@ func NewFoldPass() *FoldPass {
 
 func (p *FoldPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
 	consts := map[ssa.Value]types.Boxed{}
+	computed := map[ssa.Value]bool{}
+	rb := newRebuilder(fn)
 	changed := false
 
 	for _, block := range order(fn) {
-		ops := fn.Block(block).Ops
-		for i := range ops {
-			op := &ops[i]
-			if op.Op == ssa.OpConst {
-				consts[op.Results[0]] = op.Const
-				continue
-			}
-			if op.Op != ssa.OpExec || !op.Code.IsPure() {
-				continue
-			}
-			args := make([]types.Boxed, len(op.Args))
-			known := true
-			for j, a := range op.Args {
-				v, ok := consts[a]
-				if !ok {
-					known = false
-					break
-				}
-				args[j] = v
-			}
-			if !known {
-				continue
-			}
-			result, ok := eval(op.Code, args)
-			if !ok {
-				continue
-			}
-			res := op.Results[0]
-			*op = ssa.Operation{Op: ssa.OpConst, Const: result, Results: []ssa.Value{res}}
-			consts[res] = result
-			changed = true
+		id := rb.block(block)
+		blk := fn.Block(block)
+		for _, param := range blk.Params {
+			rb.alias(param, rb.b.Param(id, fn.Type(param)))
 		}
+		for _, op := range blk.Ops {
+			op = rb.operation(op)
+			if op.Op == ssa.OpExec && op.Code.IsPure() {
+				if next, ok := p.fold(rb, id, fn, consts, computed, op); ok {
+					changed = true
+					// An operation reduced to one of its own arguments has
+					// had its result aliased onto it and leaves nothing to
+					// add.
+					if len(next.Results) == 0 {
+						continue
+					}
+					op = next
+				}
+			}
+			op = rb.define(fn, op)
+			rb.b.Add(id, op)
+			switch op.Op {
+			case ssa.OpConst:
+				consts[op.Results[0]] = op.Const
+				computed[op.Results[0]] = true
+			case ssa.OpExec, ssa.OpBridge:
+				// A value an opcode computed carries the representation its
+				// static type names; one read out of a slot need not (see
+				// fold).
+				for _, r := range op.Results {
+					computed[r] = true
+				}
+			}
+		}
+		rb.b.Term(id, rb.terminator(blk.Term))
 	}
 
 	if !changed {
 		return pass.PreserveAll(), nil
 	}
+	*fn = *rb.b.Build()
 	return pass.PreserveNone(), nil
+}
+
+// fold returns what op becomes once its constant arguments are accounted for,
+// and false when it stays as it is. An operation that reduces to one of its
+// own arguments comes back with no results at all: fold has already aliased
+// the value it produced onto that argument, so nothing is left to add.
+func (p *FoldPass) fold(rb *rebuilder, id int, fn *ssa.Function, consts map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, op ssa.Operation) (ssa.Operation, bool) {
+	args := make([]types.Boxed, 0, len(op.Args))
+	for _, a := range op.Args {
+		c, ok := consts[a]
+		if !ok {
+			break
+		}
+		args = append(args, c)
+	}
+	if len(args) == len(op.Args) {
+		if result, ok := eval(op.Code, args); ok {
+			return ssa.Operation{Op: ssa.OpConst, Const: result, Results: op.Results}, true
+		}
+		return op, false
+	}
+	if len(op.Args) != 2 || len(op.Results) != 1 {
+		return op, false
+	}
+	right, ok := consts[op.Args[1]]
+	if !ok {
+		return op, false
+	}
+	// An identity hands back its left argument, and with it that argument's
+	// own representation. Only a value an opcode computed carries the one its
+	// static type names: a slot is zero-filled rather than written with its
+	// declared type's zero, so an unwritten i32 local reads back as a raw
+	// Boxed(0), whose kind is f64 (docs/memory-model.md). The arithmetic this
+	// rewrite would remove is what re-tags it, and the type has to match for
+	// the same reason - i1 and i8 both reach an i32 opcode, and neither may be
+	// read back where the i32 result was.
+	if identity(op.Code, right) && computed[op.Args[0]] && rb.b.Type(op.Args[0]) == fn.Type(op.Results[0]) {
+		rb.alias(op.Results[0], op.Args[0])
+		return ssa.Operation{Op: op.Op, Code: op.Code, Args: op.Args}, true
+	}
+	code, amount, ok := reduce(op.Code, right)
+	if !ok {
+		return op, false
+	}
+	shift := rb.b.Value(rb.b.Type(op.Args[1]))
+	rb.b.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{shift}})
+	consts[shift] = amount
+	return ssa.Operation{Op: op.Op, Code: code, Args: []ssa.Value{op.Args[0], shift}, Results: op.Results}, true
+}
+
+// identity reports whether code hands back its left argument unchanged when
+// its right one is c.
+func identity(code instr.Opcode, c types.Boxed) bool {
+	switch code {
+	case instr.I32_ADD, instr.I32_SUB, instr.I32_OR, instr.I32_XOR,
+		instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U:
+		return c.Kind() == types.KindI32 && c.I32() == 0
+	case instr.I32_AND:
+		return c.Kind() == types.KindI32 && c.I32() == -1
+	case instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U:
+		return c.Kind() == types.KindI32 && c.I32() == 1
+	case instr.I64_ADD, instr.I64_SUB, instr.I64_OR, instr.I64_XOR,
+		instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U:
+		return c.Kind() == types.KindI64 && c.I64() == 0
+	case instr.I64_AND:
+		return c.Kind() == types.KindI64 && c.I64() == -1
+	case instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U:
+		return c.Kind() == types.KindI64 && c.I64() == 1
+	default:
+		return false
+	}
+}
+
+// reduce returns the shift a multiply or an unsigned divide by the
+// power-of-two c becomes, and its amount. A signed divide is not one of them:
+// an arithmetic shift right rounds toward negative infinity where the divide
+// rounds toward zero.
+func reduce(code instr.Opcode, c types.Boxed) (instr.Opcode, types.Boxed, bool) {
+	var shift instr.Opcode
+	switch code {
+	case instr.I32_MUL, instr.I64_MUL:
+		shift = instr.I32_SHL
+		if code == instr.I64_MUL {
+			shift = instr.I64_SHL
+		}
+	case instr.I32_DIV_U, instr.I64_DIV_U:
+		shift = instr.I32_SHR_U
+		if code == instr.I64_DIV_U {
+			shift = instr.I64_SHR_U
+		}
+	default:
+		return 0, 0, false
+	}
+	switch c.Kind() {
+	case types.KindI32:
+		n, ok := log2(uint64(uint32(c.I32())))
+		return shift, types.BoxI32(int32(n)), ok
+	case types.KindI64:
+		n, ok := log2(uint64(c.I64()))
+		return shift, types.BoxI64(int64(n)), ok
+	default:
+		return 0, 0, false
+	}
+}
+
+// log2 returns the exponent of v when v is a power of two greater than one.
+func log2(v uint64) (uint64, bool) {
+	if v < 2 || v&(v-1) != 0 {
+		return 0, false
+	}
+	return uint64(bits.TrailingZeros64(v)), true
 }
 
 // eval computes the constant Code performs over args, or reports false when
@@ -390,7 +518,7 @@ func evalF64Cmp(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 
 // mod computes IEEE remainder (rem) or, when floored is true, floored
 // modulo (mod): the sign of a floored result follows the divisor, matching
-// transform.FoldPass's F32_MOD/F64_MOD semantics.
+// the interpreter's own F32_MOD and F64_MOD.
 func mod(a, b float64, floored bool) float64 {
 	m := math.Mod(a, b)
 	if floored && m != 0 && (m < 0) != (b < 0) {

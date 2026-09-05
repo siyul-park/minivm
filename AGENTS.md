@@ -81,7 +81,7 @@ Violations cause silent corruption or invalid execution. `docs/architecture.md` 
 - Threaded closure errors `panic`; `interp.Run()` recovers and annotates `at=<ip>`. Compile-time threading advances `c.ip`, runtime execution advances `f.ip`.
 - A JIT handler returns `true` only after lowering the opcode and advancing `s.ip` by its exact width; on type mismatch or unsupported lowering it returns `false` without mutating IR, stack, params, facts, or labels.
 - Any JIT path that can hand state back to the interpreter — guard exit, fallback, spill decision, loop back-edge, hoisted container — has an exact contract in `docs/jit-internals.md`. Read it before touching one.
-- Offset-preserving passes must preserve byte offsets; `GVNPass`, `DCEPass`, and `SSAPass` are the known exceptions. The first two repair branches/handlers; `SSAPass` re-emits the function and declines it outright when a branch no longer fits its operand.
+- `SSAPass` is the one transform that moves byte offsets: it re-emits the function from its SSA rather than repairing offsets in place, and declines it outright when a branch no longer fits its operand. Any new offset-moving pass must do one or the other.
 
 ## Tests
 

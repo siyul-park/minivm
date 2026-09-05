@@ -1,6 +1,7 @@
 package transform_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -118,6 +119,138 @@ func TestFoldPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn), "the frame still names a value the function actually defines")
 		require.Contains(t, ssa.Format(fn), "stack=[v3]")
 		require.Contains(t, ssa.Format(fn), "v3:i32 = const 5")
+	})
+
+	identities := []struct {
+		name string
+		code instr.Opcode
+		typ  ssa.Type
+		with types.Boxed
+	}{
+		{"i32 add zero", instr.I32_ADD, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 sub zero", instr.I32_SUB, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 or zero", instr.I32_OR, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 xor zero", instr.I32_XOR, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 shl zero", instr.I32_SHL, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 shr_s zero", instr.I32_SHR_S, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 shr_u zero", instr.I32_SHR_U, ssa.TypeI32, types.BoxI32(0)},
+		{"i32 and minus one", instr.I32_AND, ssa.TypeI32, types.BoxI32(-1)},
+		{"i32 mul one", instr.I32_MUL, ssa.TypeI32, types.BoxI32(1)},
+		{"i32 div_s one", instr.I32_DIV_S, ssa.TypeI32, types.BoxI32(1)},
+		{"i32 div_u one", instr.I32_DIV_U, ssa.TypeI32, types.BoxI32(1)},
+		{"i64 add zero", instr.I64_ADD, ssa.TypeI64, types.BoxI64(0)},
+		{"i64 and minus one", instr.I64_AND, ssa.TypeI64, types.BoxI64(-1)},
+		{"i64 mul one", instr.I64_MUL, ssa.TypeI64, types.BoxI64(1)},
+		{"i64 div_u one", instr.I64_DIV_U, ssa.TypeI64, types.BoxI64(1)},
+	}
+	// The left argument has to be a value an opcode computed, so the identity
+	// hands back a representation its static type names.
+	seed := func(t ssa.Type) instr.Opcode {
+		if t == ssa.TypeI64 {
+			return instr.I64_REM_S
+		}
+		return instr.I32_REM_S
+	}
+	for _, c := range identities {
+		t.Run("reduces "+c.name+" to its left argument", func(t *testing.T) {
+			b := ssa.New("f")
+			entry := b.Block()
+			param := b.Param(entry, c.typ)
+			x, right, result := b.Value(c.typ), b.Value(c.typ), b.Value(c.typ)
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: seed(c.typ), Args: []ssa.Value{param, param}, Results: []ssa.Value{x}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.with, Results: []ssa.Value{right}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+			fn := b.Build()
+			require.NoError(t, ssa.Verify(fn))
+
+			preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+			require.NoError(t, err)
+			require.Equal(t, pass.PreserveNone(), preserved)
+			require.NoError(t, ssa.Verify(fn))
+			out := ssa.Format(fn)
+			require.NotContains(t, out, instr.TypeOf(c.code).Mnemonic)
+			require.Contains(t, out, "return v2")
+		})
+	}
+
+	t.Run("leaves an identity over a value read out of a slot", func(t *testing.T) {
+		// A slot is zero-filled rather than written with its declared type's
+		// zero, so an unwritten i32 local reads back as a raw Boxed(0) whose
+		// kind is f64. The addition this rewrite would remove is what re-tags
+		// it as the i32 the slot was declared to hold.
+		b := ssa.New("f")
+		entry := b.Block()
+		x, right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{right}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Contains(t, ssa.Format(fn), "i32.add")
+	})
+
+	reductions := []struct {
+		name string
+		code instr.Opcode
+		typ  ssa.Type
+		with types.Boxed
+		want instr.Opcode
+		by   int
+	}{
+		{"i32 multiply", instr.I32_MUL, ssa.TypeI32, types.BoxI32(8), instr.I32_SHL, 3},
+		{"i32 unsigned divide", instr.I32_DIV_U, ssa.TypeI32, types.BoxI32(16), instr.I32_SHR_U, 4},
+		{"i64 multiply", instr.I64_MUL, ssa.TypeI64, types.BoxI64(4), instr.I64_SHL, 2},
+		{"i64 unsigned divide", instr.I64_DIV_U, ssa.TypeI64, types.BoxI64(2), instr.I64_SHR_U, 1},
+	}
+	for _, c := range reductions {
+		t.Run("reduces an "+c.name+" by a power of two to a shift", func(t *testing.T) {
+			b := ssa.New("f")
+			entry := b.Block()
+			x := b.Param(entry, c.typ)
+			right, result := b.Value(c.typ), b.Value(c.typ)
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.with, Results: []ssa.Value{right}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+			fn := b.Build()
+			require.NoError(t, ssa.Verify(fn))
+
+			preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+			require.NoError(t, err)
+			require.Equal(t, pass.PreserveNone(), preserved)
+			require.NoError(t, ssa.Verify(fn))
+			out := ssa.Format(fn)
+			require.NotContains(t, out, instr.TypeOf(c.code).Mnemonic)
+			require.Contains(t, out, instr.TypeOf(c.want).Mnemonic)
+			require.Contains(t, out, fmt.Sprintf("const %d", c.by))
+		})
+	}
+
+	t.Run("leaves a signed divide by a power of two alone", func(t *testing.T) {
+		// An arithmetic shift right rounds toward negative infinity where the
+		// divide rounds toward zero.
+		b := ssa.New("f")
+		entry := b.Block()
+		x := b.Param(entry, ssa.TypeI32)
+		right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(8), Results: []ssa.Value{right}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		fn := b.Build()
+
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Contains(t, ssa.Format(fn), "i32.div_s")
 	})
 
 	cases := []struct {
