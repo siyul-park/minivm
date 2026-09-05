@@ -49,7 +49,7 @@ func op(f *Function, o Operation) string {
 	case OpState:
 		for _, frame := range o.Frames {
 			args = append(args, fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]}",
-				frame.Addr, frame.Base, frame.IP, frame.Returns, strings.Join(refs(frame.Stack), ", ")))
+				frame.Addr, frame.Base, frame.IP, frame.Returns, strings.Join(stack(frame.Stack), ", ")))
 		}
 	}
 	args = append(args, refs(o.Args)...)
@@ -113,6 +113,19 @@ func defs(f *Function, vs []Value) string {
 		names[i] = fmt.Sprintf("v%d:%s", v, f.Type(v))
 	}
 	return strings.Join(names, ", ")
+}
+
+// stack names the operands one frame resumes with, marking the entries that
+// own the reference count the interpreter adopts.
+func stack(os []Operand) []string {
+	names := make([]string, len(os))
+	for i, o := range os {
+		names[i] = fmt.Sprintf("v%d", o.Value)
+		if o.Owned {
+			names[i] += " owned"
+		}
+	}
+	return names
 }
 
 // refs names the values being read.

@@ -56,6 +56,19 @@ func (r *rebuilder) list(vs []ssa.Value) []ssa.Value {
 	return out
 }
 
+// stack translates the operands one frame resumes with, each keeping the
+// ownership its entry carries: renumbering a value never moves a retain.
+func (r *rebuilder) stack(os []ssa.Operand) []ssa.Operand {
+	if len(os) == 0 {
+		return nil
+	}
+	out := make([]ssa.Operand, len(os))
+	for i, o := range os {
+		out[i] = ssa.Operand{Value: r.value(o.Value), Owned: o.Owned}
+	}
+	return out
+}
+
 // alias records that old now reads back as at: at is at's own renumbering
 // when old survives, or the survivor standing in for old when a pass elides
 // old's defining operation.
@@ -73,7 +86,7 @@ func (r *rebuilder) operation(op ssa.Operation) ssa.Operation {
 	if len(op.Frames) > 0 {
 		frames := make([]ssa.Frame, len(op.Frames))
 		for i, fr := range op.Frames {
-			fr.Stack = r.list(fr.Stack)
+			fr.Stack = r.stack(fr.Stack)
 			frames[i] = fr
 		}
 		op.Frames = frames

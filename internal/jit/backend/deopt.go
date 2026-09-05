@@ -8,14 +8,10 @@ import (
 
 // Deopt is one deoptimization resolved out of the frame chain an OpState
 // carries: where the interpreter picks execution up, which VM stack slot each
-// live operand must be boxed into, and the frame records the journal is handed
-// so Go can rebuild the call chain native inlining hid. It states what native
-// code writes, never how - the stores are the machine's.
-//
-// Ownership is deliberately absent. ssa.Frame lists the stack a deopt resumes
-// with but not which of those values carry a reference count, so a machine
-// still takes the cold-path retains itself. Stating it here is a change to the
-// IR, not to this type: Flush is where the answer lands.
+// live operand must be boxed into and whether that operand already owns its
+// reference count, and the frame records the journal is handed so Go can
+// rebuild the call chain native inlining hid. It states what native code
+// writes, never how - the stores and the retains are the machine's.
 type Deopt struct {
 	// ID is the descriptor journal.CellExitID reports this exit under, or -1
 	// for an exit with none. Native code writes ID+1, so -1 writes the zero
@@ -39,10 +35,14 @@ type Deopt struct {
 }
 
 // Flush is one live operand and the VM stack slot, as a delta from the entry
-// frame's base, native code must box it into before returning.
+// frame's base, native code must box it into before returning. Owned reports
+// that the operand already carries the reference count the interpreter adopts
+// on resuming; a borrowed one derives its count from storage the interpreter
+// is about to leave behind, so the cold path retains it before it returns.
 type Flush struct {
 	Value ssa.Value
 	Slot  int
+	Owned bool
 }
 
 // Record is one journal frame record: the values journal.RecordAddr,
@@ -70,7 +70,7 @@ func (c *Compiler) Exit(v ssa.Value, reason prof.ExitReason, opcode int) Deopt {
 	for _, frame := range op.Frames {
 		floor := frame.Base + c.slots[frame.Addr]
 		for i, operand := range frame.Stack {
-			d.Stack = append(d.Stack, Flush{Value: operand, Slot: floor + i})
+			d.Stack = append(d.Stack, Flush{Value: operand.Value, Slot: floor + i, Owned: operand.Owned})
 		}
 		d.SP = floor + len(frame.Stack)
 	}

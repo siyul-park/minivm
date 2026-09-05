@@ -107,7 +107,7 @@ func TestFoldPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
 		// sum has no other use; it is only live because a deopt frame names it.
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Value{sum}}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: sum}}}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))

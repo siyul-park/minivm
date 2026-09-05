@@ -161,6 +161,29 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
+	t.Run("accepts a frame owning the reference it resumes with", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		array := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: array, Owned: true}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
+	t.Run("rejects a frame owning a value that holds no reference", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		count := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: count, Owned: true}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
+	})
+
 	t.Run("rejects an interpreter state with no frame", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

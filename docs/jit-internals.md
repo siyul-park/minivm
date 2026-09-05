@@ -209,7 +209,7 @@ Which roots it accepts and rejects is identical to `StaticPlan`'s, including roo
 - **Bridge.** `OpBridge` is an operation, not a terminator, so the block ends on it with an `OpJump` to the block the interpreter resumes into. The resume position is therefore that single successor of a block whose last operation is a bridge, and its IP is the bridged opcode's own IP — carried by the bridge's `OpState` frame — plus that opcode's encoded width, which is fixed per opcode for every bridgeable one. `instr` states an arity for `ARRAY_NEW` that only approximates its real one, so a bridge names the arguments `instr.TypeOf` declares and the operands beyond them reach the interpreter through the flushed stack the `OpState` frame lists.
 - **Guards.** A container access whose shape the plan resolved is preceded by `OpGuardShape` carrying it: the element itab `ElemShapeByKind` gives for an array, the `*types.StructType` pointer for a struct. An access whose shape did not resolve carries neither, exactly as `Step.Shape` is zero in a static plan today. Index bounds are not guarded in the IR; the guarded heap path still owns that check.
 - **Ownership.** `backing`'s five-way inference stays a planning fact, and the IR states its result. A ref loaded from a local, global, upvalue, or constant is borrowed; anything an operation produces is owned. `OpRetain` materializes where `own`, `detach`, `ownRefs`, and `ret` take one: before a slot store, for the surviving copy of a tee and of a `DUP` of an owned ref, before a container store's stored value, before every operand a call or a bridge hands over, on a returned value, and on an edge whose successor merged that operand to owned. `OpRelease` drops the count a consumed owned container held. Two successors that disagree about one operand's ownership leave the function unplanned rather than retaining it on a path that never releases it.
-- **Not expressible.** The cold-path retains — `retainDeferred` and the exit stubs — have no IR form. `ssa.Frame` lists the stack a deopt resumes with but not which of those values are owned, so a backend must keep taking them on the cold path itself.
+- **Cold-path ownership.** `ssa.Frame.Stack` is a list of `ssa.Operand`, each naming a value and whether that stack entry owns a reference count, which is the fact `retainDeferred` and `emitExits` act on: a borrowed entry is the one a cold path retains before handing the flushed stack to the interpreter. Ownership belongs to the entry and not to the value, because a `DUP` puts one value in two positions and a later retain moves exactly one of them onto the stack, so no per-value flag could state it. `ssa.Verify` rejects a frame owning a value that cannot hold a reference. The retains themselves stay the machine's — the IR says which entries need one, not how to take it.
 - **Extra block.** A branch to the offset one past the end of the code, which `analysis.Blocks` treats as a virtual exit and a plan leaves as an unresolved edge, becomes a real block that returns or completes.
 - **Narrower than the plan.** An operand whose kind its opcode cannot pop leaves the function unplanned, where `applyStep` never type-checks; `program.Verify` rejects such bytecode before it runs. An `i64` literal that does not survive `types.BoxI64` is refused for the same reason, because `ssa.Operation.Const` is the only place a literal can live.
 
@@ -349,14 +349,17 @@ rather than by a target:
 - **Deopt metadata.** `Compiler.Exit` resolves the `ssa.Frame` chain an
   `OpState` carries into `backend.Deopt`: `Resume` is `journal.CellNextIP`,
   `SP` is `journal.CellSP`, `Stack` is every live operand with the VM stack
-  slot it must be boxed into, and `Frames` are the `journal.Record` rows. Every
-  coordinate is a delta from the entry frame's base, exactly as the ARM64
-  `trapFlushed` writes them. A frame's operand sits at its `Base` plus its
-  function's `types.Function.Declared()` slot count plus its position, so a
-  compile whose frame address names no function is refused rather than resuming
-  at a wrong slot. `Frames` is **innermost first**, which is the order
-  `journal.At` indexes records in and `Interpreter.deopt` reads them back in —
-  the reverse of the outermost-first order `ssa.Frame` chains are built in.
+  slot it must be boxed into and whether that entry already owns its reference
+  count (`Flush.Owned`, taken from the `ssa.Operand` the frame carries, which
+  is what tells a cold stub which entries to retain), and `Frames` are the
+  `journal.Record` rows. Every coordinate is a delta from the entry frame's
+  base, exactly as the ARM64 `trapFlushed` writes them. A frame's operand sits
+  at its `Base` plus its function's `types.Function.Declared()` slot count plus
+  its position, so a compile whose frame address names no function is refused
+  rather than resuming at a wrong slot. `Frames` is **innermost first**, which
+  is the order `journal.At` indexes records in and `Interpreter.deopt` reads
+  them back in — the reverse of the outermost-first order `ssa.Frame` chains
+  are built in.
   `Exit` also assigns the descriptor `journal.CellExitID` reports (`ID+1`, so
   `ID == -1` writes the zero that means none, which is what a bridge and a
   yield take), and `Code.Exits` is those descriptors in assignment order.
@@ -405,12 +408,6 @@ the order, the registers, the moves, and the metadata.
 
 #### What the seam still cannot say
 
-- **Cold-path ownership.** `ssa.Frame` lists the stack a deopt resumes with but
-  not which of those values carry a reference count, so `backend.Flush` states
-  a location and no more and a machine keeps taking the cold-path retains
-  itself (`retainDeferred`, `emitExits`). The fix is in the IR — an ownership
-  bit beside each `Frame.Stack` value — not in this package; `Flush` is where
-  it lands.
 - **Entry kind.** A `jit.Plan` says whether its anchor is a function entry, a
   module entry, or a loop header, and the ARM64 prologue and teardown differ by
   it. An `ssa.Function` says none of that, so `Compile` will need the anchor
@@ -693,6 +690,8 @@ A retain materializes at every point that hands a deferred value to storage the 
 - exit stubs — `emitExits` reloads each deferred operand from its flushed VM stack slot and retains it on the cold guard path.
 - `retainDeferred` — a stub-less deopt that hands the flushed operand stack to the interpreter (a trap fallback, module completion) re-takes each deferred operand's retain from its VM stack slot.
 - real calls — `directCall` and `selfCall` own every live deferred operand before the `BL`, because a callee trap adopts the caller's flushed stack.
+
+The SSA frontends record the same fact per operand-stack entry rather than per value: `ssa.Frame.Stack` marks an entry owned exactly when its `backing` is `BackingStack` at the point the deopt state materializes, which is after the retains that instruction already took (see SSA Static Frontend).
 
 A committing (loop back-edge) flush rejects any live deferred ref: owning it would retain once per iteration with no matching release, so a loop-carried deferred ref keeps the whole trace threaded instead. Standalone loop traces also remain threaded when their entry already has live operands because trace plans do not reconstruct loop-entry operand state.
 

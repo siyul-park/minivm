@@ -32,10 +32,12 @@ func TestCompiler_Exit(t *testing.T) {
 			live[i] = b.Value(ssa.TypeI32)
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(int32(i)), Results: []ssa.Value{live[i]}})
 		}
+		held := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
-			{Addr: 1, Base: 0, IP: 10, Returns: 1, Stack: []ssa.Value{live[0], live[1]}},
-			{Addr: 2, Base: 4, IP: 20, Returns: 1, Stack: []ssa.Value{live[2]}},
+			{Addr: 1, Base: 0, IP: 10, Returns: 1, Stack: []ssa.Operand{{Value: live[0]}, {Value: live[1]}}},
+			{Addr: 2, Base: 4, IP: 20, Returns: 1, Stack: []ssa.Operand{{Value: live[2]}, {Value: held, Owned: true}}},
 		}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{live[0]}, State: state, Results: []ssa.Value{b.Value(ssa.TypeI32)}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
@@ -50,11 +52,12 @@ func TestCompiler_Exit(t *testing.T) {
 		require.Equal(t, []backend.Deopt{{
 			ID:     0,
 			Resume: 20,
-			SP:     6,
+			SP:     7,
 			Stack: []backend.Flush{
 				{Value: live[0], Slot: 2},
 				{Value: live[1], Slot: 3},
 				{Value: live[2], Slot: 5},
+				{Value: held, Slot: 6, Owned: true},
 			},
 			Frames: []backend.Record{
 				{Addr: 2, BP: 4, IP: 20, Returns: 1},
@@ -71,7 +74,7 @@ func TestCompiler_Exit(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{v}})
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
-			{Addr: 1, Base: 0, IP: 7, Returns: 0, Stack: []ssa.Value{v}},
+			{Addr: 1, Base: 0, IP: 7, Returns: 0, Stack: []ssa.Operand{{Value: v}}},
 		}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{v}, State: state, Results: []ssa.Value{b.Value(ssa.TypeI32)}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})

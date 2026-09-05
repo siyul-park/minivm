@@ -46,16 +46,32 @@ type Shape struct {
 
 // Frame is one interpreter frame an OpState materializes: the function slot
 // it runs in, its base offset from the entry frame, the IP it resumes at, the
-// result count its teardown uses, and the operand values live on its stack,
-// bottom first. The chain is multi-frame because a frontend may inline
-// callees into one native frame, and the interpreter has to be handed every
-// frame that inlining hid.
+// result count its teardown uses, and the operands live on its stack, bottom
+// first. The chain is multi-frame because a frontend may inline callees into
+// one native frame, and the interpreter has to be handed every frame that
+// inlining hid.
 type Frame struct {
 	Addr    int
 	Base    int
 	IP      int
 	Returns int
-	Stack   []Value
+	Stack   []Operand
+}
+
+// Operand is one entry on a frame's operand stack: the value it holds, and
+// whether that entry carries a reference count of its own. The interpreter
+// adopts every stack entry it resumes with and releases it, so a borrowed
+// entry - one deriving its count from storage that still holds it - has to be
+// retained before control leaves, which is what a cold path emits and Owned
+// is what tells it where.
+//
+// Ownership belongs to the entry rather than to the value, because one value
+// can sit in two positions at once with only one of them retained: a DUP
+// copies a borrowed reference, and a later retain moves exactly one of the two
+// copies onto the stack. Only a reference is ever owned.
+type Operand struct {
+	Value Value
+	Owned bool
 }
 
 // Operation is one step inside a Block: a definition in a value graph, with no

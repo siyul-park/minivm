@@ -69,6 +69,27 @@ type operand struct {
 	fact
 }
 
+// values names the SSA value each operand holds.
+func values(stack []operand) []ssa.Value {
+	out := make([]ssa.Value, len(stack))
+	for i, o := range stack {
+		out[i] = o.value
+	}
+	return out
+}
+
+// operands states what a deopt is handed: each value, and whether that stack
+// entry carries the reference count the interpreter adopts. Only a reference
+// backed by the stack copy itself does; every other backing defers the count to
+// storage that still holds it, so a cold path retains it before handing it over.
+func operands(stack []operand) []ssa.Operand {
+	out := make([]ssa.Operand, len(stack))
+	for i, o := range stack {
+		out[i] = ssa.Operand{Value: o.value, Owned: o.kind == types.KindRef && o.backing == jit.BackingStack}
+	}
+	return out
+}
+
 // resolve gives every span the facts its operands carry on entry, as the least
 // fixpoint over the edges execution takes, and reports which spans that
 // fixpoint reached. It reports false when the walk cannot model an opcode or

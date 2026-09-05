@@ -59,7 +59,7 @@ func Verify(f *Function) error {
 			if err := operation(f, sites, op); err != nil {
 				return fmt.Errorf("blk%d op %d: %w", id, i, err)
 			}
-			if err := uses(f, sites, dom, site{id, i}, operands(op)); err != nil {
+			if err := uses(f, sites, dom, site{id, i}, reads(op)); err != nil {
 				return fmt.Errorf("blk%d op %d: %w", id, i, err)
 			}
 		}
@@ -188,6 +188,13 @@ func operation(f *Function, sites []site, o Operation) error {
 		}
 		if len(o.Frames) == 0 {
 			return fmt.Errorf("%w: %s carries no frame", ErrState, o.name())
+		}
+		for _, frame := range o.Frames {
+			for _, operand := range frame.Stack {
+				if operand.Owned && f.Type(operand.Value) != TypeRef {
+					return fmt.Errorf("%w: %s owns %s", ErrType, o.name(), f.Type(operand.Value))
+				}
+			}
 		}
 	default:
 		return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
@@ -352,12 +359,14 @@ func uses(f *Function, sites []site, dom *graph.Dominance, at site, vs []Value) 
 	return nil
 }
 
-// operands returns every value o reads: its arguments, the stacks its frames
+// reads returns every value o reads: its arguments, the stacks its frames
 // hold, and the state it resumes into.
-func operands(o Operation) []Value {
+func reads(o Operation) []Value {
 	vs := append([]Value(nil), o.Args...)
 	for _, frame := range o.Frames {
-		vs = append(vs, frame.Stack...)
+		for _, operand := range frame.Stack {
+			vs = append(vs, operand.Value)
+		}
 	}
 	if o.State != NoValue {
 		vs = append(vs, o.State)

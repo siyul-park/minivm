@@ -83,7 +83,7 @@ func TestDCEPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Value{sum}}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: sum}}}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
@@ -96,6 +96,25 @@ func TestDCEPass_Run(t *testing.T) {
 		out := ssa.Format(fn)
 		require.Contains(t, out, "i32.add")
 		require.Contains(t, out, "stack=[v3]")
+	})
+
+	t.Run("keeps a reference only a frame's owned entry names, still owned once renumbered", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		array, dead, state := b.Value(ssa.TypeRef), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(3), Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(9), Results: []ssa.Value{dead}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: array, Owned: true}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveNone(), preserved, "the unused constant goes, which rebuilds the function around the frame that stays")
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, "func f\nblk0: ()\n\tv1:ref = const 3\n\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[v1 owned]}\n\texit state v2\n", ssa.Format(fn))
 	})
 
 	t.Run("removes an OpState nothing still resumes into, once the guard that alone used it is gone", func(t *testing.T) {

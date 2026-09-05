@@ -154,11 +154,12 @@ func TestBody(t *testing.T) {
 }
 
 // agrees checks that the frontend plans no root the plan does not, that every
-// function it emits verifies, and that its blocks reach each other exactly as
-// the plan's do. It returns how many roots each side planned, so a caller
-// holding bytecode program.Verify accepts can require the reverse as well: the
-// frontend declines an operand of a kind its opcode cannot pop, which the plan
-// never checks and verified bytecode never contains.
+// function it emits verifies, that its blocks reach each other exactly as the
+// plan's do, and that it records the ownership the plan does. It returns how
+// many roots each side planned, so a caller holding bytecode program.Verify
+// accepts can require the reverse as well: the frontend declines an operand of
+// a kind its opcode cannot pop, which the plan never checks and verified
+// bytecode never contains.
 func agrees(t *testing.T, input *jit.Input) (int, int) {
 	t.Helper()
 
@@ -178,9 +179,90 @@ func agrees(t *testing.T, input *jit.Input) (int, int) {
 		plan, ok := roots[anchor]
 		require.True(t, ok, "anchor %+v is not a root the plan takes\n%s", anchor, instr.Format(input.Function.Code))
 		require.NoError(t, ssa.Verify(fn), "anchor %+v\n%s", anchor, ssa.Format(fn))
-		require.Equal(t, graph(plan), breadth(0, fn.Len(), fn.Succ), "anchor %+v\n%s", anchor, ssa.Format(fn))
+		blocks, want := graph(plan)
+		ids, got := breadth(0, fn.Len(), fn.Succ)
+		require.Equal(t, want, got, "anchor %+v\n%s", anchor, ssa.Format(fn))
+		owns(t, plan, blocks, fn, ids)
+		adopts(t, fn)
 	}
 	return len(roots), emitted
+}
+
+// owns checks that the frontend records the ownership the plan resolved. The
+// two forms state it in different places - jit.Block.State on the plan, a stack
+// entry of every ssa.Frame a deopt materializes in the SSA - so they are read
+// where they name the same operand: a block's own parameters, paired by the
+// breadth-first order both graphs are numbered in. An entry the plan backs with
+// the operand-stack copy itself (jit.BackingStack) carries the reference count
+// the interpreter adopts on resuming; one deferred to a local, a global, an
+// upvalue, or a constant does not. Only the states before the block first
+// retains that parameter say anything about its entry ownership: after a
+// retain, the entry owns a count the plan's entry state never had.
+func owns(t *testing.T, plan jit.Plan, blocks []int, fn *ssa.Function, ids []int) {
+	t.Helper()
+	for n, block := range blocks {
+		if block >= len(plan.Blocks) || n >= len(ids) || ids[n] >= fn.Len() {
+			continue
+		}
+		state, blk := plan.Blocks[block].State, fn.Block(ids[n])
+		require.Len(t, blk.Params, len(state), "blk%d is entered with a different stack\n%s", ids[n], ssa.Format(fn))
+		for i, slot := range state {
+			if slot.Kind != types.KindRef {
+				continue
+			}
+			want, param := slot.Backing == jit.BackingStack, blk.Params[i]
+			for _, op := range blk.Ops {
+				if op.Op == ssa.OpRetain && op.Args[0] == param {
+					break
+				}
+				for _, frame := range op.Frames {
+					for _, operand := range frame.Stack {
+						if operand.Value == param {
+							require.Equal(t, want, operand.Owned, "blk%d v%d\n%s", ids[n], param, ssa.Format(fn))
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// adopts checks the rule every handoff out of native code shares: a bridge, a
+// call, and a deopt hand the flushed operand stack to code that adopts every
+// reference on it and later releases each one, so none may still be borrowed
+// there. It is the barrier the plan emits at its cold path instead - ownRefs
+// before a call, retainDeferred before a fallback or a bridge - stated in the
+// IR here.
+func adopts(t *testing.T, fn *ssa.Function) {
+	t.Helper()
+	states := map[ssa.Value]ssa.Operation{}
+	for id := 0; id < fn.Len(); id++ {
+		for _, op := range fn.Block(id).Ops {
+			if op.Op == ssa.OpState {
+				states[op.Results[0]] = op
+			}
+		}
+	}
+	owned := func(state ssa.Value) {
+		for _, frame := range states[state].Frames {
+			for _, operand := range frame.Stack {
+				if fn.Type(operand.Value) == ssa.TypeRef {
+					require.True(t, operand.Owned, "v%d is handed over borrowed\n%s", operand.Value, ssa.Format(fn))
+				}
+			}
+		}
+	}
+	for id := 0; id < fn.Len(); id++ {
+		blk := fn.Block(id)
+		for _, op := range blk.Ops {
+			if op.Op == ssa.OpBridge || (op.Op == ssa.OpExec && op.Code.Writes(instr.Frame)) {
+				owned(op.State)
+			}
+		}
+		if blk.Term.Op == ssa.OpExit {
+			owned(blk.Term.State)
+		}
+	}
 }
 
 // fixture is one planning input together with the name its case runs under.
@@ -384,6 +466,34 @@ func corpus(t *testing.T) []fixture {
 		Objects:   jit.Objects{2: {Fn: callee}},
 	})
 
+	// A reference live across a branch is what makes a block's entry ownership
+	// observable: both successors take it as a parameter, borrowed from the slot
+	// it was loaded out of in one shape and owned by the stack in the other.
+	add("borrowed array across a branch", &jit.Input{Address: 1, Function: &types.Function{
+		Typ: &types.FunctionType{Params: []types.Type{arrayType, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) {
+			done := b.Label()
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).BrIf(done)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+			b.Bind(done).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+		}),
+	}})
+
+	add("owned array across a branch", &jit.Input{
+		Address: 1,
+		Function: &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				done := b.Label()
+				b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.REF_CAST, 0)
+				b.Emit(instr.LOCAL_GET, 0).BrIf(done)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+				b.Bind(done).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+			}),
+		},
+		Decl: []types.Type{arrayType},
+	})
+
 	add("array store", &jit.Input{Address: 1, Function: &types.Function{
 		Typ: &types.FunctionType{Params: []types.Type{arrayType}},
 		Code: assemble(t, func(b *instr.Builder) {
@@ -500,11 +610,12 @@ func anchors(input *jit.Input) []jit.Anchor {
 	return append(out, jit.Anchor{Addr: input.Address, IP: len(code) + 1})
 }
 
-// graph is a plan's blocks as an adjacency list in breadth-first order from its
-// root, the one numbering both forms share. A bridging block names no edge -
-// resuming from the interpreter is a fresh entry rather than a branch - so the
-// block planned right after it is its successor.
-func graph(plan jit.Plan) [][]int {
+// graph is a plan's blocks in breadth-first order from its root, and the
+// adjacency list that order numbers them by - the one numbering both forms
+// share. A bridging block names no edge - resuming from the interpreter is a
+// fresh entry rather than a branch - so the block planned right after it is
+// its successor.
+func graph(plan jit.Plan) ([]int, [][]int) {
 	succs := func(id int) []int {
 		block := plan.Blocks[id]
 		if block.Term.Kind == jit.TerminateBridge {
@@ -521,11 +632,12 @@ func graph(plan jit.Plan) [][]int {
 
 // breadth renumbers a reachable subgraph by the order a breadth-first walk from
 // root reaches it, so two graphs are equal exactly when they have the same
-// blocks and the same edges between them. An edge naming no block leaves the
-// unit entirely and meets one node standing for outside, which is where a plan
-// puts a branch past the end of the code and the SSA puts the block it lays out
-// for it.
-func breadth(root, size int, succs func(int) []int) [][]int {
+// blocks and the same edges between them. It returns that order beside the
+// adjacency list, because the order is what pairs one form's block with the
+// other's. An edge naming no block leaves the unit entirely and meets one node
+// standing for outside, which is where a plan puts a branch past the end of the
+// code and the SSA puts the block it lays out for it.
+func breadth(root, size int, succs func(int) []int) ([]int, [][]int) {
 	next := func(block int) []int {
 		if block >= size {
 			return nil
@@ -559,7 +671,7 @@ func breadth(root, size int, succs func(int) []int) [][]int {
 			out[n] = append(out[n], id[succ])
 		}
 	}
-	return out
+	return order, out
 }
 
 // assemble builds the code of one function.

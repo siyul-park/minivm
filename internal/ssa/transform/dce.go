@@ -105,8 +105,8 @@ func liveOps(fn *ssa.Function, blocks []int) map[site]bool {
 			push(a)
 		}
 		for _, fr := range op.Frames {
-			for _, v := range fr.Stack {
-				push(v)
+			for _, o := range fr.Stack {
+				push(o.Value)
 			}
 		}
 		push(op.State)

@@ -545,12 +545,3 @@ func backedge(root jit.Anchor, tr *jit.Trace, idx, target int) bool {
 	return op.Cut && op.Depth == 0 && root.IP != 0 &&
 		op.Fn == root.Addr && op.Target == root.IP && target == root.IP
 }
-
-// values names the SSA value each operand holds.
-func values(stack []operand) []ssa.Value {
-	out := make([]ssa.Value, len(stack))
-	for i, o := range stack {
-		out[i] = o.value
-	}
-	return out
-}

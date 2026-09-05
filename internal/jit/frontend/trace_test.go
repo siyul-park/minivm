@@ -30,10 +30,12 @@ func TestTrace(t *testing.T) {
 					continue
 				}
 				require.NoError(t, ssa.Verify(fn), "anchor %+v\n%s", anchor, ssa.Format(fn))
+				adopts(t, fn)
 				if tc.diverges {
 					continue
 				}
-				require.Equal(t, reached(plan), breadth(0, fn.Len(), fn.Succ),
+				_, blocks := breadth(0, fn.Len(), fn.Succ)
+				require.Equal(t, reached(plan), blocks,
 					"anchor %+v\n%s", anchor, ssa.Format(fn))
 			}
 		})
@@ -112,7 +114,8 @@ blk0: () <-- (blk0)
 
 		fn := frontend.Trace(tc.input, tc.anchors[0])
 		require.NoError(t, ssa.Verify(fn), ssa.Format(fn))
-		require.Equal(t, [][]int{{1, 2}, {3}, {3}, nil}, breadth(0, fn.Len(), fn.Succ))
+		_, blocks := breadth(0, fn.Len(), fn.Succ)
+		require.Equal(t, [][]int{{1, 2}, {3}, {3}, nil}, blocks)
 	})
 }
 

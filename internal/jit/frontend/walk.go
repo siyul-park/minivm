@@ -28,7 +28,7 @@ type walk struct {
 	seen jit.Step
 
 	ip    int
-	pre   []ssa.Value
+	pre   []operand
 	state ssa.Value
 }
 
@@ -764,7 +764,10 @@ func (w *walk) detach(from jit.Backing, offset int) {
 
 // own takes the retain that moves a borrowed reference's ownership onto the
 // operand stack. What is known about the value survives: only where its count
-// lives has changed.
+// lives has changed. The retain lands on the snapshot a deopt from this
+// instruction resumes with as well, because that is the same stack entry and
+// the count the interpreter will release when it adopts it: every own runs
+// before its instruction pops or pushes, so at names one entry in both.
 func (w *walk) own(at int) {
 	o := &w.stack[at]
 	if o.kind != types.KindRef || o.backing == jit.BackingStack {
@@ -772,6 +775,9 @@ func (w *walk) own(at int) {
 	}
 	w.retain(o.value)
 	o.backing, o.offset = jit.BackingStack, 0
+	if at < len(w.pre) {
+		w.pre[at] = *o
+	}
 }
 
 // retain adds the reference count a new owner holds.
@@ -790,13 +796,11 @@ func (w *walk) release(o operand) {
 
 // begin starts one instruction, recording the operands a deopt from it resumes
 // with. They are the operands before it ran, because that is where the
-// interpreter picks the opcode up.
+// interpreter picks the opcode up, and each keeps the ownership it holds when
+// the state materializes (see own).
 func (w *walk) begin(ip int) {
 	w.ip, w.state = ip, ssa.NoValue
-	w.pre = make([]ssa.Value, len(w.stack))
-	for i, o := range w.stack {
-		w.pre[i] = o.value
-	}
+	w.pre = append(w.pre[:0], w.stack...)
 }
 
 // deopt materializes the interpreter state the current instruction resumes
@@ -815,7 +819,7 @@ func (w *walk) deopt() ssa.Value {
 		} else {
 			ip = w.ip
 		}
-		frames[i] = ssa.Frame{Addr: fr.addr, Base: fr.base, IP: ip, Returns: fr.returns(), Stack: stack}
+		frames[i] = ssa.Frame{Addr: fr.addr, Base: fr.base, IP: ip, Returns: fr.returns(), Stack: operands(stack)}
 	}
 	w.state = w.b.Value(ssa.TypeState)
 	w.b.Add(w.block, ssa.Operation{Op: ssa.OpState, Frames: frames, Results: []ssa.Value{w.state}})

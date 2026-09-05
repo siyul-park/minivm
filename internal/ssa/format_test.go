@@ -39,7 +39,7 @@ func TestFormat(t *testing.T) {
 		next := b.Value(ssa.TypeI32)
 		one := b.Value(ssa.TypeI32)
 		step := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 12, Returns: 1, Stack: []ssa.Value{index}}}, Results: []ssa.Value{inner}})
+		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 12, Returns: 1, Stack: []ssa.Operand{{Value: index}}}}, Results: []ssa.Value{inner}})
 		b.Add(body, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{index, length}, State: inner})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{checked, index}, Results: []ssa.Value{elem}})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{total, elem}, Results: []ssa.Value{next}})
@@ -73,6 +73,30 @@ func TestFormat(t *testing.T) {
 			"\tjump blk1(v13, v11)\n"+
 			"blk3: (v14:i32) <-- (blk1)\n"+
 			"\treturn v14\n", ssa.Format(f))
+	})
+
+	t.Run("marks the stack entries a deopt frame owns", func(t *testing.T) {
+		b := ssa.New("own")
+		entry := b.Block()
+		array := b.Value(ssa.TypeRef)
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{array}})
+		// One value in two stack positions, retained once: ownership is the
+		// entry's, so the two positions print differently.
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
+			{Addr: 1, Stack: []ssa.Operand{{Value: array}, {Value: array, Owned: true}}},
+		}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+
+		f := b.Build()
+		require.NoError(t, ssa.Verify(f))
+		require.Equal(t, "func own\n"+
+			"blk0: ()\n"+
+			"\tv1:ref = load local[0]\n"+
+			"\tretain v1\n"+
+			"\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[v1, v1 owned]}\n"+
+			"\texit state v2\n", ssa.Format(f))
 	})
 
 	t.Run("prints every other operation form", func(t *testing.T) {

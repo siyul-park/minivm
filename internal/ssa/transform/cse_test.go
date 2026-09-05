@@ -119,7 +119,7 @@ func TestCSEPass_Run(t *testing.T) {
 		second, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(next, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{second}})
 		// second's only use is inside a deopt frame, not an ordinary argument.
-		b.Add(next, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Value{second}}}, Results: []ssa.Value{state}})
+		b.Add(next, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: second}}}}, Results: []ssa.Value{state}})
 		b.Term(next, ssa.Terminator{Op: ssa.OpExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
