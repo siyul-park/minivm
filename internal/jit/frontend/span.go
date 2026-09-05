@@ -144,12 +144,12 @@ func targets(ips []int, at map[int]int) []int {
 // module entry, which an already installed entry does not rebuild; every other
 // IP must name a loop header, because those are the only points a live frame
 // re-enters native code at.
-func enter(spans []span, root jit.Anchor, installed bool) (int, bool) {
-	if root.IP == 0 {
+func enter(spans []span, ip int, installed bool) (int, bool) {
+	if ip == 0 {
 		return 0, !installed && spans[0].start == 0
 	}
 	for id, s := range spans {
-		if s.start == root.IP && header(spans, id) {
+		if s.start == ip && header(spans, id) {
 			return id, true
 		}
 	}
@@ -192,16 +192,4 @@ func reach(spans []span, root int) []int {
 		}
 	}
 	return order
-}
-
-// calls reports whether code enters another function.
-func calls(code []byte) bool {
-	for ip := 0; ip < len(code); {
-		inst := instr.Instruction(code[ip:])
-		if inst.Opcode().Writes(instr.Frame) {
-			return true
-		}
-		ip += inst.Width()
-	}
-	return false
 }

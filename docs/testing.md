@@ -95,18 +95,18 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 4 | 4 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
-| `internal/jit/frontend` | 2 | 2 | 0 | 0 |
+| `internal/jit/frontend` | 3 | 3 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
 | `internal/ssa/transform` | 10 | 10 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
 | `interp` | 83 | 83 | 0 | 0 |
-| `optimize` | 4 | 4 | 0 | 0 |
+| `optimize` | 5 | 5 | 0 | 0 |
 | `pass` | 9 | 9 | 0 | 0 |
 | `prof` | 22 | 22 | 0 | 0 |
 | `program` | 25 | 25 | 0 | 0 |
-| `transform` | 10 | 10 | 0 | 0 |
+| `transform` | 12 | 12 | 0 | 0 |
 | `types` | 171 | 171 | 0 | 0 |
 
 ### Symbol Matrix
@@ -316,6 +316,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/graph/dominance.go` | `TestDominance_IDom` | ✅ |
 | `internal/graph/loop.go` | `TestLoopHeaders` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
+| `internal/jit/frontend/frontend.go` | `TestBody` | ✅ |
 | `internal/jit/frontend/trace.go` | `TestTrace` | ✅ |
 | `internal/ssa/value.go` | `TestTypeOf` | ✅ |
 | `internal/ssa/value.go` | `TestType_String` | ✅ |
@@ -494,6 +495,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/pool.go` | `TestPool_Close` | ✅ |
 | `interp/pool.go` | `TestPool_Get` | ✅ |
 | `interp/pool.go` | `TestPool_Put` | ✅ |
+| `optimize/optimizer.go` | `TestWithSSA` | ✅ |
 | `optimize/optimizer.go` | `TestNew` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Add` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Level` | ✅ |
@@ -564,6 +566,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `transform/dce.go` | `TestNewDCEPass` | ✅ |
 | `transform/gvn.go` | `TestGVNPass_Run` | ✅ |
 | `transform/gvn.go` | `TestNewGVNPass` | ✅ |
+| `transform/ssa.go` | `TestNewSSAPass` | ✅ |
+| `transform/ssa.go` | `TestSSAPass_Run` | ✅ |
 | `types/array.go` | `TestArrayType_Cast` | ✅ |
 | `types/array.go` | `TestArrayType_Equals` | ✅ |
 | `types/array.go` | `TestArrayType_Kind` | ✅ |

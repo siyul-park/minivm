@@ -71,7 +71,7 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 		return ssa.Terminator{Op: ssa.OpJump}, true
 	}
 	if w.frame().addr == 0 {
-		return ssa.Terminator{Op: ssa.OpComplete}, true
+		return w.complete(), true
 	}
 	return w.leave(), true
 }
@@ -603,6 +603,15 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 		w.release(consumed[i])
 	}
 	return true
+}
+
+// complete ends module code with the operands it leaves on the interpreter's
+// operand stack, which is a module's result the way a function's is what it
+// returns. A borrowed one is owned first, because the interpreter adopts what
+// it finds there.
+func (w *walk) complete() ssa.Terminator {
+	w.adopt()
+	return ssa.Terminator{Op: ssa.OpComplete, Args: values(w.stack)}
 }
 
 // leave ends the function with the results its type declares. A borrowed one is

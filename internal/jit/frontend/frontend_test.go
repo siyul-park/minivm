@@ -86,6 +86,73 @@ blk3: () <-- (blk1)
 	})
 }
 
+func TestBody(t *testing.T) {
+	t.Run("translates a whole function", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+			Code: assemble(t, func(b *instr.Builder) {
+				head, done := b.Label(), b.Label()
+				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+				b.Bind(head)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.I32_GE_S).BrIf(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+				b.Br(head)
+				b.Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Body(frontend.Module{}, 1, fn)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		static, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.Equal(t, ssa.Format(static), ssa.Format(out), "the entry root translates to the same function either way")
+	})
+
+	t.Run("translates module code the native calling convention refuses", func(t *testing.T) {
+		callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		input := &jit.Input{
+			Address: 0,
+			Function: &types.Function{
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.CALL) }),
+			},
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   jit.Objects{2: {Fn: callee}},
+		}
+
+		static, err := frontend.Static(input, jit.Anchor{})
+		require.NoError(t, err)
+		require.Nil(t, static, "module entry does not implement the framed native-call ABI")
+
+		out, err := frontend.Body(frontend.Module{Constants: input.Constants, Objects: input.Objects}, 0, input.Function)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+	})
+
+	t.Run("declines what bytecode alone cannot resolve", func(t *testing.T) {
+		for name, fn := range map[string]*types.Function{
+			"no code": {Typ: &types.FunctionType{}},
+			"a protected region": {
+				Typ:      &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Handlers: []instr.Handler{{Start: 0, End: 5, Catch: 5}},
+				Code:     assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
+			},
+			"an unresolved callee": {
+				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) }),
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				out, err := frontend.Body(frontend.Module{}, 1, fn)
+				require.NoError(t, err)
+				require.Nil(t, out)
+			})
+		}
+	})
+}
+
 // agrees checks that the frontend plans no root the plan does not, that every
 // function it emits verifies, and that its blocks reach each other exactly as
 // the plan's do. It returns how many roots each side planned, so a caller

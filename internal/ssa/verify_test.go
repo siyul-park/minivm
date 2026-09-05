@@ -23,6 +23,15 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
+	t.Run("accepts module code completing with operands still on the stack", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		value := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{value}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{value}})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
 	t.Run("rejects a function with no entry block", func(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(ssa.New("f").Build()), ssa.ErrForm)
 	})

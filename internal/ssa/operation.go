@@ -143,7 +143,9 @@ const (
 	// OpReturn leaves the function with Args as its results.
 	OpReturn
 	// OpComplete ends module code, which has no return: the top-level frame
-	// survives and execution advances past the end of the module.
+	// survives and execution advances past the end of the module. Args is the
+	// operand stack it leaves behind, bottom first, which is a module's
+	// observable result exactly as OpReturn's is a function's.
 	OpComplete
 	// OpExit abandons native execution and resumes the interpreter at State.
 	OpExit

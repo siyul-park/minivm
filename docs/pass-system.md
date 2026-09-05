@@ -35,6 +35,7 @@ Design rules:
 | transforms | `transform/` |
 | optimizer levels | `optimize/` |
 | branch and handler repair | `transform/rewrite.go` |
+| bytecode to SSA and back | `transform/ssa.go`, `transform/emit.go` |
 | SSA transformation policies (one per pass, no composer) | `internal/ssa/transform/` |
 
 ## Core Model
@@ -151,6 +152,21 @@ O3  FoldPass
 ```
 
 `Optimize(prog)` runs the configured pipeline. `Add(p)` appends a custom transform.
+
+`optimize.New(level, optimize.WithSSA())` appends the level's SSA passes, run over every
+function through `transform.SSAPass`:
+
+```text
+O1  FoldPass, DCEPass
+O2  FoldPass, CSEPass, GuardPass, DCEPass
+O3  FoldPass, CSEPass, GuardPass, HoistPass, DCEPass
+```
+
+They are off by default only while `transform` still owns the bytecode passes: running
+both does the work twice, and the SSA passes do not yet subsume them (see the route's
+own section below). The option goes away with the bytecode passes it defers to. One
+`pass.Manager` serves both unit types, and `transform.SSAPass` builds no pipeline of its
+own - `optimize` composes the `pass.Pipeline[*ssa.Function]` and hands it over.
 
 Because analyses are invalidated between transforms, each pass receives fresh analysis data.
 
@@ -271,7 +287,61 @@ Every pass here must stay correct and useful on a function with no JIT-specific 
 
 `HoistPass` (`internal/ssa/transform/hoist.go`) is the general loop-invariant code motion `docs/jit-internals.md`'s "No hoist, no carry" paragraph always said belonged in an optimizer rather than in the trace frontend: it uses `internal/graph`'s dominance and `LoopHeaders` directly, over any function, not only a trace-compiled one. It is deliberately narrower than that paragraph once envisioned, though. Eligibility is `OpConst` or a pure, non-trapping `OpExec` - never a guard, an `OpLoad`, an `OpStore`, or anything else that reads or writes `Local`, `Global`, `Upval`, `Heap`, `Frame`, or `Branch`, and never an integer division or remainder, whose zero-divisor fault could otherwise fire on a loop trip count of zero that the original program never reached. Every one of the four guards always carries deopt state (`ssa.Verify`'s own `resume()` rule), and that state names a frame chain and stack valid at the guard's original position, not at a point before the loop ran - `HoistPass` refuses anything that carries state outright rather than try to reconstruct one that would be. It hoists only into a preheader that already exists (the loop header's one predecessor from outside the loop) and never splits an edge to build one. See `internal/ssa/transform/hoist.go`'s own documentation for the full argument, including which of `hoistable`'s three restrictions in `internal/jit/traceplan.go` were backend representation artifacts and which - the ban on ref-array containers - is a real hazard that belongs to retain/release pairing instead, still deferred.
 
-The eventual plan is to delete `transform`'s `FoldPass`, `AlgebraicPass`, `DCEPass`, and `GVNPass` in favor of these five, once a bytecode-to-SSA-to-bytecode route exists to run them over `*program.Program` too. Nothing calls `internal/ssa/transform` yet: it has no consumer in `internal/jit` or elsewhere, and both that bytecode route and the JIT's own use of these passes are future work.
+The eventual plan is to delete `transform`'s `FoldPass`, `AlgebraicPass`, `DCEPass`, and `GVNPass` in favor of these five. `transform.SSAPass` is the route that makes that possible; the JIT's own use of these passes is still future work.
+
+## Bytecode to SSA and Back
+
+`transform.SSAPass` (`transform/ssa.go`) is a `pass.Pass[*program.Program]` that takes each
+of a program's functions - the top-level body first, then every `*types.Function` constant -
+to SSA with `frontend.Body`, runs the `pass.Pipeline[*ssa.Function]` it was constructed with,
+and writes the result back out as bytecode with the emitter in `transform/emit.go`. It builds
+no second translator: `frontend.Body` is `frontend.Static` without the three rules that belong
+to a native compile rather than to the translation (see `docs/jit-internals.md`).
+
+A constant pool has no heap behind it here, so `pool` gives every constant the interpreter
+would allocate a cell for - a string, a container, a function, an i64 too wide for its boxed
+payload - a reference naming its own pool slot plus one, and resolves the `jit.Object` facts
+for it off the constant itself. A translation only ever hands that identity back to
+`jit.Objects`, and the emitter inverts it through the same table, so no heap address is
+needed or invented.
+
+The emitter's whole problem is that SSA carries dataflow and bytecode carries an operand
+stack. A value read exactly once, in its own block, at the moment it is on top stays on the
+stack, which is every value an untransformed function holds, since it came from a stack
+machine in the first place. Anything else - read twice, read in another block, or moved out
+of stack order by a pass - takes a fresh local. Which values those are is not known before
+the stack is walked, so a walk that cannot reach a value names it, that value takes a local,
+and the walk runs again.
+
+### What the route declines
+
+A declined function comes back byte for byte as it was; nothing is ever emitted wrong.
+
+| Declined | Why |
+|---|---|
+| `UNREACHABLE` anywhere in the function | the IR has no operation for it, so the trap would be lost |
+| an opcode carrying an immediate operand (`REF_TEST`, `REF_CAST`, `ARRAY_NEW`, `ARRAY_NEW_DEFAULT`, `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `MAP_NEW`, `MAP_NEW_DEFAULT`) | the IR resolves what the operand meant and keeps no way to spell it again |
+| a block nothing reaches | the frontend's fact fixpoint runs over the edges execution takes and never gives one a state |
+| a protected region, an unresolved callee, an operand kind no opcode can pop | the frontend declines them already |
+| a module value needing a local | a module's locals sit on the operand stack a caller reads results off, so one more of them is one more result |
+| a local slot past 255, a constant slot past 65535 | the operand widths `LOCAL_*` and `CONST_GET` encode them in |
+| a branch offset outside signed 16 bits | blocks come back in the order the SSA holds them, not the order the bytecode laid them out, so a branch that just reached its target may not |
+
+### Where it differs from the bytecode passes
+
+Measured against `transform`'s own passes over the same inputs, in `TestSSAPass_Run`:
+
+- `internal/ssa/transform.FoldPass` folds `i64.xor`, `i64.and`, and `i64.or`, which
+  `transform/cf.go` writes one case per opcode by hand and left out. Every other window over
+  every pure opcode folds identically, constant pool included.
+- `internal/ssa/transform.DCEPass` drops a computation nothing reads; `transform.DCEPass`
+  cannot, because whether an operand stack still needs a value it pushed is not a question a
+  peephole over bytecode answers.
+- `transform.DCEPass` drops a block nothing reaches; the route declines the function instead.
+- `internal/ssa/transform.CSEPass` collapses a repeated pure computation over one shared
+  definition; it does not collapse one whose operands are reloaded, which is most of what
+  `transform.GVNPass` eliminates. Nothing in `internal/ssa/transform` forwards a redundant
+  load yet, and that pass is what the route still needs before `GVNPass` can be deleted.
 
 ## Rewrite Rules
 
@@ -296,6 +366,10 @@ Check separately:
 If repair cannot preserve behavior, leave the function unchanged.
 
 Prefer a safe no-op over a risky rewrite.
+
+`transform.SSAPass` re-emits rather than repairs, which is the same rule at its limit: it
+computes every branch offset from the layout it produced and declines the whole function when
+one no longer fits its operand.
 
 ## Maintenance Notes
 

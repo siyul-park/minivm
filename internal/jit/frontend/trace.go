@@ -386,7 +386,7 @@ func (r *replay) close(w *walk, tr *jit.Trace) bool {
 	case jit.StatusFallback:
 		w.exit(tr.Anchor.IP)
 	case jit.StatusCompleted:
-		r.b.Term(w.block, ssa.Terminator{Op: ssa.OpComplete})
+		r.b.Term(w.block, w.complete())
 	case jit.StatusLoop:
 		edge, ok := r.reach(w, tr.Anchor, true)
 		if !ok {

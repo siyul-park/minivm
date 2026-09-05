@@ -287,7 +287,7 @@ func terminator(f *Function, sites []site, t Terminator) error {
 			return counted(t.Op.String(), args, edges)
 		}
 	case OpComplete:
-		if args != 0 || edges != 0 {
+		if edges != 0 {
 			return counted(t.Op.String(), args, edges)
 		}
 	case OpExit, OpSuspend:

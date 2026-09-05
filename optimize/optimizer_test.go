@@ -13,6 +13,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWithSSA(t *testing.T) {
+	// The addition is dead: the bytecode passes fold it and keep the folded
+	// constant, because dropping a value the code pushes is not something a
+	// peephole over an operand stack can decide. Over SSA it is ordinary
+	// liveness, so the route removes the whole phrase.
+	build := func() *program.Program {
+		return program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 5),
+					instr.New(instr.RETURN),
+				).MustBuild(),
+			),
+		)
+	}
+
+	bytecode, err := optimize.New(optimize.O1).Optimize(build())
+	require.NoError(t, err)
+	routed, err := optimize.New(optimize.O1, optimize.WithSSA()).Optimize(build())
+	require.NoError(t, err)
+	require.NoError(t, program.Verify(routed))
+
+	kept := routed.Constants[0].(*types.Function)
+	require.NotEqual(t, instr.Format(bytecode.Constants[0].(*types.Function).Code), instr.Format(kept.Code))
+	require.Equal(t, instr.Format(instr.Marshal([]instr.Instruction{
+		instr.New(instr.I32_CONST, 5),
+		instr.New(instr.RETURN),
+	})), instr.Format(kept.Code))
+
+	vm := interp.New(routed)
+	defer vm.Close()
+	require.NoError(t, vm.Run(context.Background()))
+	value, err := vm.Pop()
+	require.NoError(t, err)
+	require.Equal(t, types.I32(5), value)
+}
+
 func TestNew(t *testing.T) {
 	optimizer := optimize.New(optimize.O2)
 	require.Equal(t, optimize.O2, optimizer.Level())

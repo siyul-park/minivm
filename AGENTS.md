@@ -65,7 +65,7 @@ Do not report work complete until all of these hold:
 | Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
 | JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/jit_arm64.go`, `interp/jit_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |
-| Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
+| Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/`, `internal/ssa/transform/` | `go test ./analysis ./transform ./optimize ./pass ./internal/ssa/... ./internal/jit/frontend` |
 | Bytecode verification / untrusted input | `docs/verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
 | REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
 | Debugger / stepping | `docs/debugging.md`, `docs/profile.md` | `interp/debugger.go`, `cli/repl.go` | `go test -race -run 'TestInterpreter_WithDebugger\|TestDebugger_Breakpoints' ./interp` |
@@ -81,7 +81,7 @@ Violations cause silent corruption or invalid execution. `docs/architecture.md` 
 - Threaded closure errors `panic`; `interp.Run()` recovers and annotates `at=<ip>`. Compile-time threading advances `c.ip`, runtime execution advances `f.ip`.
 - A JIT handler returns `true` only after lowering the opcode and advancing `s.ip` by its exact width; on type mismatch or unsupported lowering it returns `false` without mutating IR, stack, params, facts, or labels.
 - Any JIT path that can hand state back to the interpreter — guard exit, fallback, spill decision, loop back-edge, hoisted container — has an exact contract in `docs/jit-internals.md`. Read it before touching one.
-- Offset-preserving passes must preserve byte offsets; `GVNPass` and `DCEPass` are the known exceptions and must repair branches/handlers.
+- Offset-preserving passes must preserve byte offsets; `GVNPass`, `DCEPass`, and `SSAPass` are the known exceptions. The first two repair branches/handlers; `SSAPass` re-emits the function and declines it outright when a branch no longer fits its operand.
 
 ## Tests
 
