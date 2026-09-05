@@ -26,6 +26,8 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
 | Asynchronous compilation | `compile.TestWithAsync`, `compile.TestQueue_Close`, `interp.TestPool_Get`, `interp.TestPool_Close` | a build overlapping the goroutine that claimed it, adoption at a safepoint, and shutdown with builds in flight, all under `-race` |
 | Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
+| Backend seam | `backend.TestCompile` and the `Compiler` owner tests | the block layout, value-to-register binding, edge copies, and journal deopt metadata `internal/jit/backend` produces, asserted through a recording `backend.Machine` that emits nothing |
+| Golden machine code | the owning `internal/jit/<arch>` test | a test states the code to compile and the exact instructions the machine should emit for it, read back from `asm.Assembler.Instructions` before register allocation and `asm.Assembler.Alloc` after it, alongside `backend.Code.Order` and `Code.Exits`. Writing the expected output first is what decides what good code for a shape is |
 | Frontend equivalence | `frontend.TestStatic`, `frontend.TestTrace`, `interp.TestFrontend_Trace` | each SSA frontend accepts exactly the roots its `jit` plan counterpart accepts, every function it emits passes `ssa.Verify`, and its block graph matches the plan's - for `Static` over a written corpus and generated well-typed functions, for `Trace` over hand-built recorded trees and over trees the real recorder produced |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
@@ -90,10 +92,11 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | Package | Exported owners | Owned | Shared family | Missing |
 |---|---:|---:|---:|---:|
 | `analysis` | 3 | 3 | 0 | 0 |
-| `internal/asm` | 37 | 37 | 0 | 0 |
+| `internal/asm` | 39 | 39 | 0 | 0 |
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 4 | 4 | 0 | 0 |
+| `internal/jit/backend` | 10 | 10 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 3 | 3 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
@@ -122,6 +125,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/assembler.go` | `TestAssembler_Bind` | ✅ |
 | `internal/asm/assembler.go` | `TestAssembler_Pin` | ✅ |
 | `internal/asm/assembler.go` | `TestAssembler_Emit` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Instructions` | ✅ |
+| `internal/asm/assembler.go` | `TestAssembler_Alloc` | ✅ |
 | `internal/asm/assembler.go` | `TestAssembler_Build` | ✅ |
 | `internal/asm/buffer.go` | `TestNewBuffer` | ✅ |
 | `internal/asm/buffer.go` | `TestBuffer_Free` | ✅ |
@@ -316,6 +321,16 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestBody` | ✅ |
 | `internal/jit/frontend/trace.go` | `TestTrace` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompile` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Asm` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Input` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Func` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Reg` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Def` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Block` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Next` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Moves` | ✅ |
+| `internal/jit/backend/deopt.go` | `TestCompiler_Exit` | ✅ |
 | `internal/ssa/value.go` | `TestTypeOf` | ✅ |
 | `internal/ssa/value.go` | `TestType_String` | ✅ |
 | `internal/ssa/operation.go` | `TestOp_String` | ✅ |

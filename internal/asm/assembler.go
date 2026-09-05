@@ -85,27 +85,51 @@ func (a *Assembler) Emit(insts ...Instruction) {
 	a.insts = append(a.insts, insts...)
 }
 
+// Instructions returns the instructions emitted so far, before register
+// allocation: virtual registers unbound, label branches unresolved. It is the
+// stream Alloc rewrites and Build encodes, so a caller states what a code
+// generator should emit and reads back what it did.
+func (a *Assembler) Instructions() []Instruction {
+	return append([]Instruction(nil), a.insts...)
+}
+
+// Alloc runs register allocation over the emitted instructions and returns
+// the stream Build encodes: every virtual register bound to a physical one,
+// with the spills and reloads pressure required. Build repeats the work
+// rather than consuming a result, so allocating for inspection does not spend
+// the Assembler.
+func (a *Assembler) Alloc() ([]Instruction, error) {
+	insts, _, err := a.alloc()
+	return insts, err
+}
+
 // Build finalizes the instruction list into machine code: it rewrites
 // operands from virtual to physical registers, relaxes out-of-range label
 // branches, and encodes every instruction with its label references
 // resolved.
 func (a *Assembler) Build() ([]byte, error) {
-	if a.err != nil {
-		return nil, a.err
-	}
-	if a.arch == nil {
-		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
-	}
-
-	rw, err := newRewriter(a.arch, a.insts, a.pins, int(a.nextVReg))
-	if err != nil {
-		return nil, err
-	}
-	insts, labels, err := rw.run(a.insts, a.labels)
+	insts, labels, err := a.alloc()
 	if err != nil {
 		return nil, err
 	}
 	return a.encode(insts, labels)
+}
+
+// alloc binds every virtual register to a physical one, returning the
+// rewritten stream and the label positions rebased onto it.
+func (a *Assembler) alloc() ([]Instruction, map[Label]int, error) {
+	if a.err != nil {
+		return nil, nil, a.err
+	}
+	if a.arch == nil {
+		return nil, nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
+	}
+
+	rw, err := newRewriter(a.arch, a.insts, a.pins, int(a.nextVReg))
+	if err != nil {
+		return nil, nil, err
+	}
+	return rw.run(a.insts, a.labels)
 }
 
 func (a *Assembler) fail(err error) error {

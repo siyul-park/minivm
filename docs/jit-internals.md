@@ -21,6 +21,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | compile job queue, its execution mode, and the published-code store shared by interpreters | `internal/jit/compile` |
 | throughput/give-up retirement verdict (pure, no interpreter state) | `internal/jit/tier` |
 | ARM64 lowering | `internal/jit/arm64/` |
+| architecture-neutral SSA backend and the `Machine` seam | `internal/jit/backend` |
 | ARM64 arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
 | frame-journal layout | `internal/journal/` |
 | callable ABI | `internal/asm/` |
@@ -226,7 +227,7 @@ Which roots it accepts is identical to `TracePlan`'s, status for status, includi
 - **No hoist, no carry.** `Plan.Hoist` and `Plan.Carried` have no SSA form, deliberately. `internal/ssa/transform.HoistPass` is the general loop-invariant code motion pass `hoistable` motivated, built over `internal/graph` dominance and `LoopHeaders` exactly as this section once said an optimizer pass could — but it hoists a narrower class than `hoistable` ever counted, not a broader one: an `OpConst`, or a pure, non-trapping `OpExec` whose arguments are all loop-invariant, moved into an existing preheader. It never touches an `OpGuardShape` or anything else that carries deopt state, because a guard is speculative — hoisting one into a preheader would run it (and risk failing it) on a loop trip count of zero the original program never reached — and because the state a guard resumes into names a frame chain valid at its original position, not at a point before the loop ran. Rereading `hoistable`'s three restrictions against that pass: "one container per loop" and `MaxHoistSlot` are both backend representation artifacts of caching one container's data pointer and length in fixed ARM64 registers, which `HoistPass` has no register budget to protect and so does not reproduce; the ref-array exclusion is real, but it belongs to the slice-header cache `internal/jit/arm64/control.go`'s own `hoist` builds to skip an element's retain/release accounting on every access, which `HoistPass` never attempts (it moves no `OpLoad`, no `OpStore`, and no `OpExec` that reads or writes `Heap`) — that hazard remains retain/release pairing's, still deferred until a backend consumes SSA. `Carried` is likewise which locals an allocator keeps in registers across a back-edge, with no HoistPass counterpart yet.
 - **Narrower than the plan.** A callee holding captures or a non-scalar local of its own is not inlined: an inlined frame reaches its upvalues through the closure reference it was called with, which a `Slot` cannot name, and a fresh frame sits over stale words, so filling a reference slot would release a count it never took (`OpStore` is release-then-write). A recording ending on a tail call is refused, because its frame is gone and nothing names where it resumes. The recorded `Step.Arg` observations that specialize a divisor or shift do not become `OpGuardValue` yet, and `Step.Shape` for `ARRAY_SET`/`STRUCT_SET` does not become a guard — the IR carries no shape for a container store in either frontend.
 
-`jit.Bridgeable` still hardcodes ARM64 capability in the architecture-neutral layer, and the SSA frontend consumes it as-is; replacing it with a capability the selected `Machine` answers is open work.
+`jit.Bridgeable` still hardcodes ARM64 capability in the architecture-neutral layer, and the SSA frontend consumes it as-is. `backend.Machine.Lowers` is the capability that replaces it (see SSA Backend Seam); the frontend switches to asking the selected machine when the ARM64 backend moves onto that seam.
 
 ## Trace Recording
 
@@ -296,6 +297,128 @@ In a loop plan, a partial leg whose cut lands on the plan's own header (same fun
 Every plan block passes through one `emitBlock` path and every edge carries an explicit block ID or an unresolved threaded-fallback anchor. Bytecode locations describe source positions only; block IDs preserve distinct inlined contexts even when they share the same `(function, IP)`. A state-backed block reloads VM homes, while a profiled successor may continue with the current symbolic state.
 
 Caller continuations are ordinary blocks in the same flat block pool. A cold edge carries the continuation block IDs that must run after an inlined callee returns. A deferred edge receives a label and a canonical symbolic snapshot (register-free values, reset locals); `label` shares the label of a previously scheduled continuation only when block, tail, and canonical snapshot are identical, and its ledger keeps consumed work items so folded legs that branch into one another (a loop nest) converge instead of exhausting the continuation limit. States are never merged by bytecode anchor alone.
+
+### SSA Backend Seam
+
+`internal/jit/backend` is the architecture-neutral half of an SSA backend, and
+`backend.Machine` is the seam an architecture implements under it.
+`backend.Compile(m, a, in, f)` drives one `*ssa.Function` through one machine
+into one `asm.Assembler`, and returns the layout it chose and the exit
+descriptors it registered. Nothing installs it yet: `internal/jit/arm64` still
+consumes `jit.Plan` through `jit.Machine.Lower`, and both seams exist until the
+ARM64 lowering is ported.
+
+The seam is four hooks, opened per compile so one `Machine` serves concurrent
+compiles and holds none of their state:
+
+| Hook | Contract |
+|---|---|
+| `Machine.Lowers(instr.Opcode) bool` | the capability question, asked before anything is planned. `Compile` refuses a function holding an `OpExec` the machine declined, so a `Lowering` never sees one |
+| `Machine.Open(*Compiler) Lowering` | begins one compile; the returned `Lowering` holds that compile's state |
+| `Lowering.Enter() bool` | the callable prologue, emitted before the first block's label is bound. Every block already has its label, so a prologue that dispatches an external bridge re-entry can branch to one |
+| `Lowering.Lower(block int, ops []ssa.Operation) (int, bool)` | emits `ops[0]` and reports how many of `ops` it consumed. Consuming more than one is how a machine fuses an adjacent run; the compiler calls again from the first operation left |
+| `Lowering.Term(block int, ssa.Terminator) bool` | ends the block. No label is bound after it, so a machine asks `Compiler.Next` which block falls through |
+| `Lowering.Leave() bool` | emits what lowering deferred — the cold stub behind each guard, any continuation it scheduled |
+
+Anything else a machine needs it asks the `*Compiler` it was opened with:
+`Asm` (the assembler it emits, allocates temporaries, and takes labels from),
+`Input` (the compile-time snapshot), `Func` (the IR, for a value's type or a
+block's parameters), `Reg` (the virtual register bound to a value), `Def` (the
+operation defining a value), `Block` (a block's label), `Next` (the block laid
+out after one), `Moves` (an edge's block-parameter copies), and `Exit` (the
+journal words a deoptimization writes).
+
+The neutral layer owns exactly four decisions, because each is stated by the IR
+rather than by a target:
+
+- **Layout.** Blocks are emitted in reverse postorder, with the depth-first
+  walk taking successors back to front so the first edge of a terminator is the
+  one laid out next. A block precedes every block it dominates and a loop body
+  stays contiguous. `Code.Order` reports it.
+- **Registers.** Every value is bound to one `asm.VReg` for the whole compile,
+  allocated in value order before lowering starts, so the assignment is
+  deterministic. An integer or reference takes a 64-bit integer register, an
+  `f32` a 32-bit float register and an `f64` a 64-bit one — the lane each
+  representation occupies. A machine that wants a narrower view derives it.
+- **Edge copies.** `Compiler.Moves` turns an edge's arguments into the copies
+  its target block's parameters need, ordered so no register is overwritten
+  before it is read, with a fresh temporary parked in front of a cycle (the
+  swap two loop-carried values make on a back edge). Placement stays the
+  machine's, because only it knows whether a copy fits before its branch or
+  needs a landing pad.
+- **Deopt metadata.** `Compiler.Exit` resolves the `ssa.Frame` chain an
+  `OpState` carries into `backend.Deopt`: `Resume` is `journal.CellNextIP`,
+  `SP` is `journal.CellSP`, `Stack` is every live operand with the VM stack
+  slot it must be boxed into, and `Frames` are the `journal.Record` rows. Every
+  coordinate is a delta from the entry frame's base, exactly as the ARM64
+  `trapFlushed` writes them. A frame's operand sits at its `Base` plus its
+  function's `types.Function.Declared()` slot count plus its position, so a
+  compile whose frame address names no function is refused rather than resuming
+  at a wrong slot. `Frames` is **innermost first**, which is the order
+  `journal.At` indexes records in and `Interpreter.deopt` reads them back in —
+  the reverse of the outermost-first order `ssa.Frame` chains are built in.
+  `Exit` also assigns the descriptor `journal.CellExitID` reports (`ID+1`, so
+  `ID == -1` writes the zero that means none, which is what a bridge and a
+  yield take), and `Code.Exits` is those descriptors in assignment order.
+
+Everything else stays the machine's: the instructions, the prologue, the
+journal stores, the cold stubs and their retains, register pinning, and the
+symbolic operand state a stack-machine lowering keeps.
+
+Two lowering facilities the ARM64 backend uses today are preserved by name.
+`dispatch.go`'s `fuse` reads the step *after* the one being lowered, which is
+`Lowering.Lower`'s window and consumed count. `value.known`/`imm` reads a
+constant *behind* an operand — the fold that turns a shift amount into an
+immediate and elides a divide-by-zero guard — which is `Compiler.Def` returning
+the argument's `OpConst`. A seam offering only one of the two would cost the
+backend an optimization it already has.
+
+#### Observability and golden code
+
+Every stage of the pipeline is inspectable, so a test can state the machine
+code a shape should compile to instead of accepting whatever lowering emits.
+`Code.Order` is the layout, `Code.Exits` the descriptors, `Compiler.Exit`'s
+`Deopt` the metadata, `asm.Assembler.Instructions` the emitted stream before
+register allocation, and `asm.Assembler.Alloc` the stream `Build` encodes,
+after allocation and spilling. `Alloc` repeats the allocation rather than
+consuming it, so inspecting does not spend the assembler.
+
+Golden machine-code tests belong beside the machine that emits them
+(`internal/jit/arm64`), not here: a test builds an SSA function, runs
+`backend.Compile` with the real machine, and asserts the two instruction
+streams plus the layout and exits. `internal/jit/backend`'s own tests use a
+recording machine that emits nothing, because the neutral layer's product is
+the order, the registers, the moves, and the metadata.
+
+#### Where optimization belongs
+
+- Target-independent rewrites belong in `internal/ssa/transform`, which already
+  owns folding, load forwarding, CSE, guard elimination, hoisting, and DCE, and
+  is where retain/release pairing, critical-edge splitting, and block-parameter
+  copy coalescing go. A pass reimplemented per machine is a pass in the wrong
+  package.
+- Instruction selection, addressing modes, immediate folding, redundant-move
+  elimination, and peepholes are the machine's, judged against golden output.
+- Layout, value-to-register binding, edge-copy sequencing, and deopt metadata
+  are `internal/jit/backend`'s. Anything here that turns out to be
+  target-specific moves out to a machine rather than growing a policy knob.
+
+#### What the seam still cannot say
+
+- **Cold-path ownership.** `ssa.Frame` lists the stack a deopt resumes with but
+  not which of those values carry a reference count, so `backend.Flush` states
+  a location and no more and a machine keeps taking the cold-path retains
+  itself (`retainDeferred`, `emitExits`). The fix is in the IR — an ownership
+  bit beside each `Frame.Stack` value — not in this package; `Flush` is where
+  it lands.
+- **Entry kind.** A `jit.Plan` says whether its anchor is a function entry, a
+  module entry, or a loop header, and the ARM64 prologue and teardown differ by
+  it. An `ssa.Function` says none of that, so `Compile` will need the anchor
+  and kind when ARM64 moves onto this seam.
+- **Bridge resume points.** `jit.Entry.Resumable` is built from
+  `Block.Bridge` today. Its SSA form is the single successor of a block whose
+  last operation is an `OpBridge`, at the bridged opcode's IP plus its encoded
+  width; computing it belongs with the entry dispatch that consumes it.
 
 ## Trace ABI
 

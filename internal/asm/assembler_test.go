@@ -161,6 +161,64 @@ func TestAssembler_Emit(t *testing.T) {
 	})
 }
 
+func TestAssembler_Instructions(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+	load := arm64.LDI(v, 1)
+	assembler.Emit(load...)
+	assembler.Emit(arm64.RET())
+
+	require.Equal(t, append(append([]asm.Instruction(nil), load...), arm64.RET()), assembler.Instructions())
+}
+
+func TestAssembler_Alloc(t *testing.T) {
+	t.Run("binds every virtual register to a physical one", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, 1)...)
+		assembler.Emit(arm64.RET())
+
+		insts, err := assembler.Alloc()
+		require.NoError(t, err)
+		require.Len(t, insts, len(assembler.Instructions()))
+		for _, inst := range insts {
+			for _, operand := range [4]asm.Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
+				require.NotContains(t, []asm.Operand{asm.Virtual(v)}, operand)
+			}
+		}
+	})
+
+	t.Run("leaves the assembler buildable", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, 1)...)
+		assembler.Emit(arm64.RET())
+
+		_, err := assembler.Alloc()
+		require.NoError(t, err)
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+	})
+
+	t.Run("reports the pressure Build reports", func(t *testing.T) {
+		assembler := asm.New(noFrameArch{arm64.New()})
+		values := make([]asm.VReg, 64)
+		for i := range values {
+			values[i] = assembler.Reg(asm.RegTypeInt, asm.Width64)
+			assembler.Emit(arm64.LDI(values[i], uint64(i))...)
+		}
+		for _, v := range values {
+			assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.Virtual(v)})
+		}
+		assembler.Emit(arm64.RET())
+
+		_, err := assembler.Alloc()
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
+	})
+}
+
 func TestAssembler_Build(t *testing.T) {
 	t.Run("rejects a virtual register the assembler never handed out", func(t *testing.T) {
 		assembler := asm.New(arm64.New())
