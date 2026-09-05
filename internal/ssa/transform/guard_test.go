@@ -1,4 +1,4 @@
-package opt_test
+package transform_test
 
 import (
 	"strings"
@@ -7,13 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/siyul-park/minivm/internal/ssa"
-	"github.com/siyul-park/minivm/internal/ssa/opt"
+	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
 )
 
 func TestNewGuardPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
-		var p pass.Pass[*ssa.Function] = opt.NewGuardPass()
+		var p pass.Pass[*ssa.Function] = transform.NewGuardPass()
 		require.NotNil(t, p)
 	})
 }
@@ -33,7 +33,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -57,7 +57,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved, "the second guard admits a different shape, so it is not redundant")
@@ -79,7 +79,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -101,7 +101,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved, "the two guards narrow the same operand to different kinds")
@@ -123,7 +123,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -143,7 +143,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -165,7 +165,7 @@ func TestGuardPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewGuardPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)

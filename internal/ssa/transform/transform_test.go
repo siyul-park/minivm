@@ -1,4 +1,4 @@
-package opt_test
+package transform_test
 
 import (
 	"strings"
@@ -8,18 +8,19 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	"github.com/siyul-park/minivm/internal/ssa/opt"
+	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
-func TestNew(t *testing.T) {
-	t.Run("returns an optimizer", func(t *testing.T) {
-		require.NotNil(t, opt.New())
-	})
-}
-
-func TestOptimizer_Optimize(t *testing.T) {
+// TestPassOrder composes this package's four passes into a caller-owned
+// pipeline, exactly as internal/jit or a future bytecode-to-SSA route would,
+// and asserts the ordering fact this package itself no longer enforces:
+// CSEPass must run before GuardPass, because a guard's operand is only
+// recognizably equal to an earlier guard's once CSEPass has unified the
+// values they read, and DCEPass must run last to sweep up what folding,
+// deduplicating, and guard elimination leave behind.
+func TestPassOrder(t *testing.T) {
 	t.Run("folds, deduplicates, eliminates a redundant guard, and sweeps the dead code left behind", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
@@ -47,10 +48,15 @@ func TestOptimizer_Optimize(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		out, err := opt.New().Optimize(fn)
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(transform.NewFoldPass())
+		pipeline.Add(transform.NewCSEPass())
+		pipeline.Add(transform.NewGuardPass())
+		pipeline.Add(transform.NewDCEPass())
+		out, err := pipeline.Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Same(t, fn, out, "Optimize mutates the function in place and returns it")
+		require.Same(t, fn, out, "the pipeline mutates the function in place and returns it")
 		require.NoError(t, ssa.Verify(fn))
 
 		got := ssa.Format(fn)
@@ -62,36 +68,4 @@ func TestOptimizer_Optimize(t *testing.T) {
 		// same folded-and-deduplicated constant.
 		require.Equal(t, 1, strings.Count(got, "const 5"))
 	})
-}
-
-func TestOptimizer_Add(t *testing.T) {
-	t.Run("runs a custom pass appended to the pipeline", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
-		fn := b.Build()
-
-		o := opt.New()
-		ran := false
-		o.Add(recordingPass{ran: &ran})
-
-		_, err := o.Optimize(fn)
-
-		require.NoError(t, err)
-		require.True(t, ran, "the appended pass must run as part of the pipeline")
-	})
-}
-
-// recordingPass is a minimal pass.Pass[*ssa.Function] that only records that
-// it ran, proving Optimizer.Add wires a custom pass into the same pipeline
-// the built-in passes run in rather than something Optimize ignores.
-type recordingPass struct {
-	ran *bool
-}
-
-var _ pass.Pass[*ssa.Function] = recordingPass{}
-
-func (p recordingPass) Run(_ *pass.Manager, _ *ssa.Function) (pass.Preserved, error) {
-	*p.ran = true
-	return pass.PreserveAll(), nil
 }

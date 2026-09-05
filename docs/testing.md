@@ -97,7 +97,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 2 | 2 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
-| `internal/ssa/opt` | 11 | 11 | 0 | 0 |
+| `internal/ssa/transform` | 8 | 8 | 0 | 0 |
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 43 | 43 | 0 | 0 |
@@ -337,17 +337,14 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/ssa/builder.go` | `TestBuilder_Build` | ✅ |
 | `internal/ssa/verify.go` | `TestVerify` | ✅ |
 | `internal/ssa/format.go` | `TestFormat` | ✅ |
-| `internal/ssa/opt/opt.go` | `TestNew` | ✅ |
-| `internal/ssa/opt/opt.go` | `TestOptimizer_Optimize` | ✅ |
-| `internal/ssa/opt/opt.go` | `TestOptimizer_Add` | ✅ |
-| `internal/ssa/opt/fold.go` | `TestNewFoldPass` | ✅ |
-| `internal/ssa/opt/fold.go` | `TestFoldPass_Run` | ✅ |
-| `internal/ssa/opt/cse.go` | `TestNewCSEPass` | ✅ |
-| `internal/ssa/opt/cse.go` | `TestCSEPass_Run` | ✅ |
-| `internal/ssa/opt/guard.go` | `TestNewGuardPass` | ✅ |
-| `internal/ssa/opt/guard.go` | `TestGuardPass_Run` | ✅ |
-| `internal/ssa/opt/dce.go` | `TestNewDCEPass` | ✅ |
-| `internal/ssa/opt/dce.go` | `TestDCEPass_Run` | ✅ |
+| `internal/ssa/transform/fold.go` | `TestNewFoldPass` | ✅ |
+| `internal/ssa/transform/fold.go` | `TestFoldPass_Run` | ✅ |
+| `internal/ssa/transform/cse.go` | `TestNewCSEPass` | ✅ |
+| `internal/ssa/transform/cse.go` | `TestCSEPass_Run` | ✅ |
+| `internal/ssa/transform/guard.go` | `TestNewGuardPass` | ✅ |
+| `internal/ssa/transform/guard.go` | `TestGuardPass_Run` | ✅ |
+| `internal/ssa/transform/dce.go` | `TestNewDCEPass` | ✅ |
+| `internal/ssa/transform/dce.go` | `TestDCEPass_Run` | ✅ |
 | `cli/cli.go` | `TestRoot` | ✅ |
 | `cli/cli.go` | `TestWithFS` | ✅ |
 | `cli/fs.go` | `TestOS` | ✅ |

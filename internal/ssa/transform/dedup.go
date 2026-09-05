@@ -1,4 +1,4 @@
-package opt
+package transform
 
 import (
 	"github.com/siyul-park/minivm/internal/graph"

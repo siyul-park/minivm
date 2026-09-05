@@ -1,4 +1,4 @@
-package opt_test
+package transform_test
 
 import (
 	"testing"
@@ -7,14 +7,14 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	"github.com/siyul-park/minivm/internal/ssa/opt"
+	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
 func TestNewFoldPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
-		var p pass.Pass[*ssa.Function] = opt.NewFoldPass()
+		var p pass.Pass[*ssa.Function] = transform.NewFoldPass()
 		require.NotNil(t, p)
 	})
 }
@@ -33,7 +33,7 @@ func TestFoldPass_Run(t *testing.T) {
 		before := ssa.Format(fn)
 		require.Contains(t, before, "v3:i32 = i32.add v1, v2")
 
-		preserved, err := opt.NewFoldPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -55,7 +55,7 @@ func TestFoldPass_Run(t *testing.T) {
 		fn := b.Build()
 		before := ssa.Format(fn)
 
-		preserved, err := opt.NewFoldPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved)
@@ -72,7 +72,7 @@ func TestFoldPass_Run(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{quotient}})
 		fn := b.Build()
 
-		preserved, err := opt.NewFoldPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved)
@@ -91,7 +91,7 @@ func TestFoldPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewFoldPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved)
@@ -111,7 +111,7 @@ func TestFoldPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewFoldPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -231,7 +231,7 @@ func TestFoldPass_Run(t *testing.T) {
 			fn := b.Build()
 			require.NoError(t, ssa.Verify(fn))
 
-			preserved, err := opt.NewFoldPass().Run(pass.NewManager(), fn)
+			preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 			require.NoError(t, err)
 			require.Equal(t, pass.PreserveNone(), preserved)

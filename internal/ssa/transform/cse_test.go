@@ -1,4 +1,4 @@
-package opt_test
+package transform_test
 
 import (
 	"strings"
@@ -8,14 +8,14 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	"github.com/siyul-park/minivm/internal/ssa/opt"
+	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
 func TestNewCSEPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
-		var p pass.Pass[*ssa.Function] = opt.NewCSEPass()
+		var p pass.Pass[*ssa.Function] = transform.NewCSEPass()
 		require.NotNil(t, p)
 	})
 }
@@ -32,7 +32,7 @@ func TestCSEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewCSEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -55,7 +55,7 @@ func TestCSEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewCSEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -82,7 +82,7 @@ func TestCSEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewCSEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved, "neither arm dominates the other, so nothing collapses")
@@ -101,7 +101,7 @@ func TestCSEPass_Run(t *testing.T) {
 		b.Term(next, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 
-		preserved, err := opt.NewCSEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -124,7 +124,7 @@ func TestCSEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewCSEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)

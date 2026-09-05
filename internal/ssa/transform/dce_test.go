@@ -1,4 +1,4 @@
-package opt_test
+package transform_test
 
 import (
 	"testing"
@@ -7,14 +7,14 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	"github.com/siyul-park/minivm/internal/ssa/opt"
+	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
 func TestNewDCEPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
-		var p pass.Pass[*ssa.Function] = opt.NewDCEPass()
+		var p pass.Pass[*ssa.Function] = transform.NewDCEPass()
 		require.NotNil(t, p)
 	})
 }
@@ -30,7 +30,7 @@ func TestDCEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewDCEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -48,7 +48,7 @@ func TestDCEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewDCEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved, "array.len reads the heap, so it is kept regardless of its unused result")
@@ -68,7 +68,7 @@ func TestDCEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.Equal(t, 3, fn.Len())
 
-		preserved, err := opt.NewDCEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -88,7 +88,7 @@ func TestDCEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewDCEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved, "sum is unused as an ordinary argument, but the frame that names it is a live root")
@@ -107,7 +107,7 @@ func TestDCEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewDCEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
@@ -131,7 +131,7 @@ func TestDCEPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := opt.NewDCEPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveAll(), preserved)
