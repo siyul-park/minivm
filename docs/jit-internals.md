@@ -228,7 +228,7 @@ Which roots it accepts is identical to `TracePlan`'s, status for status, includi
 - **No hoist, no carry.** `Plan.Hoist` and `Plan.Carried` have no SSA form, deliberately. `internal/ssa/transform.HoistPass` is the general loop-invariant code motion pass `hoistable` motivated, built over `internal/graph` dominance and `LoopHeaders` exactly as this section once said an optimizer pass could — but it hoists a narrower class than `hoistable` ever counted, not a broader one: an `OpConst`, or a pure, non-trapping `OpExec` whose arguments are all loop-invariant, moved into an existing preheader. It never touches an `OpGuardShape` or anything else that carries deopt state, because a guard is speculative — hoisting one into a preheader would run it (and risk failing it) on a loop trip count of zero the original program never reached — and because the state a guard resumes into names a frame chain valid at its original position, not at a point before the loop ran. Rereading `hoistable`'s three restrictions against that pass: "one container per loop" and `MaxHoistSlot` are both backend representation artifacts of caching one container's data pointer and length in fixed ARM64 registers, which `HoistPass` has no register budget to protect and so does not reproduce; the ref-array exclusion is real, but it belongs to the slice-header cache `internal/jit/arm64/control.go`'s own `hoist` builds to skip an element's retain/release accounting on every access, which `HoistPass` never attempts (it moves no `OpLoad`, no `OpStore`, and no `OpExec` that reads or writes `Heap`) — that hazard remains retain/release pairing's, still deferred until a backend consumes SSA. `Carried` now has a counterpart in `internal/ssa/transform.PromotePass`, which says the same thing one level up: a loop-carried scalar local is promoted out of its slot into SSA values with a block parameter on the back edge, so the backend sees a value with a live range instead of a slot to keep a register authoritative for, and every `OpState` names the value each promoted slot must be written back with - the IR form of `commitCarried`. It is not the whole of `Carried`: the seven-register budget, `MaxHoistSlot`, and the bridge rule that disables carrying are all backend and plan facts a target-independent pass has no counterpart for, and a ref local is promoted by neither.
 - **Narrower than the plan.** A callee holding captures or a non-scalar local of its own is not inlined: an inlined frame reaches its upvalues through the closure reference it was called with, which a `Slot` cannot name, and a fresh frame sits over stale words, so filling a reference slot would release a count it never took (`OpStore` is release-then-write). A recording reaching a tail call ends there on `OpExit` (see Tail calls below), so the records after one - which the recorder writes in the reused frame, under the callee's own address - are never replayed. The recorded `Step.Arg` observations that specialize a divisor or shift do not become `OpGuardValue` yet, and `Step.Shape` for `ARRAY_SET`/`STRUCT_SET` does not become a guard — the IR carries no shape for a container store in either frontend. A call to a closure allocated at runtime is planned by neither frontend: the plan lowering pairs the recorded `Step.Callee` with the observed closure reference, and `jit.Objects` resolves only address zero, the constant pool, and host-bound addresses, so nothing in the snapshot maps a runtime closure to the function it calls. That is the same gap as the inlining restriction above and closes with it.
 
-`jit.Bridgeable` still hardcodes ARM64 capability in the architecture-neutral layer, and the SSA frontend consumes it as-is. `backend.Machine.Lowers` is the capability that replaces it (see SSA Backend Seam); the frontend switches to asking the selected machine when the ARM64 backend moves onto that seam.
+`jit.Bridgeable` still hardcodes ARM64 capability in the architecture-neutral layer, and the SSA frontend consumes it as-is. `backend.Machine.Lowers` and `backend.Machine.Traps` are the two capability questions that replace it (see SSA Backend Seam) — one refuses an opcode, the other ends the block on it; the frontend switches to asking the selected machine when the ARM64 backend moves onto that seam.
 
 ### Tail calls
 
@@ -315,9 +315,10 @@ Caller continuations are ordinary blocks in the same flat block pool. A cold edg
 
 `internal/jit/backend` is the architecture-neutral half of an SSA backend, and
 `backend.Machine` is the seam an architecture implements under it.
-`backend.Compile(m, a, in, f)` drives one `*ssa.Function` through one machine
-into one `asm.Assembler`, and returns the layout it chose and the exit
-descriptors it registered. Nothing installs it yet: `internal/jit/arm64` still
+`backend.Compile(m, a, in, root, f)` drives one `*ssa.Function`, entered at one
+`jit.Anchor`, through one machine into one `asm.Assembler`, and returns the
+layout it chose, the exit descriptors it registered, and the bridge resume
+points its callable may be re-entered at. Nothing installs it yet: `internal/jit/arm64` still
 consumes `jit.Plan` through `jit.Machine.Lower`, and both seams exist until the
 ARM64 lowering is ported.
 
@@ -326,20 +327,31 @@ compiles and holds none of their state:
 
 | Hook | Contract |
 |---|---|
-| `Machine.Lowers(instr.Opcode) bool` | the capability question, asked before anything is planned. `Compile` refuses a function holding an `OpExec` the machine declined, so a `Lowering` never sees one |
+| `Machine.Lowers(instr.Opcode) bool` | can the machine emit native code for this opcode at all. `Compile` refuses a function holding an `OpExec` the machine declined, so a `Lowering` never sees one. It judges only the blocks it lays out: an opcode reachable solely behind a trap is code no native path runs, and refusing the function for it would throw away the prefix the trap exists to keep |
+| `Machine.Traps(instr.Opcode) bool` | does lowering this opcode end the block by handing control back — the unconditional terminal exit ARM64 emits today for the map, string-iteration, bulk-array, `MAP_SET`, `REF_TEST`/`REF_CAST`, error, `THROW`, and `YIELD`/`RESUME` opcodes. The opposite answer to `Lowers`: a trapped opcode *is* lowered, as an exit, so `Traps` is asked only of one `Lowers` admits |
 | `Machine.Open(*Compiler) Lowering` | begins one compile; the returned `Lowering` holds that compile's state |
 | `Lowering.Enter() bool` | the callable prologue, emitted before the first block's label is bound. Every block already has its label, so a prologue that dispatches an external bridge re-entry can branch to one |
-| `Lowering.Lower(block int, ops []ssa.Operation) (int, bool)` | emits `ops[0]` and reports how many of `ops` it consumed. Consuming more than one is how a machine fuses an adjacent run; the compiler calls again from the first operation left |
-| `Lowering.Term(block int, ssa.Terminator) bool` | ends the block. No label is bound after it, so a machine asks `Compiler.Next` which block falls through |
+| `Lowering.Lower(block int, ops []ssa.Operation) (int, bool)` | emits `ops[0]` and reports how many of `ops` it consumed. Consuming more than one is how a machine fuses an adjacent run; the compiler calls again from the first operation left. `ops` ends at the block's trapping operation, so a fusion can never reach past the point control leaves |
+| `Lowering.Term(block int, ssa.Terminator) bool` | ends the block, unless a trap already did. No label is bound after it, so a machine asks `Compiler.Next` which block falls through |
 | `Lowering.Leave() bool` | emits what lowering deferred — the cold stub behind each guard, any continuation it scheduled |
 
 Anything else a machine needs it asks the `*Compiler` it was opened with:
 `Asm` (the assembler it emits, allocates temporaries, and takes labels from),
-`Input` (the compile-time snapshot), `Func` (the IR, for a value's type or a
-block's parameters), `Reg` (the virtual register bound to a value), `Def` (the
-operation defining a value), `Block` (a block's label), `Next` (the block laid
-out after one), `Moves` (an edge's block-parameter copies), and `Exit` (the
-journal words a deoptimization writes).
+`Input` (the compile-time snapshot), `Root` (the anchor this compile is entered
+at), `Func` (the IR, for a value's type or a block's parameters), `Reg` (the
+virtual register bound to a value), `Def` (the operation defining a value),
+`Block` (a block's label), `Next` (the block laid out after one), `Bridges`
+(the external re-entries an entry dispatch must answer), `Moves` (an edge's
+block-parameter copies), and `Exit` (the journal words a deoptimization
+writes).
+
+The entry kind is not carried anywhere: `jit.Anchor.Kind` derives it, because
+an offset inside a function is a loop header, address zero at offset zero is
+the module body, and any other address at offset zero is that function's own
+entry. `Plan.Valid` checks its `Kind` field against exactly that. So `Compile`
+takes the anchor alone, `Compiler.Root` hands it to the machine, and
+`ssa.Function` — the same IR the ahead-of-time optimizer builds, which has no
+anchors and no entries — gains nothing.
 
 The neutral layer owns exactly four decisions, because each is stated by the IR
 rather than by a target:
@@ -347,7 +359,10 @@ rather than by a target:
 - **Layout.** Blocks are emitted in reverse postorder, with the depth-first
   walk taking successors back to front so the first edge of a terminator is the
   one laid out next. A block precedes every block it dominates and a loop body
-  stays contiguous. `Code.Order` reports it.
+  stays contiguous. A block that traps reaches none of its successors, so the
+  walk stops there and lays out nothing only that block led to; the compiler
+  also stops the block at the trap, handing `Lower` no operation after it and
+  calling no `Term`, since control has already left. `Code.Order` reports it.
 - **Registers.** Every value is bound to one `asm.VReg` for the whole compile,
   allocated in value order before lowering starts, so the assignment is
   deterministic. An integer or reference takes a 64-bit integer register, an
@@ -376,6 +391,13 @@ rather than by a target:
   `Exit` also assigns the descriptor `journal.CellExitID` reports (`ID+1`, so
   `ID == -1` writes the zero that means none, which is what a bridge and a
   yield take), and `Code.Exits` is those descriptors in assignment order.
+- **Bridge resume points.** A block whose last operation is an `OpBridge` and
+  which leaves by a single edge creates one external re-entry: the interpreter
+  runs that opcode and leaves execution at its own IP plus its encoded width,
+  in the block that edge names. `backend.Bridge` is that pair, `Code.Bridges`
+  the list, and `Compiler.Bridges` the same list during the compile, because
+  the entry dispatch that turns the journal's IP into a branch is emitted in
+  `Enter`. `jit.Entry.Resumable` is these IPs.
 
 Everything else stays the machine's: the instructions, the prologue, the
 journal stores, the cold stubs and their retains, register pinning, and the
@@ -421,14 +443,13 @@ the order, the registers, the moves, and the metadata.
 
 #### What the seam still cannot say
 
-- **Entry kind.** A `jit.Plan` says whether its anchor is a function entry, a
-  module entry, or a loop header, and the ARM64 prologue and teardown differ by
-  it. An `ssa.Function` says none of that, so `Compile` will need the anchor
-  and kind when ARM64 moves onto this seam.
-- **Bridge resume points.** `jit.Entry.Resumable` is built from
-  `Block.Bridge` today. Its SSA form is the single successor of a block whose
-  last operation is an `OpBridge`, at the bridged opcode's IP plus its encoded
-  width; computing it belongs with the entry dispatch that consumes it.
+- **A bridge a block does not end on.** The static frontend cuts a span at
+  every bridgeable opcode, so its `OpBridge` is always a block's last
+  operation. The trace frontend does not: a bridgeable opcode recorded
+  mid-trace becomes an `OpBridge` with operations after it in the same block.
+  Such a bridge names no resume point, so the callable traps there and falls
+  back instead of resuming. Splitting the recorded block at it is the trace
+  frontend's fix, not the seam's.
 
 ## Trace ABI
 

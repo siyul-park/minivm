@@ -10,9 +10,9 @@ package jit
 import "github.com/siyul-park/minivm/prof"
 
 // Anchor names one native entry point: a function address and the in-function
-// instruction offset a plan starts compiling from. ip is zero for a
+// instruction offset a plan starts compiling from. IP is zero for a
 // function-entry or module-entry anchor and positive for a loop-header
-// anchor.
+// anchor, which is what Kind reads it back as.
 type Anchor struct {
 	Addr int
 	IP   int
@@ -114,6 +114,24 @@ const (
 	maxCarried   = 7
 )
 
+// Kind is which of the three entries this anchor names, which is the anchor's
+// own fact rather than a choice something makes alongside it: an offset inside
+// a function is a loop header, address zero at offset zero is the module body,
+// and any other address at offset zero is that function's own entry. Nothing
+// else is an anchor, so a negative coordinate names no entry at all.
+func (a Anchor) Kind() EntryKind {
+	switch {
+	case a.Addr < 0 || a.IP < 0:
+		return entryInvalid
+	case a.IP > 0:
+		return EntryLoop
+	case a.Addr == 0:
+		return EntryModule
+	default:
+		return EntryFunction
+	}
+}
+
 // Profile converts kind to the profiling vocabulary prof.Collector records
 // against.
 func (kind EntryKind) Profile() prof.EntryKind {
@@ -136,20 +154,7 @@ func (p Plan) Valid() bool {
 	if p.Root < 0 || p.Root >= len(p.Blocks) || p.Blocks[p.Root].Tail || p.Blocks[p.Root].Anchor != p.Anchor {
 		return false
 	}
-	switch p.Kind {
-	case EntryFunction:
-		if p.Anchor.Addr <= 0 || p.Anchor.IP != 0 {
-			return false
-		}
-	case EntryLoop:
-		if p.Anchor.Addr < 0 || p.Anchor.IP <= 0 {
-			return false
-		}
-	case EntryModule:
-		if p.Anchor.Addr != 0 || p.Anchor.IP != 0 {
-			return false
-		}
-	default:
+	if p.Kind == entryInvalid || p.Kind != p.Anchor.Kind() {
 		return false
 	}
 	for _, block := range p.Blocks {

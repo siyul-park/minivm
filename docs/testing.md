@@ -26,7 +26,7 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
 | Asynchronous compilation | `compile.TestWithAsync`, `compile.TestQueue_Close`, `interp.TestPool_Get`, `interp.TestPool_Close` | a build overlapping the goroutine that claimed it, adoption at a safepoint, and shutdown with builds in flight, all under `-race` |
 | Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
-| Backend seam | `backend.TestCompile` and the `Compiler` owner tests | the block layout, value-to-register binding, edge copies, and journal deopt metadata `internal/jit/backend` produces, asserted through a recording `backend.Machine` that emits nothing |
+| Backend seam | `backend.TestCompile` and the `Compiler` owner tests | the block layout, value-to-register binding, edge copies, entry kind, bridge resume points, and journal deopt metadata `internal/jit/backend` produces, asserted through a recording `backend.Machine` that emits nothing |
 | Golden machine code | the owning `internal/jit/<arch>` test | a test states the code to compile and the exact instructions the machine should emit for it, read back from `asm.Assembler.Instructions` before register allocation and `asm.Assembler.Alloc` after it, alongside `backend.Code.Order` and `Code.Exits`. Writing the expected output first is what decides what good code for a shape is |
 | Frontend equivalence | `frontend.TestStatic`, `frontend.TestTrace`, `interp.TestFrontend_Trace` | each SSA frontend accepts exactly the roots its `jit` plan counterpart accepts, every function it emits passes `ssa.Verify`, and its block graph matches the plan's - for `Static` over a written corpus and generated well-typed functions, for `Trace` over hand-built recorded trees and over trees the real recorder produced |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
@@ -96,7 +96,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 5 | 5 | 0 | 0 |
-| `internal/jit/backend` | 10 | 10 | 0 | 0 |
+| `internal/jit/backend` | 12 | 12 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 3 | 3 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
@@ -331,6 +331,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/jit/backend/compiler.go` | `TestCompiler_Block` | ✅ |
 | `internal/jit/backend/compiler.go` | `TestCompiler_Next` | ✅ |
 | `internal/jit/backend/compiler.go` | `TestCompiler_Moves` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Root` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestCompiler_Bridges` | ✅ |
 | `internal/jit/backend/deopt.go` | `TestCompiler_Exit` | ✅ |
 | `internal/ssa/value.go` | `TestTypeOf` | ✅ |
 | `internal/ssa/value.go` | `TestType_String` | ✅ |

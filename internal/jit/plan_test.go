@@ -4,9 +4,34 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/prof"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestAnchor_Kind(t *testing.T) {
+	tests := []struct {
+		name   string
+		anchor jit.Anchor
+		want   jit.EntryKind
+	}{
+		{name: "module body", anchor: jit.Anchor{}, want: jit.EntryModule},
+		{name: "function entry", anchor: jit.Anchor{Addr: 1}, want: jit.EntryFunction},
+		{name: "loop header", anchor: jit.Anchor{Addr: 1, IP: 4}, want: jit.EntryLoop},
+		{name: "module loop header", anchor: jit.Anchor{IP: 4}, want: jit.EntryLoop},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, test.anchor.Kind())
+		})
+	}
+
+	t.Run("classifies a negative coordinate as no entry", func(t *testing.T) {
+		require.Equal(t, jit.Anchor{Addr: -1}.Kind(), jit.Anchor{IP: -1}.Kind())
+		require.NotEqual(t, jit.EntryModule, jit.Anchor{Addr: -1}.Kind())
+		require.Equal(t, prof.EntryNone, jit.Anchor{Addr: -1}.Kind().Profile())
+	})
+}
 
 func TestPlan_Valid(t *testing.T) {
 	tests := []struct {

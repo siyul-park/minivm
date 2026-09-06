@@ -17,13 +17,21 @@ import (
 // anything is planned, and opens one Lowering per compile, so one Machine is
 // shared by concurrent compiles and holds none of their state.
 type Machine interface {
-	// Lowers reports whether the machine emits native code for code. It is
-	// the capability question a frontend asks while planning: an opcode the
-	// machine declines is bridged to the interpreter rather than lowered
-	// (see docs/jit-internals.md, Bridge). Compile asks it too, and refuses
-	// a function holding an operation the machine declined, so a Lowering
-	// never sees one.
+	// Lowers reports whether the machine emits native code for code at all.
+	// It is the capability question a frontend asks while planning: an opcode
+	// the machine declines is bridged to the interpreter rather than lowered
+	// (see docs/jit-internals.md, Bridge). Compile asks it too, over the
+	// blocks it lays out, and refuses a function holding an operation the
+	// machine declined, so a Lowering never sees one.
 	Lowers(code instr.Opcode) bool
+	// Traps reports whether lowering code ends the block by handing control
+	// back to the interpreter - the unconditional terminal exit a machine
+	// emits for an opcode it runs rather than computes. It is the other
+	// capability question, and the opposite answer to Lowers: a trapped
+	// opcode is lowered, as an exit, so Traps is asked only of one Lowers
+	// admits. Compile lowers it last in its block, calls no Term after it,
+	// and lays out no block that only its abandoned successors reach.
+	Traps(code instr.Opcode) bool
 	// Open begins one compile and returns the Lowering that emits it. c
 	// stays valid until that compile ends.
 	Open(c *Compiler) Lowering
@@ -42,12 +50,14 @@ type Lowering interface {
 	// Lower emits ops[0] and reports how many of ops it consumed. Consuming
 	// more than one is how a machine fuses an adjacent run into a single
 	// lowering; the Compiler calls Lower again from the first operation left.
-	// A count that is not positive, or that runs past the block, abandons the
-	// compile.
+	// A count that is not positive, or that runs past ops, abandons the
+	// compile. ops ends at the block's trapping operation, so a fusion can
+	// never reach past the point control leaves.
 	Lower(block int, ops []ssa.Operation) (int, bool)
-	// Term ends block with t. The Compiler binds no label after it: a
-	// machine that wants to fall through asks Compiler.Next which block
-	// follows this one in the layout.
+	// Term ends block with t, unless the block trapped, which ends it
+	// already. The Compiler binds no label after it: a machine that wants to
+	// fall through asks Compiler.Next which block follows this one in the
+	// layout.
 	Term(block int, t ssa.Terminator) bool
 	// Leave emits what lowering deferred - the cold stub behind every guard,
 	// any continuation it scheduled - after the last block.

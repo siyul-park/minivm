@@ -46,7 +46,7 @@ func TestCompiler_Exit(t *testing.T) {
 
 		m := &machine{guard: prof.ExitGuardKind, opcode: int(instr.ARRAY_GET)}
 		input := &jit.Input{Objects: jit.Objects{1: {Fn: outer}, 2: {Fn: inner}}}
-		code, ok := backend.Compile(m, asm.New(arm64.New()), input, f)
+		code, ok := backend.Compile(m, asm.New(arm64.New()), input, jit.Anchor{}, f)
 		require.True(t, ok)
 
 		require.Equal(t, []backend.Deopt{{
@@ -94,7 +94,7 @@ func TestCompiler_Exit(t *testing.T) {
 
 		m := &machine{guard: prof.ExitGuardKind, opcode: int(instr.ARRAY_GET)}
 		input := &jit.Input{Objects: jit.Objects{1: {Fn: fn}}}
-		_, ok := backend.Compile(m, asm.New(arm64.New()), input, f)
+		_, ok := backend.Compile(m, asm.New(arm64.New()), input, jit.Anchor{}, f)
 		require.True(t, ok)
 
 		require.Equal(t, []backend.Flush{
@@ -120,7 +120,7 @@ func TestCompiler_Exit(t *testing.T) {
 
 		m := &machine{guard: prof.ExitNone}
 		input := &jit.Input{Objects: jit.Objects{1: {Fn: &types.Function{}}}}
-		code, ok := backend.Compile(m, asm.New(arm64.New()), input, f)
+		code, ok := backend.Compile(m, asm.New(arm64.New()), input, jit.Anchor{}, f)
 		require.True(t, ok)
 
 		require.Equal(t, []backend.Deopt{{ID: -1, Resume: 7, SP: 1, Slots: []backend.Flush{{Value: v, Slot: 0}}, Frames: []backend.Record{{Addr: 1, IP: 7}}}}, m.deopts)
@@ -137,7 +137,7 @@ func TestCompiler_Exit(t *testing.T) {
 		require.NoError(t, ssa.Verify(f))
 
 		m := &machine{}
-		_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, f)
+		_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{}, f)
 		require.True(t, ok)
 
 		require.Equal(t, backend.Deopt{}, m.compiler.Exit(v, prof.ExitGuardKind, 0))
@@ -151,7 +151,7 @@ func TestCompiler_Exit(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 3}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 
-		_, ok := backend.Compile(&machine{}, asm.New(arm64.New()), &jit.Input{}, b.Build())
+		_, ok := backend.Compile(&machine{}, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{}, b.Build())
 		require.False(t, ok)
 	})
 }

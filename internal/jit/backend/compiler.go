@@ -1,19 +1,33 @@
 package backend
 
 import (
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/ssa"
 )
 
 // Code is what one Compile produced that the emitted instructions do not
-// already say: the order it laid the blocks out in, and the exit descriptors
-// it registered, in the order journal.CellExitID counts them. The
-// instructions themselves stay in the asm.Assembler the caller supplied,
-// which is what allocates and encodes them.
+// already say: the order it laid the blocks out in, the exit descriptors it
+// registered, in the order journal.CellExitID counts them, and the bridge
+// resume points its callable may be re-entered at. The instructions
+// themselves stay in the asm.Assembler the caller supplied, which is what
+// allocates and encodes them.
 type Code struct {
-	Order []int
-	Exits []jit.Exit
+	Order   []int
+	Exits   []jit.Exit
+	Bridges []Bridge
+}
+
+// Bridge is one external re-entry an OpBridge creates: the IP a fresh call may
+// arrive with - the bridged opcode's own IP plus its encoded width, which is
+// where the interpreter leaves execution once it has run that opcode - and the
+// block laid out at it. A machine's entry dispatch turns the IP the journal
+// carries into a branch to that block's label; jit.Entry.Resumable is these
+// IPs (see docs/jit-internals.md, Bridge).
+type Bridge struct {
+	IP    int
+	Block int
 }
 
 // Move is one register copy a block-parameter edge requires: the parameter's
@@ -32,14 +46,17 @@ type Move struct {
 type Compiler struct {
 	asm   *asm.Assembler
 	input *jit.Input
+	root  jit.Anchor
 	fn    *ssa.Function
 
-	order  []int
-	next   []int
-	labels []asm.Label
-	regs   []asm.VReg
-	defs   []site
-	slots  map[int]int
+	order   []int
+	next    []int
+	labels  []asm.Label
+	regs    []asm.VReg
+	defs    []site
+	slots   map[int]int
+	traps   []int
+	bridges []Bridge
 
 	exits []jit.Exit
 }
@@ -51,13 +68,14 @@ type site struct {
 	index int
 }
 
-// Compile lowers f through m into a, reporting the layout and exits it
-// produced. It refuses a function m declined an operation of, and abandons the
-// compile the first time m reports failure, exactly as an unlowerable plan
-// leaves threaded execution installed. f is expected to have passed
-// ssa.Verify, which is the caller's boundary and not repeated here.
-func Compile(m Machine, a *asm.Assembler, in *jit.Input, f *ssa.Function) (Code, bool) {
-	c, ok := newCompiler(m, a, in, f)
+// Compile lowers f, entered at root, through m into a, reporting the layout,
+// exits, and bridge resume points it produced. It refuses a function m
+// declined an operation of, and abandons the compile the first time m reports
+// failure, exactly as an unlowerable plan leaves threaded execution installed.
+// f is expected to have passed ssa.Verify and root to name the entry it was
+// built for, which is the caller's boundary and not repeated here.
+func Compile(m Machine, a *asm.Assembler, in *jit.Input, root jit.Anchor, f *ssa.Function) (Code, bool) {
+	c, ok := newCompiler(m, a, in, root, f)
 	if !ok {
 		return Code{}, false
 	}
@@ -67,22 +85,27 @@ func Compile(m Machine, a *asm.Assembler, in *jit.Input, f *ssa.Function) (Code,
 	}
 	for _, id := range c.order {
 		a.Bind(c.labels[id])
-		block := f.Block(id)
-		for i := 0; i < len(block.Ops); {
-			n, ok := l.Lower(id, block.Ops[i:])
-			if !ok || n <= 0 || i+n > len(block.Ops) {
+		ops := c.ops(id)
+		for i := 0; i < len(ops); {
+			n, ok := l.Lower(id, ops[i:])
+			if !ok || n <= 0 || i+n > len(ops) {
 				return Code{}, false
 			}
 			i += n
 		}
-		if !l.Term(id, block.Term) {
+		// A trap has already left for the interpreter, so the block has no
+		// terminator to reach and no successor to fall through to.
+		if c.traps[id] >= 0 {
+			continue
+		}
+		if !l.Term(id, f.Block(id).Term) {
 			return Code{}, false
 		}
 	}
 	if !l.Leave() {
 		return Code{}, false
 	}
-	return Code{Order: c.order, Exits: c.exits}, true
+	return Code{Order: c.order, Exits: c.exits, Bridges: c.bridges}, true
 }
 
 // Asm returns the assembler this compile emits into. A machine takes
@@ -98,6 +121,24 @@ func (c *Compiler) Asm() *asm.Assembler {
 // reaches the interpreter's private types through.
 func (c *Compiler) Input() *jit.Input {
 	return c.input
+}
+
+// Root returns the anchor this compile is entered at. Its Kind is what a
+// prologue and a teardown differ by: a function entry clears the callee locals
+// its callers left and leaves by returning, a module entry completes instead,
+// and a loop entry re-enters a frame that is already live and must never
+// unwind it. The kind is the anchor's own fact, so nothing carries it
+// alongside - which is what keeps it out of ssa.Function, the IR an ahead-of-time
+// optimizer with no anchors and no entries shares.
+func (c *Compiler) Root() jit.Anchor {
+	return c.root
+}
+
+// Bridges returns the external re-entries this function's bridges create, in
+// layout order. A machine reads them in Enter, where its entry dispatch turns
+// the IP a fresh call arrives with into a branch to that block's label.
+func (c *Compiler) Bridges() []Bridge {
+	return c.bridges
 }
 
 // Func returns the function being lowered, for the queries the Lowering hooks
@@ -204,27 +245,27 @@ func (c *Compiler) Moves(e ssa.Edge) []Move {
 	return out
 }
 
-// newCompiler indexes f for one compile: it lays the blocks out, binds a
-// register to every value and a label to every block, records where each
-// value is defined, and resolves the slot count of every frame a deopt can
-// rebuild. It refuses a function that is malformed for lowering, or that
-// holds an operation m declined.
-func newCompiler(m Machine, a *asm.Assembler, in *jit.Input, f *ssa.Function) (*Compiler, bool) {
+// newCompiler indexes f for one compile: it finds where each block hands
+// control back, lays the blocks that are still reached out, binds a register
+// to every value and a label to every block, records where each value is
+// defined, resolves the slot count of every frame a deopt can rebuild, and
+// resolves the re-entry each bridge creates. It refuses a function that is
+// malformed for lowering, or that holds an operation m declined.
+func newCompiler(m Machine, a *asm.Assembler, in *jit.Input, root jit.Anchor, f *ssa.Function) (*Compiler, bool) {
 	if m == nil || a == nil || in == nil || f == nil || f.Len() == 0 {
 		return nil, false
 	}
 	c := &Compiler{
 		asm:    a,
 		input:  in,
+		root:   root,
 		fn:     f,
-		order:  order(f),
+		traps:  traps(m, f),
 		next:   make([]int, f.Len()),
 		labels: make([]asm.Label, f.Len()),
 		slots:  map[int]int{},
 	}
-	if len(c.order) != f.Len() {
-		return nil, false
-	}
+	c.order = order(f, c.traps)
 	for id := range c.next {
 		c.next[id] = -1
 	}
@@ -241,12 +282,6 @@ func newCompiler(m Machine, a *asm.Assembler, in *jit.Input, f *ssa.Function) (*
 			c.define(param, site{id, -1})
 		}
 		for i, op := range block.Ops {
-			if op.Op == ssa.OpExec && !m.Lowers(op.Code) {
-				return nil, false
-			}
-			if op.Op == ssa.OpState && !c.measure(op.Frames) {
-				return nil, false
-			}
 			for _, result := range op.Results {
 				c.define(result, site{id, i})
 			}
@@ -258,7 +293,62 @@ func newCompiler(m Machine, a *asm.Assembler, in *jit.Input, f *ssa.Function) (*
 			c.regs[v] = a.Reg(typ, width)
 		}
 	}
+
+	// Only what is laid out is emitted, so only that is judged: an opcode the
+	// machine declined behind a trap is code no native path reaches, and
+	// refusing the whole function for it would throw away the prefix the trap
+	// exists to keep.
+	for _, id := range c.order {
+		for _, op := range c.ops(id) {
+			if op.Op == ssa.OpExec && !m.Lowers(op.Code) {
+				return nil, false
+			}
+			if op.Op == ssa.OpState && !c.measure(op.Frames) {
+				return nil, false
+			}
+		}
+		if bridge, ok := c.bridge(id); ok {
+			c.bridges = append(c.bridges, bridge)
+		}
+	}
 	return c, true
+}
+
+// bridge resolves the external re-entry the block's trailing OpBridge creates.
+// The interpreter runs that one opcode and leaves execution at the instruction
+// after it, which is the block the bridge falls into - so a bridge anywhere
+// but at the end of a block, or one leaving by anything but a single edge,
+// names no re-entry and gets none.
+func (c *Compiler) bridge(id int) (Bridge, bool) {
+	block, ops := c.fn.Block(id), c.ops(id)
+	if len(ops) == 0 || len(block.Term.Edges) != 1 {
+		return Bridge{}, false
+	}
+	last := ops[len(ops)-1]
+	if last.Op != ssa.OpBridge {
+		return Bridge{}, false
+	}
+	state, ok := c.Def(last.State)
+	if !ok || state.Op != ssa.OpState || len(state.Frames) == 0 {
+		return Bridge{}, false
+	}
+	frame := state.Frames[len(state.Frames)-1]
+	fn := c.input.Objects.Function(frame.Addr)
+	if fn == nil || frame.IP < 0 || frame.IP >= len(fn.Code) {
+		return Bridge{}, false
+	}
+	return Bridge{IP: frame.IP + instr.Instruction(fn.Code[frame.IP:]).Width(), Block: block.Term.Edges[0].Block}, true
+}
+
+// ops returns the operations of block id that native code runs: everything up
+// to and including the one that hands control back to the interpreter, and the
+// whole block when none does.
+func (c *Compiler) ops(id int) []ssa.Operation {
+	ops := c.fn.Block(id).Ops
+	if at := c.traps[id]; at >= 0 {
+		return ops[:at+1]
+	}
+	return ops
 }
 
 // define records where v is defined, growing the per-value tables to reach it.
@@ -289,14 +379,34 @@ func (c *Compiler) measure(frames []ssa.Frame) bool {
 	return true
 }
 
+// traps records, for every block, the index of the first operation whose
+// lowering hands control back to the interpreter, or -1 for a block that
+// never does. It is the point the block ends at: what follows it there, and
+// every block only it reaches, is code no native path runs.
+func traps(m Machine, f *ssa.Function) []int {
+	at := make([]int, f.Len())
+	for id := range at {
+		at[id] = -1
+		for i, op := range f.Block(id).Ops {
+			if op.Op == ssa.OpExec && m.Traps(op.Code) {
+				at[id] = i
+				break
+			}
+		}
+	}
+	return at
+}
+
 // order lays f's blocks out in reverse postorder: a block precedes every
 // block it dominates, and a loop body stays contiguous between its header and
 // its back edge. The depth-first walk takes each block's successors back to
 // front, which puts the first edge first in the result, so the path a
 // frontend laid down first - the recorded one, for a trace - is the one that
-// falls through. It is the layout the backend chooses, not a graph fact,
-// which is why it lives here rather than with internal/graph's dominance.
-func order(f *ssa.Function) []int {
+// falls through. A block that traps reaches none of its successors, so the
+// walk stops there and lays out nothing only that block led to. It is the
+// layout the backend chooses, not a graph fact, which is why it lives here
+// rather than with internal/graph's dominance.
+func order(f *ssa.Function, traps []int) []int {
 	visited := make([]bool, f.Len())
 	post := make([]int, 0, f.Len())
 	type frame struct{ block, next int }
@@ -304,7 +414,10 @@ func order(f *ssa.Function) []int {
 	visited[0] = true
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
-		succ := f.Succ(top.block)
+		var succ []int
+		if traps[top.block] < 0 {
+			succ = f.Succ(top.block)
+		}
 		if top.next < len(succ) {
 			s := succ[len(succ)-1-top.next]
 			top.next++
