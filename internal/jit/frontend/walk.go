@@ -58,6 +58,8 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 				return ssa.Terminator{}, false
 			}
 			return w.leave(), true
+		case instr.RETURN_CALL:
+			return w.tail(ip)
 		}
 		if !w.perform(inst) {
 			return ssa.Terminator{}, false
@@ -262,7 +264,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		}
 		return w.exec(op, 1, []fact{cast})
 
-	case instr.CALL, instr.RETURN_CALL:
+	case instr.CALL:
 		if len(w.stack) == 0 {
 			return false
 		}
@@ -270,12 +272,9 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if target == nil {
 			return false
 		}
-		var results []fact
-		if op == instr.CALL {
-			results = make([]fact, len(target.Typ.Returns))
-			for i, t := range target.Typ.Returns {
-				results[i] = fact{kind: t.Kind()}
-			}
+		results := make([]fact, len(target.Typ.Returns))
+		for i, t := range target.Typ.Returns {
+			results[i] = fact{kind: t.Kind()}
 		}
 		return w.exec(op, 1+len(target.Typ.Params), results)
 	case instr.CLOSURE_NEW:
@@ -650,6 +649,28 @@ func (w *walk) leave() ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args}
 }
 
+// tail ends the function on a tail call, which retires this frame and enters
+// another one at the same stack floor. No operation of this IR states that and
+// no edge of this graph leads there - the frame the block was translated in is
+// gone, and the results the new activation hands back are its own - so native
+// execution ends here and the interpreter performs the call from the operand
+// stack the exit hands it.
+//
+// The callee is still resolved, though nothing lowers it: jit.StaticPlan
+// refuses a function holding a call whose target the snapshot does not name or
+// whose arguments are not on the stack, and this frontend plans no root that
+// plan does not.
+func (w *walk) tail(ip int) (ssa.Terminator, bool) {
+	if len(w.stack) == 0 {
+		return ssa.Terminator{}, false
+	}
+	_, target := w.callee(len(w.stack) - 1)
+	if target == nil || len(w.stack) < 1+len(target.Typ.Params) {
+		return ssa.Terminator{}, false
+	}
+	return w.exit(ip), true
+}
+
 // enter inlines one call: the callee reference is consumed, the arguments
 // under it become the new frame's parameters, its remaining locals start
 // cleared, and the caller records where it resumes once the frame returns.
@@ -738,10 +759,10 @@ func (w *walk) stitch() bool {
 // exit abandons native execution, resuming the interpreter at ip in the
 // innermost frame. The interpreter adopts the operand stack it is handed, so
 // every reference still borrowed from storage is owned first.
-func (w *walk) exit(ip int) {
+func (w *walk) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
-	w.b.Term(w.block, ssa.Terminator{Op: ssa.OpExit, State: w.deopt()})
+	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
 }
 
 // guard admits only a container of the shape the plan resolved for it, so the

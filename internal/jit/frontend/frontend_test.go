@@ -84,6 +84,34 @@ blk3: () <-- (blk1)
 	jump blk1()
 `, shape.Itab), ssa.Format(out))
 	})
+
+	t.Run("ends a tail call by leaving native execution", func(t *testing.T) {
+		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}}
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{
+			Address:   1,
+			Function:  fn,
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   jit.Objects{2: {Fn: callee}},
+		}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	v2:ref = const 2
+	retain v2
+	v3:state = state {addr=1 base=0 ip=5 returns=1 stack=[v1, v2 owned]}
+	exit state v3
+`, ssa.Format(out))
+	})
 }
 
 func TestBody(t *testing.T) {
@@ -446,6 +474,55 @@ func corpus(t *testing.T) []fixture {
 		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) }),
 	}})
 
+	// tail hands its argument to whichever function reference 2 names: itself,
+	// which the plan lowers as a loop back to its own entry, or another
+	// function, which it lowers by morphing the running activation. The SSA
+	// leaves through both, because neither the frame a tail call enters nor the
+	// body it runs is one this graph holds.
+	step := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}
+	tail := &types.Function{
+		Typ: step,
+		Code: assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+		}),
+	}
+	add("tail call", &jit.Input{
+		Address:   1,
+		Function:  tail,
+		Constants: []types.Boxed{types.BoxRef(2)},
+		Objects:   jit.Objects{2: {Fn: &types.Function{Typ: step}}},
+	})
+	add("self tail call", &jit.Input{
+		Address:   2,
+		Function:  tail,
+		Constants: []types.Boxed{types.BoxRef(2)},
+		Objects:   jit.Objects{2: {Fn: tail}},
+	})
+
+	// The reference under the arguments is a leftover the tail call discards,
+	// which the interpreter releases with the retiring frame: the exit hands it
+	// over owned, or that release drops a count native code never took.
+	add("tail call over a leftover reference", &jit.Input{
+		Address: 1,
+		Function: &types.Function{
+			Typ:    step,
+			Locals: []types.Type{arrayType},
+			Code: assemble(t, func(b *instr.Builder) {
+				done := b.Label()
+				b.Emit(instr.LOCAL_GET, 0).BrIf(done)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+				b.Bind(done).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+			}),
+		},
+		Constants: []types.Boxed{types.BoxRef(2)},
+		Objects:   jit.Objects{2: {Fn: &types.Function{Typ: step}}},
+	})
+
+	add("unknown tail callee", &jit.Input{Address: 1, Function: &types.Function{
+		Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.RETURN_CALL) }),
+	}})
+
 	add("module", &jit.Input{Address: 0, Function: &types.Function{
 		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.DROP) }),
 	}})
@@ -659,12 +736,17 @@ func anchors(input *jit.Input) []jit.Anchor {
 // adjacency list that order numbers them by - the one numbering both forms
 // share. A bridging block names no edge - resuming from the interpreter is a
 // fresh entry rather than a branch - so the block planned right after it is
-// its successor.
+// its successor. A block ending on a tail call reaches nothing: it retires its
+// frame, and the branch the plan wires to the bytecode after it is an edge
+// analysis.Blocks lays out no successor for and execution never takes.
 func graph(plan jit.Plan) ([]int, [][]int) {
 	succs := func(id int) []int {
 		block := plan.Blocks[id]
 		if block.Term.Kind == jit.TerminateBridge {
 			return []int{id + 1}
+		}
+		if steps := block.Steps; len(steps) > 0 && steps[len(steps)-1].Op == instr.RETURN_CALL {
+			return nil
 		}
 		out := make([]int, 0, len(block.Term.Edges))
 		for _, edge := range block.Term.Edges {

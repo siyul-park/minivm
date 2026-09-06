@@ -154,6 +154,8 @@ func recordings(t *testing.T) []recording {
 	add("loop root falls back", ending(t, jit.StatusFallback, 1))
 	add("entry is aborted", ending(t, jit.StatusAborted, 0))
 	add("entry is partial", ending(t, jit.StatusPartial, 0))
+	add("self tail call closes the recording", tailed(t, true))
+	add("tail call morphs into another function", tailed(t, false))
 	add("call is inlined", inlined(t, 1))
 	add("nested call is inlined", inlined(t, 2))
 	add("observed callee is guarded and entered", observed(t, true))
@@ -537,6 +539,45 @@ func tree(fn *types.Function, addr int, root *jit.Trace, branches map[int]*jit.T
 		},
 		anchors: []jit.Anchor{{Addr: addr}, root.Anchor},
 	}
+}
+
+// tailed records a function reaching a tail call: back to itself, which the
+// recorder closes the recording on without stepping into the reused frame, or
+// into another function, which it steps into so the records after it run in a
+// frame the caller's own block cannot name.
+func tailed(t *testing.T, self bool) recording {
+	t.Helper()
+	fn := &types.Function{
+		Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+		}),
+	}
+	other := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN) }),
+	}
+	at := offsets(fn.Code)
+
+	rec := &tape{}
+	rec.at(fn, 1, at[0], 0)
+	rec.at(fn, 1, at[1], 0)
+	tail := rec.at(fn, 1, at[2], 0)
+	tail.Callee, tail.Seen = 1, types.BoxRef(1)
+	if !self {
+		tail.Callee, tail.Seen = 2, types.BoxRef(2)
+		for _, ip := range offsets(other.Code) {
+			rec.at(other, 2, ip, 0)
+		}
+	}
+
+	out := tree(fn, 1, &jit.Trace{Anchor: jit.Anchor{Addr: 1}, Ops: rec.ops, Status: jit.StatusReturned}, nil)
+	out.input.Constants = []types.Boxed{types.BoxRef(1)}
+	out.input.Objects = jit.Objects{1: {Fn: fn}, 2: {Fn: other}}
+	if !self {
+		out.input.Constants = []types.Boxed{types.BoxRef(2)}
+	}
+	return out
 }
 
 // tape builds one recording the way interp's tracer writes it: one record per

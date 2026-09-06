@@ -497,6 +497,13 @@ func declined(t *testing.T) map[string]*program.Program {
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN),
 		)), program.WithTypes(types.NewArrayType(types.TypeI32))),
+		// A tail call retires the frame, which the IR states by ending the
+		// block on an exit rather than with an operation to write back.
+		"a tail call": program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(body(
+			instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL),
+		))),
 		// A protected region is entered out of band, which the frontend
 		// declines to model.
 		"an exception handler": program.New([]instr.Instruction{

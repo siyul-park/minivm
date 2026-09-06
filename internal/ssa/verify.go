@@ -229,6 +229,9 @@ func performs(f *Function, o Operation) error {
 	if !instr.Valid(o.Code) {
 		return fmt.Errorf("%w: %s performs no opcode", ErrForm, o.Op)
 	}
+	if leaves(o.Code) {
+		return fmt.Errorf("%w: %s performs a terminator", ErrForm, o.name())
+	}
 	typ := instr.TypeOf(o.Code)
 	if typ.Pop == nil && typ.Push == nil {
 		if o.Code.Writes(instr.Frame) && len(o.Args) == 0 {
@@ -253,6 +256,21 @@ func performs(f *Function, o Operation) error {
 		return fmt.Errorf("%w: %s selects between %s and %s", ErrType, o.name(), f.Type(o.Args[0]), f.Type(o.Args[1]))
 	}
 	return nil
+}
+
+// leaves reports whether an opcode moves control out of the operations after
+// it. Where it goes is what a Terminator and the edges under it say, so such an
+// opcode is one of those and never an Operation: an operation the block carries
+// on past cannot be one that ends the block, and a return, a branch, and a tail
+// call each already have a terminator of their own. A throw is not one of them
+// - it leaves through the interpreter, as the bridge performing it does.
+func leaves(op instr.Opcode) bool {
+	switch op {
+	case instr.BR, instr.BR_IF, instr.BR_TABLE, instr.RETURN, instr.RETURN_CALL:
+		return true
+	default:
+		return false
+	}
 }
 
 // typed checks that o's results and operands carry types its operation can

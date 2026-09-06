@@ -12,10 +12,10 @@ import (
 // a point a backend can be entered at is a block of its own.
 //
 // Control and dataflow are not the same successors. An opcode that leaves the
-// function - a throw, a tail call, an unreachable - is followed by the bytecode
-// after it, which control reaches only from somewhere else; flow carries the
-// operand facts along the edges execution really takes, succs names the blocks
-// the terminator wires.
+// function - a throw, an unreachable - is followed by the bytecode after it,
+// which control reaches only from somewhere else; flow carries the operand
+// facts along the edges execution really takes, succs names the blocks the
+// terminator wires.
 type span struct {
 	start int
 	end   int
@@ -96,12 +96,14 @@ func past(code []byte) bool {
 // leaves returns the spans control reaches from a block's last span: its
 // branch targets, the instruction after a conditional branch, or the block
 // that follows it. A block whose last span is empty ends on a bridge, and
-// falls through like any other.
+// falls through like any other. A return and a tail call reach nothing: both
+// leave the frame the span was translated in, so the bytecode after them is
+// entered only from elsewhere.
 func leaves(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
 	ip, inst, ok := tail(code, block)
 	if ok {
 		switch inst.Opcode() {
-		case instr.RETURN:
+		case instr.RETURN, instr.RETURN_CALL:
 			return nil
 		case instr.BR, instr.BR_TABLE:
 			return targets(instr.Targets(code, ip), at)

@@ -121,6 +121,21 @@ before making a performance claim.
 |  | minivm `jit` | 69.36 µs | 0 | 0 |
 |  | Wazero | **42.34 µs** | 8 | 1 |
 | Reference | Native Go | 15.72 µs | 0 | 0 |
+#### `TailSum(1000)` and `TailPingPong(1000)`
+
+The only kernels whose bytecode holds a `RETURN_CALL`. Measured on Apple M4 Pro, Go 1.26.2, `-benchtime=1s -count=2`, no external runtimes.
+
+| Kernel | Tier | ns/op | B/op | allocs/op |
+|---|---|---:|---:|---:|
+| `TailSum` | minivm `threaded` | **10.07 µs** | 0 | 0 |
+|  | minivm `default` | 277.6 µs | 0 | 0 |
+|  | minivm `jit` | 273.2 µs | 0 | 0 |
+| `TailPingPong` | minivm `threaded` | **10.25 µs** | 0 | 0 |
+|  | minivm `default` | 138.6 µs | 0 | 0 |
+|  | minivm `jit` | 139.0 µs | 0 | 0 |
+
+A tail call is the one shape where native execution is a clear loss: 15-28x slower than threaded, and fixed per run rather than per tail call - the same figure at n=100 as at n=1000. The tail lowering is not what costs. A self tail call compiles once through the static frontend into a 260-byte entry and yields once per run; the caller's trace side-exits at the tail call every run and is recompiled 250 times over 2000 runs, emitting 7.09 MB, with resident size bounded by retirement at ~195 MB. The recompilation storm in the caller, not the tail lowering, is the open issue.
+
 #### `ClosureCounter(128)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -392,6 +407,8 @@ figures reflect only the Go benchmark harness and should not be compared directl
 | `Sieve` | n=256 | typed-array access |
 | `RecursiveFib` | n=20,35 | calls and recursion |
 | `IndirectRecursiveFib` | fixed recursive workload | indirect calls |
+| `TailSum` | n=1000 | a tail call back to the same function |
+| `TailPingPong` | n=1000 | tail calls that morph into another function |
 | `ClosureCounter` | 128 iterations | closures and calls |
 | `NQueens` | n=7 | recursive state |
 | `Fannkuch` | n=6 | permutation search |

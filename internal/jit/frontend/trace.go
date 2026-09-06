@@ -199,6 +199,13 @@ func (r *replay) run(item work) bool {
 				continue
 			}
 			return r.retire(w, base)
+		case instr.RETURN_CALL:
+			// A tail call retires the frame this recording was replayed in and
+			// enters another one, which no operation states and no block of
+			// this graph is laid out for: the recording carries on wherever
+			// the interpreter takes the call, so native execution ends here.
+			r.b.Term(w.block, w.exit(op.IP))
+			return true
 		case instr.CALL:
 			// The recording says whether the call was entered: the ops after an
 			// inlined one run one frame deeper. Anything else - a host call, a
@@ -218,7 +225,7 @@ func (r *replay) run(item work) bool {
 		// interpreter takes that one over with nothing to resume into. Every
 		// other bridgeable opcode still resumes natively after it.
 		if jit.Bridgeable(op.Op) && idx+1 == len(tr.Ops) {
-			w.exit(op.IP)
+			r.b.Term(w.block, w.exit(op.IP))
 			return true
 		}
 		if !w.perform(inst) {
@@ -374,7 +381,7 @@ func (r *replay) cut(w *walk, tr *jit.Trace, idx int) bool {
 		r.b.Term(w.block, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{edge}})
 		return true
 	}
-	w.exit(tr.Ops[idx].Target)
+	r.b.Term(w.block, w.exit(tr.Ops[idx].Target))
 	return true
 }
 
@@ -384,7 +391,7 @@ func (r *replay) cut(w *walk, tr *jit.Trace, idx int) bool {
 func (r *replay) close(w *walk, tr *jit.Trace) bool {
 	switch tr.Status {
 	case jit.StatusFallback:
-		w.exit(tr.Anchor.IP)
+		r.b.Term(w.block, w.exit(tr.Anchor.IP))
 	case jit.StatusCompleted:
 		r.b.Term(w.block, w.complete())
 	case jit.StatusLoop:
@@ -398,7 +405,7 @@ func (r *replay) close(w *walk, tr *jit.Trace) bool {
 		if !last.Terminal || last.Fn != w.frame().addr {
 			return false
 		}
-		w.exit(last.IP + instr.Instruction(w.frame().fn.Code[last.IP:]).Width())
+		r.b.Term(w.block, w.exit(last.IP+instr.Instruction(w.frame().fn.Code[last.IP:]).Width()))
 	default:
 		return false
 	}
@@ -430,7 +437,7 @@ func (r *replay) reach(w *walk, target jit.Anchor, folds bool) (ssa.Edge, bool) 
 	args := values(w.stack)
 	id, params := r.lay(w, false)
 	out := &walk{facts: r.facts, b: r.b, block: id, frames: w.frames, stack: params}
-	out.exit(target.IP)
+	r.b.Term(id, out.exit(target.IP))
 	return ssa.Edge{Block: id, Args: args}, true
 }
 

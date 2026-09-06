@@ -66,6 +66,26 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
+	t.Run("rejects a terminator used where an operation belongs", func(t *testing.T) {
+		for name, code := range map[string]instr.Opcode{
+			"a tail call": instr.RETURN_CALL,
+			"a return":    instr.RETURN,
+			"a branch":    instr.BR_IF,
+		} {
+			t.Run(name, func(t *testing.T) {
+				b := ssa.New("f")
+				entry := b.Block()
+				state := b.Value(ssa.TypeState)
+				callee := b.Value(ssa.TypeRef)
+				b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+				b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(2), Results: []ssa.Value{callee}})
+				b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: code, Args: []ssa.Value{callee}, State: state})
+				b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+				require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
+			})
+		}
+	})
+
 	t.Run("rejects a value defined twice", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
