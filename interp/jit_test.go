@@ -101,10 +101,139 @@ func TestCompiler_Compile(t *testing.T) {
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
+		// The SSA machine's guards are the first exits it emits, so this is
+		// where their cold stub is judged: not that a stub was emitted, but
+		// that the interpreter picks execution up exactly where the guard
+		// refused it, with the operand stack and the reference counts the
+		// threaded handler about to run expects. Both of the read's exits
+		// are taken here - the shape guard in front of it and the bounds
+		// test inside it, which leaves through the same state.
+		//
+		// A borrowed container is the case that can only be caught here: it
+		// derives its count from the global slot native code is about to
+		// leave behind, so the stub owes it the retain the interpreter will
+		// release, and no run that does not deoptimize can tell the
+		// difference.
+		t.Run("a cold stub resumes the interpreter", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
+			},
+				program.WithConstants(
+					types.TypedArray[int32]{70, 80, 90},
+					types.NewArray(types.TypeI32Array, types.BoxI32(7), types.BoxI32(8), types.BoxI32(9)),
+				),
+				program.WithGlobals(types.TypeI32Array, types.TypeI32))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+
+			// The recording is what resolves the element shape: a global
+			// carries only its kind, so bytecode alone names no container.
+			speculated, other := i.constants[0], i.constants[1]
+			i.retain(speculated.Ref())
+			require.NoError(t, i.SetGlobal(0, speculated))
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
+			root := jit.Anchor{}
+			require.NotNil(t, i.tracer.capture(i, root).trace)
+			i.exits[root] = i.code[root.Addr][0]
+
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			input, ok := i.compileSnapshot(root.Addr)
+			require.True(t, ok)
+			compiled := compiler.Compile(input, root)
+			require.NoError(t, compiled.Err)
+			require.NotNil(t, compiled.Code, "%+v", compiled)
+			entry, ok := compiled.Code.Entries[root]
+			require.True(t, ok)
+			require.Equal(t, []jit.Exit{
+				{Reason: prof.ExitGuardShape, Opcode: int(instr.ARRAY_GET)},
+				{Reason: prof.ExitGuardBounds, Opcode: int(instr.ARRAY_GET)},
+			}, entry.Exits, "the SSA machine emits the shape guard and the read's bounds test, in that order")
+
+			at := instr.New(instr.GLOBAL_GET, 0).Width() * 2
+
+			// The read's own bounds test leaves through the state its guard
+			// carries, so an index past the end exits at the same opcode the
+			// shape guard would have.
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(9)))
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			require.Equal(t, uint64(at), i.journal[journal.CellNextIP])
+			require.Equal(t, jit.Exit{Reason: prof.ExitGuardBounds, Opcode: int(instr.ARRAY_GET)}, entry.Exits[i.journal[journal.CellExitID]-1])
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
+
+			// A ref array of the same declared type is a container of another
+			// concrete type, so the shape the read was compiled against no
+			// longer holds and the guard must refuse it before the load.
+			i.retain(other.Ref())
+			require.NoError(t, i.SetGlobal(0, other))
+			counted := i.rc[other.Ref()]
+
+			require.NoError(t, entry.Callable.Call(i.journalPtr()))
+			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
+			require.Equal(t, uint64(at), i.journal[journal.CellNextIP], "a guard resumes at the opcode it refused, never past it")
+			require.Equal(t, jit.Exit{Reason: prof.ExitGuardShape, Opcode: int(instr.ARRAY_GET)}, entry.Exits[i.journal[journal.CellExitID]-1])
+
+			i.sp = int(i.journal[journal.CellSP])
+			i.deopt()
+			require.Equal(t, 2, i.sp)
+			require.Equal(t, at, i.fr.ip)
+			require.Equal(t, []types.Boxed{other, types.BoxI32(1)}, i.stack[:i.sp], "the interpreter resumes with the operands the opcode started with")
+			require.Equal(t, counted+1, i.rc[other.Ref()], "a borrowed container is retained for the interpreter that adopts it")
+
+			// Running the opcode the guard refused balances that retain: the
+			// threaded handler releases the container it pops, which is the
+			// count the stub took.
+			i.code[root.Addr][i.fr.ip](i)
+			require.Equal(t, types.BoxI32(8), i.stack[i.sp-1])
+			require.Equal(t, counted, i.rc[other.Ref()])
+		})
+
+		// The hazard the store rule exists for, end to end: a global declared
+		// any currently holds a reference, and a scalar written over it has
+		// to release that reference. Neither pipeline lowers such a store -
+		// the SSA machine refuses it on the slot's kind, the plan pipeline's
+		// globalSet on the same fact - so nothing is installed and the root
+		// stays threaded. What a weakened rule would produce instead is
+		// native code that writes the slot and drops the count, which the
+		// refcount assertion below is what catches.
+		t.Run("a scalar store over a reference global keeps its count", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			value := i.constants[0]
+			i.retain(value.Ref())
+			require.NoError(t, i.SetGlobal(0, value))
+			counted := i.rc[value.Ref()]
+
+			root := jit.Anchor{}
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			input, ok := i.compileSnapshot(root.Addr)
+			require.True(t, ok)
+			require.Equal(t, types.KindRef, input.Globals[0], "the snapshot reports what the slot holds, which is what the rule reads")
+			compiled := compiler.Compile(input, root)
+			require.NoError(t, compiled.Err)
+			require.Nil(t, compiled.Code, "a store that would drop a reference count is compiled by neither pipeline")
+
+			require.NoError(t, i.Run(context.Background()))
+			require.Equal(t, types.BoxI32(5), i.globals[0])
+			require.Equal(t, counted-1, i.rc[value.Ref()], "the overwritten reference is released exactly once")
+		})
+
+		// An i64 element keeps this on the plan pipeline, whose own index
+		// guard is what the exit below names: the SSA machine declines an
+		// i64 read, so the compiler still selects a plan for this root. The
+		// SSA machine's own bounds test is covered where it is emitted, in
+		// the guarded-read golden stream and in the subtest above.
 		t.Run("guard bounds", func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
+			}, program.WithConstants(types.TypedArray[int64]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			{
@@ -287,10 +416,15 @@ func TestCompiler_Compile(t *testing.T) {
 			require.Equal(t, int32(2), array[0])
 		})
 
+		// An i64 element is the shape that reaches the plan pipeline's own
+		// value guard: it may be heap-promoted, so the read has to prove the
+		// loaded word still fits the boxed lane before it continues. It is
+		// also a shape the SSA machine declines, so the compiler still
+		// selects a plan for this root.
 		t.Run("array get value guard", func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
+			}, program.WithConstants(types.TypedArray[int64]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			value := i.constants[0]

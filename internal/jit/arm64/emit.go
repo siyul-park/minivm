@@ -17,21 +17,23 @@ import (
 //
 // What it lowers is narrow while the port runs: arithmetic over the kinds
 // that stay unboxed in a register, compile-time constants, local and global
-// slot access, and the branches and returns that carry those between blocks.
-// The heap, guards and their cold stubs, calls, bridges, suspension, a native
-// loop back-edge, and every reference count are declined here, and
-// jit.Compiler compiles a root holding one of them through the plan pipeline
-// instead (see Compiler.native).
+// slot access, the branches and returns that carry those between blocks, the
+// shape a heap access is admitted through and the cold stub it exits to, and
+// the array read that loads through it. Calls, bridges, suspension, a native
+// loop back-edge, heap writes, and every reference count a native path would
+// have to take itself are declined here, and jit.Compiler compiles a root
+// holding one of them through the plan pipeline instead.
 type machine struct {
 	scratch []asm.PReg
 }
 
 // emitter emits one function's ARM64 code from SSA. It owns the frame base
 // every local slot is addressed from, the frame facts a prologue and a
-// teardown are shaped by, and the blocks already laid out, which is what
-// makes a back edge recognizable. Every other fact it needs - a value's
-// register and type, a block's label, the block that falls through - it asks
-// the compiler for.
+// teardown are shaped by, the blocks already laid out, which is what makes a
+// back edge recognizable, and the cold stubs its guards branch to. Every
+// other fact it needs - a value's register and type, a block's label, the
+// block that falls through, the journal words a deopt writes - it asks the
+// compiler for.
 type emitter struct {
 	c       *backend.Compiler
 	a       *asm.Assembler
@@ -41,8 +43,9 @@ type emitter struct {
 	locals  int
 	returns int
 
-	base asm.VReg
-	seen []bool
+	base  asm.VReg
+	seen  []bool
+	stubs []stub
 }
 
 // maxSlot is the largest slot index a load or store reaches: the offset is
@@ -71,7 +74,8 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_LE, instr.F32_GT, instr.F32_GE,
 		instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV,
 		instr.F64_ABS, instr.F64_NEG, instr.F64_SQRT,
-		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE:
+		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE,
+		instr.ARRAY_GET:
 		return true
 	default:
 		return false
@@ -80,8 +84,9 @@ func (m machine) Lowers(code instr.Opcode) bool {
 
 // Traps reports whether lowering code ends the block by handing control back.
 // Nothing this machine lowers does: an opcode it cannot compute it declines
-// outright rather than running as an exit, because an exit needs the deopt
-// state and cold stub this stage does not emit.
+// outright rather than running as an exit, because an unconditional exit ends
+// the block, and every exit this machine emits is the cold path behind a
+// guard the hot path falls through.
 func (m machine) Traps(instr.Opcode) bool {
 	return false
 }
@@ -161,8 +166,14 @@ func (e *emitter) Enter() bool {
 	return true
 }
 
-// Lower emits one operation. It consumes exactly one: this machine fuses no
-// adjacent run yet, so every shape it lowers is one operation wide.
+// Lower emits one operation, or the two a guarded heap read is written in.
+// Those two are the one shape this machine fuses, and it fuses them because
+// they are one operation of the bytecode: they resume into a single
+// interpreter state, which describes the operand stack at that instruction
+// and nowhere else. Consuming them together is what makes their adjacency a
+// structural fact rather than a rule something has to keep true - ops never
+// reaches past the end of a block or past a trap, so a guard whose read is
+// not the very next operation lowers as neither.
 func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 	e.seen[block] = true
 	op := ops[0]
@@ -175,10 +186,24 @@ func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 		return 1, e.store(op)
 	case ssa.OpExec:
 		return 1, e.exec(op)
+	case ssa.OpGuardShape:
+		// The opcode test is load-bearing, not defence in depth. read
+		// re-derives everything else it needs from the pair, but nothing in
+		// it re-derives "this is an array read": an opcode admitted through
+		// a bare-itab shape, popping two and pushing one, would satisfy
+		// every check. Three separate facts keep that from happening today -
+		// frontend/walk.go guards no other read, transform/dce.go keeps a
+		// heap-reading exec alive so a guard is never stranded, and Lowers
+		// admits no other guard producer - so an edit to any of them belongs
+		// here too.
+		if len(ops) < 2 || ops[1].Op != ssa.OpExec || ops[1].Code != instr.ARRAY_GET {
+			return 1, false
+		}
+		return 2, e.read(op, ops[1])
 	case ssa.OpState:
-		// A state materializes nothing here. Nothing this machine lowers can
-		// deoptimize - a scalar slot store cannot fail, and every operation
-		// that can is declined - so no emitted instruction reads it.
+		// A state materializes nothing where it stands: it names the values a
+		// deopt writes back, and the cold stub that writes them is emitted
+		// behind the guard that resumes into it (see emitter.exit).
 		return 1, true
 	default:
 		return 1, false
@@ -204,9 +229,16 @@ func (e *emitter) Term(block int, t ssa.Terminator) bool {
 	}
 }
 
-// Leave emits nothing: this machine defers nothing, because it emits no guard
-// to hang a cold stub behind and schedules no continuation.
+// Leave emits the cold stub behind every guard, after the last block, so a
+// guard costs one rarely-taken branch on the hot path and none of the stores
+// that hand control back.
 func (e *emitter) Leave() bool {
+	for _, s := range e.stubs {
+		e.a.Bind(s.label)
+		if !e.unwind(s.deopt) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -233,6 +265,11 @@ func (e *emitter) constant(op ssa.Operation) bool {
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDI(bits, uint64(op.Const))...)
 		e.a.Emit(arm64.FMOV(dst, bits))
+	case ssa.TypeRef:
+		// A reference is held boxed, so the pool word is the value itself. It
+		// carries no count of its own: the pool holds the retain, which is
+		// what leaves the operand borrowed and a cold path owing it a retain.
+		e.a.Emit(arm64.LDI(dst, uint64(op.Const))...)
 	default:
 		return false
 	}
@@ -240,8 +277,10 @@ func (e *emitter) constant(op ssa.Operation) bool {
 }
 
 // load reads one interpreter slot into the value's register, unboxed. An i32,
-// i8, and i1 need no work at all: the boxed word already carries the value in
-// the lane every later operation reads.
+// i8, i1, and ref need no work at all: the boxed word already carries the
+// value in the lane every later operation reads it in. A ref takes no count
+// either - the slot keeps the one it holds, and the operand borrows it until
+// something hands it to storage the interpreter can see.
 func (e *emitter) load(op ssa.Operation) bool {
 	base, off, ok := e.slot(op.Slot)
 	if !ok || len(op.Results) != 1 {
@@ -249,7 +288,7 @@ func (e *emitter) load(op ssa.Operation) bool {
 	}
 	dst := e.c.Reg(op.Results[0])
 	switch e.c.Func().Type(op.Results[0]) {
-	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32, ssa.TypeRef:
 		e.a.Emit(arm64.LDR(dst, base, int16(off*8)))
 	case ssa.TypeF32:
 		boxed := e.a.Reg(asm.RegTypeInt, asm.Width64)
@@ -263,12 +302,21 @@ func (e *emitter) load(op ssa.Operation) bool {
 	return true
 }
 
-// store writes one interpreter slot boxed. It takes no reference-count
-// action, and needs none: a slot able to hold a reference is declined before
-// any of this runs, so nothing here overwrites a count the interpreter owns.
+// store writes one interpreter slot boxed. Only a slot that cannot be holding
+// a reference: overwriting one releases the reference it replaced and adopts
+// the one it takes, which is the ownership accounting this machine does not
+// emit. The slot decides that and not the value written, because an i32
+// stored over a slot that currently holds a reference drops that count just
+// as a reference would. Only a global is asked: a frame declaring a reference
+// local is refused whole (see Enter), so every local slot reached here is
+// scalar. The rule belongs here rather than with the addressing, because
+// reading the same slot borrows and owes nothing.
 func (e *emitter) store(op ssa.Operation) bool {
 	base, off, ok := e.slot(op.Slot)
 	if !ok || len(op.Args) != 1 {
+		return false
+	}
+	if op.Slot.Space == ssa.SpaceGlobal && e.c.Input().Globals[op.Slot.Index] == types.KindRef {
 		return false
 	}
 	boxed, ok := e.box(op.Args[0])
@@ -379,6 +427,8 @@ func (e *emitter) exec(op ssa.Operation) bool {
 	case instr.F64_GE:
 		return e.compare(op, ssa.TypeF64, arm64.CondGE)
 	default:
+		// A heap read is not here: it lowers only as the second half of the
+		// guarded pair Lower fuses, never on its own.
 		return false
 	}
 }
@@ -548,14 +598,21 @@ func (e *emitter) complete(t ssa.Terminator) bool {
 	return true
 }
 
-// box produces v's boxed word in a fresh register: the form every VM slot
-// holds. A raw i32, i8, and i1 keep their value in the low 32 bits, so boxing
-// masks and tags; an f32's bits leave the float bank first; an f64's boxed
-// word is its bit pattern already.
+// box produces v's boxed word: the form every VM slot holds. A raw i32, i8,
+// and i1 keep their value in the low 32 bits, so boxing masks and tags into a
+// fresh register; an f32's bits leave the float bank first; an f64's boxed
+// word is its bit pattern already; and a reference is held boxed throughout,
+// so it is handed straight back.
 func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 	src := e.c.Reg(v)
+	typ := e.c.Func().Type(v)
+	if typ == ssa.TypeRef {
+		// A reference is already held in its boxed form, so there is nothing
+		// to box and no register to box it into.
+		return src, true
+	}
 	out := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	switch e.c.Func().Type(v) {
+	switch typ {
 	case ssa.TypeI1:
 		e.a.Emit(arm64.ANDI(out, src, maskI32), arm64.MOVK(out, uint16(tagI1>>48), 48))
 	case ssa.TypeI8:
@@ -575,9 +632,8 @@ func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 
 // slot resolves the base register and word offset one interpreter slot lives
 // at. A frame base other than the entry frame's names an inlined callee's
-// storage, an upvalue's base is the closure's, and a global able to hold a
-// reference carries a count a store here would drop: this machine reaches
-// none of the three.
+// storage and an upvalue's base is the closure's: this machine reaches
+// neither.
 func (e *emitter) slot(s ssa.Slot) (asm.VReg, int, bool) {
 	switch s.Space {
 	case ssa.SpaceLocal:
@@ -586,8 +642,7 @@ func (e *emitter) slot(s ssa.Slot) (asm.VReg, int, bool) {
 		}
 		return e.base, s.Index, true
 	case ssa.SpaceGlobal:
-		globals := e.c.Input().Globals
-		if s.Index < 0 || s.Index >= len(globals) || s.Index > maxSlot || globals[s.Index] == types.KindRef {
+		if s.Index < 0 || s.Index >= len(e.c.Input().Globals) || s.Index > maxSlot {
 			return asm.VReg{}, 0, false
 		}
 		return e.pin(scratchGlobals), s.Index, true
@@ -642,9 +697,10 @@ func (e *emitter) pinTo(pr asm.PReg) asm.VReg {
 	return v
 }
 
-// lane is the register form values of t share, or the zero Type for one this
-// machine holds no form for: a reference and an i64, whose slot reads need a
-// guard, and the interpreter state an OpState defines.
+// lane is the register form values of t share, or the zero Type for one no
+// arithmetic here computes in: an i64, which needs the boxability guard this
+// machine does not emit; a reference, which is moved rather than computed;
+// and the interpreter state an OpState defines.
 func lane(t ssa.Type) ssa.Type {
 	switch t {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:

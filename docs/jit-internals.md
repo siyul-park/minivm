@@ -427,12 +427,15 @@ backend an optimization it already has.
 
 #### ARM64 SSA machine
 
-`internal/jit/arm64`'s `machine` and `emitter` (`emit.go`) are the ARM64 side of
-that seam, reached through `arm64.New().Compile`. They are deliberately small:
-an immutable machine holding the pinned journal registers, and a per-compile
-emitter holding the frame base every local slot is addressed from, the frame
-facts a prologue and a teardown are shaped by, and which blocks are already
-laid out. Everything else - a value's register and type, a block's label, the
+`internal/jit/arm64`'s `machine` and `emitter` are the ARM64 side of that seam,
+reached through `arm64.New().Compile`, split across `emit.go` (the machine, the
+prologue, and one operation's instructions), `guard.go` (a speculated shape and
+the cold stub it leaves through), and `read.go` (a heap read). They are
+deliberately small: an immutable machine holding the pinned journal registers,
+and a per-compile emitter holding the frame base every local slot is addressed
+from, the frame facts a prologue and a teardown are shaped by, which blocks are
+already laid out, the heap cell each guarded container was walked to, and the
+cold stubs its guards branch to. Everything else - a value's register and type, a block's label, the
 block that falls through, an edge's copies, a deopt's journal words - it asks
 the `backend.Compiler` for, which is why it needs none of the plan `lowering`'s
 symbolic operand stack, inlined activations, deferred work, or backing
@@ -448,22 +451,68 @@ than a pair around every opcode.
 
 What it lowers, and therefore what `Lowers` admits: `i32` arithmetic, bitwise
 operations, shifts, comparisons, and `eqz`; `f32` and `f64` arithmetic, `abs`,
-`neg`, `sqrt`, and comparisons; compile-time constants; local and global slot
-loads and stores; `OpJump` and `OpBranch`; and `OpReturn` and `OpComplete` for a
-function and a module entry. `Traps` is false throughout: an opcode this machine
-cannot compute it declines outright rather than running as an exit, because an
-exit needs the deopt state and cold stub it does not emit.
+`neg`, `sqrt`, and comparisons; compile-time constants, a pool reference
+included; local and global slot loads, and stores to a slot that cannot hold a
+reference; `OpGuardShape` over an array shape; `ARRAY_GET` of a scalar element;
+`OpJump` and `OpBranch`; and `OpReturn` and `OpComplete` for a function and a
+module entry. `Traps` is false throughout: an opcode this machine cannot
+compute it declines outright rather than running as an exit, because an
+unconditional exit ends the block, and every exit it emits is the cold path
+behind a guard the hot path falls through.
+
+**Guards and their cold stubs.** `guard.go` lowers `OpGuardShape` as the tag
+test, heap-cell walk, and itab compare the plan pipeline writes once per access
+in `guardHeap`/`guardItab`, and hands the cell's data word to the read behind
+it so that read loads through the same cell instead of resolving it again. It
+runs *before* the access it admits, which is what Speculation requires.
+
+A guard and its read are **the one shape this machine fuses**: `Lower` sees
+`OpGuardShape` followed by `OpExec ARRAY_GET`, consumes both, and lowers
+neither alone. They are one bytecode operation and resume into one
+interpreter state, and that state describes the operand stack at that
+instruction and nowhere else - so the read's own bounds test leaves through
+the guard's state, which is sound exactly while nothing stands between them.
+Fusing makes that structural rather than a rule to keep true: `Compile` hands
+`Lower` one block's operations, truncated at its trap, so `ops[1]` can never
+be in another block or past the point control leaves.
+
+`emitter.exit` resolves the guard's `OpState` through
+`Compiler.Exit`, reserves a label, and queues a `stub`; `Leave` emits every
+stub after the last block, so the hot path carries one rarely-taken branch and
+none of the stores. A stub boxes each `Deopt.Slots` entry into its VM stack
+slot, publishes `CellSP`, writes one `journal` frame record, and reports
+`TrapFallback` with the descriptor and the resume IP. A flushed entry whose
+`Flush.Owned` is false and whose type is `ref` is retained there and only
+there: the resumed interpreter adopts every stack entry and releases it, so a
+borrowed one - a pool constant, a value read out of a global slot - would be
+released once more than it was retained. A null reference is skipped, because
+`Interpreter.releaseBox` releases no reference to the permanently-null cell
+zero and the count would be one nothing drops.
 
 Everything else declines, which abandons the compile and leaves the root to the
 plan pipeline. It declines a loop entry (a live frame it must not unwind) and a
 back edge to a block already laid out (a safepoint budget and loop-carried
 registers it does not emit); an edge carrying block-parameter arguments (edge
-copies it does not place); `OpGuard*`, `OpRetain`, `OpRelease`, `OpBridge`,
-`OpExit`, `OpSuspend`, and `OpTable`; a frame declaring a reference local or
-returning one, and a global slot able to hold one (reference counts it does not
-account for); an `i64` or `ref` value anywhere (a slot read needing a guard);
-an upvalue slot (a base only the closure resolves); and a `Slot` whose `Base` is
-not the entry frame's (an inlined callee's storage).
+copies it does not place); `OpGuardKind`, `OpGuardBounds`, `OpGuardValue`,
+`OpRetain`, `OpRelease`, `OpBridge`, `OpExit`, `OpSuspend`, and `OpTable`; a
+guard shape naming a struct type pointer or a host field kind; a frame
+declaring a reference local or returning one, and a store into a slot that can
+hold a reference (reference counts it does not account for); an `i64` value
+anywhere (the boxability guard it does not emit); an upvalue slot (a base only
+the closure resolves); and a `Slot` whose `Base` is not the entry frame's (an
+inlined callee's storage).
+
+The other heap reads the plan pipeline lowers are blocked by the IR rather than
+by this machine, and unblocking them is a frontend change. `REF_GET`,
+`ERROR_GET`, and `CORO_VALUE` push `KindAny`, which `frontend`'s bytecode walk
+cannot type, so no function holding one is planned at all. `ARRAY_LEN`,
+`STRING_LEN`, and `CORO_DONE` are planned, but the frontend emits no
+`OpGuardShape` in front of them and their `OpExec` only reads the heap, so it
+carries no `OpState` either: there is no shape to load through and nowhere for
+a mismatch to exit to. `STRUCT_GET` is guarded and does carry a state; what it
+still needs is the field's kind, which the IR holds only as the opaque
+`Shape.Typ` pointer, so lowering it soundly means the runtime field-kind guard
+and the second exit reason that the `*HostStruct` path needs anyway.
 
 An entry it does emit is `BLR`-compatible with the plan pipeline's own callers,
 because both publish into `i.natives`: it clears its own non-parameter locals in

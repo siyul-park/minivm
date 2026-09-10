@@ -1,6 +1,7 @@
 package arm64_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -55,10 +56,11 @@ func TestNew(t *testing.T) {
 	// same prologue - mirror the journal header into the pinned registers,
 	// then derive the frame base local slots are addressed from - because
 	// every entry this machine takes reads its state from there.
+	elems := types.TypedArray[int32]{10, 20, 30}
 	for _, tt := range []struct {
 		name string
 		addr int
-		fn   *types.Function
+		in   *jit.Input
 		want []asm.Instruction
 	}{
 		{
@@ -67,13 +69,13 @@ func TestNew(t *testing.T) {
 			// the frame boundary masks once.
 			name: "lowers an integer arithmetic sequence",
 			addr: 1,
-			fn: &types.Function{
+			in: input(1, &types.Function{
 				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).
 						Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL).Emit(instr.RETURN)
 				}),
-			},
+			}),
 			want: append(prologue(5, 6, 7), []asm.Instruction{
 				asmarm64.LDR(vreg(0), vreg(5), 0),
 				asmarm64.LDR(vreg(1), vreg(5), 8),
@@ -94,10 +96,10 @@ func TestNew(t *testing.T) {
 			// emitted stream this machine does not run yet.
 			name: "materializes a constant",
 			addr: 1,
-			fn: &types.Function{
+			in: input(1, &types.Function{
 				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
-			},
+			}),
 			want: append(prologue(1, 2, 3), []asm.Instruction{
 				asmarm64.MOVZ(vreg(0), 1, 0),
 				asmarm64.ANDI(vreg(4), vreg(0), 0xFFFFFFFF),
@@ -115,13 +117,13 @@ func TestNew(t *testing.T) {
 			// as a value's representation, which is the next stage's choice.
 			name: "round-trips a local through its slot",
 			addr: 1,
-			fn: &types.Function{
+			in: input(1, &types.Function{
 				Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				Locals: []types.Type{types.TypeI32},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_SET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
 				}),
-			},
+			}),
 			want: append(append(prologue(2, 3, 4),
 				asmarm64.MOVZ(vreg(5), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(5), vreg(2), 8),
@@ -144,7 +146,7 @@ func TestNew(t *testing.T) {
 			// into the taken one.
 			name: "lowers a conditional branch",
 			addr: 1,
-			fn: &types.Function{
+			in: input(1, &types.Function{
 				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) {
 					other := b.Label()
@@ -152,7 +154,7 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.I32_CONST, 7).Emit(instr.RETURN)
 					b.Bind(other).Emit(instr.I32_CONST, 9).Emit(instr.RETURN)
 				}),
-			},
+			}),
 			want: append(prologue(3, 4, 5), []asm.Instruction{
 				asmarm64.LDR(vreg(0), vreg(3), 0),
 				asmarm64.CBZLabel(narrow(0), 2),
@@ -176,12 +178,12 @@ func TestNew(t *testing.T) {
 			// caller reads it back from.
 			name: "returns through the frame base and the ABI registers",
 			addr: 1,
-			fn: &types.Function{
+			in: input(1, &types.Function{
 				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32, types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
 				}),
-			},
+			}),
 			want: append(prologue(2, 3, 4), []asm.Instruction{
 				asmarm64.MOVZ(vreg(0), 1, 0),
 				asmarm64.MOVZ(vreg(1), 2, 0),
@@ -202,12 +204,12 @@ func TestNew(t *testing.T) {
 			// at the frame boundary rather than a pair around every opcode.
 			name: "keeps a float in the float bank",
 			addr: 1,
-			fn: &types.Function{
+			in: input(1, &types.Function{
 				Typ: &types.FunctionType{Params: []types.Type{types.TypeF64, types.TypeF64}, Returns: []types.Type{types.TypeF64}},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.F64_SUB).Emit(instr.RETURN)
 				}),
-			},
+			}),
 			want: append(prologue(3, 4, 5), []asm.Instruction{
 				asmarm64.LDR(vreg(6), vreg(3), 0),
 				asmarm64.FMOV(freg(0), vreg(6)),
@@ -226,13 +228,13 @@ func TestNew(t *testing.T) {
 			// with the offset past its last instruction.
 			name: "completes module code through the journal",
 			addr: 0,
-			fn: &types.Function{
+			in: input(0, &types.Function{
 				Typ:    &types.FunctionType{},
 				Locals: []types.Type{types.TypeI32},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.I32_CONST, 5).Emit(instr.LOCAL_SET, 0)
 				}),
-			},
+			}),
 			want: append(prologue(1, 2, 3), []asm.Instruction{
 				asmarm64.MOVZ(vreg(0), 5, 0),
 				asmarm64.ANDI(vreg(4), vreg(0), 0xFFFFFFFF),
@@ -247,11 +249,74 @@ func TestNew(t *testing.T) {
 				asmarm64.RET(),
 			}...),
 		},
+		{
+			// A read speculates: the guard admits only the concrete array
+			// type the access was compiled against, and it runs first, so a
+			// container of any other type leaves before the load. The read
+			// behind it is one unsigned index test - a sign-extended negative
+			// index is above any length - and one load of the element's own
+			// width, out of the heap cell the guard already walked to.
+			name: "reads an array element through the shape that admitted it",
+			addr: 1,
+			in: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Array: jit.Itab(elems)}
+				return in
+			}(),
+			want: slices.Concat(
+				prologue(4, 5, 6),
+				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+				[]asm.Instruction{
+					asmarm64.LDR(vreg(1), vreg(4), 0),
+					asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits)),
+				},
+				asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
+				[]asm.Instruction{
+					asmarm64.CMP(vreg(7), vreg(8)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+					asmarm64.ANDI(vreg(9), vreg(0), 0xFFFFFFFF),
+					asmarm64.LDR(vreg(10), vreg(15), int16(journal.CellHeap*8)),
+					asmarm64.LSLI(vreg(11), vreg(9), 4),
+					asmarm64.ADD(vreg(12), vreg(10), vreg(11)),
+					asmarm64.LDR(vreg(13), vreg(12), 0),
+					asmarm64.LDR(vreg(14), vreg(12), 8),
+				},
+				asmarm64.LDI(vreg(16), uint64(jit.Itab(elems))),
+				[]asm.Instruction{
+					asmarm64.CMP(vreg(13), vreg(16)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+					asmarm64.MOV(vreg(2), vreg(0)),
+
+					asmarm64.LDR(vreg(17), vreg(14), 0),
+					asmarm64.LDR(vreg(18), vreg(14), 8),
+					asmarm64.SXTW(vreg(19), vreg(1)),
+					asmarm64.CMP(vreg(19), vreg(18)),
+					asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
+					asmarm64.LSLI(vreg(21), vreg(19), 2),
+					asmarm64.ADD(vreg(20), vreg(17), vreg(21)),
+					asmarm64.LDRSW(vreg(3), vreg(20), 0),
+
+					asmarm64.ANDI(vreg(22), vreg(3), 0xFFFFFFFF),
+					asmarm64.MOVK(vreg(22), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(22), vreg(4), 0),
+					asmarm64.MOV(vreg(23), vreg(22)),
+					asmarm64.RET(),
+				},
+				stub(24, 1, 3),
+				stub(38, 2, 4),
+			),
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			assembler := asm.New(asmarm64.New())
 
-			entry, ok := arm64.New().Compile(assembler, input(tt.addr, tt.fn), jit.Anchor{Addr: tt.addr})
+			entry, ok := arm64.New().Compile(assembler, tt.in, jit.Anchor{Addr: tt.addr})
 			require.True(t, ok)
 			require.Equal(t, jit.Anchor{Addr: tt.addr}.Kind(), entry.Kind)
 			require.Equal(t, prof.FrontendStatic, entry.Frontend)
@@ -318,13 +383,33 @@ func TestNew(t *testing.T) {
 			}),
 		},
 		{
-			name: "a heap access, whose guard and cold stub it does not emit",
+			// The read itself lowers (see the golden stream above); what
+			// declines is the frame, because a reference in a local carries a
+			// count the teardown on a native return does not drop.
+			name: "an array read off a reference parameter",
 			input: input(1, &types.Function{
 				Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 				}),
 			}),
+		},
+		{
+			// An i64 element may be heap-promoted, so reading one needs the
+			// boxability guard and the register lane this machine has neither
+			// of.
+			name: "an i64 array element",
+			input: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Array: jit.Itab(types.TypedArray[int64]{1})}
+				return in
+			}(),
 		},
 		{
 			name: "a call, whose frame it does not open",
@@ -357,6 +442,35 @@ func TestNew(t *testing.T) {
 			require.NotEmpty(t, code)
 		})
 	}
+
+	// A slot store is refused by the slot it writes, never by the value it
+	// writes: overwriting a slot that currently holds a reference releases
+	// that reference, and an i32 written over one drops its count exactly as
+	// a reference would. The two compiles below differ in nothing but the
+	// kind the global can hold, which is what pins the refusal to that rule
+	// rather than to anything upstream of it.
+	//
+	// Neither pipeline lowers the refused half - the plan's own globalSet
+	// declines a scalar written into a reference-kinded global too - so this
+	// case stands outside the table above, whose contract is that the plan
+	// still compiles what this machine declines.
+	t.Run("refuses a store by the slot it writes", func(t *testing.T) {
+		store := func(holds types.Kind) *jit.Input {
+			in := input(1, &types.Function{
+				Typ: &types.FunctionType{},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 5).Emit(instr.GLOBAL_SET, 0).Emit(instr.RETURN)
+				}),
+			})
+			in.Globals = []types.Kind{holds}
+			return in
+		}
+		_, ok := arm64.New().Compile(asm.New(asmarm64.New()), store(types.KindI32), jit.Anchor{Addr: 1})
+		require.True(t, ok, "a global that can only ever hold a scalar takes the store")
+
+		_, ok = arm64.New().Compile(asm.New(asmarm64.New()), store(types.KindRef), jit.Anchor{Addr: 1})
+		require.False(t, ok, "a global that can hold a reference does not, because the store would drop its count")
+	})
 }
 
 // input is the compile-time snapshot one function is compiled from, published
@@ -387,6 +501,61 @@ func prologue(base, bp, stack int32) []asm.Instruction {
 		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
 	}
 }
+
+// shapeExit and boundsExit are the labels the guarded read's two cold stubs
+// take, in the order the guard and the read reserve them; each stub then
+// takes one more, for the retain its null-reference test skips.
+const (
+	shapeExit asm.Label = iota + 1
+	boundsExit
+)
+
+// stub is one cold stub of the guarded-read stream: the two operands flushed
+// to their VM stack slots, the retain the borrowed container owes the
+// interpreter that adopts it, the published stack pointer, the one frame
+// record, and the trap. first names the stub's own first virtual register and
+// id the exit descriptor it reports, and live the label its null-reference
+// test skips the retain to.
+func stub(first int32, id uint16, live asm.Label) []asm.Instruction {
+	ctrl, bp := vreg(first), vreg(first+5)
+	return []asm.Instruction{
+		// The container is held boxed already, so it flushes as it stands,
+		// and it borrows its count from the constant pool, so the stub takes
+		// the retain the resumed interpreter releases when it pops it.
+		asmarm64.STR(vreg(0), vreg(4), 8),
+		asmarm64.ANDI(vreg(first+1), vreg(0), 0xFFFFFFFF),
+		asmarm64.CMPI(vreg(first+1), 0),
+		asmarm64.BCondLabel(asmarm64.OpBEQ, live),
+		asmarm64.LDR(vreg(first+2), ctrl, int16(journal.CellRC*8)),
+		asmarm64.LDRR(vreg(first+3), vreg(first+2), vreg(first+1)),
+		asmarm64.ADDI(vreg(first+3), vreg(first+3), 1),
+		asmarm64.STRR(vreg(first+3), vreg(first+2), vreg(first+1)),
+		asmarm64.ANDI(vreg(first+4), vreg(1), 0xFFFFFFFF),
+		asmarm64.MOVK(vreg(first+4), tag(types.KindI32), 48),
+		asmarm64.STR(vreg(first+4), vreg(4), 16),
+		asmarm64.ADDI(vreg(first+6), bp, 3),
+		asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
+		asmarm64.MOVZ(vreg(first+7), 1, 0),
+		asmarm64.STP(vreg(first+7), bp, ctrl, int16(journal.At(0, journal.RecordAddr)*8)),
+		asmarm64.MOVZ(vreg(first+8), arrayGetIP, 0),
+		asmarm64.MOVZ(vreg(first+9), 1, 0),
+		asmarm64.STP(vreg(first+8), vreg(first+9), ctrl, int16(journal.At(0, journal.RecordIP)*8)),
+		asmarm64.MOVZ(vreg(first+10), 1, 0),
+		asmarm64.STR(vreg(first+10), ctrl, int16(journal.CellDepth*8)),
+		asmarm64.MOVZ(vreg(first+11), id, 0),
+		asmarm64.STR(vreg(first+11), ctrl, int16(journal.CellExitID*8)),
+		asmarm64.MOVZ(vreg(first+12), uint16(journal.TrapFallback), 0),
+		asmarm64.STR(vreg(first+12), ctrl, int16(journal.CellTrap*8)),
+		asmarm64.MOVZ(vreg(first+13), arrayGetIP, 0),
+		asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellNextIP*8)),
+		asmarm64.RET(),
+	}
+}
+
+// arrayGetIP is where the guarded read's own opcode sits, which is both the
+// IP its frame record carries and the IP its stubs resume at: a guard exits
+// before the operation it admits, never past it.
+const arrayGetIP = 5
 
 // vreg, freg, and narrow name one virtual register of the stream a compile
 // emits: the integer bank, the float bank, and the 32-bit view of an integer
