@@ -123,6 +123,32 @@ Intentionally rejected simplifications MUST be recorded in the change summary
 with the invariant, compatibility constraint, or measured cost that prevented
 them.
 
+### 2.4 Comments
+
+Comments MUST be kept to a minimum. Code is the specification (§2 item 1); a
+comment is warranted only where the code cannot state the fact itself.
+
+A comment MUST NOT restate what the code says. Narrating a statement, naming
+the steps of a sequence the reader can see, or describing a symbol by
+paraphrasing its own name adds a second copy of the behavior that drifts from
+the first.
+
+A comment SHOULD exist only for a fact that has no expression in code:
+
+- an invariant a caller or future editor must preserve, and what breaks
+  without it;
+- a constraint that lives in another package, file, or table, naming it;
+- a rejected alternative and the measured cost or defect that rejected it;
+- a reference to an external contract, specification, or issue.
+
+Prefer removing the need for a comment over writing one. A name, a type, an
+extracted function, or a narrowed signature that makes the fact evident is
+better than prose asserting it. Where a comment is warranted, it MUST be the
+shortest form that carries the fact.
+
+Doc comments on exported symbols follow Go convention and state the contract,
+not the implementation.
+
 ## 3. Functions
 
 ### 3.1 Abstraction Level

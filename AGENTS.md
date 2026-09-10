@@ -38,7 +38,7 @@ A `program.Program` is threaded into one closure per instruction; a profiler pro
 
 1. Run `git status --short`; never overwrite or commit unrelated user changes.
 2. Read the Task Router docs for the area before changing code or tests.
-3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects.
+3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects. Comments are minimal by §2.4: write one only for a fact the code cannot state.
 4. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
 5. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
 
@@ -51,11 +51,12 @@ Do not report work complete until all of these hold:
 1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
 2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
 3. A further simplification pass found no safe improvement.
-4. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
-5. Performance claims carry the reproducible before/after evidence §14 requires.
-6. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
-7. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
-8. Any intentionally skipped simplification or validation is recorded with its reason.
+4. Every comment carries a fact the code cannot state (§2.4); comments that restate the code were deleted, not reworded.
+5. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
+6. Performance claims carry the reproducible before/after evidence §14 requires.
+7. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
+8. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
+9. Any intentionally skipped simplification or validation is recorded with its reason.
 
 ## Task Router
 

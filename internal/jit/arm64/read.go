@@ -9,27 +9,16 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// read lowers one guarded array read: the guard that admits the container,
-// and the access that loads through it. The two lower as one shape because
-// they are one bytecode operation - they resume into a single interpreter
-// state, and the bounds test below leaves through the state the guard in
-// front of it carries.
+// read lowers a guard and the array access it admits as one shape: they are
+// one bytecode operation, so the bounds test leaves through the state the
+// guard carries. Element stride lives in the shape table, not here.
 //
-// With the guard behind it, the read is the index test the plan pipeline's
-// guardIndex performs and the one load the element's own storage needs. The
-// shape table states the stride, so a new element kind stays one row there
-// rather than a rule here.
+// An i64 element may be heap-promoted and a reference element is owned by
+// whoever receives it; neither has a lane or a retain here, so both decline.
 //
-// It reads only an element that fits a register on its own. An i64 may be
-// heap-promoted, which needs the boxability guard and the register lane this
-// machine has neither of, and a reference read out of a container is owned by
-// whoever receives it, which needs a retain the IR does not carry.
-//
-// It emits before it has finished refusing: the guard commits instructions
-// and reserves a stub, and the bounds exit and the element kind can still
-// decline behind them. That is sound only because a false anywhere in
-// lowering abandons the whole Compile, whose assembler is per-attempt and
-// discarded unpublished - not because the emitted work is unwound.
+// The guard emits and reserves a stub before the bounds exit and the element
+// kind can still decline. Sound only because a false anywhere in lowering
+// abandons the whole Compile and its assembler unpublished.
 func (e *emitter) read(guard, get ssa.Operation) bool {
 	if len(get.Args) != 2 || len(get.Results) != 1 {
 		return false
@@ -61,8 +50,8 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 		arm64.LDR(ptr, data, shape.Base+sliceData),
 		arm64.LDR(length, data, shape.Base+sliceLen),
 	)
-	// One unsigned test covers both ends: a sign-extended negative index is
-	// above any length a VM container can have.
+	// A sign-extended negative index is above any length, so one unsigned
+	// test covers both ends.
 	idx := e.sign32(e.c.Reg(get.Args[1]))
 	e.a.Emit(arm64.CMP(idx, length), arm64.BCondLabel(arm64.OpBCS, fail))
 
@@ -73,11 +62,9 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 		off := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LSLI(off, idx, shape.Scale), arm64.ADD(addr, ptr, off))
 	}
-	// The lane test above already admits exactly these five kinds, so the
-	// refusal below cannot fire today. It is kept because what pins the five
-	// is three tables in three packages agreeing - the shape table's element
-	// kinds, ssa.TypeOf, and lane - and a kind that stops agreeing declines
-	// here rather than loading at some other width.
+	// Unreachable while the shape table, ssa.TypeOf, and lane agree on these
+	// five kinds; a kind that stops agreeing declines instead of loading at
+	// the wrong width.
 	switch shape.Kind {
 	case types.KindI1:
 		e.a.Emit(arm64.LDRB(dst, addr, 0))

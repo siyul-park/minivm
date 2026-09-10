@@ -10,10 +10,8 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// stub is one cold path a guard leaves through: the label its mismatch
-// branches to, and the interpreter state that path hands back. Every stub is
-// emitted after the last block, so admitting a value costs one rarely-taken
-// branch on the hot path and none of the stores behind it.
+// stub pairs one guard's mismatch label with the deopt state Leave resumes
+// it into.
 type stub struct {
 	label asm.Label
 	deopt backend.Deopt
@@ -82,8 +80,6 @@ func (e *emitter) cell(ref asm.VReg, want uintptr, fail asm.Label) asm.VReg {
 	return data
 }
 
-// admit continues only while got holds want, and leaves through fail
-// otherwise.
 func (e *emitter) admit(got asm.VReg, want uint64, fail asm.Label) {
 	reg := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDI(reg, want)...)
@@ -121,8 +117,6 @@ func addressable(slot int) bool {
 	return slot >= 0 && slot <= maxSlot
 }
 
-// opcode is the bytecode operation state resumes at, which is what an exit
-// descriptor is attributed to.
 func (e *emitter) opcode(state ssa.Value) int {
 	op, ok := e.c.Def(state)
 	if !ok || op.Op != ssa.OpState || len(op.Frames) == 0 {
@@ -197,18 +191,14 @@ func (e *emitter) record(n int, r backend.Record, ctrl, bp asm.VReg) {
 	e.a.Emit(arm64.STP(ip, returns, ctrl, int16(journal.At(n, journal.RecordIP)*8)))
 }
 
-// publish writes one journal header cell.
 func (e *emitter) publish(ctrl asm.VReg, at journal.Cell, word uint64) {
 	reg := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDI(reg, word)...)
 	e.a.Emit(arm64.STR(reg, ctrl, int16(at*8)))
 }
 
-// retain takes the reference count the interpreter adopts on resuming - the
-// one it releases again when it pops the entry. A null reference is skipped
-// for exactly that reason: the interpreter releases no reference to the
-// permanently-null cell zero (see Interpreter.releaseBox), so a count taken
-// here would be one nothing ever drops.
+// retain skips a null reference: Interpreter.releaseBox drops nothing for
+// cell zero, so a count taken here would have no matching release.
 func (e *emitter) retain(boxed, ctrl asm.VReg) {
 	addr := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	done := e.a.Label()

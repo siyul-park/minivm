@@ -15,25 +15,17 @@ import (
 // it opens for one compile. It holds the pinned journal registers and nothing
 // a compile mutates, so one machine serves concurrent compiles.
 //
-// What it lowers is narrow while the port runs: arithmetic over the kinds
-// that stay unboxed in a register, compile-time constants, local and global
-// slot access, the branches and returns that carry those between blocks, the
-// shape a heap access is admitted through and the cold stub it exits to, and
-// the array read that loads through it. Calls, bridges, suspension, a native
-// loop back-edge, heap writes, and every reference count a native path would
-// have to take itself are declined here, and jit.Compiler compiles a root
-// holding one of them through the plan pipeline instead.
+// What it lowers is narrow while the port runs; see Lowers for the set. A
+// root needing anything outside it compiles through jit.Compiler's plan
+// pipeline instead.
 type machine struct {
 	scratch []asm.PReg
 }
 
-// emitter emits one function's ARM64 code from SSA. It owns the frame base
-// every local slot is addressed from, the frame facts a prologue and a
-// teardown are shaped by, the blocks already laid out, which is what makes a
-// back edge recognizable, and the cold stubs its guards branch to. Every
-// other fact it needs - a value's register and type, a block's label, the
-// block that falls through, the journal words a deopt writes - it asks the
-// compiler for.
+// emitter emits one function's ARM64 code from SSA. It holds nothing shared
+// across compiles; anything not named on the struct - a value's register and
+// type, a block's label, the journal words a deopt writes - it asks
+// backend.Compiler for.
 type emitter struct {
 	c       *backend.Compiler
 	a       *asm.Assembler
@@ -448,7 +440,6 @@ func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, s
 	return true
 }
 
-// unary lowers a one-operand opcode over the lane want names.
 func (e *emitter) unary(op ssa.Operation, want ssa.Type, emit func(dst, src asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
@@ -497,7 +488,6 @@ func (e *emitter) compare(op ssa.Operation, want ssa.Type, cond uint8) bool {
 	return true
 }
 
-// eqz lowers the i32 zero test.
 func (e *emitter) eqz(op ssa.Operation) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
@@ -512,8 +502,6 @@ func (e *emitter) eqz(op ssa.Operation) bool {
 	return true
 }
 
-// jump continues at the block the edge names, or falls into it when the
-// layout already put it next.
 func (e *emitter) jump(block int, t ssa.Terminator) bool {
 	if len(t.Edges) != 1 || !e.forward(t.Edges[0]) {
 		return false
@@ -607,8 +595,6 @@ func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 	src := e.c.Reg(v)
 	typ := e.c.Func().Type(v)
 	if typ == ssa.TypeRef {
-		// A reference is already held in its boxed form, so there is nothing
-		// to box and no register to box it into.
 		return src, true
 	}
 	out := e.a.Reg(asm.RegTypeInt, asm.Width64)
@@ -660,8 +646,6 @@ func (e *emitter) forward(edge ssa.Edge) bool {
 	return len(edge.Args) == 0 && edge.Block >= 0 && edge.Block < len(e.seen) && !e.seen[edge.Block]
 }
 
-// lanes reports whether every value listed occupies the register form want
-// names, which is what lets one instruction of that form take them all.
 func (e *emitter) lanes(want ssa.Type, vs ...ssa.Value) bool {
 	for _, v := range vs {
 		if lane(e.c.Func().Type(v)) != want {
@@ -671,8 +655,6 @@ func (e *emitter) lanes(want ssa.Type, vs ...ssa.Value) bool {
 	return true
 }
 
-// zero32 and sign32 widen the value lane before a shift consumes the whole
-// register.
 func (e *emitter) zero32(v asm.VReg) asm.VReg {
 	out := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.ANDI(out, v, maskI32))
@@ -685,8 +667,6 @@ func (e *emitter) sign32(v asm.VReg) asm.VReg {
 	return out
 }
 
-// pin returns a fresh Width64 int vreg bound to the scratch register at idx,
-// and pinTo one bound to pr.
 func (e *emitter) pin(idx int) asm.VReg {
 	return e.pinTo(e.scratch[idx])
 }
