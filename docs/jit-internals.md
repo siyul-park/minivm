@@ -169,7 +169,7 @@ per-tick poll for code arriving from elsewhere.
 
 ## Compiler
 
-`jit.Compiler` lives in `internal/jit`. The interpreter builds the read-only `jit.Input` snapshot itself (`Interpreter.compileSnapshot` in `interp/jit.go`) and calls `Compile(input, root)` — on its own goroutine or on the queue's worker, see Solo and Pool JIT — receiving a `jit.Code`; it does not select or inspect a compilation strategy. Passing a snapshot rather than the interpreter is what keeps the dependency one-way: `internal/jit` never imports `interp`. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
+`jit.Compiler` lives in `internal/jit`. It tries the SSA pipeline first and falls back to the plan frontends: `Compiler.native` hands the root to `Machine.Compile`, and a machine that declines it, or output that does not build, leaves nothing behind - the assembler is discarded whole - so the plan frontends below compile that root exactly as they did before the seam existed. That is the gate the ARM64 port advances behind, one opcode at a time, with the `interp` parity corpus green at every step. The interpreter builds the read-only `jit.Input` snapshot itself (`Interpreter.compileSnapshot` in `interp/jit.go`) and calls `Compile(input, root)` — on its own goroutine or on the queue's worker, see Solo and Pool JIT — receiving a `jit.Code`; it does not select or inspect a compilation strategy. Passing a snapshot rather than the interpreter is what keeps the dependency one-way: `internal/jit` never imports `interp`. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
 
 Nothing an `Input` carries is storage the interpreter keeps mutating. `Constants`, `Globals`, and `Decl` are fixed once a program is loaded, a published `Trace` is immutable, and `Objects` (`jit.Objects`, a `map[int]Object`) replaces what used to be a live `[]types.Value` heap view: `Interpreter.objects` resolves address zero to the module body, every cell the constant pool publishes, and every function the host bound at a runtime address into the immutable facts a compile reads off them — the `*types.Function` published there, the `*types.StructType` a struct carries, the concrete itab of a primitive typed array, and the address a closure calls. Those are the only addresses a plan can reach: a static plan resolves a container or a callee only through a constant, and a trace plan names a callee the tracer already resolved to a function address. Resolving them on the interpreter's own goroutine is what makes a compile safe to run elsewhere — a `*types.Struct` is recycled through a pool that rewrites its type, an array header is rewritten in place, and a released slot is handed to the next allocation, so neither a heap slot nor the object behind it is stable to read from another goroutine. A resolved address stays present in the map even when its cell carries no fact, so a lowering that only needs to know an address named a live cell tests for membership. `TestCompiler_CompileConcurrentHeap` compiles on four goroutines against a heap another goroutine keeps overwriting and growing.
 
@@ -211,6 +211,7 @@ Which roots it accepts and rejects is identical to `StaticPlan`'s, including roo
 - **Ownership.** `backing`'s five-way inference stays a planning fact, and the IR states its result. A ref loaded from a local, global, upvalue, or constant is borrowed; anything an operation produces is owned. `OpRetain` materializes where `own`, `detach`, `ownRefs`, and `ret` take one: before a slot store, for the surviving copy of a tee and of a `DUP` of an owned ref, before a container store's stored value, before every operand a call or a bridge hands over, on a returned value, and on an edge whose successor merged that operand to owned. `OpRelease` drops the count a consumed owned container held. Two successors that disagree about one operand's ownership leave the function unplanned rather than retaining it on a path that never releases it.
 - **Cold-path ownership.** `ssa.Frame.Stack` is a list of `ssa.Operand`, each naming a value and whether that stack entry owns a reference count, which is the fact `retainDeferred` and `emitExits` act on: a borrowed entry is the one a cold path retains before handing the flushed stack to the interpreter. Ownership belongs to the entry and not to the value, because a `DUP` puts one value in two positions and a later retain moves exactly one of them onto the stack, so no per-value flag could state it. `ssa.Verify` rejects a frame owning a value that cannot hold a reference. The retains themselves stay the machine's — the IR says which entries need one, not how to take it. One instruction materializes one state for as long as its operands hold still: a retain taken after a state was emitted leaves that state as it was, resuming into a stack that did not own the entry yet, and starts a new one for everything after it. That is what lets a guard stand in front of an operation that adopts the stack — the guard's cold path retains what the operation's own state already owns.
 - **Extra block.** A branch to the offset one past the end of the code, which `analysis.Blocks` treats as a virtual exit and a plan leaves as an unresolved edge, becomes a real block that returns or completes.
+- **`UNREACHABLE` is an operation, not a no-op.** `instr` states no stack effect for it, so nothing but an explicit rule puts it in the IR at all, and reaching it raises. `walk.perform` emits an argument-free `OpExec` for it, which the ARM64 SSA machine declines, so a function holding one compiles through the plan pipeline instead of natively running past it. `NOP` stays the one opcode the translation drops.
 - **Narrower than the plan.** An operand whose kind its opcode cannot pop leaves the function unplanned, where `applyStep` never type-checks; `program.Verify` rejects such bytecode before it runs. A `RETURN_CALL` ends the block on `OpExit` (see Tail calls below). An `i64` literal that does not survive `types.BoxI64` is refused for the same reason, because `ssa.Operation.Const` is the only place a literal can live.
 
 ### SSA Trace Frontend
@@ -303,7 +304,7 @@ In a loop plan, a partial leg whose cut lands on the plan's own header (same fun
 
 ## Backend
 
-`internal/jit.Compiler` (built by `jit.New`) is architecture-neutral: it picks the arch and `Machine` its caller supplies, builds the assembler, and hands both to the `Machine.Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool)` seam. `jit.Input` and `jit.Plan` live in `internal/jit`; all lowering state — `lowering`, the symbolic `value` stack, inlined `activation`s, deferred `work`, and queued `sideExit`s — lives on the machine's side of that seam, private to `internal/jit/arm64`. `interp`'s build-tagged `jit_arm64.go`/`jit_stub.go` are the arch selector: on arm64, `newCompiler` builds `jit.New(arm64.New(), newMachine())` where `newMachine` calls `internal/jit/arm64.New()`; on every other architecture `newCompiler` returns `(nil, nil)` and the unavailable backend is never constructed.
+`internal/jit.Compiler` (built by `jit.New`) is architecture-neutral: it picks the arch and `Machine` its caller supplies, builds the assembler, and hands both to one of that machine's two seams. `Machine.Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (jit.Entry, bool)` takes a root and plans it itself, which is the SSA pipeline; `Machine.Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool)` takes a plan the Compiler's own frontends built, which is what every root the SSA machine still declines compiles through. `jit.Input` and `jit.Plan` live in `internal/jit`; all lowering state — `lowering`, the symbolic `value` stack, inlined `activation`s, deferred `work`, and queued `sideExit`s — lives on the machine's side of that seam, private to `internal/jit/arm64`. `interp`'s build-tagged `jit_arm64.go`/`jit_stub.go` are the arch selector: on arm64, `newCompiler` builds `jit.New(arm64.New(), newMachine())` where `newMachine` calls `internal/jit/arm64.New()`; on every other architecture `newCompiler` returns `(nil, nil)` and the unavailable backend is never constructed.
 
 `internal/jit/arm64` owns all ARM64 lowering, split by concern across `machine.go` (orchestration and the `Machine`/`lowering` types), `dispatch.go` (the single opcode dispatcher), `control.go` (control flow), `numeric.go` (numeric operations), `call.go` (calls and frames), `deopt.go` (deoptimization), `heap.go` (heap access), and `ref.go` (reference ownership).
 
@@ -318,9 +319,22 @@ Caller continuations are ordinary blocks in the same flat block pool. A cold edg
 `backend.Compile(m, a, in, root, f)` drives one `*ssa.Function`, entered at one
 `jit.Anchor`, through one machine into one `asm.Assembler`, and returns the
 layout it chose, the exit descriptors it registered, and the bridge resume
-points its callable may be re-entered at. Nothing installs it yet: `internal/jit/arm64` still
-consumes `jit.Plan` through `jit.Machine.Lower`, and both seams exist until the
-ARM64 lowering is ported.
+points its callable may be re-entered at.
+
+`backend.Root(m, a, in, root)` is one whole compile above it: it plans `in` at
+`root` through the frontend the anchor implies - bytecode first for an entry
+root, the recording first for a loop root, the plan pipeline's own order - and
+lowers what that planned through `Compile`, reporting the `jit.Entry` facts
+publication needs. Only the first frontend that plans the root gets an attempt,
+because a `Lowering` that declines leaves its own instructions in `a` and `a` is
+the caller's to discard; that costs no coverage, since the caller still has the
+plan pipeline, which tries both. `Root` is why `backend` may import
+`internal/jit/frontend`: a `jit.Compiler` cannot, because the frontend imports
+`internal/jit` back.
+
+Both seams exist until the ARM64 lowering is ported: `internal/jit/arm64`
+implements `Machine.Compile` over the SSA it has learned so far and
+`Machine.Lower` over `jit.Plan` for everything else.
 
 The seam is four hooks, opened per compile so one `Machine` serves concurrent
 compiles and holds none of their state:
@@ -410,6 +424,52 @@ constant *behind* an operand — the fold that turns a shift amount into an
 immediate and elides a divide-by-zero guard — which is `Compiler.Def` returning
 the argument's `OpConst`. A seam offering only one of the two would cost the
 backend an optimization it already has.
+
+#### ARM64 SSA machine
+
+`internal/jit/arm64`'s `machine` and `emitter` (`emit.go`) are the ARM64 side of
+that seam, reached through `arm64.New().Compile`. They are deliberately small:
+an immutable machine holding the pinned journal registers, and a per-compile
+emitter holding the frame base every local slot is addressed from, the frame
+facts a prologue and a teardown are shaped by, and which blocks are already
+laid out. Everything else - a value's register and type, a block's label, the
+block that falls through, an edge's copies, a deopt's journal words - it asks
+the `backend.Compiler` for, which is why it needs none of the plan `lowering`'s
+symbolic operand stack, inlined activations, deferred work, or backing
+inference.
+
+A value's representation is a function of its `ssa.Type`, so no per-value state
+records it: an `i1`, `i8`, and `i32` carry their value in the low 32 bits of a
+64-bit integer register with the bits above undefined, exactly as the boxed
+word leaves them, so unboxing one is free and boxing it is a mask and a tag; an
+`f32` and an `f64` live in the float bank at their own width, so an arithmetic
+sequence costs one move in per operand and one out at the frame boundary rather
+than a pair around every opcode.
+
+What it lowers, and therefore what `Lowers` admits: `i32` arithmetic, bitwise
+operations, shifts, comparisons, and `eqz`; `f32` and `f64` arithmetic, `abs`,
+`neg`, `sqrt`, and comparisons; compile-time constants; local and global slot
+loads and stores; `OpJump` and `OpBranch`; and `OpReturn` and `OpComplete` for a
+function and a module entry. `Traps` is false throughout: an opcode this machine
+cannot compute it declines outright rather than running as an exit, because an
+exit needs the deopt state and cold stub it does not emit.
+
+Everything else declines, which abandons the compile and leaves the root to the
+plan pipeline. It declines a loop entry (a live frame it must not unwind) and a
+back edge to a block already laid out (a safepoint budget and loop-carried
+registers it does not emit); an edge carrying block-parameter arguments (edge
+copies it does not place); `OpGuard*`, `OpRetain`, `OpRelease`, `OpBridge`,
+`OpExit`, `OpSuspend`, and `OpTable`; a frame declaring a reference local or
+returning one, and a global slot able to hold one (reference counts it does not
+account for); an `i64` or `ref` value anywhere (a slot read needing a guard);
+an upvalue slot (a base only the closure resolves); and a `Slot` whose `Base` is
+not the entry frame's (an inlined callee's storage).
+
+An entry it does emit is `BLR`-compatible with the plan pipeline's own callers,
+because both publish into `i.natives`: it clears its own non-parameter locals in
+the prologue, reads parameters from the VM stack, writes each boxed result to
+its frame slot and into the ABI return register, and never writes the caller's
+journal cells.
 
 #### Observability and golden code
 

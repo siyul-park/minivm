@@ -775,7 +775,7 @@ func (l lowerer) selectOp(ctx *lowering) bool {
 	if cond.kind.Repr() != types.KindI32 || v1.kind != v2.kind || v1.kind == types.KindRef {
 		return false
 	}
-	ctx.assembler.Emit(arm64.CMPI(l.narrow32(cond.reg), 0))
+	ctx.assembler.Emit(arm64.CMPI(narrow32(cond.reg), 0))
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSEL(dst, v1.reg, v2.reg, arm64.CondNE))
 	ctx.push(value{reg: dst, kind: v1.kind, raw: true})

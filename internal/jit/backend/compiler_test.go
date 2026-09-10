@@ -94,6 +94,44 @@ func (m *machine) Leave() bool {
 	return m.stops != "leave"
 }
 
+func TestRoot(t *testing.T) {
+	// A function the static frontend plans whole: a constant returned from a
+	// leaf entry, which needs nothing of the snapshot but the function itself.
+	fn := &types.Function{
+		Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.RETURN),
+		}),
+	}
+	input := &jit.Input{Address: 1, Function: fn, Objects: jit.Objects{1: {Fn: fn}}}
+
+	t.Run("plans a root from bytecode and reports the entry it lowered", func(t *testing.T) {
+		m := &machine{}
+		entry, ok := backend.Root(m, asm.New(arm64.New()), input, jit.Anchor{Addr: 1})
+		require.True(t, ok)
+		require.Equal(t, jit.EntryFunction, entry.Kind)
+		require.Equal(t, prof.FrontendStatic, entry.Frontend)
+		require.Empty(t, entry.Resumable, "a plan with no bridge names no external re-entry")
+		require.Equal(t, []ssa.Op{ssa.OpConst}, m.ops)
+	})
+
+	t.Run("declines a root the machine gives up on", func(t *testing.T) {
+		_, ok := backend.Root(&machine{stops: "enter"}, asm.New(arm64.New()), input, jit.Anchor{Addr: 1})
+		require.False(t, ok)
+	})
+
+	t.Run("declines a root neither frontend plans", func(t *testing.T) {
+		_, ok := backend.Root(&machine{}, asm.New(arm64.New()), &jit.Input{Address: 1}, jit.Anchor{Addr: 1})
+		require.False(t, ok)
+	})
+
+	t.Run("declines a call it was handed nothing to compile with", func(t *testing.T) {
+		_, ok := backend.Root(nil, asm.New(arm64.New()), input, jit.Anchor{Addr: 1})
+		require.False(t, ok)
+	})
+}
+
 func TestCompile(t *testing.T) {
 	t.Run("lowers every operation and ends every block in layout order", func(t *testing.T) {
 		b := ssa.New("f")

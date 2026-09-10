@@ -6,6 +6,10 @@
 // OpState carries into the journal words a deoptimization writes. A Machine
 // decides only what instructions say those things on its target: it never
 // reorders blocks, rewrites the IR, or invents interpreter state.
+//
+// Root is the whole compile behind one call - the frontend the anchor implies,
+// then that lowering - so a jit.Compiler reaches the SSA pipeline without
+// importing the frontend that would import it back.
 package backend
 
 import (

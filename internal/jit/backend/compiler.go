@@ -4,7 +4,9 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/frontend"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/prof"
 )
 
 // Code is what one Compile produced that the emitted instructions do not
@@ -66,6 +68,43 @@ type Compiler struct {
 type site struct {
 	block int
 	index int
+}
+
+// Root compiles the whole native entry anchored at root: it plans in through
+// the frontend the anchor implies, lowers what that planned through m, and
+// reports the entry facts a jit.Compiler publishes. The frontend order is the
+// plan pipeline's own - an entry root is planned from bytecode first, because
+// that covers opcodes no recording holds, and a loop root from its recording
+// first, because a recording specializes the body to the path actually taken.
+//
+// Only the first frontend that plans the root gets an attempt, because a
+// Lowering that declines leaves its own instructions in a, and a is the
+// caller's to discard rather than this function's to rewind. Declining costs
+// no coverage: the caller still has the plan pipeline, which tries both.
+func Root(m Machine, a *asm.Assembler, in *jit.Input, root jit.Anchor) (jit.Entry, bool) {
+	if m == nil || a == nil || in == nil {
+		return jit.Entry{}, false
+	}
+	kinds := [...]prof.Frontend{prof.FrontendStatic, prof.FrontendTrace}
+	if root.IP != 0 {
+		kinds[0], kinds[1] = kinds[1], kinds[0]
+	}
+	for _, kind := range kinds {
+		f := translate(kind, in, root)
+		if f == nil {
+			continue
+		}
+		code, ok := Compile(m, a, in, root, f)
+		if !ok {
+			return jit.Entry{}, false
+		}
+		entry := jit.Entry{Kind: root.Kind(), Frontend: kind, Exits: code.Exits}
+		for _, bridge := range code.Bridges {
+			entry.Resumable = append(entry.Resumable, bridge.IP)
+		}
+		return entry, true
+	}
+	return jit.Entry{}, false
 }
 
 // Compile lowers f, entered at root, through m into a, reporting the layout,
@@ -243,6 +282,21 @@ func (c *Compiler) Moves(e ssa.Edge) []Move {
 		}
 	}
 	return out
+}
+
+// translate plans in at root through one frontend. It reports nil for a root
+// that frontend cannot plan, and for one whose translation failed: neither is
+// this seam's to report, because the plan pipeline behind it reaches the same
+// bytecode and reports what it finds there itself.
+func translate(kind prof.Frontend, in *jit.Input, root jit.Anchor) *ssa.Function {
+	if kind == prof.FrontendTrace {
+		return frontend.Trace(in, root)
+	}
+	f, err := frontend.Static(in, root)
+	if err != nil {
+		return nil
+	}
+	return f
 }
 
 // newCompiler indexes f for one compile: it finds where each block hands

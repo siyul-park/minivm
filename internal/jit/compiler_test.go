@@ -38,6 +38,12 @@ type pressureMachine struct {
 	attempts *[]attempt
 }
 
+// Compile declines every root: this machine stands in for a backend still on
+// the plan pipeline, which is what makes the fallback observable.
+func (m pressureMachine) Compile(*asm.Assembler, *jit.Input, jit.Anchor) (jit.Entry, bool) {
+	return jit.Entry{}, false
+}
+
 func (m pressureMachine) Lower(a *asm.Assembler, _ *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
 	*m.attempts = append(*m.attempts, attempt{carried: len(p.Carried), nativeLoop: nativeLoop})
 
@@ -56,6 +62,21 @@ func (m pressureMachine) Lower(a *asm.Assembler, _ *jit.Input, p jit.Plan, nativ
 	}
 	a.Emit(asmarm64.RET())
 	return nil, true
+}
+
+// nativeMachine takes every root through the Compile seam and emits a trivial
+// body for it. It stands in for a backend already ported off the plan
+// pipeline, so a Compile through it must never reach Lower.
+type nativeMachine struct{ lowered *int }
+
+func (m nativeMachine) Compile(a *asm.Assembler, _ *jit.Input, root jit.Anchor) (jit.Entry, bool) {
+	a.Emit(asmarm64.RET())
+	return jit.Entry{Kind: root.Kind(), Frontend: prof.FrontendStatic}, true
+}
+
+func (m nativeMachine) Lower(*asm.Assembler, *jit.Input, jit.Plan, bool) ([]jit.Exit, bool) {
+	*m.lowered++
+	return nil, false
 }
 
 func newTestCompiler(t *testing.T, machine jit.Machine) *jit.Compiler {
@@ -120,6 +141,28 @@ func TestNew(t *testing.T) {
 
 func TestCompiler_Compile(t *testing.T) {
 	input, entry, header := loopInput(t)
+
+	t.Run("takes a root the machine compiles from the snapshot itself", func(t *testing.T) {
+		lowered := 0
+		c := newTestCompiler(t, nativeMachine{lowered: &lowered})
+
+		result := c.Compile(input, entry.Anchor)
+		require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
+		require.Contains(t, result.Code.Entries, entry.Anchor)
+		require.Zero(t, lowered, "a root the machine compiled itself must never reach the plan pipeline")
+	})
+
+	t.Run("falls back to the plan when the machine declines the root", func(t *testing.T) {
+		var attempts []attempt
+		c := newTestCompiler(t, pressureMachine{attempts: &attempts})
+
+		result := c.Compile(input, entry.Anchor)
+		require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
+		require.Equal(t, prof.FrontendStatic, result.Frontend)
+		require.Contains(t, result.Code.Entries, entry.Anchor)
+		require.Equal(t, []attempt{{carried: len(entry.Carried), nativeLoop: true}}, attempts,
+			"a declined root must reach the plan pipeline exactly as it did before the gate")
+	})
 
 	t.Run("keeps a static entry's loop native", func(t *testing.T) {
 		var attempts []attempt

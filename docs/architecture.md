@@ -48,7 +48,7 @@ Everything else is `OpExec` carrying an `instr.Opcode`, and `Code` is meaningful
 - `internal/ssa` must not import `interp`, `internal/jit`, `internal/asm`, or any backend.
 - `internal/ssa/transform` must not import `interp`, `internal/jit`, `internal/asm`, or any backend either: every pass it runs must stay correct over a function with no guard or deopt state at all, not only one a JIT frontend produced. It owns one transformation policy per pass, exactly as the top-level `transform` does for bytecode, and composes nothing itself; a caller builds its own `pass.Pipeline[*ssa.Function]`, and `optimize` owns the leveled, user-facing composition it runs over a program through `transform.SSAPass`.
 - `internal/jit/frontend` must not import `interp`, `internal/asm`, or any backend: it reads a compile-time snapshot and emits SSA, and nothing else.
-- `internal/jit/backend` must not import `interp` or any architecture package: it is the architecture-neutral half of an SSA backend, and reaches a target only through the `backend.Machine` seam its caller supplies.
+- `internal/jit/backend` must not import `interp` or any architecture package: it is the architecture-neutral half of an SSA backend, and reaches a target only through the `backend.Machine` seam its caller supplies. It may import `internal/jit/frontend`, because `Root` is one whole compile - plan the anchor, then lower it - and that is how a `jit.Compiler` reaches the SSA pipeline without importing a frontend that imports it back.
 - `types` must not import `interp`.
 - Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
 - `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
@@ -69,12 +69,12 @@ internal/graph → (leaf)
 internal/journal → (leaf)
 internal/codegen → instr, types, jennifer, golang.org/x/tools/imports
 internal/jit → instr, types, internal/asm, pass, analysis, prof
-internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/journal, pass, analysis, prof
+internal/jit/arm64 → instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/backend, internal/ssa, internal/journal, pass, analysis, prof
 internal/jit/tier → internal/jit, prof
 internal/ssa → instr, types, internal/graph
 internal/ssa/transform → instr, types, internal/graph, internal/ssa, pass
 internal/jit/frontend → instr, types, analysis, internal/jit, internal/ssa
-internal/jit/backend → instr, prof, internal/asm, internal/jit, internal/ssa
+internal/jit/backend → instr, prof, internal/asm, internal/jit, internal/jit/frontend, internal/ssa
 internal/jit/compile → internal/asm, internal/jit, prof
 interp  → program, instr, types, internal/asm, internal/asm/arm64, internal/jit, internal/jit/compile, internal/jit/tier, internal/journal, internal/jit/arm64, pass, analysis, prof
 debug   → interp
@@ -101,9 +101,9 @@ internal/cmd/codegen → internal/codegen
 | `internal/asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
 | `internal/asm/amd64/` | placeholder backend; does not emit native code yet |
 | `internal/jit/` | architecture-neutral compiler: the plan graph, per-step dataflow facts, runtime layout tables, recorded-trace data, both frontends, and the driver that lowers a plan through a `Machine` into published native `Code` |
-| `internal/jit/arm64/` | ARM64 `jit.Machine`: orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership |
+| `internal/jit/arm64/` | ARM64 `jit.Machine`, in the two forms the port has: the plan lowering - orchestration, opcode dispatch, control flow, numeric operations, calls and frames, deoptimization, heap access, and reference ownership - and the `backend.Machine` under `Compile`, which lowers SSA and declines every shape it has not learned yet |
 | `internal/jit/frontend/` | the SSA frontends over one snapshot: `Static`, the forward fixpoint that resolves element kinds, field kinds, call targets, and dynamic arities from constants and declared types plus the block layout a bridged opcode splits; `Trace`, which resolves the same facts from what a recording observed, lays that recording out as a block chain, folds the continuations recorded at its hot exits in, and inlines the callees it entered; `Body`, the same bytecode translation over a whole function and against a `Module` alone, for the ahead-of-time optimizer, which holds no address to anchor a native entry at and no calling convention to honour; and the one operation-level translation all three drive |
-| `internal/jit/backend/` | the architecture-neutral half of an SSA backend and the `Machine` seam under it: the layout order blocks are emitted in, the virtual register bound to each SSA value, the sequenced register copies a block-parameter edge needs, the external re-entry each bridge creates, and the journal words an `ssa.Frame` chain deoptimizes into; it emits no instruction and holds no target knowledge |
+| `internal/jit/backend/` | the architecture-neutral half of an SSA backend and the `Machine` seam under it: the layout order blocks are emitted in, the virtual register bound to each SSA value, the sequenced register copies a block-parameter edge needs, the external re-entry each bridge creates, and the journal words an `ssa.Frame` chain deoptimizes into, plus `Root`, one whole compile from a snapshot; it emits no instruction and holds no target knowledge |
 | `internal/jit/tier/` | pure throughput/give-up retirement verdict for one installed native anchor (`Watchdog`); holds no interpreter state and never imports `interp` |
 | `internal/ssa/` | SSA intermediate representation over minivm's value and opcode vocabulary: `Operation` nodes reusing `instr.Opcode`, block-parameter control flow, the interpreter-state value a deoptimization resumes into, speculation guards, explicit reference ownership, and the `Builder`, `Verify`, and `Format` that build, check, and print it; satisfies `internal/graph.Graph` |
 | `internal/ssa/transform/` | one transformation policy per pass over `*ssa.Function`, and the only implementation of each - constant folding with the algebraic identities and strength reductions, local slot promotion into values with block parameters at merge points, redundant load forwarding, dominator-tree-scoped common subexpression elimination, redundant guard elimination, loop-invariant code motion over `internal/graph` dominance, and liveness-based dead code elimination; correct over a function with no guard or deopt state as well as one a JIT frontend produced, since it knows nothing of `internal/jit`; composes nothing itself, exactly as `transform/` does not compose for bytecode - a caller builds its own `pass.Pipeline[*ssa.Function]` |

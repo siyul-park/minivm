@@ -26,8 +26,8 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | Semantic parity | owning transform, optimizer, or interpreter test | compare observable output across threaded, optimized, fused, JIT, exit, and deoptimization paths |
 | Asynchronous compilation | `compile.TestWithAsync`, `compile.TestQueue_Close`, `interp.TestPool_Get`, `interp.TestPool_Close` | a build overlapping the goroutine that claimed it, adoption at a safepoint, and shutdown with builds in flight, all under `-race` |
 | Internal invariant | nearest public or artifact boundary | safety or deterministic mechanics observed through public behavior, generated output, or executable artifacts |
-| Backend seam | `backend.TestCompile` and the `Compiler` owner tests | the block layout, value-to-register binding, edge copies, entry kind, bridge resume points, and journal deopt metadata `internal/jit/backend` produces, asserted through a recording `backend.Machine` that emits nothing |
-| Golden machine code | the owning `internal/jit/<arch>` test | a test states the code to compile and the exact instructions the machine should emit for it, read back from `asm.Assembler.Instructions` before register allocation and `asm.Assembler.Alloc` after it, alongside `backend.Code.Order` and `Code.Exits`. Writing the expected output first is what decides what good code for a shape is |
+| Backend seam | `backend.TestRoot`, `backend.TestCompile`, and the `Compiler` owner tests | the frontend order one anchor is planned through, the block layout, value-to-register binding, edge copies, entry kind, bridge resume points, and journal deopt metadata `internal/jit/backend` produces, asserted through a recording `backend.Machine` that emits nothing |
+| Golden machine code | the owning `internal/jit/<arch>` test (`arm64.TestNew`) | a test states the code to compile and the exact instructions the machine should emit for it, read back from `asm.Assembler.Instructions` before register allocation and `asm.Assembler.Alloc` after it, alongside `backend.Code.Order` and `Code.Exits`. Writing the expected output first is what decides what good code for a shape is, and a gap between the stated target and what is emitted is recorded beside it rather than adjusted away. The same test pins the other half of the ratchet: a shape the SSA machine declines still compiles through the plan pipeline |
 | Frontend equivalence | `frontend.TestStatic`, `frontend.TestTrace`, `interp.TestFrontend_Trace` | each SSA frontend accepts exactly the roots its `jit` plan counterpart accepts, every function it emits passes `ssa.Verify`, and its block graph matches the plan's - for `Static` over a written corpus and generated well-typed functions, for `Trace` over hand-built recorded trees and over trees the real recorder produced |
 | Fuzz | package `fuzz_test.go` | bounded trust-boundary and semantic differential properties |
 | Integration | highest public package boundary | real parse-to-close flows without duplicating unit cases |
@@ -96,7 +96,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/asm/amd64` | 1 | 1 | 0 | 0 |
 | `internal/asm/arm64` | 155 | 155 | 152 | 0 |
 | `internal/graph` | 5 | 5 | 0 | 0 |
-| `internal/jit/backend` | 12 | 12 | 0 | 0 |
+| `internal/jit/backend` | 13 | 13 | 0 | 0 |
 | `internal/jit/compile` | 15 | 15 | 0 | 0 |
 | `internal/jit/frontend` | 3 | 3 | 0 | 0 |
 | `internal/ssa` | 20 | 20 | 0 | 0 |
@@ -322,6 +322,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `internal/jit/frontend/frontend.go` | `TestStatic` | ✅ |
 | `internal/jit/frontend/frontend.go` | `TestBody` | ✅ |
 | `internal/jit/frontend/trace.go` | `TestTrace` | ✅ |
+| `internal/jit/backend/compiler.go` | `TestRoot` | ✅ |
 | `internal/jit/backend/compiler.go` | `TestCompile` | ✅ |
 | `internal/jit/backend/compiler.go` | `TestCompiler_Asm` | ✅ |
 | `internal/jit/backend/compiler.go` | `TestCompiler_Input` | ✅ |

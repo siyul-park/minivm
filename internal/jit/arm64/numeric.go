@@ -58,7 +58,7 @@ func (l lowerer) i32Divide(
 	if op.Arg.Kind().Repr() == types.KindI32 {
 		observed = uint64(uint32(op.Arg.I32()))
 	}
-	if !l.guardDivisor(ctx, top, l.narrow32(b), observed, op.IP) {
+	if !l.guardDivisor(ctx, top, narrow32(b), observed, op.IP) {
 		return false
 	}
 
@@ -105,7 +105,7 @@ func (l lowerer) i32Eqz(ctx *lowering) bool {
 		return false
 	}
 	a := ctx.pop()
-	ctx.assembler.Emit(arm64.CMPI(l.narrow32(a.reg), 0))
+	ctx.assembler.Emit(arm64.CMPI(narrow32(a.reg), 0))
 	l.setBool(ctx, arm64.CondEQ)
 	return true
 }
@@ -118,7 +118,7 @@ func (l lowerer) i32Cmp(ctx *lowering, cond uint8) bool {
 	if !ok {
 		return false
 	}
-	ctx.assembler.Emit(arm64.CMP(l.narrow32(a.reg), l.narrow32(b.reg)))
+	ctx.assembler.Emit(arm64.CMP(narrow32(a.reg), narrow32(b.reg)))
 	l.setBool(ctx, cond)
 	return true
 }
@@ -197,8 +197,8 @@ func (l lowerer) f32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.I
 	fb := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	fr := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	ctx.assembler.Emit(
-		arm64.FMOV(fa, l.narrow32(a.reg)),
-		arm64.FMOV(fb, l.narrow32(b.reg)),
+		arm64.FMOV(fa, narrow32(a.reg)),
+		arm64.FMOV(fb, narrow32(b.reg)),
 		op(fr, fa, fb),
 	)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -215,8 +215,8 @@ func (l lowerer) f32Cmp(ctx *lowering, cond uint8) bool {
 	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	fb := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	ctx.assembler.Emit(
-		arm64.FMOV(fa, l.narrow32(a.reg)),
-		arm64.FMOV(fb, l.narrow32(b.reg)),
+		arm64.FMOV(fa, narrow32(a.reg)),
+		arm64.FMOV(fb, narrow32(b.reg)),
 		arm64.FCMP(fa, fb),
 	)
 	l.setBool(ctx, cond)
@@ -246,7 +246,7 @@ func (l lowerer) f32ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruct
 	}
 	a := ctx.pop()
 	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
-	ctx.assembler.Emit(arm64.FMOV(fa, l.narrow32(a.reg)))
+	ctx.assembler.Emit(arm64.FMOV(fa, narrow32(a.reg)))
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(cvt(dst, fa))
 	ctx.push(value{reg: dst, kind: types.KindI32, raw: true})
@@ -261,7 +261,7 @@ func (l lowerer) f32ToF64(ctx *lowering) bool {
 	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	fd := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
 	ctx.assembler.Emit(
-		arm64.FMOV(fa, l.narrow32(a.reg)),
+		arm64.FMOV(fa, narrow32(a.reg)),
 		arm64.FCVT(fd, fa),
 	)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -458,7 +458,7 @@ func (l lowerer) f32ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg)
 	}
 	a := ctx.values[len(ctx.values)-1]
 	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
-	ctx.assembler.Emit(arm64.FMOV(fa, l.narrow32(a.reg)))
+	ctx.assembler.Emit(arm64.FMOV(fa, narrow32(a.reg)))
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(cvt(raw, fa))
 	if !l.boxableI64(ctx, raw, op.IP) {
@@ -498,7 +498,7 @@ func (l lowerer) countZeros(ctx *lowering, kind types.Kind, reverse bool) bool {
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	src, out := a.reg, dst
 	if kind == types.KindI32 {
-		src, out = l.narrow32(a.reg), l.narrow32(dst)
+		src, out = narrow32(a.reg), narrow32(dst)
 	}
 	if reverse {
 		ctx.assembler.Emit(arm64.RBIT(out, src))
@@ -548,12 +548,12 @@ func (l lowerer) rotate(ctx *lowering, op jit.Step, kind types.Kind, left bool) 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	out := raw
 	if kind == types.KindI32 {
-		src, amount, out = l.narrow32(src), l.narrow32(amount), l.narrow32(raw)
+		src, amount, out = narrow32(src), narrow32(amount), narrow32(raw)
 	}
 	if left {
 		neg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		if kind == types.KindI32 {
-			neg = l.narrow32(neg)
+			neg = narrow32(neg)
 		}
 		ctx.assembler.Emit(arm64.NEG(neg, amount))
 		amount = neg
@@ -611,7 +611,7 @@ func (l lowerer) f32Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instructi
 	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	fr := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	ctx.assembler.Emit(
-		arm64.FMOV(fa, l.narrow32(a.reg)),
+		arm64.FMOV(fa, narrow32(a.reg)),
 		op(fr, fa),
 	)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -679,7 +679,10 @@ func (l lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
 	return true
 }
 
-func (lowerer) narrow32(v asm.VReg) asm.VReg {
+// narrow32 is v's 32-bit view: the same register, named at the width the
+// value lane occupies, so a signed or unsigned compare and a 32-bit shift
+// read correct flags from bits the boxed form leaves above it.
+func narrow32(v asm.VReg) asm.VReg {
 	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
 }
 

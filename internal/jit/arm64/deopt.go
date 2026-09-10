@@ -155,7 +155,7 @@ func (l lowerer) guardRaw(ctx *lowering, got asm.VReg, val uint64, ip int) bool 
 	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(want, val)...)
 	if got.Width() == asm.Width32 {
-		want = l.narrow32(want)
+		want = narrow32(want)
 	}
 	ctx.assembler.Emit(arm64.CMP(got, want))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))

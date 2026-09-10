@@ -9,6 +9,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/backend"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
@@ -284,6 +285,17 @@ func (l lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
 	vBP := ctx.pin(scratchBP)
 	ctx.assembler.Emit(arm64.LSLI(addr, vBP, 3))
 	ctx.assembler.Emit(arm64.ADD(addr, vStack, addr))
+}
+
+// Compile emits the whole native entry anchored at root from SSA, through
+// this package's own machine. It is the seam the port advances behind: a root
+// holding anything that machine has not learned yet is declined here, and
+// jit.Compiler falls back to Lower's plan pipeline for it.
+func (l lowerer) Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (jit.Entry, bool) {
+	if len(l.scratch) < scratchCount {
+		return jit.Entry{}, false
+	}
+	return backend.Root(machine{scratch: l.scratch[:scratchCount]}, a, input, root)
 }
 
 // Lower lowers plan p into a for one native entry, reporting the exits it

@@ -16,12 +16,20 @@ type Compiler struct {
 	machine Machine
 }
 
-// Machine lowers a plan into an assembler for one architecture. All lowering
-// state — the symbolic value stack, inlined activations, deferred work, and
-// queued exits — lives on the machine's side of this seam; the Compiler picks
-// the arch, builds the assembler, and hands both to the machine, which emits
-// instructions and reports the exits it queued.
+// Machine is one architecture's native code, in the two forms this port has.
+// Compile takes a root and plans it itself, which is the SSA pipeline the
+// backend is being ported onto; Lower takes a Plan the Compiler's own
+// frontends built, which is what every root not yet ported still compiles
+// through. All lowering state — the symbolic value stack, inlined
+// activations, deferred work, and queued exits — lives on the machine's side
+// of both seams; the Compiler picks the arch, builds the assembler, and hands
+// it over.
 type Machine interface {
+	// Compile emits the whole native entry anchored at root, planning the
+	// snapshot itself, and reports the entry facts publication needs. False
+	// declines the root: nothing the machine emitted is kept, so the plan
+	// frontends below still compile it (see Compiler.native).
+	Compile(a *asm.Assembler, input *Input, root Anchor) (Entry, bool)
 	Lower(a *asm.Assembler, input *Input, p Plan, nativeLoop bool) ([]Exit, bool)
 }
 
@@ -58,6 +66,9 @@ func (c *Compiler) Buffer() *asm.Buffer {
 // caller supplies the compile-time snapshot: producing one is the
 // interpreter's job, not the Compiler's.
 func (c *Compiler) Compile(input *Input, root Anchor) Result {
+	if result, ok := c.native(input, root); ok {
+		return result
+	}
 	// Entry roots go to the static frontend first: it plans the whole function
 	// deterministically and covers opcodes no trace can record. Loop roots go
 	// to the trace frontend first, because a recorded loop specializes its
@@ -100,6 +111,30 @@ func (c *Compiler) Compile(input *Input, root Anchor) Result {
 		}
 	}
 	return result
+}
+
+// native compiles root through Machine.Compile, the seam that plans its own
+// root. It is the gate the ARM64 port advances behind: false means the
+// machine declined the root, or what it emitted did not build, and the
+// assembler is discarded whole either way, so the plan frontends below
+// compile the root exactly as they would have. Only a genuine failure is
+// reported rather than retried, because the plan path cannot succeed where
+// linking executable memory did not.
+func (c *Compiler) native(input *Input, root Anchor) (Result, bool) {
+	a := asm.New(c.arch)
+	entry, ok := c.machine.Compile(a, input, root)
+	if !ok {
+		return Result{}, false
+	}
+	code := &Code{Entries: map[Anchor]Entry{}}
+	reason, err := c.publish(code, root, a, c.arch, entry)
+	if err != nil {
+		return Result{Anchor: root, Frontend: entry.Frontend, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err}, true
+	}
+	if reason != prof.CompileReasonNone {
+		return Result{}, false
+	}
+	return Result{Code: code, Anchor: root, Frontend: entry.Frontend, Outcome: prof.CompileOutcomeEmitted}, true
 }
 
 func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Frontend) (prof.CompileReason, error) {

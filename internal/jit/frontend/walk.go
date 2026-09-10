@@ -158,8 +158,13 @@ func (w *walk) join(params []operand) ([]ssa.Value, bool) {
 func (w *walk) perform(inst instr.Instruction) bool {
 	op := inst.Opcode()
 	switch op {
-	case instr.NOP, instr.UNREACHABLE:
+	case instr.NOP:
 		return true
+	case instr.UNREACHABLE:
+		// instr states no stack effect for it, but it is not a no-op: reaching
+		// it raises. The IR performs the operation so a backend has to answer
+		// for it, instead of compiling a function that runs straight past it.
+		return w.exec(op, 0, nil)
 
 	case instr.LOCAL_GET:
 		return w.load(ssa.SpaceLocal, int(inst.Operand(0)))

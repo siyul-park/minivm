@@ -135,9 +135,9 @@ func (l lowerer) conditional(ctx *lowering, block jit.Block, tail []int) bool {
 			return false
 		}
 		if block.Term.Hot == 1 {
-			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
+			ctx.assembler.Emit(arm64.CBNZLabel(narrow32(cond.reg), label))
 		} else {
-			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
+			ctx.assembler.Emit(arm64.CBZLabel(narrow32(cond.reg), label))
 		}
 		return l.next(ctx, block.Anchor, block.Term.Edges[block.Term.Hot], tail, int(instr.BR_IF))
 	}
@@ -146,7 +146,7 @@ func (l lowerer) conditional(ctx *lowering, block jit.Block, tail []int) bool {
 		return false
 	}
 	taken := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), taken))
+	ctx.assembler.Emit(arm64.CBNZLabel(narrow32(cond.reg), taken))
 	if !l.path(ctx, block.Anchor, block.Term.Edges[1], tail, int(instr.BR_IF)) {
 		return false
 	}
