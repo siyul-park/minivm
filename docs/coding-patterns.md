@@ -81,7 +81,7 @@ apply §2 and §16.
 
 ### 2.1 Top-Down Design Review
 
-Every non-trivial change MUST review, from the public entry point downward:
+Every non-trivial change MUST be reviewed from the public entry point downward, in this order:
 
 1. package responsibility and dependency direction;
 2. public contract and ownership boundary;
@@ -89,15 +89,15 @@ Every non-trivial change MUST review, from the public entry point downward:
 4. state and lifecycle ownership;
 5. lower-level mechanics.
 
-A package, type, or abstraction whose responsibility cannot be stated in one
-precise sentence SHOULD be split, merged, narrowed, or removed.
+The review MUST verify not only that each responsibility is present, but that it is owned by the narrowest appropriate package, type, or function.
+
+A package, type, or abstraction whose responsibility cannot be stated in one precise sentence without combining independent responsibilities SHOULD be split, merged, narrowed, or removed.
 
 ### 2.2 Bottom-Up Symbol Review
 
-Every changed file, and every nearby symbol exposed by the change, MUST be
-reviewed from leaves upward. Each file, type, interface, field, function,
-method, parameter, result, constant, variable, and test helper MUST have a
-current reason to exist.
+Every changed file, and every nearby symbol exposed by the change, MUST be reviewed from leaves upward.
+
+Each file, type, interface, field, function, method, parameter, result, constant, variable, and test helper MUST have a current reason to exist, and its responsibility and ownership MUST still be correct.
 
 For each symbol, reviewers MUST ask whether it can be:
 
@@ -109,27 +109,35 @@ For each symbol, reviewers MUST ask whether it can be:
 - represented by an existing type or operation; or
 - replaced by simpler direct code or a simpler algorithm.
 
-A refactor is incomplete while it leaves dead fields, arguments, results,
-wrappers, aliases, compatibility shims, or one-call indirections made obsolete
-by the change. Future flexibility, superficial symmetry, shorter functions, and
-one-call-site convenience are not sufficient reasons for a symbol to exist.
+A refactor is incomplete while it leaves dead fields, arguments, results, wrappers, aliases, compatibility shims, or one-call indirections made obsolete by the change.
+
+Future flexibility, superficial symmetry, shorter functions, and one-call-site convenience are not sufficient reasons for a symbol to exist.
 
 ### 2.3 Simplification Loop
 
-Simplification MUST continue until another pass finds no safe improvement. Each
-pass checks, in order:
+Simplification MUST continue until another complete pass finds no safe improvement.
+
+Each pass MUST check, in order:
 
 1. removable or mergeable symbols;
 2. narrower ownership and visibility;
 3. simpler control flow;
 4. simpler or more efficient algorithms;
-5. tests and docs matching the final contract.
+5. tests and documentation matching the final contract.
 
-Intentionally rejected simplifications MUST be recorded in the change summary
-with the invariant, compatibility constraint, or measured cost that prevented
-them.
+A simplification is considered safe only when it preserves the required behavior, ownership and lifecycle invariants, compatibility constraints, and relevant performance characteristics.
 
-### 2.4 Comments
+Intentionally rejected simplifications MUST be recorded in the change summary with the invariant, compatibility constraint, or measured behavioral or performance cost that prevented them.
+
+The loop MUST terminate only when the review finds no further safe simplification.
+
+### 2.4 Non-Trivial Changes
+
+A change is non-trivial when it alters package boundaries, public behavior, ownership, lifecycle, control flow, performance-critical code, or introduces, removes, or materially changes an abstraction.
+
+Non-trivial changes MUST satisfy the full Top-Down Design Review, Bottom-Up Symbol Review, and Simplification Loop before completion.
+
+### 2.5 Comments
 
 Comments MUST be kept to a minimum. Code is the specification (§2 item 1); a
 comment is warranted only where the code cannot state the fact itself.
@@ -155,7 +163,7 @@ shortest form that carries the fact.
 Doc comments on exported symbols follow Go convention and state the contract,
 not the implementation.
 
-### 2.5 Extraction and Relocation
+### 2.6 Extraction and Relocation
 
 Moving code into a new package or file is a redesign, not a transplant. The
 move MUST re-cut the boundary it crosses: symbols are renamed by the role they
@@ -665,7 +673,7 @@ case MUST NOT be kept alive by a proxy double.
 
 ### 12.5 Self-Describing Tests
 
-A test MUST read as a specification without commentary. §2.4 applies with no
+A test MUST read as a specification without commentary. §2.5 applies with no
 exception for test code, and more strictly: a test explaining itself in prose
 is a test whose names and structure failed to.
 
@@ -801,8 +809,8 @@ Before completing a change, verify:
 - [ ] every touched symbol has a current reason to exist (§2.2);
 - [ ] another simplification pass found no safe improvement (§2.3);
 - [ ] comments carry only facts the code cannot state, in code and tests
-      (§2.4, §12.5);
-- [ ] relocated code was re-cut rather than copied (§2.5);
+      (§2.5, §12.5);
+- [ ] relocated code was re-cut rather than copied (§2.6);
 - [ ] no behavior gained a second implementation (§2 item 11);
 - [ ] names use canonical terms (§4);
 - [ ] functions hold one abstraction level (§3.1);

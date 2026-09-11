@@ -38,7 +38,7 @@ A `program.Program` is threaded into one closure per instruction; a profiler pro
 
 1. Run `git status --short`; never overwrite or commit unrelated user changes.
 2. Read the Task Router docs for the area before changing code or tests.
-3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects. Comments are minimal by §2.4: write one only for a fact the code cannot state.
+3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects. Comments are minimal by §2.5: write one only for a fact the code cannot state.
 4. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
 5. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
 6. Have a completed stage reviewed adversarially by an agent that did not write it, and iterate until that review passes, before starting the next stage. A defect costs less at the stage that introduced it than three stages later.
@@ -52,8 +52,8 @@ Do not report work complete until all of these hold:
 1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
 2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
 3. A further simplification pass found no safe improvement.
-4. Code moved across a package or file boundary was re-cut, not copied (§2.5), and no behavior has a second implementation (§2 item 11).
-5. Every comment carries a fact the code cannot state (§2.4); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.5).
+4. Code moved across a package or file boundary was re-cut, not copied (§2.6), and no behavior has a second implementation (§2 item 11).
+5. Every comment carries a fact the code cannot state (§2.5); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.5).
 6. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
 7. Performance claims carry the reproducible before/after evidence §14 requires.
 8. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
