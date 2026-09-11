@@ -41,6 +41,7 @@ A `program.Program` is threaded into one closure per instruction; a profiler pro
 3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects. Comments are minimal by §2.4: write one only for a fact the code cannot state.
 4. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
 5. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
+6. Have a completed stage reviewed adversarially by an agent that did not write it, and iterate until that review passes, before starting the next stage. A defect costs less at the stage that introduced it than three stages later.
 
 Prefer `codegraph` MCP tools over grep for structural questions (definitions, callers, call flow, impact).
 
@@ -51,12 +52,13 @@ Do not report work complete until all of these hold:
 1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
 2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
 3. A further simplification pass found no safe improvement.
-4. Every comment carries a fact the code cannot state (§2.4); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.5).
-5. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
-6. Performance claims carry the reproducible before/after evidence §14 requires.
-7. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
-8. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
-9. Any intentionally skipped simplification or validation is recorded with its reason.
+4. Code moved across a package or file boundary was re-cut, not copied (§2.5), and no behavior has a second implementation (§2 item 11).
+5. Every comment carries a fact the code cannot state (§2.4); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.5).
+6. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
+7. Performance claims carry the reproducible before/after evidence §14 requires.
+8. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
+9. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
+10. Any intentionally skipped simplification or validation is recorded with its reason.
 
 ## Task Router
 
@@ -65,7 +67,7 @@ Do not report work complete until all of these hold:
 | Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/codegen/`, `instr/`, `internal/jit/arm64/` | `go test ./internal/codegen ./internal/cmd/codegen ./instr ./internal/jit/arm64 ./interp` |
 | Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
-| JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/jit_arm64.go`, `interp/jit_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |
+| JIT/ARM64 backend (golden stream first, §13) | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/jit_arm64.go`, `interp/jit_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |
 | Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/`, `internal/ssa/transform/` | `go test ./analysis ./transform ./optimize ./pass ./internal/ssa/... ./internal/jit/frontend` |
 | Bytecode verification / untrusted input | `docs/verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
 | REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |

@@ -72,6 +72,12 @@ apply §2 and §16.
 9. Interpreter and JIT behavior MUST remain semantically symmetric, while their
    implementations MAY differ where the execution model requires it.
 10. Performance claims MUST be supported by reproducible benchmark evidence.
+11. One behavior MUST have one implementation. The same rule expressed twice -
+    across two IRs, two layers, or two representations of one instruction - is
+    a defect even when both copies are correct, because they diverge silently.
+12. A design MUST come from understanding the code it replaces. Modelling a
+    behavior from its name, or introducing a representation to defer a question
+    rather than answer it, is not a design.
 
 ### 2.1 Top-Down Design Review
 
@@ -148,6 +154,19 @@ shortest form that carries the fact.
 
 Doc comments on exported symbols follow Go convention and state the contract,
 not the implementation.
+
+### 2.5 Extraction and Relocation
+
+Moving code into a new package or file is a redesign, not a transplant. The
+move MUST re-cut the boundary it crosses: symbols are renamed by the role they
+hold in the new owner, merged where the new grouping makes two into one,
+narrowed or made private where the new boundary no longer exports them, and
+removed where the move made them redundant.
+
+Copying a symbol set across a boundary unchanged is evidence the boundary was
+not examined. The result MUST implement the same behavior with the fewest
+cohesive symbols, and every §2.2 question MUST be asked of each symbol in its
+new home.
 
 ## 3. Functions
 
@@ -359,6 +378,15 @@ references.
 | `interp` | VM execution state, threaded dispatch, fallback, JIT orchestration |
 | `internal/asm` | architecture-neutral assembly IR, allocation, linking, executable buffers |
 | `internal/asm/<arch>` | architecture encoding, ABI, registers, relaxation |
+| `internal/ssa` | SSA IR: operations, blocks, types, frame state, verification |
+| `internal/ssa/transform` | one SSA transformation policy per pass |
+| `internal/graph` | graph facts over a block view: dominance, loop headers |
+| `internal/jit` | architecture-neutral JIT vocabulary, plans, runtime layout |
+| `internal/jit/frontend` | bytecode and trace translation into SSA |
+| `internal/jit/backend` | SSA to machine selection, deopt maps, lowering seam |
+| `internal/jit/<arch>` | one architecture's native lowering |
+| `internal/jit/compile` | compile queue, claim and publish, code store |
+| `internal/jit/tier` | tier-up policy, arbitration, retirement verdict |
 | `internal/codegen` | fusion pattern catalog, pattern validation, threaded-handler emission |
 | `prof` | samples, counters, profile aggregation |
 | `pass` | generic pass lifecycle and analysis cache |
@@ -674,6 +702,13 @@ files contain only the narrow behavior that differs.
 Adding or changing an architecture path MUST update `docs/compatibility.md` and
 the relevant implementation guide or JIT contract.
 
+A native backend MUST be specified by the instruction stream it emits, not only
+by the behavior it produces. The intended stream is written down first and
+asserted as a golden case; the backend is then made to match it. Every
+difference between the intended and the emitted stream MUST be reported with
+the change, so a missed optimization is a recorded gap rather than an invisible
+one.
+
 ## 14. Performance and Benchmarks
 
 Correctness and simplicity are prerequisites for optimization. Performance work
@@ -754,6 +789,10 @@ Before completing a change, verify:
 - [ ] top-down design and bottom-up symbol reviews are complete (§2.1-§2.2);
 - [ ] every touched symbol has a current reason to exist (§2.2);
 - [ ] another simplification pass found no safe improvement (§2.3);
+- [ ] comments carry only facts the code cannot state, in code and tests
+      (§2.4, §12.5);
+- [ ] relocated code was re-cut rather than copied (§2.5);
+- [ ] no behavior gained a second implementation (§2 item 11);
 - [ ] names use canonical terms (§4);
 - [ ] functions hold one abstraction level (§3.1);
 - [ ] helpers remove real complexity (§3.3);
