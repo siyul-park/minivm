@@ -618,7 +618,7 @@ case MUST NOT be kept alive by a proxy double.
 
 ### 12.4 Assertions and Cleanup
 
-- Use `require`, not `assert`.
+- Use `require`, not `assert`, and pass no message argument (§12.5).
 - Defer cleanup immediately after successful allocation.
 - Keep setup, behavior, and expectation visible in one flow.
 - Aim for at most one `t.Run` level.
@@ -637,8 +637,12 @@ is a test whose names and structure failed to.
   comment next to a literal.
 - A comment MUST NOT label the arrange, act, or assert step; the structure
   already shows them.
-- `require` messages carry the expectation a failure needs, so a comment
-  restating the assertion is a second copy of it.
+- Assertions take no message argument. `require.Equal(t, want, got)`, not a
+  message explaining it. A failure names the file, line, and both values,
+  which is the assertion itself; prose beside it is a second copy that drifts.
+- A failure that is unclear without prose is a naming or structure defect.
+  Fix the fixture name, the case name, or the shape of the assertion rather
+  than annotating it.
 
 The narrow exception is a fact the test cannot express in code: why a case
 exists that looks redundant, where a magic constant came from, or the defect a
