@@ -24,18 +24,18 @@ func TestNewSSAPass(t *testing.T) {
 
 func TestSSAPass_Run(t *testing.T) {
 	t.Run("a round trip preserves what a program does", func(t *testing.T) {
-		for name, prog := range programs(t) {
-			require.NoError(t, program.Verify(prog), name)
+		for _, prog := range programs(t) {
+			require.NoError(t, program.Verify(prog))
 			want, wantErr := outcome(t, prog)
 
 			got := duplicate(prog)
 			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
-			require.NoError(t, err, name)
-			require.NoError(t, program.Verify(got), "%s\n%s", name, got.String())
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
 
 			values, message := outcome(t, got)
-			require.Equal(t, wantErr, message, "%s\n%s", name, got.String())
-			require.Equal(t, want, values, "%s\n%s", name, got.String())
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want, values)
 		}
 	})
 
@@ -50,14 +50,14 @@ func TestSSAPass_Run(t *testing.T) {
 			got := duplicate(prog)
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
 			require.NoError(t, err)
-			require.NoError(t, program.Verify(got), got.String())
+			require.NoError(t, program.Verify(got))
 			if preserved == pass.PreserveNone() {
 				rewritten++
 			}
 
 			values, message := outcome(t, got)
-			require.Equal(t, wantErr, message, "%s---\n%s", prog.String(), got.String())
-			require.Equal(t, want, values, "%s---\n%s", prog.String(), got.String())
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want, values)
 		}
 		require.NotZero(t, rewritten)
 	})
@@ -73,14 +73,14 @@ func TestSSAPass_Run(t *testing.T) {
 			got := duplicate(prog)
 			preserved, err := transform.NewSSAPass(optimizing()).Run(pass.NewManager(), got)
 			require.NoError(t, err)
-			require.NoError(t, program.Verify(got), got.String())
+			require.NoError(t, program.Verify(got))
 			if preserved == pass.PreserveNone() {
 				rewritten++
 			}
 
 			values, message := outcome(t, got)
-			require.Equal(t, wantErr, message, "%s---\n%s", prog.String(), got.String())
-			require.Equal(t, want, values, "%s---\n%s", prog.String(), got.String())
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want, values)
 		}
 		require.NotZero(t, rewritten)
 	})
@@ -105,8 +105,8 @@ func TestSSAPass_Run(t *testing.T) {
 			}
 
 			routed, routedMessage := outcome(t, got)
-			require.Equal(t, message, routedMessage, instr.Format(prog.Code))
-			require.Equal(t, values, routed, instr.Format(prog.Code))
+			require.Equal(t, message, routedMessage)
+			require.Equal(t, values, routed)
 		}
 		// The fold reaches the whole pure family through instr's own purity
 		// rather than one hand-written case per opcode, so the i64 bitwise
@@ -115,7 +115,7 @@ func TestSSAPass_Run(t *testing.T) {
 			instr.I32_XOR, instr.I32_AND, instr.I32_OR,
 			instr.I64_XOR, instr.I64_AND, instr.I64_OR,
 		} {
-			require.True(t, folded[op], instr.TypeOf(op).Mnemonic)
+			require.True(t, folded[op])
 		}
 	})
 
@@ -296,33 +296,33 @@ func TestSSAPass_Run(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 			}, program.WithConstants(spanning(t, tc.pad)))
-			require.NoError(t, program.Verify(prog), tc.name)
+			require.NoError(t, program.Verify(prog))
 			want, wantErr := outcome(t, prog)
 			before := prog.String()
 
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
-			require.NoError(t, err, tc.name)
-			require.Equal(t, tc.expects, preserved, tc.name)
-			require.NoError(t, program.Verify(prog), tc.name)
+			require.NoError(t, err)
+			require.Equal(t, tc.expects, preserved)
+			require.NoError(t, program.Verify(prog))
 			if preserved == pass.PreserveAll() {
-				require.Equal(t, before, prog.String(), tc.name)
+				require.Equal(t, before, prog.String())
 			}
 
 			values, message := outcome(t, prog)
-			require.Equal(t, wantErr, message, tc.name)
-			require.Equal(t, want, values, tc.name)
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want, values)
 		}
 	})
 
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
-		for name, prog := range declined(t) {
-			require.NoError(t, program.Verify(prog), name)
+		for _, prog := range declined(t) {
+			require.NoError(t, program.Verify(prog))
 			before := prog.String()
 
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
-			require.NoError(t, err, name)
-			require.Equal(t, pass.PreserveAll(), preserved, name)
-			require.Equal(t, before, prog.String(), name)
+			require.NoError(t, err)
+			require.Equal(t, pass.PreserveAll(), preserved)
+			require.Equal(t, before, prog.String())
 		}
 	})
 }
@@ -589,7 +589,7 @@ func constant(t *testing.T) []struct {
 // padding and one phrase that has to take a local.
 func spanning(t *testing.T, pad int) *types.Function {
 	t.Helper()
-	require.Zero(t, pad%3, "padding is built from three-byte phrases")
+	require.Zero(t, pad%3)
 
 	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32)
 	done := fn.Label()

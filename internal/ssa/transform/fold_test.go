@@ -42,7 +42,7 @@ func TestFoldPass_Run(t *testing.T) {
 		after := ssa.Format(fn)
 		require.NotContains(t, after, "i32.add")
 		require.Contains(t, after, "v3:i32 = const 5")
-		require.Equal(t, sum, ssa.Value(3), "the folded operation keeps its own result value")
+		require.Equal(t, sum, ssa.Value(3))
 	})
 
 	t.Run("reports PreserveAll and leaves the function untouched when nothing folds", func(t *testing.T) {
@@ -116,7 +116,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
-		require.NoError(t, ssa.Verify(fn), "the frame still names a value the function actually defines")
+		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "stack=[v3]")
 		require.Contains(t, ssa.Format(fn), "v3:i32 = const 5")
 	})

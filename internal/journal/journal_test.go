@@ -22,7 +22,7 @@ func TestLayout(t *testing.T) {
 		}
 		seen := make(map[journal.Cell]bool, len(cells))
 		for _, c := range cells {
-			require.False(t, seen[c], "duplicate cell index %d", c)
+			require.False(t, seen[c])
 			seen[c] = true
 		}
 	})
@@ -33,7 +33,7 @@ func TestLayout(t *testing.T) {
 		}
 		seen := make(map[journal.Record]bool, len(records))
 		for _, r := range records {
-			require.False(t, seen[r], "duplicate record index %d", r)
+			require.False(t, seen[r])
 			seen[r] = true
 		}
 	})
@@ -44,7 +44,7 @@ func TestLayout(t *testing.T) {
 		}
 		seen := make(map[journal.Trap]bool, len(traps))
 		for _, tr := range traps {
-			require.False(t, seen[tr], "duplicate trap code %d", tr)
+			require.False(t, seen[tr])
 			seen[tr] = true
 		}
 	})

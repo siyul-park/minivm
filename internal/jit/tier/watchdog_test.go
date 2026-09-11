@@ -89,7 +89,7 @@ func TestNew(t *testing.T) {
 			w.Enter()
 		}
 		shadow, _ = w.Reach()
-		require.False(t, shadow, "a decided probe must never start timing")
+		require.False(t, shadow)
 		require.False(t, w.TakePending())
 	})
 
@@ -106,7 +106,7 @@ func TestWatchdog_Enter(t *testing.T) {
 		w := tier.New(functionEntry())
 		w.Enter()
 		shadow, _ := w.Reach()
-		require.False(t, shadow, "a single entry must not start timing the throughput probe")
+		require.False(t, shadow)
 		driveToShadow(t, w, 0)
 	})
 
@@ -138,7 +138,7 @@ func TestWatchdog_Reach(t *testing.T) {
 		driveToShadow(t, w, 0)
 		driveShadowRound(t, w, 0)
 		shadow, _ := w.Reach()
-		require.False(t, shadow, "a completed round returns to native timing")
+		require.False(t, shadow)
 		require.False(t, w.Retire())
 		// Not decided: the probe must be able to reach the shadow phase again.
 		driveToShadow(t, w, 0)
@@ -185,12 +185,12 @@ func TestWatchdog_Reach(t *testing.T) {
 		}
 		const outlier = 5 * time.Millisecond
 		_, reached := driveToShadowMaybe(w, outlier)
-		require.True(t, reached, "the probe must still be probing before the outlier round")
+		require.True(t, reached)
 		driveShadowRound(t, w, quiet)
 
 		grown, reached := driveToShadowMaybe(w, quiet)
-		require.True(t, reached, "one outlier round must not decide the verdict on its own")
-		require.Greater(t, grown, baseline, "a sharp timing outlier must widen the probe window")
+		require.True(t, reached)
+		require.Greater(t, grown, baseline)
 	})
 
 	t.Run("settles within the round cap when the signal stays unclear", func(t *testing.T) {
@@ -208,8 +208,8 @@ func TestWatchdog_Reach(t *testing.T) {
 			driveShadowRound(t, w, delay)
 		}
 		shadow, _ := w.Reach()
-		require.False(t, shadow, "the probe must have reached a verdict")
-		require.LessOrEqual(t, rounds, 7, "the round cap must force a decision by the 7th round")
+		require.False(t, shadow)
+		require.LessOrEqual(t, rounds, 7)
 	})
 }
 
@@ -249,7 +249,7 @@ func TestWatchdog_Retire(t *testing.T) {
 			w.Exit(1)
 		}
 		require.True(t, w.Retire())
-		require.False(t, w.Retire(), "a completed window must reset for the next one")
+		require.False(t, w.Retire())
 	})
 }
 
@@ -292,7 +292,7 @@ func TestWatchdog_Reset(t *testing.T) {
 		require.True(t, w.TakePending())
 		w.Reset()
 		shadow, _ := w.Reach()
-		require.False(t, shadow, "an interrupted shadow window returns to native timing")
+		require.False(t, shadow)
 		require.False(t, w.TakePending())
 		driveToShadow(t, w, 0)
 	})
@@ -306,7 +306,7 @@ func TestWatchdog_Reset(t *testing.T) {
 		}
 		require.True(t, w.Retire())
 		w.Reset()
-		require.True(t, w.Retire(), "a decided verdict must survive a boundary reset")
+		require.True(t, w.Retire())
 		shadow, _ := w.Reach()
 		require.False(t, shadow)
 	})

@@ -33,14 +33,13 @@ func TestFrameSize(t *testing.T) {
 	reserve := parseStackLiteral(t, src, `ADD\s+\$(\d+),\s*RSP`, abiFile)
 	frame := parseStackLiteral(t, src, `TEXT ·invoke\(SB\), \$(\d+)-`, abiFile)
 
-	require.Equal(t, frame, reserve+arm64.SaveAreaBytes,
-		"abi_arm64.s's TEXT frame size must equal its ADD reserve plus arm64.SaveAreaBytes")
+	require.Equal(t, frame, reserve+arm64.SaveAreaBytes)
 }
 
 func parseStackLiteral(t *testing.T, src []byte, pattern, file string) int {
 	t.Helper()
 	match := regexp.MustCompile(pattern).FindSubmatch(src)
-	require.NotNil(t, match, "expected %s in %s", pattern, file)
+	require.NotNil(t, match)
 	n, err := strconv.Atoi(string(match[1]))
 	require.NoError(t, err)
 	return n

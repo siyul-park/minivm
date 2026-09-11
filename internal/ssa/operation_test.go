@@ -33,7 +33,7 @@ func TestOp_String(t *testing.T) {
 		seen := make(map[string]bool, len(names))
 		for op, name := range names {
 			require.Equal(t, name, op.String())
-			require.False(t, seen[name], "duplicate operation name %q", name)
+			require.False(t, seen[name])
 			seen[name] = true
 		}
 	})

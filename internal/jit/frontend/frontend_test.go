@@ -18,7 +18,7 @@ func TestStatic(t *testing.T) {
 	for _, tc := range corpus(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			planned, emitted := agrees(t, tc.input)
-			require.Equal(t, planned, emitted, "every root the plan takes must still be planned")
+			require.Equal(t, planned, emitted)
 		})
 	}
 
@@ -115,7 +115,7 @@ blk0: ()
 }
 
 func TestBody(t *testing.T) {
-	t.Run("translates a whole function", func(t *testing.T) {
+	t.Run("translates a whole function to match the entry root's native translation", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 			Locals: []types.Type{types.TypeI32},
@@ -136,7 +136,7 @@ func TestBody(t *testing.T) {
 
 		static, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
 		require.NoError(t, err)
-		require.Equal(t, ssa.Format(static), ssa.Format(out), "the entry root translates to the same function either way")
+		require.Equal(t, ssa.Format(static), ssa.Format(out))
 	})
 
 	t.Run("translates module code the native calling convention refuses", func(t *testing.T) {
@@ -152,7 +152,7 @@ func TestBody(t *testing.T) {
 
 		static, err := frontend.Static(input, jit.Anchor{})
 		require.NoError(t, err)
-		require.Nil(t, static, "module entry does not implement the framed native-call ABI")
+		require.Nil(t, static)
 
 		out, err := frontend.Body(frontend.Module{Constants: input.Constants, Objects: input.Objects}, 0, input.Function)
 		require.NoError(t, err)
@@ -199,17 +199,17 @@ func agrees(t *testing.T, input *jit.Input) (int, int) {
 	emitted := 0
 	for _, anchor := range anchors(input) {
 		fn, err := frontend.Static(input, anchor)
-		require.Equal(t, planned == nil, err == nil, "anchor %+v", anchor)
+		require.Equal(t, planned == nil, err == nil)
 		if err != nil || fn == nil {
 			continue
 		}
 		emitted++
 		plan, ok := roots[anchor]
-		require.True(t, ok, "anchor %+v is not a root the plan takes\n%s", anchor, instr.Format(input.Function.Code))
-		require.NoError(t, ssa.Verify(fn), "anchor %+v\n%s", anchor, ssa.Format(fn))
+		require.True(t, ok)
+		require.NoError(t, ssa.Verify(fn))
 		blocks, want := graph(plan)
 		ids, got := breadth(0, fn.Len(), fn.Succ)
-		require.Equal(t, want, got, "anchor %+v\n%s", anchor, ssa.Format(fn))
+		require.Equal(t, want, got)
 		owns(t, plan, blocks, fn, ids)
 		adopts(t, fn)
 		targets(t, fn)
@@ -234,7 +234,7 @@ func owns(t *testing.T, plan jit.Plan, blocks []int, fn *ssa.Function, ids []int
 			continue
 		}
 		state, blk := plan.Blocks[block].State, fn.Block(ids[n])
-		require.Len(t, blk.Params, len(state), "blk%d is entered with a different stack\n%s", ids[n], ssa.Format(fn))
+		require.Len(t, blk.Params, len(state))
 		for i, slot := range state {
 			if slot.Kind != types.KindRef {
 				continue
@@ -247,7 +247,7 @@ func owns(t *testing.T, plan jit.Plan, blocks []int, fn *ssa.Function, ids []int
 				for _, frame := range op.Frames {
 					for _, operand := range frame.Stack {
 						if operand.Value == param {
-							require.Equal(t, want, operand.Owned, "blk%d v%d\n%s", ids[n], param, ssa.Format(fn))
+							require.Equal(t, want, operand.Owned)
 						}
 					}
 				}
@@ -276,7 +276,7 @@ func adopts(t *testing.T, fn *ssa.Function) {
 		for _, frame := range states[state].Frames {
 			for _, operand := range frame.Stack {
 				if fn.Type(operand.Value) == ssa.TypeRef {
-					require.True(t, operand.Owned, "v%d is handed over borrowed\n%s", operand.Value, ssa.Format(fn))
+					require.True(t, operand.Owned)
 				}
 			}
 		}
@@ -306,19 +306,19 @@ func targets(t *testing.T, fn *ssa.Function) {
 			if op.Op != ssa.OpExec || !op.Code.Writes(instr.Frame) {
 				continue
 			}
-			require.NotEmpty(t, op.Args, "a call names no callee\n%s", ssa.Format(fn))
+			require.NotEmpty(t, op.Args)
 			// The callee is popped first, so it is the last of the arguments
 			// an operation holds bottom of the stack first.
 			at := op.Args[len(op.Args)-1]
 			callee, ok := defines(fn, at)
-			require.True(t, ok, "v%d is a block parameter, not a callee\n%s", at, ssa.Format(fn))
+			require.True(t, ok)
 			if callee.Op == ssa.OpGuardValue {
 				callee, ok = defines(fn, callee.Args[1])
-				require.True(t, ok, "v%d admits a block parameter\n%s", at, ssa.Format(fn))
+				require.True(t, ok)
 			}
-			require.Equal(t, ssa.OpConst, callee.Op, "v%d does not resolve to a reference\n%s", at, ssa.Format(fn))
-			require.Equal(t, types.KindRef, callee.Const.Kind(), "v%d does not resolve to a reference\n%s", at, ssa.Format(fn))
-			require.Positive(t, callee.Const.Ref(), "v%d resolves to no heap cell\n%s", at, ssa.Format(fn))
+			require.Equal(t, ssa.OpConst, callee.Op)
+			require.Equal(t, types.KindRef, callee.Const.Kind())
+			require.Positive(t, callee.Const.Ref())
 		}
 	}
 }

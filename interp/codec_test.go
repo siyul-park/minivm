@@ -586,12 +586,12 @@ func TestRegistry_Marshal(t *testing.T) {
 			{name: "string", value: map[string]int32{"a": 7}, key: stringKey(t, i, "a")},
 		} {
 			value, err := r.Marshal(i, tt.value)
-			require.NoError(t, err, tt.name)
+			require.NoError(t, err)
 
 			got, ok, err := value.(*interp.HostMap).Get(i, tt.key)
-			require.NoError(t, err, tt.name)
-			require.True(t, ok, tt.name)
-			require.Equal(t, types.BoxI32(7), got, tt.name)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, types.BoxI32(7), got)
 		}
 	})
 
@@ -715,12 +715,12 @@ func TestRegistry_Marshal(t *testing.T) {
 			r := interp.NewRegistry()
 
 			_, err := r.Marshal(i, tt.value)
-			require.ErrorIs(t, err, interp.ErrHeapExhausted, tt.name)
+			require.ErrorIs(t, err, interp.ErrHeapExhausted)
 
 			addr, err := i.Alloc(types.String("x"))
-			require.NoError(t, err, tt.name)
-			require.NoError(t, i.Release(addr), tt.name)
-			require.NoError(t, i.Close(), tt.name)
+			require.NoError(t, err)
+			require.NoError(t, i.Release(addr))
+			require.NoError(t, i.Close())
 		}
 	})
 

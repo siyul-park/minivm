@@ -122,8 +122,8 @@ func TestForwardPass_Run(t *testing.T) {
 		require.Equal(t, pass.PreserveNone(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
-		require.Equal(t, 2, strings.Count(out, "load global[0]"), "a call writes Global")
-		require.Equal(t, 1, strings.Count(out, "load local[0]"), "a call never writes the caller's locals")
+		require.Equal(t, 2, strings.Count(out, "load global[0]"))
+		require.Equal(t, 1, strings.Count(out, "load local[0]"))
 	})
 
 	t.Run("keeps a read in a block more than one edge reaches", func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "one arm wrote the slot the other read")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 }

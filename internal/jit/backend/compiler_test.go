@@ -112,7 +112,7 @@ func TestRoot(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, jit.EntryFunction, entry.Kind)
 		require.Equal(t, prof.FrontendStatic, entry.Frontend)
-		require.Empty(t, entry.Resumable, "a plan with no bridge names no external re-entry")
+		require.Empty(t, entry.Resumable)
 		require.Equal(t, []ssa.Op{ssa.OpConst}, m.ops)
 	})
 
@@ -194,7 +194,7 @@ func TestCompile(t *testing.T) {
 
 			m := &machine{stops: stop}
 			_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{}, b.Build())
-			require.False(t, ok, stop)
+			require.False(t, ok)
 		}
 	})
 
@@ -213,9 +213,9 @@ func TestCompile(t *testing.T) {
 		m := &machine{traps: []instr.Opcode{instr.MAP_LEN}}
 		code, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{}, f)
 		require.True(t, ok)
-		require.Equal(t, []int{entry}, code.Order, "the trap reaches no successor, so nothing behind it is laid out")
-		require.Equal(t, []ssa.Op{ssa.OpConst, ssa.OpExec}, m.ops, "the operation after the trap never runs")
-		require.Empty(t, m.ended, "a trapped block has left already, so it has no terminator to end on")
+		require.Equal(t, []int{entry}, code.Order)
+		require.Equal(t, []ssa.Op{ssa.OpConst, ssa.OpExec}, m.ops)
+		require.Empty(t, m.ended)
 	})
 
 	t.Run("compiles a prefix whose declined operation only a trap could reach", func(t *testing.T) {

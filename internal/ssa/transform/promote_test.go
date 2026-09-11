@@ -35,7 +35,7 @@ func TestPromotePass_Run(t *testing.T) {
 		require.Zero(t, count(fn, ssa.OpStore))
 
 		header, _ := find(fn, func(blk ssa.Block) bool { return len(blk.Params) == 1 })
-		require.NotEqual(t, -1, header, "the merge the back edge reaches takes the counter as a parameter")
+		require.NotEqual(t, -1, header)
 		counter := fn.Block(header).Params[0]
 		require.Equal(t, ssa.TypeI32, fn.Type(counter))
 
@@ -45,11 +45,10 @@ func TestPromotePass_Run(t *testing.T) {
 		for _, op := range advanced.Ops {
 			if op.Op == ssa.OpExec && op.Code == instr.I32_ADD {
 				next = op.Results[0]
-				require.Equal(t, []ssa.Value{counter, op.Args[1]}, op.Args, "the body advances the counter it was entered with")
+				require.Equal(t, []ssa.Value{counter, op.Args[1]}, op.Args)
 			}
 		}
-		require.Equal(t, []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}, advanced.Term.Edges,
-			"the back edge hands the header what this iteration computed")
+		require.Equal(t, []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}, advanced.Term.Edges)
 	})
 
 	t.Run("resumes a deopt with the value the promoted slot held there", func(t *testing.T) {
@@ -75,7 +74,7 @@ func TestPromotePass_Run(t *testing.T) {
 		state, ok = resumes(entry)
 		require.True(t, ok)
 		require.Equal(t, []ssa.Frame{{Addr: 1, IP: 1, Locals: []ssa.Local{{Index: 0, Value: entry.Ops[0].Results[0]}}}}, state.Frames)
-		require.Equal(t, ssa.OpLoad, entry.Ops[0].Op, "the entry load is what the slot held on entry")
+		require.Equal(t, ssa.OpLoad, entry.Ops[0].Op)
 	})
 
 	t.Run("gives an entry that is its own loop header a block to load in", func(t *testing.T) {
@@ -102,9 +101,9 @@ func TestPromotePass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
 
-		require.Equal(t, 3, fn.Len(), "the loop header gains a block in front of it")
+		require.Equal(t, 3, fn.Len())
 		require.Empty(t, fn.Pred(0))
-		require.Equal(t, ssa.OpLoad, fn.Block(0).Ops[0].Op, "the load runs once per entry, not once per iteration")
+		require.Equal(t, ssa.OpLoad, fn.Block(0).Ops[0].Op)
 		require.Equal(t, ssa.OpJump, fn.Block(0).Term.Op)
 		require.Equal(t, 1, count(fn, ssa.OpLoad))
 		require.Zero(t, count(fn, ssa.OpStore))

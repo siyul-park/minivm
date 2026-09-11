@@ -57,7 +57,7 @@ func TestNew(t *testing.T) {
 	q := compile.New(4)
 
 	_, ok := q.Claim(0, 0)
-	require.False(t, ok, "a queue with nothing requested has nothing to serve")
+	require.False(t, ok)
 	require.False(t, q.Hit(0, 0))
 }
 
@@ -137,7 +137,7 @@ func TestQueue_Add(t *testing.T) {
 		q.Done(1, nil)
 
 		_, ok = q.Claim(1, 0)
-		require.False(t, ok, "a hot re-request of the active root is already covered")
+		require.False(t, ok)
 	})
 
 	t.Run("serves a side exit ahead of waiting hot roots", func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestQueue_Add(t *testing.T) {
 
 		next, ok := q.Claim(1, 0)
 		require.True(t, ok)
-		require.Equal(t, sideExit(1, 4), next, "publication leaves the queued exit for the next winner")
+		require.Equal(t, sideExit(1, 4), next)
 	})
 
 	t.Run("lets a side exit replace a waiting hot root but not the reverse", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestQueue_Add(t *testing.T) {
 		q.Done(1, nil)
 
 		_, ok = q.Claim(1, 0)
-		require.False(t, ok, "the hot request it replaced must not still be waiting")
+		require.False(t, ok)
 
 		q.Add(sideExit(2, 4))
 		q.Add(hot(2, 4))
@@ -188,7 +188,7 @@ func TestQueue_Add(t *testing.T) {
 		q.Done(2, nil)
 
 		_, ok = q.Claim(2, 0)
-		require.False(t, ok, "a hot request cannot displace a waiting exit")
+		require.False(t, ok)
 	})
 
 	t.Run("ignores an address outside the program", func(t *testing.T) {
@@ -210,7 +210,7 @@ func TestQueue_Claim(t *testing.T) {
 		_, ok := q.Claim(1, 0)
 		require.True(t, ok)
 		_, ok = q.Claim(1, 0)
-		require.False(t, ok, "a second holder must wait for the first to finish")
+		require.False(t, ok)
 	})
 
 	t.Run("waits for the threshold", func(t *testing.T) {
@@ -263,10 +263,10 @@ func TestQueue_Serve(t *testing.T) {
 			q.Done(1, nil)
 		})
 
-		require.True(t, ran, "a queue with no worker must finish the build before Serve returns")
+		require.True(t, ran)
 		q.Add(hot(1, 4))
 		_, ok = q.Claim(1, 0)
-		require.True(t, ok, "the build ended its claim")
+		require.True(t, ok)
 	})
 
 	t.Run("runs the build on the worker", func(t *testing.T) {
@@ -285,7 +285,7 @@ func TestQueue_Serve(t *testing.T) {
 		<-ran
 		q.Add(hot(1, 4))
 		_, ok = q.Claim(1, 0)
-		require.True(t, ok, "the build ended its claim")
+		require.True(t, ok)
 	})
 }
 
@@ -317,7 +317,7 @@ func TestQueue_Done(t *testing.T) {
 
 		q.Add(hot(2, 0))
 		_, ok = q.Claim(2, 0)
-		require.False(t, ok, "a root another build already emitted needs no build of its own")
+		require.False(t, ok)
 	})
 
 	t.Run("keeps a root a build emitted nothing for requestable", func(t *testing.T) {
@@ -329,7 +329,7 @@ func TestQueue_Done(t *testing.T) {
 
 		q.Add(hot(1, 4))
 		again, ok := q.Claim(1, 0)
-		require.True(t, ok, "a caller that learns more about the root may ask again")
+		require.True(t, ok)
 		require.Equal(t, hot(1, 4), again)
 	})
 
@@ -342,7 +342,7 @@ func TestQueue_Done(t *testing.T) {
 
 		q.Add(sideExit(1, 4))
 		rebuild, ok := q.Claim(1, 0)
-		require.True(t, ok, "rebuilding a native root with the exit's leg folded in is the point")
+		require.True(t, ok)
 		require.Equal(t, sideExit(1, 4), rebuild)
 	})
 }
@@ -408,6 +408,6 @@ func TestQueue_Close(t *testing.T) {
 			q.Done(1, nil)
 		})
 
-		require.True(t, ran, "a closed queue has no worker left to hand the build to")
+		require.True(t, ran)
 	})
 }

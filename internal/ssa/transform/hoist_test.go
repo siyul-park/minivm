@@ -117,8 +117,8 @@ func TestHoistPass_Run(t *testing.T) {
 		// blk0 is always the preheader: this pass's rebuild always visits
 		// the entry block first (see blockChunk), so a genuine hoist out of
 		// the loop shows up there regardless of how everything else renumbers.
-		require.Equal(t, 1, strings.Count(blockChunk(after, 0), "i32.add"), "the addition now lives in the preheader")
-		require.Equal(t, 2, strings.Count(after, "i32.add"), "moved, not duplicated - the counter's own increment is the other occurrence")
+		require.Equal(t, 1, strings.Count(blockChunk(after, 0), "i32.add"))
+		require.Equal(t, 2, strings.Count(after, "i32.add"))
 	})
 
 	t.Run("does not hoist an operation whose argument is loop-variant", func(t *testing.T) {
@@ -134,7 +134,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.True(t, hasCode(fn.Block(l.body).Ops, instr.I32_ADD), "an add reading the loop counter itself must stay")
+		require.True(t, hasCode(fn.Block(l.body).Ops, instr.I32_ADD))
 	})
 
 	t.Run("does not hoist a heap read a loop's own heap write could invalidate", func(t *testing.T) {
@@ -152,8 +152,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.True(t, hasCode(fn.Block(l.body).Ops, instr.ARRAY_LEN),
-			"array.len stays in the loop body: it reads Heap, so instr.Opcode.IsPure() is already false regardless of the array.set below")
+		require.True(t, hasCode(fn.Block(l.body).Ops, instr.ARRAY_LEN))
 	})
 
 	t.Run("does not hoist a loop-invariant division that could fault on a zero divisor", func(t *testing.T) {
@@ -169,8 +168,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.True(t, hasCode(fn.Block(l.body).Ops, instr.I32_DIV_S),
-			"a loop-invariant division must not run on a trip count the original loop might never reach")
+		require.True(t, hasCode(fn.Block(l.body).Ops, instr.I32_DIV_S))
 	})
 
 	t.Run("does not hoist out of a loop with no suitable preheader", func(t *testing.T) {
@@ -218,7 +216,7 @@ func TestHoistPass_Run(t *testing.T) {
 		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "the header has two outside predecessors, so no preheader exists to hoist into")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -247,11 +245,11 @@ func TestHoistPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 
 		out := ssa.Format(fn)
-		require.Contains(t, out, "guard.shape", "the guard survives")
-		require.Contains(t, out, "state v", "its deopt state survives, still named on the guard")
-		require.Equal(t, 1, strings.Count(blockChunk(out, 0), "i32.add"), "the addition hoisted into the preheader")
-		require.Equal(t, 2, strings.Count(out, "i32.add"), "moved, not duplicated - the counter's own increment is the other occurrence")
-		require.NotContains(t, blockChunk(out, 0), "guard.shape", "the guard, which always carries deopt state, never moves into the preheader")
+		require.Contains(t, out, "guard.shape")
+		require.Contains(t, out, "state v")
+		require.Equal(t, 1, strings.Count(blockChunk(out, 0), "i32.add"))
+		require.Equal(t, 2, strings.Count(out, "i32.add"))
+		require.NotContains(t, blockChunk(out, 0), "guard.shape")
 	})
 
 	t.Run("cascades a doubly loop-invariant operation out of a nested loop in one run", func(t *testing.T) {
@@ -320,8 +318,8 @@ func TestHoistPass_Run(t *testing.T) {
 		// cascade all the way out to pre in this one Run, not stop at
 		// inner's own preheader (mid).
 		out := ssa.Format(fn)
-		require.Equal(t, 1, strings.Count(blockChunk(out, 0), "i32.add"), "x+y cascades all the way out to the outermost preheader")
-		require.Equal(t, 3, strings.Count(out, "i32.add"), "moved, not duplicated - the two counter increments are the other occurrences")
+		require.Equal(t, 1, strings.Count(blockChunk(out, 0), "i32.add"))
+		require.Equal(t, 3, strings.Count(out, "i32.add"))
 	})
 
 	t.Run("is correct on a function carrying no loop at all", func(t *testing.T) {

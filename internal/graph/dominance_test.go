@@ -51,23 +51,32 @@ func TestNewDominance(t *testing.T) {
 
 func TestFrontier(t *testing.T) {
 	t.Run("names the join each arm of a diamond stops being the only definition at", func(t *testing.T) {
-		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
-		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
+		entry, left, right, join := 0, 1, 2, 3
+		g := newFixture(4, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}})
 
 		f := graph.Frontier(g, graph.NewDominance(g))
 
-		require.Equal(t, [][]int{nil, {3}, {3}, nil}, f,
-			"the entry dominates the join, so nothing it defines needs merging there")
+		want := make([][]int, 4)
+		want[entry] = nil
+		want[left] = []int{join}
+		want[right] = []int{join}
+		want[join] = nil
+		require.Equal(t, want, f)
 	})
 
 	t.Run("names a loop header as the frontier of every block its body reaches it from", func(t *testing.T) {
-		// 0 -> 1, 1 -> 2, 2 -> 3, 3 -> 1, 2 -> 4.
-		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 3}, {3, 1}, {2, 4}})
+		entry, header, body, latch, exit := 0, 1, 2, 3, 4
+		g := newFixture(5, [][2]int{{entry, header}, {header, body}, {body, latch}, {latch, header}, {body, exit}})
 
 		f := graph.Frontier(g, graph.NewDominance(g))
 
-		require.Equal(t, [][]int{nil, {1}, {1}, {1}, nil}, f,
-			"the header is where a definition made anywhere in the body meets the one the preheader made")
+		want := make([][]int, 5)
+		want[entry] = nil
+		want[header] = []int{header}
+		want[body] = []int{header}
+		want[latch] = []int{header}
+		want[exit] = nil
+		require.Equal(t, want, f)
 	})
 
 	t.Run("leaves a graph with no join empty", func(t *testing.T) {
@@ -91,28 +100,28 @@ func TestFrontier(t *testing.T) {
 
 func TestDominance_Dominates(t *testing.T) {
 	t.Run("entry dominates every node reachable through a diamond, but neither arm dominates the join", func(t *testing.T) {
-		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
-		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
+		entry, left, right, join := 0, 1, 2, 3
+		g := newFixture(4, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}})
 
 		d := graph.NewDominance(g)
 
-		require.True(t, d.Dominates(0, 3), "entry reaches the join through every path")
-		require.False(t, d.Dominates(1, 3), "the sibling arm through 2 bypasses 1")
-		require.False(t, d.Dominates(2, 3), "the sibling arm through 1 bypasses 2")
-		require.True(t, d.Dominates(0, 1))
-		require.True(t, d.Dominates(0, 2))
+		require.True(t, d.Dominates(entry, join))
+		require.False(t, d.Dominates(left, join))
+		require.False(t, d.Dominates(right, join))
+		require.True(t, d.Dominates(entry, left))
+		require.True(t, d.Dominates(entry, right))
 	})
 
 	t.Run("a loop header dominates its body across the back edge, never the reverse", func(t *testing.T) {
-		// 0 -> 1 (header), 1 -> 2 (body), 2 -> 1 (back edge), 2 -> 3 (exit).
-		g := newFixture(4, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}})
+		entry, header, body, exit := 0, 1, 2, 3
+		g := newFixture(4, [][2]int{{entry, header}, {header, body}, {body, header}, {body, exit}})
 
 		d := graph.NewDominance(g)
 
-		require.True(t, d.Dominates(1, 2), "the header dominates the body on every iteration")
-		require.False(t, d.Dominates(2, 1), "the back edge does not make the body dominate its own header")
-		require.True(t, d.Dominates(1, 3), "the only path to the exit passes through the header")
-		require.True(t, d.Dominates(0, 3))
+		require.True(t, d.Dominates(header, body))
+		require.False(t, d.Dominates(body, header))
+		require.True(t, d.Dominates(header, exit))
+		require.True(t, d.Dominates(entry, exit))
 	})
 
 	t.Run("an unreachable node dominates nothing, including itself", func(t *testing.T) {
@@ -126,18 +135,19 @@ func TestDominance_Dominates(t *testing.T) {
 	})
 
 	t.Run("disagrees with a flat before-in-the-stream approximation across sibling arms", func(t *testing.T) {
-		// A store at node 1 and a reload at node 4 would look ordered by a
-		// flat instruction-position scan alone (1 precedes 4), the
-		// approximation asm's allocator used before it consulted real
-		// dominance. Real dominance rejects it: the sibling arm through
-		// node 2 reaches node 4 without ever running node 1.
-		g := newFixture(5, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}, {3, 4}})
+		// store and reload would look ordered by a flat instruction-position
+		// scan alone (store precedes reload), the approximation asm's
+		// allocator used before it consulted real dominance. Real dominance
+		// rejects it: the sibling arm reaches reload without ever running
+		// store.
+		entry, store, sibling, join, reload := 0, 1, 2, 3, 4
+		g := newFixture(5, [][2]int{{entry, store}, {entry, sibling}, {store, join}, {sibling, join}, {join, reload}})
 
 		d := graph.NewDominance(g)
 
-		require.False(t, d.Dominates(1, 4), "the sibling arm through 2 bypasses 1 even though 1 sits earlier in node order")
-		require.True(t, d.Dominates(3, 4), "the join point genuinely dominates everything after it")
-		require.True(t, d.Dominates(0, 4))
+		require.False(t, d.Dominates(store, reload))
+		require.True(t, d.Dominates(join, reload))
+		require.True(t, d.Dominates(entry, reload))
 	})
 }
 
@@ -159,14 +169,14 @@ func TestDominance_IDom(t *testing.T) {
 	})
 
 	t.Run("a join's immediate dominator is the nearest common ancestor of its arms, not either arm", func(t *testing.T) {
-		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
-		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
+		entry, left, right, join := 0, 1, 2, 3
+		g := newFixture(4, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}})
 
 		d := graph.NewDominance(g)
 
-		require.Equal(t, 0, d.IDom(1))
-		require.Equal(t, 0, d.IDom(2))
-		require.Equal(t, 0, d.IDom(3), "neither sibling arm dominates the join, so its idom is their common ancestor")
+		require.Equal(t, entry, d.IDom(left))
+		require.Equal(t, entry, d.IDom(right))
+		require.Equal(t, entry, d.IDom(join))
 	})
 
 	t.Run("a loop body's immediate dominator is its header, not the back edge", func(t *testing.T) {

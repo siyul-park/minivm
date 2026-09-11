@@ -478,15 +478,13 @@ func TestAssembler_Build(t *testing.T) {
 		// The fall-through arm executes v's spill store itself, so this run
 		// is correct however the allocator behaves: a sanity check that the
 		// diamond is otherwise wired correctly.
-		require.Equal(t, uint64(magic), run(1),
-			"fall-through arm must read back the value its own arm stored")
+		require.Equal(t, uint64(magic), run(1))
 
 		// The taken arm never executes the fall-through arm's code, so v's
 		// spill store never runs on this call. v was defined before the
 		// branch, not inside the skipped arm, so a sound allocator must
 		// still produce magic here.
-		require.Equal(t, uint64(magic), run(0),
-			"branch-taken arm must still see v's value after the forward-branch merge")
+		require.Equal(t, uint64(magic), run(0))
 	})
 
 	t.Run("self-recursive call clobbers the caller's spill slots", func(t *testing.T) {
@@ -560,8 +558,7 @@ func TestAssembler_Build(t *testing.T) {
 		// silently sharing one spill area between activations.
 		// interp/jit.go's publish turns this into "keep threaded dispatch".
 		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable,
-			"a self-recursive build must reject rather than share one spill area between activations")
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
 	})
 
 	t.Run("spills a value confined to one loop iteration", func(t *testing.T) {
@@ -599,7 +596,7 @@ func TestAssembler_Build(t *testing.T) {
 		assembler.Emit(arm64.RET())
 
 		code, err := assembler.Build()
-		require.NoError(t, err, "a loop confining its pressure to one iteration must still get a spill frame")
+		require.NoError(t, err)
 
 		buffer, err := asm.NewBuffer(4096)
 		require.NoError(t, err)
@@ -612,8 +609,7 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
 		// The loop counts 5, 4, 3, 2, 1, so the last iteration to run — the
 		// one whose store survives — sees counter == 1.
-		require.Equal(t, wideSum(pressure)+1, values[1],
-			"the last iteration's spilled-and-reloaded value must survive intact")
+		require.Equal(t, wideSum(pressure)+1, values[1])
 	})
 
 	t.Run("declines a value live across a back edge", func(t *testing.T) {
@@ -679,8 +675,7 @@ func TestAssembler_Build(t *testing.T) {
 
 		values := [2]uint64{0, 0}
 		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
-		require.Equal(t, uint64(iterations*(iterations+1)/2), values[1],
-			"a store issued once before the loop must not silently replay on every iteration of a self-referencing reload")
+		require.Equal(t, uint64(iterations*(iterations+1)/2), values[1])
 	})
 
 	t.Run("declines a value spilled on one diamond arm and reloaded on the sibling arm", func(t *testing.T) {
@@ -740,10 +735,8 @@ func TestAssembler_Build(t *testing.T) {
 			return values[1]
 		}
 
-		require.Equal(t, wideSum(pressure)+1, run(1),
-			"the fall-through arm must still compute its own result correctly")
-		require.Equal(t, uint64(magic), run(0),
-			"the taken arm must read v intact even though the sibling arm's own pressure never dominates it")
+		require.Equal(t, wideSum(pressure)+1, run(1))
+		require.Equal(t, uint64(magic), run(0))
 	})
 }
 

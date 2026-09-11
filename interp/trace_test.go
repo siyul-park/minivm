@@ -213,13 +213,13 @@ func TestTracer_Capture(t *testing.T) {
 
 			result := tracer.publish(root, tree, tr, tt.status, prof.CaptureReasonNone)
 
-			require.Same(t, tr, result.trace, tt.name)
-			require.Equal(t, tt.status, tr.Status, tt.name)
-			require.Equal(t, prof.CaptureOutcomePublished, result.outcome, tt.name)
-			require.Equal(t, prof.CaptureReasonNone, result.reason, tt.name)
+			require.Same(t, tr, result.trace)
+			require.Equal(t, tt.status, tr.Status)
+			require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
+			require.Equal(t, prof.CaptureReasonNone, result.reason)
 			published := tracer.RootAt(root)
-			require.NotNil(t, published, tt.name)
-			require.Same(t, tr, published.Root, tt.name)
+			require.NotNil(t, published)
+			require.Same(t, tr, published.Root)
 		}
 	})
 

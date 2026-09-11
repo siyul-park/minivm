@@ -201,7 +201,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 
 		fn := optimized.Constants[0].(*types.Function)
-		require.Len(t, fn.Locals, 1, "common subexpression captured into a fresh local")
+		require.Len(t, fn.Locals, 1)
 		require.Contains(t, instr.Format(fn.Code), "local.tee")
 
 		beforeVM := interp.New(before)
@@ -367,10 +367,10 @@ func TestOptimizer_Optimize(t *testing.T) {
 		optimized, err := optimize.New(optimize.O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
-		require.Len(t, optimized.Types, 1, "a referenced program type is not dropped")
+		require.Len(t, optimized.Types, 1)
 
 		fn := optimized.Constants[0].(*types.Function)
-		require.Len(t, fn.Handlers, 1, "function handlers are not dropped")
+		require.Len(t, fn.Handlers, 1)
 
 		beforeVM := interp.New(before)
 		defer beforeVM.Close()

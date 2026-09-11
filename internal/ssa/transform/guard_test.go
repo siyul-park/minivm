@@ -40,8 +40,8 @@ func TestGuardPass_Run(t *testing.T) {
 		require.Equal(t, pass.PreserveNone(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
-		require.Equal(t, 1, strings.Count(out, "guard.shape"), "only one guard should remain")
-		require.Contains(t, out, "return v3", "the eliminated guard's uses now read the surviving guard's result")
+		require.Equal(t, 1, strings.Count(out, "guard.shape"))
+		require.Contains(t, out, "return v3")
 	})
 
 	t.Run("does not collapse guards admitting different shapes", func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "the second guard admits a different shape, so it is not redundant")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "guard.shape"))
 	})
@@ -105,7 +105,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "the two guards narrow the same operand to different kinds")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "guard.kind"))
 	})
@@ -171,7 +171,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
-		require.NoError(t, ssa.Verify(fn), "the surviving guard's state must still resolve, and its frame must still name a real value")
-		require.Contains(t, ssa.Format(fn), "stack=[v2]", "extra, named only from the frame, survives the rebuild untouched")
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, ssa.Format(fn), "stack=[v2]")
 	})
 }

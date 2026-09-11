@@ -55,7 +55,7 @@ func TestStore_Detach(t *testing.T) {
 
 		require.NoError(t, s.Detach())
 		published, ok := s.Code(0)
-		require.True(t, ok, "one holder leaving must not retire what everyone dispatches into")
+		require.True(t, ok)
 		require.NotNil(t, published)
 
 		require.NoError(t, s.Close())
@@ -67,17 +67,17 @@ func TestStore_Close(t *testing.T) {
 	s.Publish(code(jit.Anchor{Addr: 1}), buffer(t))
 
 	require.NoError(t, s.Close())
-	require.NoError(t, s.Close(), "closing twice must not free the buffers twice")
+	require.NoError(t, s.Close())
 }
 
 func TestStore_Shared(t *testing.T) {
 	s := compile.NewStore()
 	defer func() { require.NoError(t, s.Close()) }()
 
-	require.False(t, s.Shared(), "a store nobody else attached to needs no polling")
+	require.False(t, s.Shared())
 	require.True(t, s.Attach())
 	require.NoError(t, s.Detach())
-	require.True(t, s.Shared(), "a holder that has left could still have published")
+	require.True(t, s.Shared())
 }
 
 func TestStore_Publish(t *testing.T) {
@@ -120,5 +120,5 @@ func TestStore_Code(t *testing.T) {
 	_, ok = s.Code(0)
 	require.True(t, ok)
 	_, ok = s.Code(1)
-	require.False(t, ok, "a caller that has seen everything published waits for more")
+	require.False(t, ok)
 }

@@ -38,7 +38,7 @@ func TestCSEPass_Run(t *testing.T) {
 		require.Equal(t, pass.PreserveNone(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
-		require.Equal(t, 1, strings.Count(out, "i32.add"), "only one addition should remain")
+		require.Equal(t, 1, strings.Count(out, "i32.add"))
 		require.Equal(t, "func f\nblk0: (v1:i32, v2:i32)\n\tv3:i32 = i32.add v1, v2\n\treturn v3, v3\n", out)
 	})
 
@@ -85,7 +85,7 @@ func TestCSEPass_Run(t *testing.T) {
 		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "neither arm dominates the other, so nothing collapses")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "i32.add"))
 	})
@@ -128,8 +128,8 @@ func TestCSEPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
-		require.NoError(t, ssa.Verify(fn), "the frame must still name a value the function actually defines")
+		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "i32.add"))
-		require.Contains(t, ssa.Format(fn), "stack=[v3]", "the frame now names the surviving addition's own result")
+		require.Contains(t, ssa.Format(fn), "stack=[v3]")
 	})
 }

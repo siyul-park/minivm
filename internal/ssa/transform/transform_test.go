@@ -56,13 +56,13 @@ func TestPassOrder(t *testing.T) {
 		out, err := pipeline.Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Same(t, fn, out, "the pipeline mutates the function in place and returns it")
+		require.Same(t, fn, out)
 		require.NoError(t, ssa.Verify(fn))
 
 		got := ssa.Format(fn)
-		require.NotContains(t, got, "i32.add", "both additions folded to the same constant")
-		require.NotContains(t, got, "const 99", "the unused constant was swept once folding and CSE left it with no use")
-		require.Equal(t, 1, strings.Count(got, "guard.shape"), "the second, redundant guard was eliminated")
+		require.NotContains(t, got, "i32.add")
+		require.NotContains(t, got, "const 99")
+		require.Equal(t, 1, strings.Count(got, "guard.shape"))
 
 		// sum1, sum2, and the survivor of the two additions all collapse to the
 		// same folded-and-deduplicated constant.
@@ -137,8 +137,8 @@ func TestPassOrder(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 
 		got := ssa.Format(fn)
-		require.Equal(t, 1, strings.Count(got, "guard.shape"), "GuardPass still collapses the redundant guard with HoistPass in the pipeline")
-		require.Equal(t, 2, strings.Count(got, "i32.add"), "x+y hoisted out of the loop; counter+sum, which reads it, is the other survivor")
-		require.Equal(t, 1, strings.Count(blockChunk(got, 0), "i32.add"), "x+y specifically now lives in the preheader")
+		require.Equal(t, 1, strings.Count(got, "guard.shape"))
+		require.Equal(t, 2, strings.Count(got, "i32.add"))
+		require.Equal(t, 1, strings.Count(blockChunk(got, 0), "i32.add"))
 	})
 }

@@ -61,7 +61,7 @@ func TestGenerate(t *testing.T) {
 						continue
 					}
 					if ident.Name == "Interpreter" {
-						require.Fail(t, "generated Interpreter method", generated.Path+":"+node.Name.Name)
+						require.Fail(t, "generated Interpreter method")
 					}
 					if pointer, ok := field.Type.(*ast.StarExpr); ok {
 						ident, ok := pointer.X.(*ast.Ident)
@@ -72,7 +72,7 @@ func TestGenerate(t *testing.T) {
 				selector, ok := node.Fun.(*ast.SelectorExpr)
 				if ok {
 					_, found := forbidden[selector.Sel.Name]
-					require.False(t, found, generated.Path+":"+selector.Sel.Name)
+					require.False(t, found)
 				}
 			}
 			return true

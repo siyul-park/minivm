@@ -42,18 +42,16 @@ func TestARM64_StackReserve(t *testing.T) {
 	require.NoError(t, err)
 
 	reserveLiteral := regexp.MustCompile(`ADD\s+\$(\d+),\s*RSP`).FindSubmatch(src)
-	require.NotNil(t, reserveLiteral, "expected an ADD $N, RSP reserve instruction in %s", abiFile)
+	require.NotNil(t, reserveLiteral)
 	reserveVal, err := strconv.Atoi(string(reserveLiteral[1]))
 	require.NoError(t, err)
-	require.Equal(t, reserveVal, reserve,
-		"arm64.StackReserve(1<<journal.Shift, nativeFrameLimit) must equal the trampoline's ADD $N, RSP reserve")
+	require.Equal(t, reserveVal, reserve)
 
 	frameLiteral := regexp.MustCompile(`TEXT ·invoke\(SB\), \$(\d+)-`).FindSubmatch(src)
-	require.NotNil(t, frameLiteral, "expected a TEXT ·invoke(SB), $N-M frame size in %s", abiFile)
+	require.NotNil(t, frameLiteral)
 	frameVal, err := strconv.Atoi(string(frameLiteral[1]))
 	require.NoError(t, err)
-	require.Equal(t, frameVal, frame,
-		"arm64.FrameSize(1<<journal.Shift, nativeFrameLimit) must equal the trampoline's TEXT frame size")
+	require.Equal(t, frameVal, frame)
 }
 
 // Backedge covers when a module loop is attempted for compilation, which

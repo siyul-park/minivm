@@ -118,7 +118,7 @@ func loopInput(t *testing.T) (*jit.Input, jit.Plan, jit.Plan) {
 	header := plans[1]
 	require.Equal(t, jit.EntryFunction, entry.Kind)
 	require.Equal(t, jit.EntryLoop, header.Kind)
-	require.NotEmpty(t, header.Carried, "the fixture must pin a carried local for the ladder to have a rung to drop")
+	require.NotEmpty(t, header.Carried)
 	return input, entry, header
 }
 
@@ -136,7 +136,7 @@ func TestNew(t *testing.T) {
 	var attempts []attempt
 	c := newTestCompiler(t, pressureMachine{attempts: &attempts})
 	require.NotNil(t, c)
-	require.NotNil(t, c.Buffer(), "a compiler owns the executable buffer its code is published into")
+	require.NotNil(t, c.Buffer())
 }
 
 func TestCompiler_Compile(t *testing.T) {
@@ -149,7 +149,7 @@ func TestCompiler_Compile(t *testing.T) {
 		result := c.Compile(input, entry.Anchor)
 		require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
 		require.Contains(t, result.Code.Entries, entry.Anchor)
-		require.Zero(t, lowered, "a root the machine compiled itself must never reach the plan pipeline")
+		require.Zero(t, lowered)
 	})
 
 	t.Run("falls back to the plan when the machine declines the root", func(t *testing.T) {
@@ -160,8 +160,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
 		require.Equal(t, prof.FrontendStatic, result.Frontend)
 		require.Contains(t, result.Code.Entries, entry.Anchor)
-		require.Equal(t, []attempt{{carried: len(entry.Carried), nativeLoop: true}}, attempts,
-			"a declined root must reach the plan pipeline exactly as it did before the gate")
+		require.Equal(t, []attempt{{carried: len(entry.Carried), nativeLoop: true}}, attempts)
 	})
 
 	t.Run("keeps a static entry's loop native", func(t *testing.T) {
@@ -254,7 +253,7 @@ func TestCompiler_CompileConcurrentHeap(t *testing.T) {
 	input := &jit.Input{Address: 1, Function: caller, Constants: constants, Objects: objects}
 
 	want := newNativeCompiler(t).Compile(input, jit.Anchor{Addr: 1})
-	require.Equal(t, prof.CompileOutcomeEmitted, want.Outcome, "the fixture must reach the backend for the concurrent runs to prove anything")
+	require.Equal(t, prof.CompileOutcomeEmitted, want.Outcome)
 
 	done := make(chan struct{})
 	go func() {

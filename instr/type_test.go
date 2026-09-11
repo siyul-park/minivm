@@ -25,20 +25,20 @@ func TestTypeOf(t *testing.T) {
 func TestValid(t *testing.T) {
 	mnemonics := make(map[string]instr.Opcode)
 	for op := instr.NOP; op <= instr.STRING_ITER; op++ {
-		require.True(t, instr.Valid(op), "opcode %d has no metadata", op)
+		require.True(t, instr.Valid(op))
 		typ := instr.TypeOf(op)
-		require.NotEmpty(t, typ.Mnemonic, "opcode %d has no mnemonic", op)
-		previous, exists := mnemonics[typ.Mnemonic]
-		require.False(t, exists, "opcodes %d and %d share mnemonic %q", previous, op, typ.Mnemonic)
+		require.NotEmpty(t, typ.Mnemonic)
+		_, exists := mnemonics[typ.Mnemonic]
+		require.False(t, exists)
 		mnemonics[typ.Mnemonic] = op
 		for _, width := range typ.Widths {
-			require.Contains(t, []int{-8, -4, -2, -1, 1, 2, 4, 8}, width, "%s has invalid operand width", typ.Mnemonic)
+			require.Contains(t, []int{-8, -4, -2, -1, 1, 2, 4, 8}, width)
 		}
 	}
 
 	require.Equal(t, instr.I32_CONST, mnemonics["i32.const"])
 	for code := int(instr.STRING_ITER) + 1; code < 256; code++ {
-		require.False(t, instr.Valid(instr.Opcode(code)), "opcode %d is registered past STRING_ITER", code)
+		require.False(t, instr.Valid(instr.Opcode(code)))
 	}
 }
 
@@ -63,8 +63,7 @@ func TestOpcode_Reads(t *testing.T) {
 			mnemonic := instr.TypeOf(op).Mnemonic
 			space, _, ok := strings.Cut(mnemonic, ".")
 			if effect, named := spaces[space]; ok && named {
-				require.True(t, op.Reads(effect) || op.Writes(effect),
-					"%s touches no %s storage", mnemonic, space)
+				require.True(t, op.Reads(effect) || op.Writes(effect))
 			}
 		}
 	})
@@ -83,8 +82,7 @@ func TestOpcode_Writes(t *testing.T) {
 	t.Run("enters a frame only where a call does", func(t *testing.T) {
 		for op := instr.NOP; op <= instr.STRING_ITER; op++ {
 			want := op == instr.CALL || op == instr.RETURN_CALL
-			require.Equal(t, want, op.Writes(instr.Frame),
-				"%s disagrees about entering a frame", instr.TypeOf(op).Mnemonic)
+			require.Equal(t, want, op.Writes(instr.Frame))
 		}
 	})
 
@@ -96,8 +94,7 @@ func TestOpcode_Writes(t *testing.T) {
 			instr.YIELD: true, instr.RESUME: true,
 		}
 		for op := instr.NOP; op <= instr.STRING_ITER; op++ {
-			require.Equal(t, leaves[op], op.Writes(instr.Branch),
-				"%s disagrees about moving the instruction pointer", instr.TypeOf(op).Mnemonic)
+			require.Equal(t, leaves[op], op.Writes(instr.Branch))
 		}
 	})
 }

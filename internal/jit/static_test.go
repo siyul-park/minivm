@@ -152,7 +152,7 @@ func TestStaticPlan(t *testing.T) {
 		require.Equal(t,
 			plans[0].Blocks[left].Term.Edges[0].Index,
 			plans[0].Blocks[right].Term.Edges[0].Index,
-			"both arms fall through to the same join, which must be interned as one block")
+		)
 	})
 
 	t.Run("a loop root is pruned to what it reaches", func(t *testing.T) {
@@ -209,7 +209,7 @@ func TestStaticPlan(t *testing.T) {
 		plans, err := jit.StaticPlan(&jit.Input{Address: 1, Function: fn})
 		require.NoError(t, err)
 		require.Len(t, plans, 1)
-		require.Nil(t, plans[0].Carried, "with no back edge there is nothing to carry")
+		require.Nil(t, plans[0].Carried)
 	})
 
 	t.Run("struct get with an unknown index rejects the plan", func(t *testing.T) {

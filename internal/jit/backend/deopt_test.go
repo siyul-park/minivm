@@ -101,7 +101,7 @@ func TestCompiler_Exit(t *testing.T) {
 			{Value: counter, Slot: 1},
 			{Value: live, Slot: 2},
 		}, m.deopts[0].Slots)
-		require.Equal(t, 3, m.deopts[0].SP, "a promoted local sits under the operands, so it moves no stack pointer")
+		require.Equal(t, 3, m.deopts[0].SP)
 	})
 
 	t.Run("registers no descriptor for an exit that reports none", func(t *testing.T) {

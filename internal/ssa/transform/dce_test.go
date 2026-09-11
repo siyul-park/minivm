@@ -51,7 +51,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "array.len reads the heap, so it is kept regardless of its unused result")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "array.len")
 	})
@@ -91,7 +91,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved, "sum is unused as an ordinary argument, but the frame that names it is a live root")
+		require.Equal(t, pass.PreserveAll(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Contains(t, out, "i32.add")
@@ -112,7 +112,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved, "the unused constant goes, which rebuilds the function around the frame that stays")
+		require.Equal(t, pass.PreserveNone(), preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, "func f\nblk0: ()\n\tv1:ref = const 3\n\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[v1 owned]}\n\texit state v2\n", ssa.Format(fn))
 	})

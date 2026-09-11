@@ -148,7 +148,7 @@ func TestParse(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.True(t, tt.want.Equals(got), "got %v, want %v", got, tt.want)
+			require.True(t, tt.want.Equals(got))
 		})
 	}
 
