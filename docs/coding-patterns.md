@@ -81,7 +81,7 @@ apply §2 and §16.
 
 ### 2.1 Top-Down Design Review
 
-Every non-trivial change MUST be reviewed from the public entry point downward, in this order:
+Every non-trivial change MUST be reviewed from the public entry point downward:
 
 1. package responsibility and dependency direction;
 2. public contract and ownership boundary;
@@ -89,35 +89,34 @@ Every non-trivial change MUST be reviewed from the public entry point downward, 
 4. state and lifecycle ownership;
 5. lower-level mechanics.
 
-The review MUST verify not only that each responsibility is present, but that it is owned by the narrowest appropriate package, type, or function.
+Verify that each responsibility belongs to the narrowest appropriate owner.
 
-A package, type, or abstraction whose responsibility cannot be stated in one precise sentence without combining independent responsibilities SHOULD be split, merged, narrowed, or removed.
+A package, type, or abstraction that combines independent responsibilities SHOULD be split, merged, narrowed, or removed.
 
 ### 2.2 Bottom-Up Symbol Review
 
-Every changed file, and every nearby symbol exposed by the change, MUST be reviewed from leaves upward.
+Every changed file and every nearby symbol affected in responsibility, ownership, visibility, call relationships, or contract MUST be reviewed from leaves upward.
 
-Each file, type, interface, field, function, method, parameter, result, constant, variable, and test helper MUST have a current reason to exist, and its responsibility and ownership MUST still be correct.
+Each file, type, interface, field, function, method, parameter, result, constant, variable, and test helper MUST have a current reason to exist and a correct owner.
 
-For each symbol, reviewers MUST ask whether it can be:
+For each symbol, consider whether it can be:
 
-- removed;
-- inlined;
-- merged with an existing owner;
-- narrowed in scope or made private;
-- renamed by role;
-- represented by an existing type or operation; or
-- replaced by simpler direct code or a simpler algorithm.
+* removed or inlined;
+* merged with an existing owner;
+* narrowed or made private;
+* renamed by role;
+* represented by an existing type or operation; or
+* replaced by simpler direct code or a simpler algorithm.
 
-A refactor is incomplete while it leaves dead fields, arguments, results, wrappers, aliases, compatibility shims, or one-call indirections made obsolete by the change.
+A refactor is incomplete if the change leaves obsolete fields, parameters, results, wrappers, aliases, compatibility shims, or one-call indirections.
 
-Future flexibility, superficial symmetry, shorter functions, and one-call-site convenience are not sufficient reasons for a symbol to exist.
+Future flexibility, superficial symmetry, shorter functions, or one-call-site convenience are not sufficient justification.
 
 ### 2.3 Simplification Loop
 
-Simplification MUST continue until another complete pass finds no safe improvement.
+Simplification MUST continue until a complete subsequent pass finds no further safe improvement.
 
-Each pass MUST check, in order:
+Each pass checks, in order:
 
 1. removable or mergeable symbols;
 2. narrower ownership and visibility;
@@ -125,17 +124,29 @@ Each pass MUST check, in order:
 4. simpler or more efficient algorithms;
 5. tests and documentation matching the final contract.
 
-A simplification is considered safe only when it preserves the required behavior, ownership and lifecycle invariants, compatibility constraints, and relevant performance characteristics.
+Simplification means removing unnecessary structural complexity, not merely reducing lines of code.
+
+A simplification is safe only if it preserves required behavior, ownership and lifecycle invariants, compatibility constraints, and relevant performance characteristics.
+
+Any structural change MUST trigger another review of the affected scope.
 
 Intentionally rejected simplifications MUST be recorded in the change summary with the invariant, compatibility constraint, or measured behavioral or performance cost that prevented them.
 
-The loop MUST terminate only when the review finds no further safe simplification.
+The loop ends only when no further safe simplification remains.
 
 ### 2.4 Non-Trivial Changes
 
-A change is non-trivial when it alters package boundaries, public behavior, ownership, lifecycle, control flow, performance-critical code, or introduces, removes, or materially changes an abstraction.
+A change is non-trivial when it alters any of the following:
 
-Non-trivial changes MUST satisfy the full Top-Down Design Review, Bottom-Up Symbol Review, and Simplification Loop before completion.
+* package boundaries or dependency direction;
+* public behavior or public contracts;
+* ownership;
+* lifecycle;
+* control flow;
+* performance-critical code; or
+* the introduction, removal, or material modification of an abstraction.
+
+Every non-trivial change MUST complete the **Top-Down Design Review, Bottom-Up Symbol Review, and Simplification Loop** before it is considered complete.
 
 ### 2.5 Comments
 
@@ -149,11 +160,11 @@ the first.
 
 A comment SHOULD exist only for a fact that has no expression in code:
 
-- an invariant a caller or future editor must preserve, and what breaks
+* an invariant a caller or future editor must preserve, and what breaks
   without it;
-- a constraint that lives in another package, file, or table, naming it;
-- a rejected alternative and the measured cost or defect that rejected it;
-- a reference to an external contract, specification, or issue.
+* a constraint that lives in another package, file, or table, naming it;
+* a rejected alternative and the measured cost or defect that rejected it;
+* a reference to an external contract, specification, or issue.
 
 Prefer removing the need for a comment over writing one. A name, a type, an
 extracted function, or a narrowed signature that makes the fact evident is
@@ -182,10 +193,10 @@ new home.
 
 A function MUST NOT mix unrelated levels, including:
 
-- CLI parsing with VM state mutation;
-- bytecode decoding with optimization policy;
-- register-allocation mechanics with JIT orchestration;
-- profiling aggregation with execution control.
+* CLI parsing with VM state mutation;
+* bytecode decoding with optimization policy;
+* register-allocation mechanics with JIT orchestration;
+* profiling aggregation with execution control.
 
 The main flow MUST remain visible. Mechanics MAY move behind a behavior-level
 name when doing so makes that flow easier to read.
@@ -208,11 +219,11 @@ execute
 
 A file MUST form a descending staircase of abstraction:
 
-- symbols at the same level MUST be adjacent and in call order;
-- a callee MUST be as close to its caller as its other callers allow;
-- a shared callee MUST follow the last caller that introduces it;
-- a lower level MUST NOT be interleaved between higher-level symbols; and
-- error constructors, formatters, and comparable leaves MUST be last.
+* symbols at the same level MUST be adjacent and in call order;
+* a callee MUST be as close to its caller as its other callers allow;
+* a shared callee MUST follow the last caller that introduces it;
+* a lower level MUST NOT be interleaved between higher-level symbols; and
+* error constructors, formatters, and comparable leaves MUST be last.
 
 ### 3.3 Helper Extraction
 
@@ -236,12 +247,12 @@ be reimplemented when that package can own the operation.
 
 ### 3.4 Methods and Functions
 
-- Use a method when behavior belongs to one receiver.
-- Use a package function for constructors, behavior shared by unrelated types,
+* Use a method when behavior belongs to one receiver.
+* Use a package function for constructors, behavior shared by unrelated types,
   or behavior with no natural receiver.
-- Receiver-owned behavior MUST NOT remain a package helper.
-- A method MUST NOT be added merely to shorten a call.
-- Constructors MUST be package functions, never methods.
+* Receiver-owned behavior MUST NOT remain a package helper.
+* A method MUST NOT be added merely to shorten a call.
+* Constructors MUST be package functions, never methods.
 
 A private package function used by one type MUST become a method or be inlined,
 unless it is a constructor or is materially clearer as a package-level
@@ -251,17 +262,17 @@ mechanic.
 
 ### 4.1 General
 
-- Prefer one-word names.
-- Add a word only when package, receiver, or local context cannot distinguish
+* Prefer one-word names.
+* Add a word only when package, receiver, or local context cannot distinguish
   the concept.
-- Use one canonical term per concept across packages.
-- Names MUST NOT repeat the receiver, package, subsystem, phase, or
+* Use one canonical term per concept across packages.
+* Names MUST NOT repeat the receiver, package, subsystem, phase, or
   representation without a real disambiguation need.
-- Abbreviations MUST be established project or domain terms such as `ID`, `IP`,
+* Abbreviations MUST be established project or domain terms such as `ID`, `IP`,
   `ABI`, `JIT`, `VM`, `CPU`, `CFG`, `GVN`, and `DCE`.
-- One-letter names MUST be limited to conventional indexes, receivers, and very
+* One-letter names MUST be limited to conventional indexes, receivers, and very
   small scopes.
-- Protocol, ISA, opcode, ABI, and standard-library terms MUST retain their exact
+* Protocol, ISA, opcode, ABI, and standard-library terms MUST retain their exact
   spelling.
 
 Names describe caller-visible roles, not mechanics. `Run`, `Build`, `Lower`,
@@ -293,17 +304,17 @@ same scope would collide.
 
 Every exported symbol is a maintenance commitment.
 
-- Accept interfaces when callers provide behavior.
-- Return concrete types from constructors.
-- Define interfaces in the package that consumes the behavior.
-- Keep public structs small and intentional.
-- Exported writable aggregate fields SHOULD NOT be added.
-- Aliases, wrappers, or pass-through methods MUST have a distinct contract.
-- `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` containers MUST
+* Accept interfaces when callers provide behavior.
+* Return concrete types from constructors.
+* Define interfaces in the package that consumes the behavior.
+* Keep public structs small and intentional.
+* Exported writable aggregate fields SHOULD NOT be added.
+* Aliases, wrappers, or pass-through methods MUST have a distinct contract.
+* `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` containers MUST
   NOT be added only to group parameters or returns.
-- Speculative options, algorithms, extension points, and policy knobs MUST NOT
+* Speculative options, algorithms, extension points, and policy knobs MUST NOT
   be exported.
-- A type MUST own an invariant, policy, transition, or stable capability.
+* A type MUST own an invariant, policy, transition, or stable capability.
 
 Public APIs outside the scope explicitly authorized by the user MUST remain
 source compatible. Compatibility MUST NOT preserve an internal symbol that has
@@ -362,14 +373,14 @@ behavior methods, not field assignment.
 
 ### 5.4 Values and Representations
 
-- Prefer values when they protect meaningful invariants.
-- Normalize sets by immutable identity.
-- Reject duplicate identities before mutating state.
-- Store and return sets in deterministic order.
-- Custom text, binary, and JSON input/output SHOULD be symmetric unless a
+* Prefer values when they protect meaningful invariants.
+* Normalize sets by immutable identity.
+* Reject duplicate identities before mutating state.
+* Store and return sets in deterministic order.
+* Custom text, binary, and JSON input/output SHOULD be symmetric unless a
   current wire contract requires otherwise.
-- Mutable builders MUST NOT leak mutable backing storage into built values.
-- `Clone` MUST preserve hidden execution and ownership state required by the
+* Mutable builders MUST NOT leak mutable backing storage into built values.
+* `Clone` MUST preserve hidden execution and ownership state required by the
   public contract.
 
 ## 6. Package and Domain Ownership
@@ -441,15 +452,15 @@ stable error with the exact instruction position.
 
 The JIT is an optimization over threaded semantics.
 
-- Unsupported lowering MUST leave the exact threaded fallback available.
-- A failed speculative lowering MUST NOT partially mutate IR, stack facts,
+* Unsupported lowering MUST leave the exact threaded fallback available.
+* A failed speculative lowering MUST NOT partially mutate IR, stack facts,
   labels, or ownership state.
-- Architecture-neutral planning MUST remain separate from architecture
+* Architecture-neutral planning MUST remain separate from architecture
   encoding.
-- JIT policy MUST NOT leak into `asm` instruction mechanics.
-- Native installation and publication MUST preserve immutable code and
+* JIT policy MUST NOT leak into `asm` instruction mechanics.
+* Native installation and publication MUST preserve immutable code and
   interpreter-local dispatch ownership.
-- Interpreter/JIT parity MUST be tested through public observable behavior.
+* Interpreter/JIT parity MUST be tested through public observable behavior.
 
 ### 7.4 Assembler and Executable Memory
 
@@ -482,12 +493,12 @@ trace -> plan -> lower -> build -> publish -> install
 Mechanics MAY be extracted behind policy names, but shallow wrappers MUST NOT
 hide these flows. Prefer:
 
-- one direct pass over coordinated passes;
-- local state over global maps;
-- exact ownership over cleanup protocols;
-- data flow matching the runtime model;
-- bounded worklists over recursive traversal in runtime ownership paths; and
-- immutable publication over shared mutation.
+* one direct pass over coordinated passes;
+* local state over global maps;
+* exact ownership over cleanup protocols;
+* data flow matching the runtime model;
+* bounded worklists over recursive traversal in runtime ownership paths; and
+* immutable publication over shared mutation.
 
 `release` MUST remain iterative. Heap index zero MUST remain `Null`. Frame code
 MUST keep function address and callable reference distinct. Detailed runtime and
@@ -557,17 +568,17 @@ literals MUST follow declaration order.
 
 ## 10. Errors
 
-- Errors MUST NOT be ignored.
-- Package-created semantic errors MUST be stable `ErrXxx` sentinels.
-- Dependency errors MUST remain unchanged when identity is contractual.
-- Only outcomes understood at the current boundary MAY be translated.
-- Cancellation, timeout, conflict, corruption, resource exhaustion, and other
+* Errors MUST NOT be ignored.
+* Package-created semantic errors MUST be stable `ErrXxx` sentinels.
+* Dependency errors MUST remain unchanged when identity is contractual.
+* Only outcomes understood at the current boundary MAY be translated.
+* Cancellation, timeout, conflict, corruption, resource exhaustion, and other
   operational failures MUST be preserved.
-- `fmt.Errorf` MUST NOT create a new semantic category.
-- Errors MUST NOT be wrapped only to repeat the failed operation.
-- `%w` MUST be used when added context preserves a dependency or sentinel.
-- `errors.Is` and `errors.As` MUST be used only when identity controls behavior.
-- Error messages MUST NOT expose host values, private code, pointers, or other
+* `fmt.Errorf` MUST NOT create a new semantic category.
+* Errors MUST NOT be wrapped only to repeat the failed operation.
+* `%w` MUST be used when added context preserves a dependency or sentinel.
+* `errors.Is` and `errors.As` MUST be used only when identity controls behavior.
+* Error messages MUST NOT expose host values, private code, pointers, or other
   sensitive process state.
 
 | Form | Meaning |
@@ -583,31 +594,31 @@ a single recovery boundary. Other runtime failures MUST return errors.
 
 ## 11. Concurrency and Lifecycle
 
-- `context.Context` MUST be the first parameter of operations that may block,
+* `context.Context` MUST be the first parameter of operations that may block,
   perform I/O, or cross a process boundary.
-- Contexts MUST NOT be stored in long-lived structs.
-- Cancellation and timeout ownership MUST be preserved.
-- Shared mutable state MUST have one clear owner and synchronization strategy.
-- Goroutine lifetimes MUST be tied to an operation or process lifecycle.
-- Long-lived goroutines MUST shut down gracefully.
-- Immutable data SHOULD be published atomically instead of mutated under
+* Contexts MUST NOT be stored in long-lived structs.
+* Cancellation and timeout ownership MUST be preserved.
+* Shared mutable state MUST have one clear owner and synchronization strategy.
+* Goroutine lifetimes MUST be tied to an operation or process lifecycle.
+* Long-lived goroutines MUST shut down gracefully.
+* Immutable data SHOULD be published atomically instead of mutated under
   readers.
-- Cleanup methods MUST release native memory and owned references exactly once.
-- Race tests MUST cover changes to pools, caches, profilers, publication, or
+* Cleanup methods MUST release native memory and owned references exactly once.
+* Race tests MUST cover changes to pools, caches, profilers, publication, or
   shared compilation.
 
 ## 12. Tests
 
 ### 12.1 Placement and Ownership
 
-- Unit tests live beside production code as `*_test.go`.
-- Every test package MUST use the production package name plus the `_test`
+* Unit tests live beside production code as `*_test.go`.
+* Every test package MUST use the production package name plus the `_test`
   suffix and exercise the package as an importing client.
-- Each test file MUST match the production file owning the symbol.
-- Catch-all concept files and `test_helpers_test.go` MUST NOT be created.
-- Black-box, conformance, and external fixtures belong under `test/` or the
+* Each test file MUST match the production file owning the symbol.
+* Catch-all concept files and `test_helpers_test.go` MUST NOT be created.
+* Black-box, conformance, and external fixtures belong under `test/` or the
   dedicated `benchmarks/` module.
-- Test order MUST match source declaration order.
+* Test order MUST match source declaration order.
 
 Write one top-level test per exported constructor, function, or method with an
 independent contract. Cases MUST be subtests; sibling top-level tests per case
@@ -633,12 +644,12 @@ behavior through exported functions and methods or an observable boundary.
 
 Tests MUST NOT:
 
-- construct literals naming unexported fields;
-- read or write unexported state;
-- call unexported functions or methods;
-- assert private representation;
-- add production proxies solely for testing; or
-- proxy a real implementation merely to inject failure.
+* construct literals naming unexported fields;
+* read or write unexported state;
+* call unexported functions or methods;
+* assert private representation;
+* add production proxies solely for testing; or
+* proxy a real implementation merely to inject failure.
 
 If behavior cannot be reached publicly, it is either a missing legitimate
 contract or unobservable implementation state. Improve the production API only
@@ -665,11 +676,11 @@ case MUST NOT be kept alive by a proxy double.
 
 ### 12.4 Assertions and Cleanup
 
-- Use `require`, not `assert`, and pass no message argument (§12.5).
-- Defer cleanup immediately after successful allocation.
-- Keep setup, behavior, and expectation visible in one flow.
-- Aim for at most one `t.Run` level.
-- Table tests SHOULD be used when cases share one shape.
+* Use `require`, not `assert`, and pass no message argument (§12.5).
+* Defer cleanup immediately after successful allocation.
+* Keep setup, behavior, and expectation visible in one flow.
+* Aim for at most one `t.Run` level.
+* Table tests SHOULD be used when cases share one shape.
 
 ### 12.5 Self-Describing Tests
 
@@ -677,17 +688,17 @@ A test MUST read as a specification without commentary. §2.5 applies with no
 exception for test code, and more strictly: a test explaining itself in prose
 is a test whose names and structure failed to.
 
-- The test name states the behavior under test, not the function called.
-- A case name in a table states the case, so the table reads as an
+* The test name states the behavior under test, not the function called.
+* A case name in a table states the case, so the table reads as an
   enumeration of the contract.
-- Fixture values carry their meaning in named constants or variables, not in a
+* Fixture values carry their meaning in named constants or variables, not in a
   comment next to a literal.
-- A comment MUST NOT label the arrange, act, or assert step; the structure
+* A comment MUST NOT label the arrange, act, or assert step; the structure
   already shows them.
-- Assertions take no message argument. `require.Equal(t, want, got)`, not a
+* Assertions take no message argument. `require.Equal(t, want, got)`, not a
   message explaining it. A failure names the file, line, and both values,
   which is the assertion itself; prose beside it is a second copy that drifts.
-- A failure that is unclear without prose is a naming or structure defect.
+* A failure that is unclear without prose is a naming or structure defect.
   Fix the fixture name, the case name, or the shape of the assertion rather
   than annotating it.
 
@@ -804,27 +815,27 @@ and remain concise, factual, and reproducible.
 
 Before completing a change, verify:
 
-- [ ] package and type ownership are clear (§6-§8);
-- [ ] top-down design and bottom-up symbol reviews are complete (§2.1-§2.2);
-- [ ] every touched symbol has a current reason to exist (§2.2);
-- [ ] another simplification pass found no safe improvement (§2.3);
-- [ ] comments carry only facts the code cannot state, in code and tests
+* [ ] package and type ownership are clear (§6-§8);
+* [ ] top-down design and bottom-up symbol reviews are complete (§2.1-§2.2);
+* [ ] every touched symbol has a current reason to exist (§2.2);
+* [ ] another simplification pass found no safe improvement (§2.3);
+* [ ] comments carry only facts the code cannot state, in code and tests
       (§2.5, §12.5);
-- [ ] relocated code was re-cut rather than copied (§2.6);
-- [ ] no behavior gained a second implementation (§2 item 11);
-- [ ] names use canonical terms (§4);
-- [ ] functions hold one abstraction level (§3.1);
-- [ ] helpers remove real complexity (§3.3);
-- [ ] public APIs are minimal and compatibility constraints are respected (§5);
-- [ ] mutable values are defensively copied (§5.3);
-- [ ] declarations and tests follow source order (§3.2, §9, §12);
-- [ ] runtime, ownership, and fallback invariants remain intact (§7-§8);
-- [ ] operational errors preserve identity (§10);
-- [ ] concurrency and lifecycle ownership are explicit (§11);
-- [ ] generated and architecture paths are synchronized (§13);
-- [ ] performance claims have reproducible evidence (§14);
-- [ ] relevant tests, race checks, static analysis, and benchmarks pass; and
-- [ ] unrelated user changes are absent from every commit.
+* [ ] relocated code was re-cut rather than copied (§2.6);
+* [ ] no behavior gained a second implementation (§2 item 11);
+* [ ] names use canonical terms (§4);
+* [ ] functions hold one abstraction level (§3.1);
+* [ ] helpers remove real complexity (§3.3);
+* [ ] public APIs are minimal and compatibility constraints are respected (§5);
+* [ ] mutable values are defensively copied (§5.3);
+* [ ] declarations and tests follow source order (§3.2, §9, §12);
+* [ ] runtime, ownership, and fallback invariants remain intact (§7-§8);
+* [ ] operational errors preserve identity (§10);
+* [ ] concurrency and lifecycle ownership are explicit (§11);
+* [ ] generated and architecture paths are synchronized (§13);
+* [ ] performance claims have reproducible evidence (§14);
+* [ ] relevant tests, race checks, static analysis, and benchmarks pass; and
+* [ ] unrelated user changes are absent from every commit.
 
 ## Maintenance Notes
 
@@ -835,10 +846,10 @@ architecture docs, not in this standard.
 
 ## Related Documents
 
-- `AGENTS.md` — repository workflow and task router
-- `.claude/CLAUDE.md` — Claude-specific execution overlay
-- `docs/architecture.md` — package boundaries and runtime ownership
-- `docs/testing.md` — public API test ownership inventory
-- `docs/benchmarks.md` — measured results and methodology
-- `docs/jit-internals.md` — JIT and assembler contracts
-- `docs/README.md` — documentation ownership and format
+* `AGENTS.md` — repository workflow and task router
+* `.claude/CLAUDE.md` — Claude-specific execution overlay
+* `docs/architecture.md` — package boundaries and runtime ownership
+* `docs/testing.md` — public API test ownership inventory
+* `docs/benchmarks.md` — measured results and methodology
+* `docs/jit-internals.md` — JIT and assembler contracts
+* `docs/README.md` — documentation ownership and format
