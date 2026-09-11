@@ -43,6 +43,18 @@ A `program.Program` is threaded into one closure per instruction; a profiler pro
 5. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
 6. Have a completed stage reviewed adversarially by an agent that did not write it, and iterate until that review passes, before starting the next stage. A defect costs less at the stage that introduced it than three stages later.
 
+### Review Contract
+
+An adversarial review MUST enforce `docs/coding-patterns.md`, not merely hunt for bugs. A change that works and violates the specification is not complete, so the reviewer runs the same passes the author owed:
+
+- **§2.1 top-down.** Walk package responsibility, public contract, primary behavior, state and lifecycle ownership, then mechanics. Report any responsibility not held by the narrowest appropriate package, type, or function, and any abstraction whose responsibility needs two independent sentences.
+- **§2.2 bottom-up.** Every changed and nearby symbol, from leaves upward. For each, ask whether it can be removed, inlined, merged with an existing owner, narrowed or privatized, renamed by role, represented by an existing type or operation, or replaced by simpler code. Dead fields, arguments, results, wrappers, aliases, shims, and one-call indirections the change made obsolete are review findings, not style notes.
+- **§2.3 simplification loop.** Run a pass in the stated order and report what a further pass would still find. A rejected simplification MUST be justified by an invariant, a compatibility constraint, or a measured cost; "it works" is not a justification.
+- **§2.4** decides whether a change owed the full review at all; a non-trivial change that skipped it is itself a finding.
+- **§2.5, §2.6, §3.2, §4, §12** and the sections §1.3 selects: comments carrying only facts the code cannot state, relocation re-cut rather than copied, declaration order, naming, and test placement, self-description, and public-contract-only access.
+
+A reviewer MUST verify claims by execution rather than by reading: run the tests, mutate a load-bearing line and confirm something fails, and refute a rationale by building the thing it calls impossible. A stated impossibility that turns out to be false is a higher-value finding than a bug, because the next author inherits it as fact.
+
 Prefer `codegraph` MCP tools over grep for structural questions (definitions, callers, call flow, impact).
 
 ### Completion Gate
