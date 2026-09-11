@@ -608,6 +608,17 @@ the setter owner.
 
 ### 12.2 Public Contract Only
 
+Every test package MUST be the production package name plus `_test`, so a test
+is an importing client with no more access than any other caller.
+
+This is a design constraint, not a testing formality. A package that is hard to
+test from outside is hard to use from outside, and the difficulty is the same
+difficulty: state a caller cannot observe, a result a caller cannot reach, a
+setup a caller cannot perform. Reaching into private state hides that signal
+instead of answering it. When a test cannot say what it needs to say through
+the public surface, the finding is about the API, and §12.2's closing rule
+decides what to do about it.
+
 Tests are executable specifications. Public-contract tests MUST construct
 exported types through exported constructors, builders, or options and verify
 behavior through exported functions and methods or an observable boundary.

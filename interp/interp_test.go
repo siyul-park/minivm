@@ -2144,7 +2144,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 		i.Flush()
 		attempts, _ := p.Metric("vm_jit_attempts_total")
-		require.Zero(t, attempts, "an unreachable threshold must never trigger a compile attempt")
+		require.Zero(t, attempts)
 		// The very first entry always records one incidental, never-completed
 		// capture (outcome "partial") regardless of the threshold - that is
 		// ordinary entry-warmup instrumentation, not loop discovery. The public
@@ -2155,7 +2155,7 @@ func TestInterpreter_Run(t *testing.T) {
 		published := jitMetricSum(i, p, "vm_jit_trace_captures_total", func(labels []prof.Label) bool {
 			return jitLabel(labels, "outcome") == "published"
 		})
-		require.Zero(t, published, "an unreachable threshold must never publish a discovered loop trace")
+		require.Zero(t, published)
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -2207,7 +2207,7 @@ func TestInterpreter_Run(t *testing.T) {
 			}
 			settledAttempts := attempts()
 			settledEntries := nativeEntries()
-			require.Greater(t, settledEntries, float64(0), "the loop must have installed native code before cooling")
+			require.Greater(t, settledEntries, float64(0))
 
 			for range 8 {
 				require.NoError(t, i.Run(context.Background()))
@@ -2216,8 +2216,8 @@ func TestInterpreter_Run(t *testing.T) {
 				require.Equal(t, types.I32(2), v)
 				i.Reset()
 			}
-			require.Equal(t, settledAttempts, attempts(), "cooling must stop further compile attempts")
-			require.Greater(t, nativeEntries(), settledEntries, "cooling must not stop the installed native handler from running")
+			require.Equal(t, settledAttempts, attempts())
+			require.Greater(t, nativeEntries(), settledEntries)
 		})
 	}
 
@@ -2262,7 +2262,7 @@ func TestInterpreter_Run(t *testing.T) {
 				prof.Label{Key: "kind", Value: "call"},
 				prof.Label{Key: "frontend", Value: "static"})
 			require.True(t, ok)
-			require.Less(t, entries, float64(4096), "probe should retire within its bounded adaptive budget")
+			require.Less(t, entries, float64(4096))
 		})
 
 		t.Run("keeps a faster function entry", func(t *testing.T) {
@@ -2311,7 +2311,7 @@ func TestInterpreter_Run(t *testing.T) {
 				prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "call"},
 				prof.Label{Key: "frontend", Value: "static"})
-			require.False(t, retired, "a faster native function entry must not retire")
+			require.False(t, retired)
 		})
 	}
 
@@ -2362,9 +2362,9 @@ func TestInterpreter_Run(t *testing.T) {
 					require.NoError(t, err)
 					want, err := threaded.PopBoxed()
 					require.NoError(t, err)
-					require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+					require.Equal(t, want, got)
 					require.Equal(t, types.BoxI32(size/2), got)
-					require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+					require.Equal(t, refCounts(threaded), refCounts(jit))
 					jit.Reset()
 					threaded.Reset()
 				}
@@ -2389,8 +2389,8 @@ func TestInterpreter_Run(t *testing.T) {
 					entries += metric.Value
 				}
 			}
-			require.Greater(t, entries, float64(0), "expected a native entry metric")
-			require.Less(t, entries/runs, float64(8), "in-loop branch still exits the native loop")
+			require.Greater(t, entries, float64(0))
+			require.Less(t, entries/runs, float64(8))
 			traces := float64(0)
 			for _, metric := range profile.Metrics() {
 				if metric.Name != "vm_jit_compiles_total" {
@@ -2403,7 +2403,7 @@ func TestInterpreter_Run(t *testing.T) {
 					traces += metric.Value
 				}
 			}
-			require.Greater(t, traces, float64(0), "static entry must yield a hot loop to the trace frontend")
+			require.Greater(t, traces, float64(0))
 		})
 
 		t.Run("ARM64 folded return leg tears down the loop frame", func(t *testing.T) {
@@ -2442,9 +2442,9 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, err)
 				want, err := threaded.PopBoxed()
 				require.NoError(t, err)
-				require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+				require.Equal(t, want, got)
 				require.Equal(t, types.BoxI32(3*size), got)
-				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+				require.Equal(t, refCounts(threaded), refCounts(jit))
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -2480,9 +2480,9 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, err)
 				want, err := threaded.PopBoxed()
 				require.NoError(t, err)
-				require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+				require.Equal(t, want, got)
 				require.Equal(t, types.BoxI32(36), got)
-				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+				require.Equal(t, refCounts(threaded), refCounts(jit))
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -2574,7 +2574,7 @@ func(struct {value: i64; left: any; right: any}) i32
 			require.NoError(t, jit.Run(context.Background()))
 			got, err := jit.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded")
+			require.Equal(t, want, got)
 		})
 	}
 	modes := []struct {
@@ -2602,7 +2602,7 @@ func(struct {value: i64; left: any; right: any}) i32
 					require.NoError(t, err)
 					require.Equal(t, want, got)
 				}
-				require.Equal(t, len(tt.program.Locals), i.Len(), "unexpected values remain on the operand stack")
+				require.Equal(t, len(tt.program.Locals), i.Len())
 			})
 		}
 	}
@@ -4700,8 +4700,8 @@ func TestARM64_SelfCallFromInlinedFrame(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "depth %d iteration %d", depth, iter)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "depth %d iteration %d", depth, iter)
+			require.Equal(t, want, got)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -4744,8 +4744,8 @@ func TestARM64_CalleeLocals(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -4758,7 +4758,7 @@ func TestARM64_CalleeLocals(t *testing.T) {
 				entries += metric.Value
 			}
 		}
-		require.Greater(t, entries, float64(0), "expected native code to be installed")
+		require.Greater(t, entries, float64(0))
 	}
 
 	// probe reads ref local 1 before assigning it, scales the answer, and leaves
@@ -4899,7 +4899,7 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 			entries += metric.Value
 		}
 	}
-	require.Greater(t, entries, float64(0), "self-recursive function must retain native coverage")
+	require.Greater(t, entries, float64(0))
 }
 
 // TestARM64_SelfCallFrameLocals protects the frame teardown that follows a
@@ -4949,15 +4949,15 @@ func TestARM64_SelfCallFrameLocals(t *testing.T) {
 	profile := prof.New()
 	jit := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1))
 	threaded := interp.New(prog, interp.WithThreshold(-1))
-	for n := range 16 {
-		require.NoError(t, jit.Run(context.Background()), "iteration %d", n)
+	for range 16 {
+		require.NoError(t, jit.Run(context.Background()))
 		require.NoError(t, threaded.Run(context.Background()))
 		got, err := jit.PopBoxed()
 		require.NoError(t, err)
 		want, err := threaded.PopBoxed()
 		require.NoError(t, err)
-		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-		require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+		require.Equal(t, want, got)
+		require.Equal(t, refCounts(threaded), refCounts(jit))
 		jit.Reset()
 		threaded.Reset()
 	}
@@ -4970,7 +4970,7 @@ func TestARM64_SelfCallFrameLocals(t *testing.T) {
 			entries += metric.Value
 		}
 	}
-	require.Greater(t, entries, float64(0), "expected native code to be installed")
+	require.Greater(t, entries, float64(0))
 }
 
 // TestARM64_MutualEntries protects nested native entry frames.
@@ -5037,8 +5037,8 @@ func TestARM64_MutualEntries(t *testing.T) {
 		}
 		entries[labels["func"]] += metric.Value
 	}
-	require.Greater(t, entries["1"], float64(0), "function A must install a native entry")
-	require.Greater(t, entries["2"], float64(0), "function B must install a native entry")
+	require.Greater(t, entries["1"], float64(0))
+	require.Greater(t, entries["2"], float64(0))
 }
 
 // TestARM64_RefReturn protects the retain ordering at a native entry frame's
@@ -5073,9 +5073,9 @@ func TestARM64_RefReturn(t *testing.T) {
 			require.NoError(t, err)
 			ref, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, ref, got)
 			require.Equal(t, want, got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -5095,8 +5095,8 @@ func TestARM64_RefReturn(t *testing.T) {
 				}
 			}
 		}
-		require.Greater(t, entries, float64(0), "expected native code to be installed")
-		require.Zero(t, guardValueExits, "guardFrame spuriously deopted a RETURN of a singly-owned frame local")
+		require.Greater(t, entries, float64(0))
+		require.Zero(t, guardValueExits)
 	}
 
 	t.Run("entry frame returns a singly-owned frame local", func(t *testing.T) {
@@ -5275,7 +5275,7 @@ func TestARM64_DirectSelfCall(t *testing.T) {
 					entries += metric.Value
 				}
 			}
-			require.Greater(t, static, float64(0), "recursive function must get a static whole-function entry")
+			require.Greater(t, static, float64(0))
 			require.Greater(t, entries, float64(0))
 		})
 	}
@@ -5325,9 +5325,9 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
 			require.Equal(t, types.BoxI32(1), got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -5378,14 +5378,14 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, v)
 			require.Equal(t, types.BoxI32(size), v)
 
 			l, err := i.Local(0)
 			require.NoError(t, err)
 			ref = l.Ref()
 			require.Equal(t, 1, refCountAt(t, i, ref)) // the local slot's own retain, never doubled or dropped
-			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(i))
 			i.Reset()
 			threaded.Reset()
 		}
@@ -5441,13 +5441,13 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, v)
 			require.Equal(t, types.BoxI32(2*size), v)
 
 			g, err := i.Global(0)
 			require.NoError(t, err)
 			require.Equal(t, 1, refCountAt(t, i, g.Ref())) // the global slot's own retain, never doubled or dropped
-			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(i))
 			i.Reset()
 			threaded.Reset()
 		}
@@ -5509,9 +5509,9 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, v)
 			require.Equal(t, types.BoxI32(3*size), v)
-			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(i))
 			i.Reset()
 			threaded.Reset()
 		}
@@ -5563,7 +5563,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, v)
 			require.Equal(t, types.BoxI32(2*size), v)
 
 			l, err := i.Local(0)
@@ -5571,7 +5571,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			wantLocal, err := threaded.Local(0)
 			require.NoError(t, err)
 			require.Equal(t, refCountAt(t, threaded, wantLocal.Ref()), refCountAt(t, i, l.Ref()))
-			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(i))
 			i.Reset()
 			threaded.Reset()
 		}
@@ -5626,7 +5626,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, v)
 			require.Equal(t, types.BoxI32(2), v)
 
 			l, err := i.Local(1)
@@ -5634,7 +5634,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			wantLocal, err := threaded.Local(1)
 			require.NoError(t, err)
 			require.Equal(t, refCountAt(t, threaded, wantLocal.Ref()), refCountAt(t, i, l.Ref()))
-			require.Equal(t, refCounts(threaded), refCounts(i), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(i))
 			i.Reset()
 			threaded.Reset()
 		}
@@ -5670,8 +5670,8 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			require.NoError(t, err)
 			want, err := ref.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(ref), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, refCounts(ref), refCounts(jit))
 			jit.Reset()
 			ref.Reset()
 		}
@@ -5920,9 +5920,9 @@ func TestARM64_StaticLoopEntry(t *testing.T) {
 		require.NoError(t, err)
 		want, err := threaded.PopBoxed()
 		require.NoError(t, err)
-		require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+		require.Equal(t, want, got)
 		require.Equal(t, types.BoxI32(size), got)
-		require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+		require.Equal(t, refCounts(threaded), refCounts(jit))
 		jit.Reset()
 		threaded.Reset()
 	}
@@ -5953,10 +5953,10 @@ func TestARM64_StaticLoopEntry(t *testing.T) {
 			entered = metric.Value > 0
 		}
 	}
-	require.NotZero(t, entry, "expected a whole-module static entry")
-	require.NotZero(t, header, "expected a static loop-header entry")
-	require.True(t, entered, "the static loop entry was never invoked")
-	require.Less(t, header, entry, "the loop header emitted blocks its own root cannot reach")
+	require.NotZero(t, entry)
+	require.NotZero(t, header)
+	require.True(t, entered)
+	require.Less(t, header, entry)
 }
 
 func TestARM64_HoistedContainerLoop(t *testing.T) {
@@ -6003,9 +6003,9 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
 			require.Equal(t, types.BoxI32(size), got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6028,7 +6028,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 				entries += metric.Value
 			case "vm_jit_entry_bytes_total":
 				sawBytes = true
-				require.Less(t, metric.Value, float64(16<<10), "loop body was duplicated instead of using a back-edge")
+				require.Less(t, metric.Value, float64(16<<10))
 			case "vm_jit_native_exits_total":
 				for _, label := range metric.Labels {
 					if label.Key == "reason" {
@@ -6038,7 +6038,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			}
 		}
 		require.Greater(t, entries, float64(0))
-		require.True(t, sawBytes, "expected a native entry byte metric")
+		require.True(t, sawBytes)
 	})
 
 	t.Run("the prologue shape guard deopts to the header", func(t *testing.T) {
@@ -6090,8 +6090,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6116,7 +6116,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 				}
 			}
 		}
-		require.Greater(t, guards, float64(0), "null entries must deopt through a guard")
+		require.Greater(t, guards, float64(0))
 	})
 
 	t.Run("a bounds deopt inside the loop matches threaded", func(t *testing.T) {
@@ -6144,8 +6144,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			wantErr := threaded.Run(context.Background())
 			require.Error(t, wantErr)
 			require.Error(t, gotErr)
-			require.Equal(t, wantErr.Error(), gotErr.Error(), "error diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, wantErr.Error(), gotErr.Error())
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6189,8 +6189,8 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6239,9 +6239,9 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			require.NoError(t, err)
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
 			require.Equal(t, types.BoxI32(3*size), got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6278,9 +6278,9 @@ func TestARM64_StructSetLoop(t *testing.T) {
 			require.NoError(t, err)
 			ref, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, ref, got)
 			require.Equal(t, want, got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6515,9 +6515,9 @@ func TestARM64_RefEqLoop(t *testing.T) {
 			require.NoError(t, err)
 			ref, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, ref, got)
 			require.Equal(t, want, got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6615,9 +6615,9 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 			require.NoError(t, err)
 			ref, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, ref, got)
 			require.Equal(t, want, got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6832,9 +6832,9 @@ func TestARM64_RefContainerStore(t *testing.T) {
 				require.NoError(t, err)
 				ref, err := threaded.PopBoxed()
 				require.NoError(t, err)
-				require.Equal(t, ref, got, "result diverged from threaded at depth %d iteration %d", depth, n)
-				require.Equal(t, want, got, "result diverged from expected node count at depth %d", depth)
-				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded at depth %d iteration %d", depth, n)
+				require.Equal(t, ref, got)
+				require.Equal(t, want, got)
+				require.Equal(t, refCounts(threaded), refCounts(jit))
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -6931,9 +6931,9 @@ func TestARM64_RefContainerStore(t *testing.T) {
 				require.NoError(t, err)
 				ref, err := threaded.PopBoxed()
 				require.NoError(t, err)
-				require.Equal(t, ref, got, "result diverged from threaded at depth %d iteration %d", depth, n)
-				require.Equal(t, want, got, "result diverged from expected node count at depth %d", depth)
-				require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded at depth %d iteration %d", depth, n)
+				require.Equal(t, ref, got)
+				require.Equal(t, want, got)
+				require.Equal(t, refCounts(threaded), refCounts(jit))
 				jit.Reset()
 				threaded.Reset()
 			}
@@ -6971,9 +6971,9 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 			require.NoError(t, err)
 			ref, err := threaded.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, ref, got)
 			require.Equal(t, want, got)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -6998,7 +6998,7 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 				static = true
 			}
 		}
-		require.True(t, static, "expected a static-frontend compile")
+		require.True(t, static)
 	}
 
 	t.Run("scalar field", func(t *testing.T) {
@@ -7082,8 +7082,8 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 			want, wantErr := threaded.PopBoxed()
 			require.NoError(t, gotErr)
 			require.NoError(t, wantErr)
-			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -7099,7 +7099,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 				entries += metric.Value
 			}
 		}
-		require.Greater(t, entries, float64(0), "expected native code to be installed")
+		require.Greater(t, entries, float64(0))
 	}
 
 	runParityErr := func(t *testing.T, prog *program.Program) {
@@ -7119,8 +7119,8 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 			wantErr := threaded.Run(context.Background())
 			require.Error(t, wantErr)
 			require.Error(t, gotErr)
-			require.Equal(t, wantErr.Error(), gotErr.Error(), "error diverged from threaded on iteration %d", n)
-			require.Equal(t, refCounts(threaded), refCounts(jit), "refcount diverged from threaded on iteration %d", n)
+			require.Equal(t, wantErr.Error(), gotErr.Error())
+			require.Equal(t, refCounts(threaded), refCounts(jit))
 			jit.Reset()
 			threaded.Reset()
 		}
@@ -7133,7 +7133,7 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 				entries += metric.Value
 			}
 		}
-		require.Greater(t, entries, float64(0), "expected native code to be installed")
+		require.Greater(t, entries, float64(0))
 	}
 
 	t.Run("allocation family: struct.new, array.new, closure.new, and ref.new", func(t *testing.T) {
@@ -7590,8 +7590,8 @@ func TestARM64_HostStructLoop(t *testing.T) {
 
 				got, _, entries := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
 				require.Equal(t, want, got)
-				require.Greater(t, entries, float64(0), "expected a native entry")
-				require.Less(t, entries, float64(size), "the read exits the native loop")
+				require.Greater(t, entries, float64(0))
+				require.Less(t, entries, float64(size))
 			})
 		}
 	})
@@ -7700,9 +7700,9 @@ func TestARM64_HostStructLoop(t *testing.T) {
 
 				got, jit, entries := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(0))
 				require.Equal(t, want, got)
-				require.Equal(t, threaded, jit, "the Go value diverged from the threaded run")
-				require.Greater(t, entries, float64(0), "expected a native entry")
-				require.Less(t, entries, float64(size), "the write exits the native loop")
+				require.Equal(t, threaded, jit)
+				require.Greater(t, entries, float64(0))
+				require.Less(t, entries, float64(size))
 			})
 		}
 	})
@@ -7720,7 +7720,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 				instr.New(instr.I32_CONST, 70000), instr.New(instr.STRUCT_SET),
 			}, program.WithConstants(host)), interp.WithTick(1), interp.WithThreshold(threshold))
 			require.ErrorIs(t, i.Run(context.Background()), interp.ErrValueOverflow)
-			require.Equal(t, int16(-300), src.I16, "the rejected write left the Go field alone")
+			require.Equal(t, int16(-300), src.I16)
 			require.NoError(t, i.Close())
 			require.NoError(t, setup.Close())
 		}
@@ -7776,7 +7776,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		gotNarrow, gotWide, entries := read(0)
 		require.Equal(t, narrow, gotNarrow)
 		require.Equal(t, wide, gotWide)
-		require.Greater(t, entries, float64(0), "expected a native entry")
+		require.Greater(t, entries, float64(0))
 	})
 
 	t.Run("a write to a field a range check narrows agrees with threaded", func(t *testing.T) {
@@ -7827,7 +7827,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 				instr.New(instr.I32_CONST, 70000), instr.New(instr.STRUCT_SET),
 			}, program.WithConstants(host)), interp.WithTick(1), interp.WithThreshold(threshold))
 			require.ErrorIs(t, i.Run(context.Background()), interp.ErrValueOverflow)
-			require.Equal(t, int16(-300), src.I16, "the rejected write left the Go field alone")
+			require.Equal(t, int16(-300), src.I16)
 			require.NoError(t, i.Close())
 			require.NoError(t, setup.Close())
 		}
@@ -7888,7 +7888,7 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		require.Equal(t, types.I32(-70000), want)
 		got, entries := read(0)
 		require.Equal(t, want, got)
-		require.Greater(t, entries, float64(0), "expected a native entry")
+		require.Greater(t, entries, float64(0))
 	})
 
 	t.Run("an index past the layout faults the same way", func(t *testing.T) {
@@ -9115,8 +9115,8 @@ func TestWithProfiler(t *testing.T) {
 			require.NoError(t, i.Run(context.Background()))
 			i.Reset()
 		}
-		require.Equal(t, early, captures(), "capture attempts must not grow once the function is cold")
-		require.Equal(t, earlyAttempts, attempts(), "the function should have given up after repeated unproductive observations")
+		require.Equal(t, early, captures())
+		require.Equal(t, earlyAttempts, attempts())
 	})
 
 	t.Run("stays correct through a genuine native trace-cut", func(t *testing.T) {
@@ -9170,7 +9170,7 @@ func TestWithProfiler(t *testing.T) {
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(iterations), got, "result must stay correct across a native trace-cut fallback")
+			require.Equal(t, types.BoxI32(iterations), got)
 			i.Reset()
 		}
 
@@ -9186,7 +9186,7 @@ func TestWithProfiler(t *testing.T) {
 			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 			prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "trace"},
 			prof.Label{Key: "reason", Value: "trace-cut"}, prof.Label{Key: "opcode", Value: "none"})
-		require.True(t, ok, "an op-limit-bound module entry must exit through a genuine trace-cut")
+		require.True(t, ok)
 		require.Greater(t, cuts, float64(0))
 	})
 }
@@ -9285,7 +9285,7 @@ func TestWithFrame(t *testing.T) {
 			case "vm_jit_native_entries_total":
 				hasEntry = true
 			case "vm_jit_native_exits_total", "vm_jit_native_yields_total":
-				require.Failf(t, "unexpected native overflow metric", "metric=%s", metric.Name)
+				require.Fail(t, "unexpected native overflow metric")
 			}
 		}
 		require.True(t, hasEntry)
@@ -9938,12 +9938,12 @@ func TestWithThreshold(t *testing.T) {
 		i := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0))
 		defer i.Close()
 
-		for round := range exitThreshold + 8 {
+		for range exitThreshold + 8 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			value, err := i.Pop()
 			require.NoError(t, err)
-			require.Equal(t, types.F64(4), value, "round %d", round)
+			require.Equal(t, types.F64(4), value)
 		}
 	})
 
@@ -9982,7 +9982,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, jitCompiledAt(i, p, addr, 0), "callee entry never warmed")
+		require.True(t, jitCompiledAt(i, p, addr, 0))
 
 		// This used to also assert that i.samples.Samples(addr) stopped
 		// growing once warm, on the theory that a native entry stops the
@@ -10120,7 +10120,7 @@ func TestWithThreshold(t *testing.T) {
 
 		i.Flush()
 		attempted := jitCompileAttempts(i, p, 0, func(ip string) bool { return ip != "0" })
-		require.Greater(t, attempted, float64(0), "the backward br_if never reported its header")
+		require.Greater(t, attempted, float64(0))
 	})
 
 	t.Run("tiers up a loop closed by a backward br_table case", func(t *testing.T) {
@@ -10156,7 +10156,7 @@ func TestWithThreshold(t *testing.T) {
 
 		i.Flush()
 		attempted := jitCompileAttempts(i, p, 0, func(ip string) bool { return ip != "0" })
-		require.Greater(t, attempted, float64(0), "the backward br_table case never reported its header")
+		require.Greater(t, attempted, float64(0))
 	})
 
 	// RESUME builds its frame by hand instead of going through the shared call
@@ -10188,8 +10188,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			i.Reset()
 		}
-		require.Greater(t, jitCompileAttempts(i, p, 1, func(string) bool { return true }), float64(0),
-			"CALL and RESUME each enter the coroutine once per run")
+		require.Greater(t, jitCompileAttempts(i, p, 1, func(string) bool { return true }), float64(0))
 	})
 
 	// A function only ever reached from a host callback is entered through the
@@ -10218,8 +10217,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, int32(n)+1, got)
 		}
-		require.Greater(t, jitCompileAttempts(i, p, ref.Ref(), func(string) bool { return true }), float64(0),
-			"the invoke trampoline never counted its callee")
+		require.Greater(t, jitCompileAttempts(i, p, ref.Ref(), func(string) bool { return true }), float64(0))
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {
@@ -10527,7 +10525,7 @@ func TestWithThreshold(t *testing.T) {
 					case types.F64:
 						got = float64(value)
 					default:
-						require.FailNow(t, "unexpected result type", "type %T", value)
+						require.FailNow(t, "unexpected result type")
 					}
 					require.InDelta(t, want, got, tt.delta)
 				}
@@ -10917,7 +10915,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, compiled, "no branch returning f64.const 1 was learned")
+		require.True(t, compiled)
 		first := jitSideExitCompiles(i, p, fn)
 
 		compiled = false
@@ -10935,7 +10933,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, compiled, "no branch returning f64.const -3 was learned")
+		require.True(t, compiled)
 
 		for range 3 {
 			i.Reset()
@@ -11019,7 +11017,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, compiled, "no branch reading array index 1 was learned")
+		require.True(t, compiled)
 
 		for range 3 {
 			i.Reset()
@@ -11701,7 +11699,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, compiled, "no first callee branch returning f64.const 1 was learned")
+		require.True(t, compiled)
 
 		for range 3 {
 			i.Reset()
@@ -11830,7 +11828,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, compiled, "no first callee branch returning f64.const 1 was learned")
+		require.True(t, compiled)
 		outer := jitSideExitCompiles(i, p, fn)
 
 		for range 3 {
@@ -11857,7 +11855,7 @@ func TestWithThreshold(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, compiled, "no nested callee branch returning f64.const -10 was learned")
+		require.True(t, compiled)
 
 		for range 3 {
 			i.Reset()
