@@ -247,9 +247,11 @@ func (e *emitter) Leave() bool {
 	return true
 }
 
-// constant materializes a compile-time value. The boxed word carries its own
-// unboxed form: an i32, i8, i1, and f32 keep it in the low 32 bits, and an
-// f64's boxed word is its IEEE bits already.
+// constant materializes a compile-time value. An i1, i8, and i32 load their
+// payload straight into the W lane, which is already this machine's raw
+// representation for them (see backend.bank); an f32's bits load into a
+// temporary and then move into the float bank, and an f64's stored word is
+// its IEEE bits already.
 func (e *emitter) constant(op ssa.Operation) bool {
 	if len(op.Results) != 1 {
 		return false
@@ -281,11 +283,16 @@ func (e *emitter) constant(op ssa.Operation) bool {
 	return true
 }
 
-// load reads one interpreter slot into the value's register, unboxed. An i32,
-// i8, i1, and ref need no work at all: the boxed word already carries the
-// value in the lane every later operation reads it in. A ref takes no count
-// either - the slot keeps the one it holds, and the operand borrows it until
-// something hands it to storage the interpreter can see.
+// load reads one interpreter slot into the value's register. Every boxed
+// word carries its payload in the low 32 bits, so an i1, i8, or i32 needs one
+// LDR of exactly that width: it reads only those four bytes and zero-extends
+// them, which turns the boxed word back into this machine's raw W-lane
+// representation without a mask. A ref reads the same LDR at its own 64-bit
+// width instead, taking the whole boxed word verbatim, since it stays boxed
+// throughout - the width each takes is dst's own declared one (see
+// backend.bank), so one call serves both. A ref takes no count either - the
+// slot keeps the one it holds, and the operand borrows it until something
+// hands it to storage the interpreter can see.
 func (e *emitter) load(op ssa.Operation) bool {
 	base, off, ok := e.slot(op.Slot)
 	if !ok || len(op.Results) != 1 {
@@ -350,11 +357,11 @@ func (e *emitter) exec(op ssa.Operation) bool {
 	case instr.I32_XOR:
 		return e.binary(op, ssa.TypeI32, arm64.EOR)
 	case instr.I32_SHL:
-		return e.shift(op, arm64.LSL, e.zero32)
+		return e.shift(op, arm64.LSL)
 	case instr.I32_SHR_S:
-		return e.shift(op, arm64.ASR, e.sign32)
+		return e.shift(op, arm64.ASR)
 	case instr.I32_SHR_U:
-		return e.shift(op, arm64.LSR, e.zero32)
+		return e.shift(op, arm64.LSR)
 	case instr.I32_EQZ:
 		return e.eqz(op)
 	case instr.I32_EQ:
@@ -439,9 +446,11 @@ func (e *emitter) exec(op ssa.Operation) bool {
 }
 
 // binary lowers a two-operand opcode over the lane want names. An i32 runs on
-// the whole register because only the low 32 bits carry the value and boxing
-// masks the rest, which is what lets i1 and i8 flow through it keeping their
-// own result kinds; a float runs in the bank its operands already occupy.
+// the W lane its operands and result already occupy - the register width
+// itself is what keeps the computation to 32 bits and zero-extends the
+// result, with nothing left to mask - which is what lets i1 and i8 flow
+// through it keeping their own result kinds; a float runs in the bank its
+// operands already occupy.
 func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -464,26 +473,29 @@ func (e *emitter) unary(op ssa.Operation, want ssa.Type, emit func(dst, src asm.
 	return true
 }
 
-// shift lowers an i32 shift. The amount is masked to five bits, matching what
-// the threaded handler shifts by, and prep extends the value lane so the bits
-// the boxed form leaves above it never enter the result.
-func (e *emitter) shift(op ssa.Operation, emit func(dst, src1, src2 asm.Reg) asm.Instruction, prep func(asm.VReg) asm.VReg) bool {
+// shift lowers an i32 shift. The value and the amount already sit raw in the
+// W lane, so nothing prepares either: the amount is masked to five bits,
+// matching what the threaded handler shifts by, and the shift itself runs
+// entirely within the 32 bits the register holds - an arithmetic right shift
+// included, since the sign bit it reads is already bit 31 of a clean value,
+// not bit 63 of a sign-extended one.
+func (e *emitter) shift(op ssa.Operation, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
 	if !e.lanes(ssa.TypeI32, op.Args[0], op.Args[1], op.Results[0]) || e.c.Func().Type(op.Results[0]) != ssa.TypeI32 {
 		return false
 	}
-	amount := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	amount := e.a.Reg(asm.RegTypeInt, asm.Width32)
 	e.a.Emit(arm64.ANDI(amount, e.c.Reg(op.Args[1]), 0x1F))
-	e.a.Emit(emit(e.c.Reg(op.Results[0]), prep(e.c.Reg(op.Args[0])), amount))
+	e.a.Emit(emit(e.c.Reg(op.Results[0]), e.c.Reg(op.Args[0]), amount))
 	return true
 }
 
 // compare lowers a comparison to the flag test the lane want names and sets
-// the i1 its result is. An integer compares on its 32-bit value lane, so a
-// signed and an unsigned condition both read correct flags; a float compares
-// in its own bank.
+// the i1 its result is. An integer already sits raw in the W lane it
+// compares on, so a signed and an unsigned condition both read correct flags
+// with no narrowing; a float compares in its own bank.
 func (e *emitter) compare(op ssa.Operation, want ssa.Type, cond uint8) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -493,7 +505,7 @@ func (e *emitter) compare(op ssa.Operation, want ssa.Type, cond uint8) bool {
 	}
 	a, b := e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])
 	if want == ssa.TypeI32 {
-		e.a.Emit(arm64.CMP(narrow32(a), narrow32(b)))
+		e.a.Emit(arm64.CMP(a, b))
 	} else {
 		e.a.Emit(arm64.FCMP(a, b))
 	}
@@ -509,7 +521,7 @@ func (e *emitter) eqz(op ssa.Operation) bool {
 		return false
 	}
 	e.a.Emit(
-		arm64.CMPI(narrow32(e.c.Reg(op.Args[0])), 0),
+		arm64.CMPI(e.c.Reg(op.Args[0]), 0),
 		arm64.CSET(e.c.Reg(op.Results[0]), arm64.CondEQ),
 	)
 	return true
@@ -536,7 +548,7 @@ func (e *emitter) branch(block int, t ssa.Terminator) bool {
 	if !e.forward(t.Edges[0]) || !e.forward(t.Edges[1]) {
 		return false
 	}
-	cond := narrow32(e.c.Reg(t.Args[0]))
+	cond := e.c.Reg(t.Args[0])
 	next, falls := e.c.Next(block)
 	if falls && next == t.Edges[0].Block {
 		e.a.Emit(arm64.CBZLabel(cond, e.c.Block(t.Edges[1].Block)))
@@ -599,11 +611,19 @@ func (e *emitter) complete(t ssa.Terminator) bool {
 	return true
 }
 
-// box produces v's boxed word: the form every VM slot holds. A raw i32, i8,
-// and i1 keep their value in the low 32 bits, so boxing masks and tags into a
-// fresh register; an f32's bits leave the float bank first; an f64's boxed
-// word is its bit pattern already; and a reference is held boxed throughout,
-// so it is handed straight back.
+// box produces v's boxed word: the form every VM slot holds. An i1, i8, and
+// i32 need no mask: every producer in this machine writes one through a
+// genuine W-register instruction, and AArch64 zeroes the upper 32 bits of
+// the corresponding X register on every such write (see docs/jit-internals.md's
+// ARM64 SSA machine section), so the value is already the clean low 32 bits of
+// its own 64-bit view - boxing just copies that view into a fresh register
+// and MOVKs the kind tag into its top 16 bits; the three kinds differ only in
+// that tag, which is what collapses them into one case (see rawTag). An f32's
+// bits leave the float bank the same way, straight into a fresh register at
+// full width (an FMOV from a 32-bit float source zero-extends its 64-bit
+// integer destination for the same architectural reason), so it takes the
+// identical single MOVK; an f64's boxed word is its bit pattern already; and
+// a reference is held boxed throughout, so it is handed straight back.
 func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 	src := e.c.Reg(v)
 	typ := e.c.Func().Type(v)
@@ -612,21 +632,30 @@ func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 	}
 	out := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	switch typ {
-	case ssa.TypeI1:
-		e.a.Emit(arm64.ANDI(out, src, maskI32), arm64.MOVK(out, uint16(tagI1>>48), 48))
-	case ssa.TypeI8:
-		e.a.Emit(arm64.ANDI(out, src, maskI32), arm64.MOVK(out, uint16(tagI8>>48), 48))
-	case ssa.TypeI32:
-		e.a.Emit(arm64.ANDI(out, src, maskI32), arm64.MOVK(out, uint16(tagI32>>48), 48))
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+		e.a.Emit(arm64.MOV(out, widen64(src)), arm64.MOVK(out, uint16(rawTag(typ)>>48), 48))
 	case ssa.TypeF32:
-		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
-		e.a.Emit(arm64.FMOV(bits, src), arm64.ANDI(out, bits, maskI32), arm64.MOVK(out, uint16(tagF32>>48), 48))
+		e.a.Emit(arm64.FMOV(out, src), arm64.MOVK(out, uint16(tagF32>>48), 48))
 	case ssa.TypeF64:
 		e.a.Emit(arm64.FMOV(out, src))
 	default:
 		return asm.VReg{}, false
 	}
 	return out, true
+}
+
+// rawTag is the boxed kind tag for one of box's raw W-lane types. The caller
+// has already narrowed typ to one of these three, so there is nothing for a
+// fourth case to report.
+func rawTag(typ ssa.Type) uint64 {
+	switch typ {
+	case ssa.TypeI1:
+		return tagI1
+	case ssa.TypeI8:
+		return tagI8
+	default:
+		return tagI32
+	}
 }
 
 // slot resolves the base register and word offset one interpreter slot lives
@@ -668,10 +697,14 @@ func (e *emitter) lanes(want ssa.Type, vs ...ssa.Value) bool {
 	return true
 }
 
-func (e *emitter) zero32(v asm.VReg) asm.VReg {
-	out := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	e.a.Emit(arm64.ANDI(out, v, maskI32))
-	return out
+// widen64 is v's 64-bit view: the same physical register, reinterpreted at
+// full width. Safe only when every write to v went through a genuine
+// 32-bit-register instruction - true of every value box calls this on - since
+// AArch64 zeroes the upper 32 bits of the corresponding 64-bit register on
+// such a write, so the view this produces is a clean, already-zero-extended
+// 64-bit value rather than one this call has to clean itself.
+func widen64(v asm.VReg) asm.VReg {
+	return asm.NewVReg(v.ID(), v.Type(), asm.Width64)
 }
 
 func (e *emitter) sign32(v asm.VReg) asm.VReg {

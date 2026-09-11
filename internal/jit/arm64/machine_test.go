@@ -80,12 +80,12 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: append(prologue(5, 6, 7), []asm.Instruction{
-				asmarm64.LDR(vreg(0), vreg(5), 0),
-				asmarm64.LDR(vreg(1), vreg(5), 8),
-				asmarm64.ADD(vreg(2), vreg(0), vreg(1)),
-				asmarm64.MOVZ(vreg(3), 3, 0),
-				asmarm64.MUL(vreg(4), vreg(2), vreg(3)),
-				asmarm64.ANDI(vreg(8), vreg(4), 0xFFFFFFFF),
+				asmarm64.LDR(narrow(0), vreg(5), 0),
+				asmarm64.LDR(narrow(1), vreg(5), 8),
+				asmarm64.ADD(narrow(2), narrow(0), narrow(1)),
+				asmarm64.MOVZ(narrow(3), 3, 0),
+				asmarm64.MUL(narrow(4), narrow(2), narrow(3)),
+				asmarm64.MOV(vreg(8), vreg(4)),
 				asmarm64.MOVK(vreg(8), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(8), vreg(5), 0),
 				asmarm64.MOV(vreg(9), vreg(8)),
@@ -104,8 +104,8 @@ func TestNew(t *testing.T) {
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
 			}),
 			want: append(prologue(1, 2, 3), []asm.Instruction{
-				asmarm64.MOVZ(vreg(0), 1, 0),
-				asmarm64.ANDI(vreg(4), vreg(0), 0xFFFFFFFF),
+				asmarm64.MOVZ(narrow(0), 1, 0),
+				asmarm64.MOV(vreg(4), vreg(0)),
 				asmarm64.MOVK(vreg(4), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(4), vreg(1), 0),
 				asmarm64.MOV(vreg(5), vreg(4)),
@@ -131,12 +131,12 @@ func TestNew(t *testing.T) {
 				asmarm64.MOVZ(vreg(5), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(5), vreg(2), 8),
 			), []asm.Instruction{
-				asmarm64.LDR(vreg(0), vreg(2), 0),
-				asmarm64.ANDI(vreg(6), vreg(0), 0xFFFFFFFF),
+				asmarm64.LDR(narrow(0), vreg(2), 0),
+				asmarm64.MOV(vreg(6), vreg(0)),
 				asmarm64.MOVK(vreg(6), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(6), vreg(2), 8),
-				asmarm64.LDR(vreg(1), vreg(2), 8),
-				asmarm64.ANDI(vreg(7), vreg(1), 0xFFFFFFFF),
+				asmarm64.LDR(narrow(1), vreg(2), 8),
+				asmarm64.MOV(vreg(7), vreg(1)),
 				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(7), vreg(2), 0),
 				asmarm64.MOV(vreg(8), vreg(7)),
@@ -159,16 +159,16 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.LDR(vreg(0), vreg(3), 0),
+				asmarm64.LDR(narrow(0), vreg(3), 0),
 				asmarm64.CBZLabel(narrow(0), 2),
-				asmarm64.MOVZ(vreg(1), 9, 0),
-				asmarm64.ANDI(vreg(6), vreg(1), 0xFFFFFFFF),
+				asmarm64.MOVZ(narrow(1), 9, 0),
+				asmarm64.MOV(vreg(6), vreg(1)),
 				asmarm64.MOVK(vreg(6), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(6), vreg(3), 0),
 				asmarm64.MOV(vreg(7), vreg(6)),
 				asmarm64.RET(),
-				asmarm64.MOVZ(vreg(2), 7, 0),
-				asmarm64.ANDI(vreg(8), vreg(2), 0xFFFFFFFF),
+				asmarm64.MOVZ(narrow(2), 7, 0),
+				asmarm64.MOV(vreg(8), vreg(2)),
 				asmarm64.MOVK(vreg(8), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(8), vreg(3), 0),
 				asmarm64.MOV(vreg(9), vreg(8)),
@@ -188,13 +188,13 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: append(prologue(2, 3, 4), []asm.Instruction{
-				asmarm64.MOVZ(vreg(0), 1, 0),
-				asmarm64.MOVZ(vreg(1), 2, 0),
-				asmarm64.ANDI(vreg(5), vreg(0), 0xFFFFFFFF),
+				asmarm64.MOVZ(narrow(0), 1, 0),
+				asmarm64.MOVZ(narrow(1), 2, 0),
+				asmarm64.MOV(vreg(5), vreg(0)),
 				asmarm64.MOVK(vreg(5), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(5), vreg(2), 0),
 				asmarm64.MOV(vreg(6), vreg(5)),
-				asmarm64.ANDI(vreg(7), vreg(1), 0xFFFFFFFF),
+				asmarm64.MOV(vreg(7), vreg(1)),
 				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(7), vreg(2), 8),
 				asmarm64.MOV(vreg(8), vreg(7)),
@@ -226,6 +226,106 @@ func TestNew(t *testing.T) {
 			}...),
 		},
 		{
+			// An f32 rejoins the boxed word through the same two-instruction
+			// shape as an i32: box's FMOV already zero-extends the low 32
+			// bits into the fresh 64-bit register, so MOVK is the only
+			// instruction left to tag it - no mask, and no third
+			// instruction moving the bits into a temporary first.
+			name: "boxes an f32 result at the return boundary",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeF32, types.TypeF32}, Returns: []types.Type{types.TypeF32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.F32_ADD).Emit(instr.RETURN)
+				}),
+			}),
+			want: append(prologue(3, 4, 5), []asm.Instruction{
+				asmarm64.LDR(vreg(6), vreg(3), 0),
+				asmarm64.FMOV(freg32(0), narrow(6)),
+				asmarm64.LDR(vreg(7), vreg(3), 8),
+				asmarm64.FMOV(freg32(1), narrow(7)),
+				asmarm64.FADD(freg32(2), freg32(0), freg32(1)),
+				asmarm64.FMOV(vreg(8), freg32(2)),
+				asmarm64.MOVK(vreg(8), tag(types.KindF32), 48),
+				asmarm64.STR(vreg(8), vreg(3), 0),
+				asmarm64.MOV(vreg(9), vreg(8)),
+				asmarm64.RET(),
+			}...),
+		},
+		{
+			// A shift's value and amount already sit raw in the W lane, so
+			// neither needs a prep instruction: the amount is masked to five
+			// bits and the shift runs directly on the two operands. I32_SHL
+			// and I32_SHR_U share this shape; I32_SHR_S below shares it too,
+			// because ASR reads bit 31 as the sign bit within a clean
+			// 32-bit register the same way LSL and LSR read it as data -
+			// unlike the 64-bit-sign-extend prep this machine used to need.
+			name: "shifts an i32 left with no operand prep",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SHL).Emit(instr.RETURN)
+				}),
+			}),
+			want: append(prologue(3, 4, 5), []asm.Instruction{
+				asmarm64.LDR(narrow(0), vreg(3), 0),
+				asmarm64.LDR(narrow(1), vreg(3), 8),
+				asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
+				asmarm64.LSL(narrow(2), narrow(0), narrow(6)),
+				asmarm64.MOV(vreg(7), vreg(2)),
+				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+				asmarm64.STR(vreg(7), vreg(3), 0),
+				asmarm64.MOV(vreg(8), vreg(7)),
+				asmarm64.RET(),
+			}...),
+		},
+		{
+			// ASR on a clean W-lane value reads bit 31 as the sign bit
+			// directly - no SXTW widening to a 64-bit register first, which
+			// is what this machine emitted before the operands were raw.
+			name: "shifts an i32 right arithmetically with no sign-extend prep",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SHR_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: append(prologue(3, 4, 5), []asm.Instruction{
+				asmarm64.LDR(narrow(0), vreg(3), 0),
+				asmarm64.LDR(narrow(1), vreg(3), 8),
+				asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
+				asmarm64.ASR(narrow(2), narrow(0), narrow(6)),
+				asmarm64.MOV(vreg(7), vreg(2)),
+				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+				asmarm64.STR(vreg(7), vreg(3), 0),
+				asmarm64.MOV(vreg(8), vreg(7)),
+				asmarm64.RET(),
+			}...),
+		},
+		{
+			name: "shifts an i32 right logically with no operand prep",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SHR_U).Emit(instr.RETURN)
+				}),
+			}),
+			want: append(prologue(3, 4, 5), []asm.Instruction{
+				asmarm64.LDR(narrow(0), vreg(3), 0),
+				asmarm64.LDR(narrow(1), vreg(3), 8),
+				asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
+				asmarm64.LSR(narrow(2), narrow(0), narrow(6)),
+				asmarm64.MOV(vreg(7), vreg(2)),
+				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+				asmarm64.STR(vreg(7), vreg(3), 0),
+				asmarm64.MOV(vreg(8), vreg(7)),
+				asmarm64.RET(),
+			}...),
+		},
+		{
 			// Module code has no return: it leaves its operand stack on the
 			// VM stack, publishes the stack pointer, and reports a clean trap
 			// with the offset past its last instruction.
@@ -239,8 +339,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: append(prologue(1, 2, 3), []asm.Instruction{
-				asmarm64.MOVZ(vreg(0), 5, 0),
-				asmarm64.ANDI(vreg(4), vreg(0), 0xFFFFFFFF),
+				asmarm64.MOVZ(narrow(0), 5, 0),
+				asmarm64.MOV(vreg(4), vreg(0)),
 				asmarm64.MOVK(vreg(4), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(4), vreg(1), 0),
 				asmarm64.ADDI(vreg(6), vreg(9), 1),
@@ -276,7 +376,7 @@ func TestNew(t *testing.T) {
 				prologue(4, 5, 6),
 				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 				[]asm.Instruction{
-					asmarm64.LDR(vreg(1), vreg(4), 0),
+					asmarm64.LDR(narrow(1), vreg(4), 0),
 					asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits)),
 				},
 				asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
@@ -298,14 +398,14 @@ func TestNew(t *testing.T) {
 
 					asmarm64.LDR(vreg(17), vreg(14), 0),
 					asmarm64.LDR(vreg(18), vreg(14), 8),
-					asmarm64.SXTW(vreg(19), vreg(1)),
+					asmarm64.SXTW(vreg(19), narrow(1)),
 					asmarm64.CMP(vreg(19), vreg(18)),
 					asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
 					asmarm64.LSLI(vreg(21), vreg(19), 2),
 					asmarm64.ADD(vreg(20), vreg(17), vreg(21)),
-					asmarm64.LDRSW(vreg(3), vreg(20), 0),
+					asmarm64.LDR(narrow(3), vreg(20), 0),
 
-					asmarm64.ANDI(vreg(22), vreg(3), 0xFFFFFFFF),
+					asmarm64.MOV(vreg(22), vreg(3)),
 					asmarm64.MOVK(vreg(22), tag(types.KindI32), 48),
 					asmarm64.STR(vreg(22), vreg(4), 0),
 					asmarm64.MOV(vreg(23), vreg(22)),
@@ -334,7 +434,7 @@ func TestNew(t *testing.T) {
 				return slices.Concat(
 					prologue(4, 5, 6),
 					asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
-					[]asm.Instruction{asmarm64.MOVZ(vreg(1), 0, 0)},
+					[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
 					[]asm.Instruction{
 						asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits)),
 					},
@@ -362,7 +462,7 @@ func TestNew(t *testing.T) {
 						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
 						asmarm64.LDR(vreg(19), vreg(17), 0),
 						asmarm64.LDR(vreg(20), vreg(17), 8),
-						asmarm64.SXTW(vreg(21), vreg(1)),
+						asmarm64.SXTW(vreg(21), narrow(1)),
 						asmarm64.CMP(vreg(21), vreg(20)),
 						asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
 						asmarm64.MOVZ(vreg(22), 40, 0),
@@ -372,8 +472,8 @@ func TestNew(t *testing.T) {
 						asmarm64.CMPI(vreg(24), uint16(types.KindI32)),
 						asmarm64.BCondLabel(asmarm64.OpBNE, kindExit),
 						asmarm64.LDR(vreg(25), vreg(14), 8),
-						asmarm64.LDRR(vreg(3), vreg(25), vreg(21)),
-						asmarm64.ANDI(vreg(26), vreg(3), 0xFFFFFFFF),
+						asmarm64.LDRR(narrow(3), vreg(25), vreg(21)),
+						asmarm64.MOV(vreg(26), vreg(3)),
 						asmarm64.MOVK(vreg(26), tag(types.KindI32), 48),
 						asmarm64.STR(vreg(26), vreg(4), 0),
 						asmarm64.MOV(vreg(27), vreg(26)),
@@ -444,7 +544,7 @@ func TestNew(t *testing.T) {
 		want := slices.Concat(
 			prologue(4, 5, 6),
 			asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
-			[]asm.Instruction{asmarm64.MOVZ(vreg(1), 0, 0)},
+			[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
 			[]asm.Instruction{asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits))},
 			asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
 			[]asm.Instruction{
@@ -464,7 +564,7 @@ func TestNew(t *testing.T) {
 				asmarm64.MOV(vreg(2), vreg(0)),
 				asmarm64.LDR(vreg(17), vreg(14), int16(layout.HostFields)),
 				asmarm64.LDR(vreg(18), vreg(14), int16(layout.HostFields+8)),
-				asmarm64.SXTW(vreg(19), vreg(1)),
+				asmarm64.SXTW(vreg(19), narrow(1)),
 				asmarm64.CMP(vreg(19), vreg(18)),
 				asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
 				asmarm64.MOVZ(vreg(20), uint16(layout.HostFieldSize), 0),
@@ -477,8 +577,8 @@ func TestNew(t *testing.T) {
 				asmarm64.LDR(vreg(24), vreg(21), int16(layout.HostFieldOffset)),
 				asmarm64.LDR(vreg(25), vreg(14), int16(layout.HostPtr)),
 				asmarm64.ADD(vreg(26), vreg(25), vreg(24)),
-				asmarm64.LDRSW(vreg(3), vreg(26), 0),
-				asmarm64.ANDI(vreg(27), vreg(3), 0xFFFFFFFF),
+				asmarm64.LDR(narrow(3), vreg(26), 0),
+				asmarm64.MOV(vreg(27), vreg(3)),
 				asmarm64.MOVK(vreg(27), tag(types.KindI32), 48),
 				asmarm64.STR(vreg(27), vreg(4), 0),
 				asmarm64.MOV(vreg(28), vreg(27)),
@@ -737,7 +837,7 @@ func stub(first int32, id uint16, live asm.Label, ip int, slot int16, sp uint16)
 		asmarm64.LDRR(vreg(first+3), vreg(first+2), vreg(first+1)),
 		asmarm64.ADDI(vreg(first+3), vreg(first+3), 1),
 		asmarm64.STRR(vreg(first+3), vreg(first+2), vreg(first+1)),
-		asmarm64.ANDI(vreg(first+4), vreg(1), 0xFFFFFFFF),
+		asmarm64.MOV(vreg(first+4), vreg(1)),
 		asmarm64.MOVK(vreg(first+4), tag(types.KindI32), 48),
 		asmarm64.STR(vreg(first+4), vreg(4), slot+8),
 		asmarm64.ADDI(vreg(first+6), bp, sp),
@@ -767,12 +867,15 @@ const (
 	structGetIP = 8
 )
 
-// vreg, freg, and narrow name one virtual register of the stream a compile
-// emits: the integer bank, the float bank, and the 32-bit view of an integer
+// vreg, freg, freg32, and narrow name one virtual register of the stream a
+// compile emits: the integer bank, the float bank at f64's width, the float
+// bank at f32's own narrower width, and the 32-bit view of an integer
 // register a value-lane test reads.
 func vreg(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
 
 func freg(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64) }
+
+func freg32(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeFloat, asm.Width32) }
 
 func narrow(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
 

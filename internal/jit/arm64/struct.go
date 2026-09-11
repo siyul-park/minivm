@@ -145,6 +145,13 @@ func (e *emitter) hostRead(guard, get ssa.Operation) bool {
 
 	// The extension mirrors heap.go's hostLoad; a float result additionally
 	// FMOVs into the float bank this backend's register allocator gave dst.
+	// A signed size-1 or size-2 field still sign-extends into dst - its
+	// declared W-lane width picks SXTB's and LDRSH's 32-bit form, which
+	// leaves the upper 32 bits of dst's own 64-bit view zero, unlike the
+	// 64-bit form this backend used before this port. The size-4 case reads
+	// through a plain LDR rather than LDRSW for the same reason: dst wants
+	// its low 32 bits - already the field's own two's-complement pattern
+	// either way - zero-extended, not sign-extended.
 	switch {
 	case size == 1 && signed:
 		raw := e.a.Reg(asm.RegTypeInt, asm.Width64)
@@ -162,7 +169,7 @@ func (e *emitter) hostRead(guard, get ssa.Operation) bool {
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDR(bits, target, 0), arm64.FMOV(dst, bits))
 	case size == 4:
-		e.a.Emit(arm64.LDRSW(dst, target, 0))
+		e.a.Emit(arm64.LDR(dst, target, 0))
 	}
 	return true
 }

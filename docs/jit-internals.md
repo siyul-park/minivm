@@ -443,12 +443,21 @@ symbolic operand stack, inlined activations, deferred work, or backing
 inference.
 
 A value's representation is a function of its `ssa.Type`, so no per-value state
-records it: an `i1`, `i8`, and `i32` carry their value in the low 32 bits of a
-64-bit integer register with the bits above undefined, exactly as the boxed
-word leaves them, so unboxing one is free and boxing it is a mask and a tag; an
-`f32` and an `f64` live in the float bank at their own width, so an arithmetic
-sequence costs one move in per operand and one out at the frame boundary rather
-than a pair around every opcode.
+records it (see `backend.bank`). An `i1`, `i8`, and `i32` take a 32-bit
+integer register (the W lane) and carry a raw payload with no runtime tag:
+every producer this machine emits for one - a constant, a slot load, an
+arithmetic or comparison result, a heap read - writes it through a genuine
+W-register instruction, and AArch64 zeroes the upper 32 bits of the
+corresponding X register on every such write, so the value's full 64-bit view
+is always already zero-extended. Unboxing one is therefore a plain 32-bit LDR
+that reads only the boxed word's low four bytes, arithmetic runs on the W lane
+directly with nothing to mask, and boxing is a 64-bit copy of that clean view
+plus one `MOVK` for the kind tag - never a mask, because there is never a
+dirty bit to remove. An `i64` and a `ref` still take a 64-bit integer register
+(an `i64` may be heap-promoted and a `ref` is held boxed throughout, neither of
+which this port has narrowed); an `f32` and an `f64` live in the float bank at
+their own width, so an arithmetic sequence costs one move in per operand and
+one out at the frame boundary rather than a pair around every opcode.
 
 What it lowers, and therefore what `Lowers` admits: `i32` arithmetic, bitwise
 operations, shifts, comparisons, and `eqz`; `f32` and `f64` arithmetic, `abs`,

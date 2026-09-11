@@ -69,7 +69,11 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 		raw := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDRB(raw, addr, 0), arm64.SXTB(dst, raw))
 	case types.KindI32:
-		e.a.Emit(arm64.LDRSW(dst, addr, 0))
+		// A plain 32-bit LDR, not LDRSW: dst is the W-lane raw representation
+		// (see backend.bank), which wants the upper 32 bits zero-extended, not
+		// sign-extended - the low 32 bits it reads are the element's own
+		// two's-complement bit pattern either way.
+		e.a.Emit(arm64.LDR(dst, addr, 0))
 	case types.KindF32:
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDRSW(bits, addr, 0), arm64.FMOV(dst, narrow32(bits)))

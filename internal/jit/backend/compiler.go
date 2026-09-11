@@ -189,11 +189,14 @@ func (c *Compiler) Func() *ssa.Function {
 
 // Reg returns the virtual register bound to v for this whole compile, or the
 // zero register for a value that holds none - the interpreter state an
-// OpState defines, or a value of another function. Integers and references
-// take a 64-bit integer register, an f32 a 32-bit float register and an f64 a
-// 64-bit one, which is the lane each value's representation occupies (see
-// docs/value-representation.md); a machine that wants a narrower view of one
-// derives it.
+// OpState defines, or a value of another function. An i1, i8, and i32 take a
+// 32-bit integer register - the W lane a raw payload of that width already
+// occupies, with no runtime tag - an i64 and a reference take a 64-bit one,
+// an f32 a 32-bit float register, and an f64 a 64-bit one, which is the lane
+// each value's representation occupies (see docs/value-representation.md); a
+// machine that wants a wider or narrower view of one derives it, since a
+// view is a free reinterpretation of the same underlying register (see
+// bank).
 func (c *Compiler) Reg(v ssa.Value) asm.VReg {
 	if v <= ssa.NoValue || int(v) >= len(c.regs) {
 		return asm.VReg{}
@@ -494,9 +497,19 @@ func order(f *ssa.Function, traps []int) []int {
 
 // bank is the register a value of type t lives in, or the undefined width for
 // a type that holds no register.
+//
+// An i1, i8, and i32 live in the W lane: their whole representation is a raw
+// payload of that width, carrying no runtime tag, so the register the
+// compiler hands out for one is already the view every consumer wants (see
+// docs/value-representation.md). An i64 and a reference still take the X
+// lane - an i64 may be heap-promoted and a reference is held boxed
+// throughout, neither of which this port has narrowed - and so does an f64,
+// paired with an f32's own 32-bit float register.
 func bank(t ssa.Type) (asm.RegType, asm.RegWidth) {
 	switch t {
-	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32, ssa.TypeI64, ssa.TypeRef:
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+		return asm.RegTypeInt, asm.Width32
+	case ssa.TypeI64, ssa.TypeRef:
 		return asm.RegTypeInt, asm.Width64
 	case ssa.TypeF32:
 		return asm.RegTypeFloat, asm.Width32

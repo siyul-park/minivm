@@ -378,7 +378,7 @@ func TestCompiler_Reg(t *testing.T) {
 		require.True(t, ok)
 
 		c := m.compiler
-		require.Equal(t, asm.NewVReg(0, asm.RegTypeInt, asm.Width64), c.Reg(i32))
+		require.Equal(t, asm.NewVReg(0, asm.RegTypeInt, asm.Width32), c.Reg(i32))
 		require.Equal(t, asm.NewVReg(1, asm.RegTypeInt, asm.Width64), c.Reg(i64))
 		require.Equal(t, asm.NewVReg(2, asm.RegTypeFloat, asm.Width32), c.Reg(f32))
 		require.Equal(t, asm.NewVReg(3, asm.RegTypeFloat, asm.Width64), c.Reg(f64))
