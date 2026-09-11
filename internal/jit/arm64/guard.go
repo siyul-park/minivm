@@ -17,6 +17,22 @@ type stub struct {
 	deopt backend.Deopt
 }
 
+// fused reports whether get is the array or struct field read guard admits:
+// get pops exactly the container guard produced and an i32 index, and pushes
+// one result. read, structRead, and hostRead each check this before their own
+// container-specific shape, because a guard whose next operation is not one
+// of these would otherwise satisfy every check the rest of them make (see
+// emit.go's Lower).
+func (e *emitter) fused(guard, get ssa.Operation) bool {
+	if len(get.Args) != 2 || len(get.Results) != 1 {
+		return false
+	}
+	if len(guard.Results) != 1 || guard.Results[0] != get.Args[0] {
+		return false
+	}
+	return e.lanes(ssa.TypeI32, get.Args[1])
+}
+
 // guard admits only a container whose runtime type is the shape this compile
 // was specialized against, and returns the heap cell it walked the reference
 // to, which is what the read behind it loads through instead of resolving the
@@ -28,28 +44,31 @@ type stub struct {
 // well. Here it is one operation, because the IR already names it one - and
 // it runs before the access it admits, which is what the mismatch has to
 // happen before (see docs/jit-internals.md, Speculation).
-func (e *emitter) guard(op ssa.Operation) (asm.VReg, bool) {
+//
+// Itab is all guard proves: a struct or host container names more in its
+// Shape (Typ, Host), but each is a check the container's own concrete type
+// does not decide by itself - a struct's Typ pointer and a host field's Go
+// kind - so structRead and hostRead prove them, reusing the fail label this
+// returns rather than opening a second ExitGuardShape for the same mismatch
+// reason heap.go's structGet reports through one.
+func (e *emitter) guard(op ssa.Operation) (asm.VReg, asm.Label, bool) {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return asm.VReg{}, false
+		return asm.VReg{}, 0, false
 	}
 	if e.c.Func().Type(op.Args[0]) != ssa.TypeRef || e.c.Func().Type(op.Results[0]) != ssa.TypeRef {
-		return asm.VReg{}, false
+		return asm.VReg{}, 0, false
 	}
-	// Only the concrete type identity is admitted here. A struct shape names
-	// a type pointer as well, and a host view's field converts through a Go
-	// kind, and each of those is proved for the sake of a read this machine
-	// does not lower.
-	if op.Shape.Itab == 0 || op.Shape.Typ != 0 || op.Shape.Host != 0 {
-		return asm.VReg{}, false
+	if op.Shape.Itab == 0 {
+		return asm.VReg{}, 0, false
 	}
 	fail, ok := e.exit(op.State, prof.ExitGuardShape)
 	if !ok {
-		return asm.VReg{}, false
+		return asm.VReg{}, 0, false
 	}
 	ref := e.c.Reg(op.Args[0])
 	data := e.cell(ref, op.Shape.Itab, fail)
 	e.a.Emit(arm64.MOV(e.c.Reg(op.Results[0]), ref))
-	return data, true
+	return data, fail, true
 }
 
 // cell walks a reference to the heap cell it names, admits only the concrete

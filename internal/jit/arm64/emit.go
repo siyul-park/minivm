@@ -67,7 +67,7 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV,
 		instr.F64_ABS, instr.F64_NEG, instr.F64_SQRT,
 		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE,
-		instr.ARRAY_GET:
+		instr.ARRAY_GET, instr.STRUCT_GET:
 		return true
 	default:
 		return false
@@ -179,19 +179,32 @@ func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 	case ssa.OpExec:
 		return 1, e.exec(op)
 	case ssa.OpGuardShape:
-		// The opcode test is load-bearing, not defence in depth. read
-		// re-derives everything else it needs from the pair, but nothing in
-		// it re-derives "this is an array read": an opcode admitted through
-		// a bare-itab shape, popping two and pushing one, would satisfy
-		// every check. Three separate facts keep that from happening today -
-		// frontend/walk.go guards no other read, transform/dce.go keeps a
+		// The opcode test is load-bearing, not defence in depth. Each of
+		// read, structRead, and hostRead re-derives everything else it needs
+		// from the pair, but nothing in any of them re-derives which read it
+		// is: an opcode admitted through a bare-itab shape, popping two and
+		// pushing one, would satisfy every other check. Three separate facts
+		// keep that from happening today - frontend/walk.go guards no read
+		// but ARRAY_GET and STRUCT_GET, transform/dce.go keeps a
 		// heap-reading exec alive so a guard is never stranded, and Lowers
 		// admits no other guard producer - so an edit to any of them belongs
-		// here too.
-		if len(ops) < 2 || ops[1].Op != ssa.OpExec || ops[1].Code != instr.ARRAY_GET {
+		// here too. Shape.Host is what then tells STRUCT_GET's two
+		// containers apart: a *types.Struct guard never sets it, and a
+		// *HostStruct guard always does (see ssa.Shape).
+		if len(ops) < 2 || ops[1].Op != ssa.OpExec {
 			return 1, false
 		}
-		return 2, e.read(op, ops[1])
+		switch ops[1].Code {
+		case instr.ARRAY_GET:
+			return 2, e.read(op, ops[1])
+		case instr.STRUCT_GET:
+			if op.Shape.Host != 0 {
+				return 2, e.hostRead(op, ops[1])
+			}
+			return 2, e.structRead(op, ops[1])
+		default:
+			return 1, false
+		}
 	case ssa.OpState:
 		// A state materializes nothing where it stands: it names the values a
 		// deopt writes back, and the cold stub that writes them is emitted

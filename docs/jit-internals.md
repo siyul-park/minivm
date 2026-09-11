@@ -430,7 +430,8 @@ backend an optimization it already has.
 `internal/jit/arm64`'s `machine` and `emitter` are the ARM64 side of that seam,
 reached through `arm64.New().Compile`, split across `emit.go` (the machine, the
 prologue, and one operation's instructions), `guard.go` (a speculated shape and
-the cold stub it leaves through), and `read.go` (a heap read). They are
+the cold stub it leaves through), `read.go` (an array read), and `struct.go` (a
+struct or `*HostStruct` field read). They are
 deliberately small: an immutable machine holding the pinned journal registers,
 and a per-compile emitter holding the frame base every local slot is addressed
 from, the frame facts a prologue and a teardown are shaped by, which blocks are
@@ -453,28 +454,58 @@ What it lowers, and therefore what `Lowers` admits: `i32` arithmetic, bitwise
 operations, shifts, comparisons, and `eqz`; `f32` and `f64` arithmetic, `abs`,
 `neg`, `sqrt`, and comparisons; compile-time constants, a pool reference
 included; local and global slot loads, and stores to a slot that cannot hold a
-reference; `OpGuardShape` over an array shape; `ARRAY_GET` of a scalar element;
-`OpJump` and `OpBranch`; and `OpReturn` and `OpComplete` for a function and a
-module entry. `Traps` is false throughout: an opcode this machine cannot
-compute it declines outright rather than running as an exit, because an
-unconditional exit ends the block, and every exit it emits is the cold path
-behind a guard the hot path falls through.
+reference; `OpGuardShape` over an array or a struct shape; `ARRAY_GET` of a
+scalar element; `STRUCT_GET` of a scalar field, against a `*types.Struct` or a
+`*HostStruct`; `OpJump` and `OpBranch`; and `OpReturn` and `OpComplete` for a
+function and a module entry. `Traps` is false throughout: an opcode this
+machine cannot compute it declines outright rather than running as an exit,
+because an unconditional exit ends the block, and every exit it emits is the
+cold path behind a guard the hot path falls through.
 
 **Guards and their cold stubs.** `guard.go` lowers `OpGuardShape` as the tag
 test, heap-cell walk, and itab compare the plan pipeline writes once per access
 in `guardHeap`/`guardItab`, and hands the cell's data word to the read behind
 it so that read loads through the same cell instead of resolving it again. It
-runs *before* the access it admits, which is what Speculation requires.
+runs *before* the access it admits, which is what Speculation requires. It
+proves only `Shape.Itab`; a struct's `Shape.Typ` (its concrete
+`*types.StructType` identity, cast to `uintptr` the same way an array's itab
+is) and a host view's `Shape.Host` (the Go kind its field converts through)
+are proven by the read behind the guard instead, because each is a per-field
+or per-container-instance fact the itab alone does not decide (see `struct.go`
+below).
 
 A guard and its read are **the one shape this machine fuses**: `Lower` sees
-`OpGuardShape` followed by `OpExec ARRAY_GET`, consumes both, and lowers
-neither alone. They are one bytecode operation and resume into one
-interpreter state, and that state describes the operand stack at that
-instruction and nowhere else - so the read's own bounds test leaves through
-the guard's state, which is sound exactly while nothing stands between them.
+`OpGuardShape` followed by `OpExec ARRAY_GET` or `OpExec STRUCT_GET`, consumes
+both, and lowers neither alone. `Shape.Host` tells `STRUCT_GET`'s two
+containers apart at that point - zero for a `*types.Struct` guard, the field's
+reflect.Kind for a `*HostStruct` one - so the opcode and the shape together
+name exactly one read, and the fusion is total (see `emit.go`'s `Lower`
+comment for why this is load-bearing rather than a redundant check). A guard
+and its read are one bytecode operation and resume into one interpreter
+state, and that state describes the operand stack at that instruction and
+nowhere else - so a read's own bounds and kind tests leave through the
+guard's state, which is sound exactly while nothing stands between them.
 Fusing makes that structural rather than a rule to keep true: `Compile` hands
 `Lower` one block's operations, truncated at its trap, so `ops[1]` can never
 be in another block or past the point control leaves.
+
+**Struct and host-struct reads.** `struct.go`'s `structRead` and `hostRead`
+extend the guarded-read shape with the check a struct's fields need that an
+array's uniformly-typed elements do not: a struct's fields differ in kind by
+index, so the field the guard and the compiled index admitted is also proven
+against the kind the frontend resolved for it (`ExitGuardKind`, a third exit
+alongside the shape and bounds ones) before the load runs. `structRead`
+proves `Shape.Typ` itself, reusing `guard`'s own exit label, since a type-
+pointer mismatch is the same shape failure a wrong itab is; `hostRead` walks
+`jit.Layout`'s host offsets exactly as `heap.go`'s `hostGet` does, bounds-
+checks the field index against the view's own layout, and compares the
+field's recorded Go kind against `Shape.Host` before choosing the load width
+and extension `HostShape.Read` names. Neither reads a field whose result kind
+this machine has no lane for: an `i64` field may be heap-promoted (the
+boxability guard this machine does not emit) and a `ref` field is owned by
+whoever receives it (the retain this machine does not emit outside a cold
+stub), so both decline exactly as `read`'s array-element lowering already
+does.
 
 `emitter.exit` resolves the guard's `OpState` through
 `Compiler.Exit`, reserves a label, and queues a `stub`; `Leave` emits every
@@ -495,8 +526,7 @@ back edge to a block already laid out (a safepoint budget and loop-carried
 registers it does not emit); an edge carrying block-parameter arguments (edge
 copies it does not place); `OpGuardKind`, `OpGuardBounds`, `OpGuardValue`,
 `OpRetain`, `OpRelease`, `OpBridge`, `OpExit`, `OpSuspend`, and `OpTable`; a
-guard shape naming a struct type pointer or a host field kind; a frame
-declaring a reference local or returning one, and a store into a slot that can
+frame declaring a reference local or returning one, and a store into a slot that can
 hold a reference (reference counts it does not account for); an `i64` value
 anywhere (the boxability guard it does not emit); an upvalue slot (a base only
 the closure resolves); and a `Slot` whose `Base` is not the entry frame's (an
@@ -509,10 +539,19 @@ cannot type, so no function holding one is planned at all. `ARRAY_LEN`,
 `STRING_LEN`, and `CORO_DONE` are planned, but the frontend emits no
 `OpGuardShape` in front of them and their `OpExec` only reads the heap, so it
 carries no `OpState` either: there is no shape to load through and nowhere for
-a mismatch to exit to. `STRUCT_GET` is guarded and does carry a state; what it
-still needs is the field's kind, which the IR holds only as the opaque
-`Shape.Typ` pointer, so lowering it soundly means the runtime field-kind guard
-and the second exit reason that the `*HostStruct` path needs anyway.
+a mismatch to exit to.
+
+`STRUCT_GET` no longer belongs to that list: `Shape.Typ`, despite its `uintptr`
+representation in the IR, was never opaque to the compiler - the frontend
+(`frontend/walk.go`'s `field`) already dereferences the `*types.StructType` it
+names to resolve the field's kind before the SSA node exists, exactly as it
+resolves an array's element kind for `ARRAY_GET`; the backend only ever needed
+the *result*, carried as the read's own SSA type, plus the runtime identity
+and per-field kind checks `structRead`/`hostRead` now emit. The blocker this
+paragraph used to record - that lowering it soundly meant a runtime
+field-kind guard and the second exit reason the `*HostStruct` path needs
+anyway - is exactly what `ExitGuardKind` and `Shape.Host` above resolve; see
+"Struct and host-struct reads."
 
 An entry it does emit is `BLR`-compatible with the plan pipeline's own callers,
 because both publish into `i.natives`: it clears its own non-parameter locals in

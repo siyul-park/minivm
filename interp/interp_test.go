@@ -7907,6 +7907,240 @@ func TestARM64_HostStructLoop(t *testing.T) {
 	})
 }
 
+func TestARM64_StructGetFieldKindDeopt(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	const i32Field, f64Field = 0, 1
+	structGetIP := int(instr.New(instr.CONST_GET, 0).Width() + instr.New(instr.GLOBAL_GET, 0).Width())
+	typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))
+	value := types.NewStruct(typ, types.BoxI32(11), types.BoxF64(22.5))
+	prog := program.New(
+		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.STRUCT_GET)},
+		program.WithConstants(value),
+		program.WithGlobals(types.TypeI32),
+	)
+
+	profile := prof.New()
+	var snap resumeSnapshot
+	vm := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0), interp.WithHook(snap.hook))
+	defer func() { require.NoError(t, vm.Close()) }()
+
+	containerAddr, err := vm.Const(0)
+	require.NoError(t, err)
+	baseline, err := vm.RefCount(containerAddr.Ref())
+	require.NoError(t, err)
+
+	for range 8 {
+		vm.Reset()
+		require.NoError(t, vm.SetGlobal(0, types.BoxI32(i32Field)))
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(11), got)
+	}
+
+	vm.Reset()
+	require.NoError(t, vm.SetGlobal(0, types.BoxI32(f64Field)))
+	require.NoError(t, vm.Run(context.Background()))
+
+	// STRUCT_GET is the sequence's own last opcode, so the hook's last firing
+	// in this run is always its fallback-resume instant, whichever call
+	// during warm-up first went native.
+	require.Equal(t, structGetIP, snap.ip)
+	require.Equal(t, 2, snap.sp)
+	require.Equal(t, baseline+1, snap.refcount)
+
+	got, err := vm.Pop()
+	require.NoError(t, err)
+	require.Equal(t, types.F64(22.5), got)
+
+	after, err := vm.RefCount(containerAddr.Ref())
+	require.NoError(t, err)
+	require.Equal(t, baseline, after)
+
+	require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "reason") == "guard-kind"
+	}), float64(0))
+}
+
+func TestARM64_StructGetFieldKinds(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	typ := types.NewStructType(
+		types.NewStructField(types.TypeI1),
+		types.NewStructField(types.TypeI8),
+		types.NewStructField(types.TypeI32),
+		types.NewStructField(types.TypeF32),
+		types.NewStructField(types.TypeF64),
+	)
+	value := types.NewStruct(typ, types.BoxI1(true), types.BoxI8(-5), types.BoxI32(11), types.BoxF32(3.5), types.BoxF64(22.5))
+
+	for _, tt := range []struct {
+		name  string
+		field int32
+		want  types.Value
+	}{
+		{"i1", 0, types.I1(true)},
+		{"i8", 1, types.I8(-5)},
+		{"i32", 2, types.I32(11)},
+		{"f32", 3, types.F32(3.5)},
+		{"f64", 4, types.F64(22.5)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			prog := program.New(
+				[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.STRUCT_GET)},
+				program.WithConstants(value),
+				program.WithGlobals(types.TypeI32),
+			)
+
+			profile := prof.New()
+			vm := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
+			defer func() { require.NoError(t, vm.Close()) }()
+
+			for range 8 {
+				vm.Reset()
+				require.NoError(t, vm.SetGlobal(0, types.BoxI32(tt.field)))
+				require.NoError(t, vm.Run(context.Background()))
+				got, err := vm.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, got)
+			}
+
+			require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_entries_total", func([]prof.Label) bool { return true }), float64(0))
+		})
+	}
+}
+
+// hostFieldKinds is the Go struct the *HostStruct field-kind tests below read
+// through a live view: one field per Go kind this backend's hostRead lowers.
+// The unexported field forces the codec to publish that view rather than
+// copying the struct into a plain VM one (see hostCounter).
+type hostFieldKinds struct {
+	Bool    bool
+	Int8    int8
+	Int16   int16
+	Uint16  uint16
+	Int32   int32
+	Float32 float32
+	Float64 float64
+	hidden  int32
+}
+
+func (h *hostFieldKinds) Hidden() int32 { return h.hidden }
+
+func TestARM64_HostStructGetFieldKindDeopt(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	const int32Field, boolField = 4, 0
+	structGetIP := int(instr.New(instr.CONST_GET, 0).Width() + instr.New(instr.GLOBAL_GET, 0).Width())
+	setup := interp.New(program.New(nil))
+	defer func() { require.NoError(t, setup.Close()) }()
+	host, err := interp.NewRegistry().Marshal(setup, &hostFieldKinds{Int32: 11, Bool: true})
+	require.NoError(t, err)
+
+	prog := program.New(
+		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.STRUCT_GET)},
+		program.WithConstants(host),
+		program.WithGlobals(types.TypeI32),
+	)
+
+	profile := prof.New()
+	var snap resumeSnapshot
+	vm := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0), interp.WithHook(snap.hook))
+	defer func() { require.NoError(t, vm.Close()) }()
+
+	containerAddr, err := vm.Const(0)
+	require.NoError(t, err)
+	baseline, err := vm.RefCount(containerAddr.Ref())
+	require.NoError(t, err)
+
+	for range 8 {
+		vm.Reset()
+		require.NoError(t, vm.SetGlobal(0, types.BoxI32(int32Field)))
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(11), got)
+	}
+
+	vm.Reset()
+	require.NoError(t, vm.SetGlobal(0, types.BoxI32(boolField)))
+	require.NoError(t, vm.Run(context.Background()))
+
+	require.Equal(t, structGetIP, snap.ip)
+	require.Equal(t, 2, snap.sp)
+	require.Equal(t, baseline+1, snap.refcount)
+
+	got, err := vm.Pop()
+	require.NoError(t, err)
+	require.Equal(t, types.I1(true), got)
+
+	after, err := vm.RefCount(containerAddr.Ref())
+	require.NoError(t, err)
+	require.Equal(t, baseline, after)
+
+	require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "reason") == "guard-kind"
+	}), float64(0))
+}
+
+func TestARM64_HostStructGetFieldKinds(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	seed := hostFieldKinds{Bool: true, Int8: -5, Int16: -12345, Uint16: 60000, Int32: 11, Float32: 3.5, Float64: 22.5}
+
+	for _, tt := range []struct {
+		name  string
+		field int32
+		want  types.Value
+	}{
+		{"bool", 0, types.I1(true)},
+		{"int8", 1, types.I8(-5)},
+		{"int16", 2, types.I32(-12345)},
+		{"uint16", 3, types.I32(60000)},
+		{"int32", 4, types.I32(11)},
+		{"float32", 5, types.F32(3.5)},
+		{"float64", 6, types.F64(22.5)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setup := interp.New(program.New(nil))
+			defer func() { require.NoError(t, setup.Close()) }()
+			src := seed
+			host, err := interp.NewRegistry().Marshal(setup, &src)
+			require.NoError(t, err)
+
+			prog := program.New(
+				[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.STRUCT_GET)},
+				program.WithConstants(host),
+				program.WithGlobals(types.TypeI32),
+			)
+
+			profile := prof.New()
+			vm := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
+			defer func() { require.NoError(t, vm.Close()) }()
+
+			for range 8 {
+				vm.Reset()
+				require.NoError(t, vm.SetGlobal(0, types.BoxI32(tt.field)))
+				require.NoError(t, vm.Run(context.Background()))
+				got, err := vm.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, got)
+			}
+
+			require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_entries_total", func([]prof.Label) bool { return true }), float64(0))
+		})
+	}
+}
+
 func TestInterpreter_Marshal(t *testing.T) {
 	// Marshal forwards to the installed codec, so the conversion contract is
 	// owned by TestRegistry_Marshal and only the delegation is checked here.
@@ -9738,6 +9972,28 @@ func jitMetricSum(i *interp.Interpreter, p *prof.Profiler, name string, match fu
 		}
 	}
 	return total
+}
+
+// resumeSnapshot is the interpreter state its hook method records at its last
+// firing during one Run: the IP execution resumed at, the operand-stack
+// depth, and the refcount of the heap value at constant index 0. The tests
+// that use it read STRUCT_GET as their program's own final opcode, so the
+// last hook firing in any one Run always lands there, whether that run went
+// native and fell back mid-way or ran threaded from the start - no arming
+// against warm-up noise is needed.
+type resumeSnapshot struct {
+	ip, sp, refcount int
+}
+
+func (s *resumeSnapshot) hook(i *interp.Interpreter) error {
+	s.ip = i.IP()
+	s.sp = i.Len()
+	addr, err := i.Const(0)
+	if err != nil {
+		return err
+	}
+	s.refcount, err = i.RefCount(addr.Ref())
+	return err
 }
 
 // jitCompiledAt reports whether fn compiled and emitted native code at ip (or

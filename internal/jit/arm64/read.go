@@ -20,14 +20,11 @@ import (
 // kind can still decline. Sound only because a false anywhere in lowering
 // abandons the whole Compile and its assembler unpublished.
 func (e *emitter) read(guard, get ssa.Operation) bool {
-	if len(get.Args) != 2 || len(get.Results) != 1 {
-		return false
-	}
-	if len(guard.Results) != 1 || guard.Results[0] != get.Args[0] {
+	if !e.fused(guard, get) {
 		return false
 	}
 	shape, ok := jit.ElemShapeByItab(guard.Shape.Itab)
-	if !ok || !e.lanes(ssa.TypeI32, get.Args[1]) {
+	if !ok {
 		return false
 	}
 	dst := e.c.Reg(get.Results[0])
@@ -35,7 +32,7 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 	if typ != ssa.TypeOf(shape.Kind) || lane(typ) == 0 {
 		return false
 	}
-	data, ok := e.guard(guard)
+	data, _, ok := e.guard(guard)
 	if !ok {
 		return false
 	}

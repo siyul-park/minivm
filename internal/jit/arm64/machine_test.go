@@ -1,8 +1,10 @@
 package arm64_test
 
 import (
+	"reflect"
 	"slices"
 	"testing"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
@@ -57,6 +59,7 @@ func TestNew(t *testing.T) {
 	// then derive the frame base local slots are addressed from - because
 	// every entry this machine takes reads its state from there.
 	elems := types.TypedArray[int32]{10, 20, 30}
+	fieldsTyp := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))
 	for _, tt := range []struct {
 		name string
 		addr int
@@ -308,9 +311,79 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(23), vreg(22)),
 					asmarm64.RET(),
 				},
-				stub(24, 1, 3),
-				stub(38, 2, 4),
+				stub(24, 1, 3, arrayGetIP, 8, 3),
+				stub(38, 2, 4, arrayGetIP, 8, 3),
 			),
+		},
+		{
+			name: "reads a struct field through the struct type and the field kind that admitted it",
+			addr: 1,
+			in: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Typ: fieldsTyp}
+				return in
+			}(),
+			want: func() []asm.Instruction {
+				typ := fieldsTyp
+				return slices.Concat(
+					prologue(4, 5, 6),
+					asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+					[]asm.Instruction{asmarm64.MOVZ(vreg(1), 0, 0)},
+					[]asm.Instruction{
+						asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits)),
+					},
+					asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
+					[]asm.Instruction{
+						asmarm64.CMP(vreg(7), vreg(8)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+						asmarm64.ANDI(vreg(9), vreg(0), 0xFFFFFFFF),
+						asmarm64.LDR(vreg(10), vreg(15), int16(journal.CellHeap*8)),
+						asmarm64.LSLI(vreg(11), vreg(9), 4),
+						asmarm64.ADD(vreg(12), vreg(10), vreg(11)),
+						asmarm64.LDR(vreg(13), vreg(12), 0),
+						asmarm64.LDR(vreg(14), vreg(12), 8),
+					},
+					asmarm64.LDI(vreg(16), uint64(jit.HeapStruct)),
+					[]asm.Instruction{
+						asmarm64.CMP(vreg(13), vreg(16)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+						asmarm64.MOV(vreg(2), vreg(0)),
+						asmarm64.LDR(vreg(17), vreg(14), 0),
+					},
+					asmarm64.LDI(vreg(18), uint64(uintptr(unsafe.Pointer(typ)))),
+					[]asm.Instruction{
+						asmarm64.CMP(vreg(17), vreg(18)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+						asmarm64.LDR(vreg(19), vreg(17), 0),
+						asmarm64.LDR(vreg(20), vreg(17), 8),
+						asmarm64.SXTW(vreg(21), vreg(1)),
+						asmarm64.CMP(vreg(21), vreg(20)),
+						asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
+						asmarm64.MOVZ(vreg(22), 40, 0),
+						asmarm64.MUL(vreg(22), vreg(21), vreg(22)),
+						asmarm64.ADD(vreg(23), vreg(19), vreg(22)),
+						asmarm64.LDRB(vreg(24), vreg(23), 32),
+						asmarm64.CMPI(vreg(24), uint16(types.KindI32)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, kindExit),
+						asmarm64.LDR(vreg(25), vreg(14), 8),
+						asmarm64.LDRR(vreg(3), vreg(25), vreg(21)),
+						asmarm64.ANDI(vreg(26), vreg(3), 0xFFFFFFFF),
+						asmarm64.MOVK(vreg(26), tag(types.KindI32), 48),
+						asmarm64.STR(vreg(26), vreg(4), 0),
+						asmarm64.MOV(vreg(27), vreg(26)),
+						asmarm64.RET(),
+					},
+					stub(28, 1, 4, structGetIP, 0, 2),
+					stub(42, 2, 5, structGetIP, 0, 2),
+					stub(56, 3, 6, structGetIP, 0, 2),
+				)
+			}(),
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -327,6 +400,100 @@ func TestNew(t *testing.T) {
 			require.NotEmpty(t, code, "the golden stream must encode")
 		})
 	}
+
+	// hostRead's Shape.Host names a Go kind a trace observes on a live
+	// *HostStruct (interp/trace.go's tracer.field), never a fact the static
+	// frontend resolves from bytecode alone (see frontend/walk.go's field),
+	// so this golden row anchors on a hand-built jit.Trace instead of the
+	// bare jit.Input every row above it uses.
+	t.Run("reads a *HostStruct field through the shape and Go kind that admitted it", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.RETURN)
+			}),
+		}
+		in := input(1, fn)
+		in.Constants = []types.Boxed{types.BoxRef(2)}
+		layout := jit.Layout{
+			HostFields:      0,
+			HostPtr:         8,
+			HostFieldOffset: 0,
+			HostFieldConv:   8,
+			HostFieldSize:   16,
+			HostConvKind:    0,
+			HostStructItab:  0xABCDEF,
+		}
+		in.Layout = layout
+
+		rec := &tape{}
+		rec.at(fn, 1, 0, 0)
+		rec.at(fn, 1, 3, 0)
+		get := rec.at(fn, 1, structGetIP, 0)
+		get.Arg = types.BoxI32(0)
+		get.Shape = jit.Shape{Itab: layout.HostStructItab, Field: reflect.Int32}
+		get.Seen = types.BoxI32(11)
+		rec.at(fn, 1, structGetIP+1, 0)
+		in.Traces = fakeTraces{{Addr: 1}: {Root: &jit.Trace{Anchor: jit.Anchor{Addr: 1}, Ops: rec.ops, Status: jit.StatusReturned}}}
+
+		assembler := asm.New(asmarm64.New())
+		entry, ok := arm64.New().Compile(assembler, in, jit.Anchor{Addr: 1})
+		require.True(t, ok)
+		require.Equal(t, prof.FrontendTrace, entry.Frontend)
+
+		want := slices.Concat(
+			prologue(4, 5, 6),
+			asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+			[]asm.Instruction{asmarm64.MOVZ(vreg(1), 0, 0)},
+			[]asm.Instruction{asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits))},
+			asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
+			[]asm.Instruction{
+				asmarm64.CMP(vreg(7), vreg(8)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+				asmarm64.ANDI(vreg(9), vreg(0), 0xFFFFFFFF),
+				asmarm64.LDR(vreg(10), vreg(15), int16(journal.CellHeap*8)),
+				asmarm64.LSLI(vreg(11), vreg(9), 4),
+				asmarm64.ADD(vreg(12), vreg(10), vreg(11)),
+				asmarm64.LDR(vreg(13), vreg(12), 0),
+				asmarm64.LDR(vreg(14), vreg(12), 8),
+			},
+			asmarm64.LDI(vreg(16), uint64(layout.HostStructItab)),
+			[]asm.Instruction{
+				asmarm64.CMP(vreg(13), vreg(16)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+				asmarm64.MOV(vreg(2), vreg(0)),
+				asmarm64.LDR(vreg(17), vreg(14), int16(layout.HostFields)),
+				asmarm64.LDR(vreg(18), vreg(14), int16(layout.HostFields+8)),
+				asmarm64.SXTW(vreg(19), vreg(1)),
+				asmarm64.CMP(vreg(19), vreg(18)),
+				asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
+				asmarm64.MOVZ(vreg(20), uint16(layout.HostFieldSize), 0),
+				asmarm64.MUL(vreg(20), vreg(19), vreg(20)),
+				asmarm64.ADD(vreg(21), vreg(17), vreg(20)),
+				asmarm64.LDR(vreg(22), vreg(21), int16(layout.HostFieldConv)),
+				asmarm64.LDRB(vreg(23), vreg(22), int16(layout.HostConvKind)),
+				asmarm64.CMPI(vreg(23), uint16(reflect.Int32)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, kindExit),
+				asmarm64.LDR(vreg(24), vreg(21), int16(layout.HostFieldOffset)),
+				asmarm64.LDR(vreg(25), vreg(14), int16(layout.HostPtr)),
+				asmarm64.ADD(vreg(26), vreg(25), vreg(24)),
+				asmarm64.LDRSW(vreg(3), vreg(26), 0),
+				asmarm64.ANDI(vreg(27), vreg(3), 0xFFFFFFFF),
+				asmarm64.MOVK(vreg(27), tag(types.KindI32), 48),
+				asmarm64.STR(vreg(27), vreg(4), 0),
+				asmarm64.MOV(vreg(28), vreg(27)),
+				asmarm64.RET(),
+			},
+			stub(29, 1, 4, structGetIP, 0, 2),
+			stub(43, 2, 5, structGetIP, 0, 2),
+			stub(57, 3, 6, structGetIP, 0, 2),
+		)
+		require.Equal(t, want, assembler.Instructions())
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+	})
 
 	// Declining is the correct answer for everything the SSA machine has not
 	// learned yet, and it must cost no coverage: the same root still compiles
@@ -489,6 +656,40 @@ func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
 	return instr.Marshal(instructions)
 }
 
+// tape records one jit.Trace by decoding each instruction's Step from fn's
+// own code, mirroring interp/trace.go's tracer.op; the caller sets whatever
+// fields the tracer would have observed at runtime (Arg, Shape, Seen) on the
+// *jit.Record it gets back.
+type tape struct {
+	ops []jit.Record
+}
+
+func (t *tape) at(fn *types.Function, addr, ip, depth int) *jit.Record {
+	inst := instr.Instruction(fn.Code[ip:])
+	t.ops = append(t.ops, jit.Record{Step: jit.Step{
+		Op: inst.Opcode(), Args: jit.Args(inst), Fn: addr, IP: ip, Depth: depth,
+	}})
+	return &t.ops[len(t.ops)-1]
+}
+
+// fakeTraces is a jit.RecordedTraces client built from a fixed set of trees,
+// standing in for interp's recorder (mirrors frontend/trace_test.go's own).
+type fakeTraces map[jit.Anchor]*jit.Tree
+
+func (f fakeTraces) Anchors(addr int) []int {
+	var out []int
+	for a, tree := range f {
+		if a.Addr == addr && tree.Root != nil {
+			out = append(out, a.IP)
+		}
+	}
+	return out
+}
+
+func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
+	return f[a]
+}
+
 // prologue is the entry every golden stream opens with: the journal header
 // mirrored into the pinned context registers, then the frame base derived
 // from the stack pointer and the frame's own base.
@@ -502,27 +703,33 @@ func prologue(base, bp, stack int32) []asm.Instruction {
 	}
 }
 
-// shapeExit and boundsExit are the labels the guarded read's two cold stubs
-// take, in the order the guard and the read reserve them; each stub then
-// takes one more, for the retain its null-reference test skips.
+// shapeExit, boundsExit, and kindExit are the labels the guarded reads' cold
+// stubs take, in the order a guard and its read reserve them; each stub then
+// takes one more, for the retain its null-reference test skips. STRUCT_GET is
+// the only read that ever reaches kindExit - see structRead.
 const (
 	shapeExit asm.Label = iota + 1
 	boundsExit
+	kindExit
 )
 
-// stub is one cold stub of the guarded-read stream: the two operands flushed
-// to their VM stack slots, the retain the borrowed container owes the
-// interpreter that adopts it, the published stack pointer, the one frame
-// record, and the trap. first names the stub's own first virtual register and
-// id the exit descriptor it reports, and live the label its null-reference
-// test skips the retain to.
-func stub(first int32, id uint16, live asm.Label) []asm.Instruction {
+// stub is one cold stub of a guarded-read stream: the container and index
+// operands flushed to their VM stack slots (at slot and slot+8), the retain
+// the borrowed container owes the interpreter that adopts it, the published
+// stack pointer, the one frame record, and the trap. first names the stub's
+// own first virtual register and id the exit descriptor it reports; live is
+// the label its null-reference test skips the retain to; ip is both the
+// opcode's own IP (a guard exits before the operation it admits, never past
+// it) and the frame record's IP; sp is the operand-stack depth (in words)
+// the function had live at that opcode, which STRUCT_GET's one fewer
+// declared param than the ARRAY_GET golden stream's own does not share.
+func stub(first int32, id uint16, live asm.Label, ip int, slot int16, sp uint16) []asm.Instruction {
 	ctrl, bp := vreg(first), vreg(first+5)
 	return []asm.Instruction{
 		// The container is held boxed already, so it flushes as it stands,
 		// and it borrows its count from the constant pool, so the stub takes
 		// the retain the resumed interpreter releases when it pops it.
-		asmarm64.STR(vreg(0), vreg(4), 8),
+		asmarm64.STR(vreg(0), vreg(4), slot),
 		asmarm64.ANDI(vreg(first+1), vreg(0), 0xFFFFFFFF),
 		asmarm64.CMPI(vreg(first+1), 0),
 		asmarm64.BCondLabel(asmarm64.OpBEQ, live),
@@ -532,12 +739,12 @@ func stub(first int32, id uint16, live asm.Label) []asm.Instruction {
 		asmarm64.STRR(vreg(first+3), vreg(first+2), vreg(first+1)),
 		asmarm64.ANDI(vreg(first+4), vreg(1), 0xFFFFFFFF),
 		asmarm64.MOVK(vreg(first+4), tag(types.KindI32), 48),
-		asmarm64.STR(vreg(first+4), vreg(4), 16),
-		asmarm64.ADDI(vreg(first+6), bp, 3),
+		asmarm64.STR(vreg(first+4), vreg(4), slot+8),
+		asmarm64.ADDI(vreg(first+6), bp, sp),
 		asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
 		asmarm64.MOVZ(vreg(first+7), 1, 0),
 		asmarm64.STP(vreg(first+7), bp, ctrl, int16(journal.At(0, journal.RecordAddr)*8)),
-		asmarm64.MOVZ(vreg(first+8), arrayGetIP, 0),
+		asmarm64.MOVZ(vreg(first+8), uint16(ip), 0),
 		asmarm64.MOVZ(vreg(first+9), 1, 0),
 		asmarm64.STP(vreg(first+8), vreg(first+9), ctrl, int16(journal.At(0, journal.RecordIP)*8)),
 		asmarm64.MOVZ(vreg(first+10), 1, 0),
@@ -546,16 +753,19 @@ func stub(first int32, id uint16, live asm.Label) []asm.Instruction {
 		asmarm64.STR(vreg(first+11), ctrl, int16(journal.CellExitID*8)),
 		asmarm64.MOVZ(vreg(first+12), uint16(journal.TrapFallback), 0),
 		asmarm64.STR(vreg(first+12), ctrl, int16(journal.CellTrap*8)),
-		asmarm64.MOVZ(vreg(first+13), arrayGetIP, 0),
+		asmarm64.MOVZ(vreg(first+13), uint16(ip), 0),
 		asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellNextIP*8)),
 		asmarm64.RET(),
 	}
 }
 
-// arrayGetIP is where the guarded read's own opcode sits, which is both the
-// IP its frame record carries and the IP its stubs resume at: a guard exits
-// before the operation it admits, never past it.
-const arrayGetIP = 5
+// arrayGetIP and structGetIP are where each guarded read's own opcode sits in
+// its golden stream's bytecode, which is both the IP its frame record
+// carries and the IP its stubs resume at.
+const (
+	arrayGetIP  = 5
+	structGetIP = 8
+)
 
 // vreg, freg, and narrow name one virtual register of the stream a compile
 // emits: the integer bank, the float bank, and the 32-bit view of an integer

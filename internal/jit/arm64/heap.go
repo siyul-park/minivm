@@ -545,12 +545,6 @@ func (l lowerer) hostGet(ctx *lowering, op jit.Step) bool {
 		return false
 	}
 	size, signed := s.Read()
-	if size == 4 && !signed {
-		// Four unsigned bytes widening into an eight-byte slot would need a
-		// zero-extending word load that no target this backend lowers for
-		// asks for, since int and uint are eight bytes on all of them.
-		return false
-	}
 	container := ctx.values[len(ctx.values)-2]
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
