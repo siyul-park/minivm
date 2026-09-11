@@ -51,7 +51,7 @@ Do not report work complete until all of these hold:
 1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
 2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
 3. A further simplification pass found no safe improvement.
-4. Every comment carries a fact the code cannot state (§2.4); comments that restate the code were deleted, not reworded.
+4. Every comment carries a fact the code cannot state (§2.4); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.5).
 5. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
 6. Performance claims carry the reproducible before/after evidence §14 requires.
 7. Generated output was regenerated, not hand-edited, and `make check-generated` passes.

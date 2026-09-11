@@ -624,7 +624,27 @@ case MUST NOT be kept alive by a proxy double.
 - Aim for at most one `t.Run` level.
 - Table tests SHOULD be used when cases share one shape.
 
-### 12.5 Runtime Parity
+### 12.5 Self-Describing Tests
+
+A test MUST read as a specification without commentary. §2.4 applies with no
+exception for test code, and more strictly: a test explaining itself in prose
+is a test whose names and structure failed to.
+
+- The test name states the behavior under test, not the function called.
+- A case name in a table states the case, so the table reads as an
+  enumeration of the contract.
+- Fixture values carry their meaning in named constants or variables, not in a
+  comment next to a literal.
+- A comment MUST NOT label the arrange, act, or assert step; the structure
+  already shows them.
+- `require` messages carry the expectation a failure needs, so a comment
+  restating the assertion is a second copy of it.
+
+The narrow exception is a fact the test cannot express in code: why a case
+exists that looks redundant, where a magic constant came from, or the defect a
+regression test pins. Name the defect or the source.
+
+### 12.6 Runtime Parity
 
 Opcode examples belong to the public `Interpreter.Run` specification. A change
 touching threaded, fused, optimized, or JIT paths MUST test every applicable
@@ -632,7 +652,7 @@ mode or state why a mode is not applicable. Tests MUST assert returned values,
 errors, encoded output, profiling snapshots, or another public observable
 boundary, never dispatch-table or lowering internals.
 
-### 12.6 Fuzzing
+### 12.7 Fuzzing
 
 Fuzz tests SHOULD target trust boundaries and semantic parity: instruction and
 program parsing, verification, type parsing, and optimizer equivalence. Inputs
