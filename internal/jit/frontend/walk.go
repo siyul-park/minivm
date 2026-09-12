@@ -626,7 +626,12 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 		kind = ssa.OpBridge
 	}
 	operation := ssa.Operation{Op: kind, Code: op, Args: args, Results: out}
-	if bridged || op.Writes(instr.Frame) || (op.Reads(instr.Heap) && op.Writes(instr.Heap)) {
+	// I64_ADD can carry a result past the boxed 49-bit payload, so its own
+	// arm64 lowering guards it and exits through this state on overflow -
+	// which is w.pre as of this instruction's own start (see begin/deopt),
+	// so the flush is both operands, still unpopped, boxing normally on the
+	// cold path since each is already proven in range by its own producer.
+	if bridged || op.Writes(instr.Frame) || (op.Reads(instr.Heap) && op.Writes(instr.Heap)) || op == instr.I64_ADD {
 		operation.State = w.deopt()
 	}
 	w.b.Add(w.block, operation)

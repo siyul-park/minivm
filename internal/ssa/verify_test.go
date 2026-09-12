@@ -380,4 +380,32 @@ func TestVerify(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{picked}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
+
+	// I64_ADD can overflow the boxed 49-bit payload, so its own arm64
+	// lowering guards the result and resumes into an interpreter state on
+	// mismatch - unlike most other OpExec opcodes, which never resume into
+	// one at all (see verify.go's operation).
+	t.Run("rejects an I64_ADD with no interpreter state", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, y, sum := b.Value(ssa.TypeI64), b.Value(ssa.TypeI64), b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(2), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
+	})
+
+	t.Run("accepts an I64_ADD that resumes into an interpreter state", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		x, y, sum := b.Value(ssa.TypeI64), b.Value(ssa.TypeI64), b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(2), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_ADD, Args: []ssa.Value{x, y}, State: state, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
 }

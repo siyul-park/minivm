@@ -13,6 +13,19 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// deoptState gives code the ssa.NoValue verify.go admits for most opcodes,
+// or a fresh, otherwise-empty OpState for I64_ADD, which can overflow the
+// boxed 49-bit payload and so always resumes into one (see verify.go's
+// operation and frontend/walk.go's exec).
+func deoptState(b *ssa.Builder, block int, code instr.Opcode) ssa.Value {
+	if code != instr.I64_ADD {
+		return ssa.NoValue
+	}
+	state := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+	return state
+}
+
 func TestNewFoldPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
 		var p pass.Pass[*ssa.Function] = transform.NewFoldPass()
@@ -159,7 +172,7 @@ func TestFoldPass_Run(t *testing.T) {
 			x, right, result := b.Value(c.typ), b.Value(c.typ), b.Value(c.typ)
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: seed(c.typ), Args: []ssa.Value{param, param}, Results: []ssa.Value{x}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.with, Results: []ssa.Value{right}})
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, State: deoptState(b, entry, c.code), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
 			require.NoError(t, ssa.Verify(fn))
@@ -359,7 +372,7 @@ func TestFoldPass_Run(t *testing.T) {
 				b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: a, Results: []ssa.Value{args[i]}})
 			}
 			result := b.Value(ssa.TypeOf(c.want.Kind()))
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: args, Results: []ssa.Value{result}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: args, State: deoptState(b, entry, c.code), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
 			require.NoError(t, ssa.Verify(fn))
@@ -369,7 +382,11 @@ func TestFoldPass_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, pass.PreserveNone(), preserved)
 			require.NoError(t, ssa.Verify(fn))
-			require.Equal(t, c.want, fn.Block(entry).Ops[len(c.args)].Const)
+			// The folded op is the last one this test added - ordinarily at
+			// len(c.args), but one later for I64_ADD, whose own deoptState
+			// above inserts an OpState ahead of it.
+			ops := fn.Block(entry).Ops
+			require.Equal(t, c.want, ops[len(ops)-1].Const)
 		})
 	}
 }

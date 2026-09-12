@@ -153,6 +153,43 @@ func TestNew(t *testing.T) {
 			),
 		},
 		{
+			// Unlike I64_AND, whose bitwise result cannot leave the boxed
+			// 49-bit payload its operands already sit in, an add of two
+			// in-range operands can carry the sum past it. The add itself
+			// runs unchecked - boxable follows it, sign-extracting the
+			// payload width and comparing against the full sum - and only
+			// the guard's mismatch label and its cold stub differ from the
+			// "ands inline i64 values" golden below; the hot path is
+			// otherwise the same three-instruction shape (load both
+			// operands, compute, box at the boundary).
+			name: "adds inline i64 values, guarding the boxed payload",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(1)<<47).Emit(instr.I64_CONST, uint64(1)<<47).Emit(instr.I64_ADD).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 0x8000, 32),
+					asmarm64.MOVZ(vreg(1), 0x8000, 32),
+					asmarm64.ADD(vreg(2), vreg(0), vreg(1)),
+					asmarm64.SBFX(vreg(6), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(6), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 1),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				addStub(10, addI64IP),
+			),
+		},
+		{
 			name: "ands inline i64 values",
 			addr: 1,
 			in: input(1, &types.Function{
@@ -916,18 +953,6 @@ func TestNew(t *testing.T) {
 			}(),
 		},
 		{
-			// I64_ADD can overflow the boxed 49-bit payload, so it needs the
-			// checked, heap-promoting path only the plan pipeline has - unlike
-			// I64_AND/OR/XOR and I64_SHR_S, which cannot (see Lowers).
-			name: "an i64 add, which can overflow the boxed payload",
-			input: input(1, &types.Function{
-				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
-				Code: assemble(t, func(b *instr.Builder) {
-					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
-				}),
-			}),
-		},
-		{
 			// The SHR_U/SHR_S asymmetry: a logical right shift of a
 			// sign-extended negative value fills in from the top with zeros
 			// it should not have, producing a huge positive value outside the
@@ -1166,7 +1191,48 @@ func stub(first int32, id uint16, live asm.Label, ip int, slot int16, sp uint16)
 const (
 	arrayGetIP  = 5
 	structGetIP = 8
+	// addI64IP is where I64_ADD sits in its own golden stream's bytecode:
+	// two 9-byte I64_CONST instructions (opcode plus 8-byte immediate)
+	// precede it.
+	addI64IP = 18
 )
+
+// addStub is the cold stub behind I64_ADD's boxability guard: both operands
+// flush boxed to their VM stack slots at base (see box's ordinary TypeI64
+// case - each is already proven in range by its own producer, so neither
+// truncates), unlike stub above there is no retain to take because neither
+// is a reference, the stack pointer advances by the two words they
+// occupied, one frame record resumes at ip, and the trap reports fallback.
+// first names the stub's own first virtual register.
+func addStub(first int32, ip int) []asm.Instruction {
+	ctrl, base := vreg(first), vreg(3)
+	return slices.Concat(
+		boxI64(vreg(first+1), vreg(0), vreg(first+2)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+1), base, 0)},
+		boxI64(vreg(first+3), vreg(1), vreg(first+4)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+3), base, 8)},
+		[]asm.Instruction{
+			asmarm64.ADDI(vreg(first+6), vreg(first+5), 2),
+			asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
+		},
+		asmarm64.LDI(vreg(first+7), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+7), vreg(first+5), ctrl, int16(journal.At(0, journal.RecordAddr)*8))},
+		asmarm64.LDI(vreg(first+8), uint64(ip)),
+		asmarm64.LDI(vreg(first+9), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+8), vreg(first+9), ctrl, int16(journal.At(0, journal.RecordIP)*8))},
+		asmarm64.LDI(vreg(first+10), 1),
+		[]asm.Instruction{asmarm64.STR(vreg(first+10), ctrl, int16(journal.CellDepth*8))},
+		asmarm64.LDI(vreg(first+11), 1),
+		[]asm.Instruction{asmarm64.STR(vreg(first+11), ctrl, int16(journal.CellExitID*8))},
+		asmarm64.LDI(vreg(first+12), uint64(journal.TrapFallback)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+12), ctrl, int16(journal.CellTrap*8))},
+		asmarm64.LDI(vreg(first+13), uint64(ip)),
+		[]asm.Instruction{
+			asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellNextIP*8)),
+			asmarm64.RET(),
+		},
+	)
+}
 
 // vreg, freg, freg32, and narrow name one virtual register of the stream a
 // compile emits: the integer bank, the float bank at f64's width, the float

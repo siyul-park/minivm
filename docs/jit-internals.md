@@ -127,9 +127,9 @@ Native computation uses the representation implied by `ssa.Type`:
 
 Interpreter-visible values are always boxed.
 
-An `i64` may remain raw after arithmetic even when it is outside the inline boxed range. `I64_ADD` therefore does not pay a boxability check in native-only flow. When a raw result reaches `GLOBAL_SET`, the store checks the inline range. An out-of-range result crosses a representation bridge instead of corrupting the boxed representation.
+`I64_ADD` can produce a result outside the inline boxed range. Its own lowering guards the result immediately after computing it and exits through the add's own pre-op state on overflow - the add's two operands, not its unboxed sum - so the flush is ordinary in-range boxed i64 values and the interpreter resumes at the add's own IP to redo it and heap-promote the result (see Guards and Deoptimization). No raw, out-of-range i64 value is ever assigned to a live SSA value, so every downstream boundary that boxes an i64 - a store, a return, module completion, a deopt flush - only ever boxes one a producer already proved in range.
 
-The current representation proof is deliberately narrow: one raw `i64` value at the top of the VM stack. Additional live raw values require a new state representation before this bridge can be generalized.
+Only `I64_ADD` compiles through this shape today. `I64_SUB`, `I64_MUL`, `I64_SHL`, `I64_SHR_U`, division, remainder, and float-to-i64 conversion can also leave the boxed range and still decline to the plan pipeline; each can adopt the identical guard once proven.
 
 ## Guards and Deoptimization
 

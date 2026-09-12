@@ -61,6 +61,7 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.I32_EQZ, instr.I32_EQ, instr.I32_NE,
 		instr.I32_LT_S, instr.I32_LE_S, instr.I32_GT_S, instr.I32_GE_S,
 		instr.I32_LT_U, instr.I32_LE_U, instr.I32_GT_U, instr.I32_GE_U,
+		instr.I64_ADD,
 		instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQZ,
 		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LE_S,
 		instr.I64_GT_S, instr.I64_GE_S, instr.I64_LT_U, instr.I64_LE_U,
@@ -397,6 +398,8 @@ func (e *emitter) exec(op ssa.Operation) bool {
 	case instr.I32_GE_U:
 		return e.compare(op, ssa.TypeI32, arm64.CondCS)
 
+	case instr.I64_ADD:
+		return e.addI64(op)
 	case instr.I64_AND:
 		return e.binary(op, ssa.TypeI64, arm64.AND)
 	case instr.I64_OR:
