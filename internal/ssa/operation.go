@@ -269,3 +269,18 @@ func (o Operation) name() string {
 		return o.Op.String()
 	}
 }
+
+// OverflowsI64 reports whether bounded i64 operands can drive code past the
+// payload types.Boxed carries an inline i64 in, so that a result needs a
+// range guard before it can be boxed. It is a fact about the boxed
+// representation rather than about the opcode, which is why it lives here
+// and not with instr's static instruction facts.
+func OverflowsI64(code instr.Opcode) bool {
+	switch code {
+	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_U,
+		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
+		return true
+	default:
+		return false
+	}
+}

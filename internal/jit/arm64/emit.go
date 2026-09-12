@@ -61,11 +61,11 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.I32_EQZ, instr.I32_EQ, instr.I32_NE,
 		instr.I32_LT_S, instr.I32_LE_S, instr.I32_GT_S, instr.I32_GE_S,
 		instr.I32_LT_U, instr.I32_LE_U, instr.I32_GT_U, instr.I32_GE_U,
-		instr.I64_ADD,
+		instr.I64_ADD, instr.I64_SUB, instr.I64_MUL,
 		instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQZ,
 		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LE_S,
 		instr.I64_GT_S, instr.I64_GE_S, instr.I64_LT_U, instr.I64_LE_U,
-		instr.I64_GT_U, instr.I64_GE_U, instr.I64_SHR_S,
+		instr.I64_GT_U, instr.I64_GE_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
 		instr.I32_TO_I64_S, instr.I32_TO_I64_U,
 		instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV,
 		instr.F32_ABS, instr.F32_NEG, instr.F32_SQRT,
@@ -399,7 +399,11 @@ func (e *emitter) exec(op ssa.Operation) bool {
 		return e.compare(op, ssa.TypeI32, arm64.CondCS)
 
 	case instr.I64_ADD:
-		return e.addI64(op)
+		return e.binary(op, ssa.TypeI64, arm64.ADD)
+	case instr.I64_SUB:
+		return e.binary(op, ssa.TypeI64, arm64.SUB)
+	case instr.I64_MUL:
+		return e.binary(op, ssa.TypeI64, arm64.MUL)
 	case instr.I64_AND:
 		return e.binary(op, ssa.TypeI64, arm64.AND)
 	case instr.I64_OR:
@@ -428,8 +432,12 @@ func (e *emitter) exec(op ssa.Operation) bool {
 		return e.compare(op, ssa.TypeI64, arm64.CondHI)
 	case instr.I64_GE_U:
 		return e.compare(op, ssa.TypeI64, arm64.CondCS)
+	case instr.I64_SHL:
+		return e.shift(op, ssa.TypeI64, 0x3F, arm64.LSL)
 	case instr.I64_SHR_S:
 		return e.shift(op, ssa.TypeI64, 0x3F, arm64.ASR)
+	case instr.I64_SHR_U:
+		return e.shift(op, ssa.TypeI64, 0x3F, arm64.LSR)
 	case instr.I32_TO_I64_S:
 		return e.widen(op, true)
 	case instr.I32_TO_I64_U:
@@ -501,6 +509,7 @@ func (e *emitter) exec(op ssa.Operation) bool {
 // result, with nothing left to mask - which is what lets i1 and i8 flow
 // through it keeping their own result kinds; a float runs in the bank its
 // operands already occupy.
+
 func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -508,7 +517,11 @@ func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, s
 	if !e.lanes(want, op.Args[0], op.Args[1], op.Results[0]) {
 		return false
 	}
-	e.a.Emit(emit(e.c.Reg(op.Results[0]), e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])))
+	dst := e.c.Reg(op.Results[0])
+	e.a.Emit(emit(dst, e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])))
+	if op.State != ssa.NoValue {
+		return e.boxable(op.State, dst)
+	}
 	return true
 }
 
@@ -548,12 +561,11 @@ func (e *emitter) unary(op ssa.Operation, want ssa.Type, emit func(dst, src asm.
 // in want's own lane, so nothing prepares either: the amount is masked to
 // the width the underlying instruction shifts by (five bits for a 32-bit
 // register, six for a 64-bit one, matching what the threaded handler shifts
-// by), and the shift itself runs entirely within the register's own bits -
-// an arithmetic right shift included, since the sign bit it reads is already
-// the register's own top bit, never one belonging to a wider sign-extended
-// view. Only I64_SHR_S reaches the i64 path (see Lowers): it is the one i64
-// shift that cannot turn a boxable operand into an unboxable result, since
-// shrinking a bounded value's magnitude never grows it.
+// by - see interp/threaded.go's I64_SHL/I64_SHR_U handlers), and the shift
+// itself runs entirely within the register's own bits - an arithmetic right
+// shift included, since the sign bit it reads is already the register's own
+// top bit, never one belonging to a wider sign-extended view.
+
 func (e *emitter) shift(op ssa.Operation, want ssa.Type, mask uint64, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -567,7 +579,11 @@ func (e *emitter) shift(op ssa.Operation, want ssa.Type, mask uint64, emit func(
 	}
 	amount := e.a.Reg(asm.RegTypeInt, width)
 	e.a.Emit(arm64.ANDI(amount, e.c.Reg(op.Args[1]), mask))
-	e.a.Emit(emit(e.c.Reg(op.Results[0]), e.c.Reg(op.Args[0]), amount))
+	dst := e.c.Reg(op.Results[0])
+	e.a.Emit(emit(dst, e.c.Reg(op.Args[0]), amount))
+	if op.State != ssa.NoValue {
+		return e.boxable(op.State, dst)
+	}
 	return true
 }
 

@@ -145,7 +145,7 @@ func (p *FoldPass) fold(rb *rebuilder, id int, fn *ssa.Function, consts map[ssa.
 	shift := rb.b.Value(rb.b.Type(op.Args[1]))
 	rb.b.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{shift}})
 	consts[shift] = amount
-	return ssa.Operation{Op: op.Op, Code: code, Args: []ssa.Value{op.Args[0], shift}, Results: op.Results}, true
+	return ssa.Operation{Op: op.Op, Code: code, Args: []ssa.Value{op.Args[0], shift}, State: op.State, Results: op.Results}, true
 }
 
 // identity reports whether code hands back its left argument unchanged when

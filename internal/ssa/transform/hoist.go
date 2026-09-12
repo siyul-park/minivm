@@ -63,25 +63,26 @@ import (
 //     per entry, even when the loop body itself runs zero times - a
 //     conditional loop tests before its first iteration, and this IR has no
 //     general way to prove a body always runs at least once. Hoisting an
-//     operation that can fail (a guard) or fault (integer division or
-//     remainder by a divisor that might be zero) into the preheader would
-//     make it run - and possibly fail or fault - on an execution the
-//     original program never reached with that operation at all. Every one
-//     of the four guards always carries deopt State (instr's own resume()
-//     rule, enforced by ssa.Verify), and OpState's Frame chain names the
-//     bytecode position and stack the guard's own site was speculated at -
-//     valid to resume into as recorded, not valid to resume into from a
-//     point before the loop ever ran. This pass sidesteps both problems by
-//     refusing anything that carries State: no guard, no OpStore, no
-//     OpRelease, no OpBridge, and no OpExec that writes Frame or that both
-//     reads and writes Heap is ever a candidate (ssa.Verify's own resume()
-//     rule already makes every one of those state-bearing, so this check is
-//     belt-and-suspenders over IsPure() rather than a second, independent
-//     gate). Integer division and remainder are IsPure() by instr's own
-//     table - no Reads, no Writes - yet a zero divisor faults the
-//     interpreter, so they are excluded by name (see speculatable) the same
-//     way FoldPass declines to fold a literal-zero divisor at compile time
-//     rather than pre-empt that same trap.
+//     operation that can fail (a guard), fault (integer division or
+//     remainder by a divisor that might be zero), or exit to a boxability
+//     guard (ssa.OverflowsI64's five arithmetic opcodes, see
+//     internal/ssa/operation.go) into the preheader would make it run - and
+//     possibly fail, fault, or exit - on an execution the original program
+//     never reached with that operation at all. Every one of the four guards
+//     and every OverflowsI64 opcode carries deopt State (instr's own
+//     resume() rule, enforced by ssa.Verify), and OpState's Frame chain
+//     names the bytecode position and stack the operation's own site was
+//     speculated at - valid to resume into as recorded, not valid to resume
+//     into from a point before the loop ever ran. hoistable's explicit
+//     `op.State != ssa.NoValue` check is what excludes these: the
+//     OverflowsI64 opcodes are IsPure() (no Reads, no Writes) exactly like
+//     any other arithmetic op, so IsPure() alone would let one through, and
+//     only the State check catches it. It is not redundant with IsPure() -
+//     it is the sole gate on this hazard. Integer division and remainder are
+//     also IsPure() - yet a zero divisor faults the interpreter - so they
+//     are excluded by name too (see speculatable) the same way FoldPass
+//     declines to fold a literal-zero divisor at compile time rather than
+//     pre-empt that same trap.
 //
 // Retain/release pairing is out of scope, per docs/jit-internals.md and
 // docs/architecture.md: this pass never moves an OpRetain or an OpRelease,
@@ -247,9 +248,12 @@ func (p *HoistPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, erro
 // hoistable reports whether op may ever move: an OpConst, which reads
 // nothing, or an OpExec whose opcode both IsPure() (no Reads, no Writes -
 // see instr.Opcode.IsPure) and is speculatable (never faults regardless of
-// its operands). Neither ever carries deopt State by ssa.Verify's own
-// resume() rule, and the explicit check here documents that this pass
-// depends on it rather than only inheriting it silently.
+// its operands). The leading op.State check is not redundant with either:
+// ssa.OverflowsI64's five arithmetic opcodes are both IsPure() and
+// speculatable yet always carry deopt State, so without this check one of
+// them would hoist into a preheader that can run on a zero-trip-count path
+// and exit its boxability guard with a Frame snapshot from before the loop
+// ever entered its body.
 func hoistable(op ssa.Operation) bool {
 	if op.State != ssa.NoValue {
 		return false

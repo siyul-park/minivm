@@ -2577,83 +2577,120 @@ func(struct {value: i64; left: any; right: any}) i32
 			require.Equal(t, want, got)
 		})
 
-		// A reverted attempt at native I64_ADD flushed a raw, unboxed sum
-		// into the VM stack behind a side channel; ret and complete boxed it
-		// directly, reproducing types.BoxI64's silent truncation of an
-		// out-of-range value. The current design guards at I64_ADD itself
-		// and exits through its own pre-op state, so a JIT run must box the
-		// same out-of-range sum the threaded interpreter's heap-promoting
-		// boxI64 does.
-		//
-		// A result agreeing with threaded execution is not enough on its
-		// own: if native I64_ADD lowering silently declined (a Lowers()
-		// regression, an arity or lane check, the frontend's state
-		// condition), the whole root falls back to the plan pipeline or
-		// threaded dispatch and the two sides agree trivially, proving
-		// nothing about the guard this test exists to cover. The profiler
-		// assertions below (mirroring "records compilation and native entry"
-		// above) require a native compile and a native entry actually fired.
-		t.Run("I64_ADD boxes an out-of-range sum the same under JIT and threaded execution", func(t *testing.T) {
-			const half = uint64(1) << 47 // 1<<47 + 1<<47 == 1<<48, one past the boxed 49-bit payload's max.
-			const runs = 8
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, half),
-				instr.New(instr.I64_CONST, half),
-				instr.New(instr.I64_ADD),
+		// The profiler assertions below require a native compile, a native
+		// entry, and a boxability guard exit under this opcode's own mnemonic
+		// to have occurred - ruling out a silent decline that falls back to
+		// threaded dispatch without ever entering native code. They do not
+		// discriminate which pipeline emitted the guard: Compiler.Compile
+		// falls back from the SSA emitter to the older static-plan pipeline on
+		// a decline, and that pipeline independently guards all five
+		// OverflowsI64 opcodes under the same metric labels. Only
+		// internal/jit/arm64/machine_test.go's goldens, which call
+		// arm64.New().Compile() directly with no fallback, pin the SSA
+		// emitter specifically.
+		overflowCases := []struct {
+			name     string
+			op       instr.Opcode
+			mnemonic string
+			lhs, rhs uint64
+		}{
+			{
+				name:     "I64_ADD boxes an out-of-range sum the same under JIT and threaded execution",
+				op:       instr.I64_ADD,
+				mnemonic: "i64.add",
+				lhs:      uint64(1) << 47,
+				rhs:      uint64(1) << 47, // 1<<47 + 1<<47 == 1<<48, one past the boxed 49-bit payload's max.
+			},
+			{
+				name:     "I64_SUB boxes an out-of-range difference the same under JIT and threaded execution",
+				op:       instr.I64_SUB,
+				mnemonic: "i64.sub",
+				lhs:      uint64(1) << 47,
+				rhs:      i64operand(-(int64(1) << 47)), // 1<<47 - (-(1<<47)) == 1<<48.
+			},
+			{
+				name:     "I64_MUL boxes an out-of-range product the same under JIT and threaded execution",
+				op:       instr.I64_MUL,
+				mnemonic: "i64.mul",
+				lhs:      uint64(1) << 47,
+				rhs:      4, // 1<<47 * 4 == 1<<49.
+			},
+			{
+				name:     "I64_SHL boxes an out-of-range shift the same under JIT and threaded execution",
+				op:       instr.I64_SHL,
+				mnemonic: "i64.shl",
+				lhs:      uint64(1) << 47,
+				rhs:      3, // 1<<47 << 3 == 1<<50.
+			},
+			{
+				name:     "I64_SHR_U boxes an out-of-range shift the same under JIT and threaded execution",
+				op:       instr.I64_SHR_U,
+				mnemonic: "i64.shr_u",
+				lhs:      i64operand(-1),
+				rhs:      1, // uint64(-1) >>_u 1 == 0x7FFFFFFFFFFFFFFF.
+			},
+		}
+
+		const overflowRuns = 8
+		for _, tc := range overflowCases {
+			t.Run(tc.name, func(t *testing.T) {
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, tc.lhs),
+					instr.New(instr.I64_CONST, tc.rhs),
+					instr.New(tc.op),
+				})
+
+				threaded := interp.New(prog, interp.WithThreshold(-1))
+				t.Cleanup(func() { require.NoError(t, threaded.Close()) })
+				profile := prof.New()
+				jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+				t.Cleanup(func() { require.NoError(t, jit.Close()) })
+
+				for n := 0; n < overflowRuns; n++ {
+					threaded.Reset()
+					jit.Reset()
+					require.NoError(t, threaded.Run(context.Background()))
+					require.NoError(t, jit.Run(context.Background()))
+					want, err := threaded.PopBoxed()
+					require.NoError(t, err)
+					got, err := jit.PopBoxed()
+					require.NoError(t, err)
+					require.Equal(t, want, got)
+				}
+
+				jit.Flush()
+
+				compiles, ok := profile.Metric("vm_jit_compiles_total",
+					prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
+					prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+				require.True(t, ok)
+				require.Equal(t, float64(1), compiles)
+
+				entries, ok := profile.Metric("vm_jit_native_entries_total",
+					prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
+				require.True(t, ok)
+				require.Equal(t, float64(overflowRuns), entries)
+
+				// Both operands are deliberately out of range, so native
+				// code runs tc.op, and its own boxable guard must be what
+				// exits every one of these runs back to threaded execution -
+				// not a decline that never entered native code at all.
+				exits, ok := profile.Metric("vm_jit_native_exits_total",
+					prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
+					prof.Label{Key: "reason", Value: "guard-value"}, prof.Label{Key: "opcode", Value: tc.mnemonic})
+				require.True(t, ok)
+				require.Equal(t, float64(overflowRuns), exits)
 			})
-
-			threaded := interp.New(prog, interp.WithThreshold(-1))
-			t.Cleanup(func() { require.NoError(t, threaded.Close()) })
-			profile := prof.New()
-			jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
-			t.Cleanup(func() { require.NoError(t, jit.Close()) })
-
-			for n := 0; n < runs; n++ {
-				threaded.Reset()
-				jit.Reset()
-				require.NoError(t, threaded.Run(context.Background()))
-				require.NoError(t, jit.Run(context.Background()))
-				want, err := threaded.PopBoxed()
-				require.NoError(t, err)
-				got, err := jit.PopBoxed()
-				require.NoError(t, err)
-				require.Equal(t, want, got)
-			}
-
-			jit.Flush()
-
-			compiles, ok := profile.Metric("vm_jit_compiles_total",
-				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
-				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
-				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
-			require.True(t, ok, "I64_ADD must not decline the static compile")
-			require.Equal(t, float64(1), compiles)
-
-			entries, ok := profile.Metric("vm_jit_native_entries_total",
-				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
-				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
-			require.True(t, ok, "compiled code must actually be entered natively")
-			require.Equal(t, float64(runs), entries)
-
-			// Both operands are deliberately out of range, so native code
-			// runs I64_ADD, and addI64's own boxable guard must be what
-			// exits every one of these runs back to threaded execution -
-			// not a decline that never entered native code at all.
-			exits, ok := profile.Metric("vm_jit_native_exits_total",
-				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
-				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
-				prof.Label{Key: "reason", Value: "guard-value"}, prof.Label{Key: "opcode", Value: "i64.add"})
-			require.True(t, ok, "I64_ADD's own boxability guard must fire natively")
-			require.Equal(t, float64(runs), exits)
-		})
+		}
 
 		// DUP pushes the same operand twice rather than cloning it, so an
 		// out-of-range I64_ADD result that DUP then GLOBAL_SET flushes to a
 		// declared i64 global must reach that global boxed exactly once,
 		// through the one register both stack entries name - never flushed
-		// raw, and never truncated by boxing only one of two copies. The
-		// reverted attempt's side channel fixed up exactly one stack slot and
-		// left the other raw.
+		// raw, and never truncated by boxing only one of two copies.
 		//
 		// PopBoxed alone would pass even if store() never wrote the global
 		// at all: it reads the leftover DUP copy complete() flushes to the
@@ -2694,7 +2731,7 @@ func(struct {value: i64; left: any; right: any}) i32
 				gotGlobal, err := jit.Global(0)
 				require.NoError(t, err)
 				require.Equal(t, wantGlobal, gotGlobal)
-				require.Equal(t, want, wantGlobal, "GLOBAL_SET must have reached the global, not just the stack DUP left behind")
+				require.Equal(t, want, wantGlobal)
 			}
 
 			jit.Flush()
@@ -2703,13 +2740,13 @@ func(struct {value: i64; left: any; right: any}) i32
 				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
 				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
-			require.True(t, ok, "I64_ADD must not decline the static compile")
+			require.True(t, ok)
 			require.Equal(t, float64(1), compiles)
 
 			entries, ok := profile.Metric("vm_jit_native_entries_total",
 				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
-			require.True(t, ok, "compiled code must actually be entered natively")
+			require.True(t, ok)
 			require.Equal(t, float64(runs), entries)
 
 			// Both operands are deliberately out of range, so native code
@@ -2720,7 +2757,7 @@ func(struct {value: i64; left: any; right: any}) i32
 				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
 				prof.Label{Key: "reason", Value: "guard-value"}, prof.Label{Key: "opcode", Value: "i64.add"})
-			require.True(t, ok, "I64_ADD's own boxability guard must fire natively")
+			require.True(t, ok)
 			require.Equal(t, float64(runs), exits)
 		})
 
@@ -2775,13 +2812,13 @@ func(struct {value: i64; left: any; right: any}) i32
 				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
 				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
-			require.True(t, ok, "I64_ADD must not decline the static compile")
+			require.True(t, ok)
 			require.Equal(t, float64(1), compiles)
 
 			entries, ok := profile.Metric("vm_jit_native_entries_total",
 				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
-			require.True(t, ok, "compiled code must actually be entered natively")
+			require.True(t, ok)
 			require.Equal(t, float64(runs), entries)
 
 			// No exit means every native entry ran the add, the DUP, and
@@ -2791,8 +2828,118 @@ func(struct {value: i64; left: any; right: any}) i32
 				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
 				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
 				prof.Label{Key: "reason", Value: "guard-value"}, prof.Label{Key: "opcode", Value: "i64.add"})
-			require.False(t, exited, "an in-range add must not exit through its own boxability guard")
+			require.False(t, exited)
 		})
+
+		// I64_ADD's own in-range parity, with the guard not firing, is
+		// already covered above by "a DUPed in-range I64_ADD result reaches
+		// a global boxed natively, with no guard exit" - these are the
+		// equivalent in-range case for the other four operations an
+		// always-overflowing fixture cannot exercise, since that fixture's
+		// guard exits before anything past it ever lowers natively.
+		//
+		// The SHL and SHR_U fixtures deliberately shift by 65, not some
+		// amount already under 64: internal/jit/arm64/emit.go's shift
+		// masks the amount to 0x3F before shifting, and
+		// interp/threaded.go's I64_SHL/I64_SHR_U handlers mask with & 63 -
+		// the same bound written twice, once in the emitter and once in the
+		// threaded handler. A shift amount that never needs masking would
+		// let the two sides agree even if one of those two masks drifted
+		// from the other; masking 65 down to 1 is what a divergence would
+		// actually show up in.
+		inRangeCases := []struct {
+			name     string
+			op       instr.Opcode
+			mnemonic string
+			lhs, rhs uint64
+			want     types.Boxed
+		}{
+			{
+				name:     "I64_SUB boxes an in-range difference the same under JIT and threaded execution, with no guard exit",
+				op:       instr.I64_SUB,
+				mnemonic: "i64.sub",
+				lhs:      300,
+				rhs:      100,
+				want:     types.BoxI64(200),
+			},
+			{
+				name:     "I64_MUL boxes an in-range product the same under JIT and threaded execution, with no guard exit",
+				op:       instr.I64_MUL,
+				mnemonic: "i64.mul",
+				lhs:      100,
+				rhs:      2,
+				want:     types.BoxI64(200),
+			},
+			{
+				name:     "I64_SHL boxes an in-range shift the same under JIT and threaded execution, with no guard exit",
+				op:       instr.I64_SHL,
+				mnemonic: "i64.shl",
+				lhs:      1,
+				rhs:      65, // masked to 65 & 63 == 1, so 1<<1 == 2.
+				want:     types.BoxI64(2),
+			},
+			{
+				name:     "I64_SHR_U boxes an in-range shift the same under JIT and threaded execution, with no guard exit",
+				op:       instr.I64_SHR_U,
+				mnemonic: "i64.shr_u",
+				lhs:      128,
+				rhs:      65, // masked to 65 & 63 == 1, so 128 >>_u 1 == 64.
+				want:     types.BoxI64(64),
+			},
+		}
+
+		const inRangeRuns = 8
+		for _, tc := range inRangeCases {
+			t.Run(tc.name, func(t *testing.T) {
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, tc.lhs),
+					instr.New(instr.I64_CONST, tc.rhs),
+					instr.New(tc.op),
+				})
+
+				threaded := interp.New(prog, interp.WithThreshold(-1))
+				t.Cleanup(func() { require.NoError(t, threaded.Close()) })
+				profile := prof.New()
+				jit := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+				t.Cleanup(func() { require.NoError(t, jit.Close()) })
+
+				for n := 0; n < inRangeRuns; n++ {
+					threaded.Reset()
+					jit.Reset()
+					require.NoError(t, threaded.Run(context.Background()))
+					require.NoError(t, jit.Run(context.Background()))
+					want, err := threaded.PopBoxed()
+					require.NoError(t, err)
+					got, err := jit.PopBoxed()
+					require.NoError(t, err)
+					require.Equal(t, want, got)
+					require.Equal(t, tc.want, got)
+				}
+
+				jit.Flush()
+
+				compiles, ok := profile.Metric("vm_jit_compiles_total",
+					prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
+					prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+				require.True(t, ok)
+				require.Equal(t, float64(1), compiles)
+
+				entries, ok := profile.Metric("vm_jit_native_entries_total",
+					prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
+				require.True(t, ok)
+				require.Equal(t, float64(inRangeRuns), entries)
+
+				// No exit means every native entry ran tc.op to completion
+				// without deopting through its own boxability guard.
+				_, exited := profile.Metric("vm_jit_native_exits_total",
+					prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+					prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
+					prof.Label{Key: "reason", Value: "guard-value"}, prof.Label{Key: "opcode", Value: tc.mnemonic})
+				require.False(t, exited)
+			})
+		}
 	}
 	modes := []struct {
 		name string

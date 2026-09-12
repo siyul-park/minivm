@@ -2,6 +2,7 @@ package transform_test
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,12 +14,12 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// deoptState gives code the ssa.NoValue verify.go admits for most opcodes,
-// or a fresh, otherwise-empty OpState for I64_ADD, which can overflow the
-// boxed 49-bit payload and so always resumes into one (see verify.go's
-// operation and frontend/walk.go's exec).
+// deoptState gives code the ssa.NoValue verify.go admits for most opcodes, or
+// a fresh, otherwise-empty OpState for one ssa.OverflowsI64 names, which can
+// overflow the boxed 49-bit payload and so always resumes into one (see
+// verify.go's operation and frontend/walk.go's exec).
 func deoptState(b *ssa.Builder, block int, code instr.Opcode) ssa.Value {
-	if code != instr.I64_ADD {
+	if !ssa.OverflowsI64(code) {
 		return ssa.NoValue
 	}
 	state := b.Value(ssa.TypeState)
@@ -100,7 +101,7 @@ func TestFoldPass_Run(t *testing.T) {
 		// Each factor fits the 49-bit boxed payload; their product does not.
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1 << 30), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1 << 30), Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_MUL, Args: []ssa.Value{x, y}, Results: []ssa.Value{product}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_MUL, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I64_MUL), Results: []ssa.Value{product}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{product}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
@@ -170,7 +171,7 @@ func TestFoldPass_Run(t *testing.T) {
 			entry := b.Block()
 			param := b.Param(entry, c.typ)
 			x, right, result := b.Value(c.typ), b.Value(c.typ), b.Value(c.typ)
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: seed(c.typ), Args: []ssa.Value{param, param}, Results: []ssa.Value{x}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: seed(c.typ), Args: []ssa.Value{param, param}, State: deoptState(b, entry, seed(c.typ)), Results: []ssa.Value{x}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.with, Results: []ssa.Value{right}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, State: deoptState(b, entry, c.code), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
@@ -184,7 +185,9 @@ func TestFoldPass_Run(t *testing.T) {
 			require.NoError(t, ssa.Verify(fn))
 			out := ssa.Format(fn)
 			require.NotContains(t, out, instr.TypeOf(c.code).Mnemonic)
-			require.Contains(t, out, "return v2")
+			left := regexp.MustCompile(`(v\d+):\S+ = ` + instr.TypeOf(seed(c.typ)).Mnemonic).FindStringSubmatch(out)
+			require.Len(t, left, 2)
+			require.Contains(t, out, "return "+left[1])
 		})
 	}
 
@@ -230,7 +233,7 @@ func TestFoldPass_Run(t *testing.T) {
 			x := b.Param(entry, c.typ)
 			right, result := b.Value(c.typ), b.Value(c.typ)
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.with, Results: []ssa.Value{right}})
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, State: deoptState(b, entry, c.code), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
 			require.NoError(t, ssa.Verify(fn))

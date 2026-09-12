@@ -62,40 +62,8 @@ func (e *emitter) guardI64(op ssa.Operation) bool {
 	return true
 }
 
-// addI64 lowers I64_ADD. Unlike I64_AND/OR/XOR and I64_SHR_S, whose operand
-// already sitting within the boxed 49-bit payload proves the result does too,
-// an add of two in-range operands can carry a result past it, so the add
-// itself is not the whole lowering: boxable follows it and, on overflow,
-// exits through this operation's own pre-op state (op.State) rather than
-// running the add unchecked and paying for the mismatch at a boundary far
-// downstream.
-//
-// op.State describes the stack as frontend/walk.go's begin captured it at
-// this instruction's own start, before either operand was popped - so its
-// flush is the two operands this add is about to consume, not the
-// (possibly unboxable) sum. Both are already proven in range by their own
-// producer - a slot load's guardI64, an in-range OpConst, or a widened
-// i32 - so they box through box's ordinary TypeI64 case with no truncation,
-// and the interpreter resumes at this add's own IP to redo it and
-// heap-promote the sum guardBoxable rejected.
-func (e *emitter) addI64(op ssa.Operation) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	if !e.lanes(ssa.TypeI64, op.Args[0], op.Args[1], op.Results[0]) {
-		return false
-	}
-	dst := e.c.Reg(op.Results[0])
-	e.a.Emit(arm64.ADD(dst, e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])))
-	return e.boxable(op.State, dst)
-}
-
-// boxable guards that v's magnitude fits the boxed 49-bit payload
-// (types.VBits): sign-extract the payload width and compare against the
-// full value, exiting through state on a mismatch. It mirrors the plan
-// pipeline's own boxableI64/guardBoxable (deopt.go, heap.go) rather than
-// reusing them directly - they are lowerer methods operating on that
-// pipeline's *lowering context, not this emitter's.
+// boxable rejects results outside the inline i64 range through the operation's state.
+// The state captures the pre-op operands, which remain boxable by construction.
 func (e *emitter) boxable(state ssa.Value, v asm.VReg) bool {
 	fail, ok := e.exit(state, prof.ExitGuardValue)
 	if !ok {

@@ -127,9 +127,9 @@ Native computation uses the representation implied by `ssa.Type`:
 
 Interpreter-visible values are always boxed.
 
-`I64_ADD` can produce a result outside the inline boxed range. Its own lowering guards the result immediately after computing it and exits through the add's own pre-op state on overflow - the add's two operands, not its unboxed sum - so the flush is ordinary in-range boxed i64 values and the interpreter resumes at the add's own IP to redo it and heap-promote the result (see Guards and Deoptimization). No raw, out-of-range i64 value is ever assigned to a live SSA value, so every downstream boundary that boxes an i64 - a store, a return, module completion, a deopt flush - only ever boxes one a producer already proved in range.
+`I64_ADD`, `I64_SUB`, `I64_MUL`, `I64_SHL`, and `I64_SHR_U` (`ssa.OverflowsI64`) can each produce a result outside the inline boxed range. Each one's own lowering guards the result immediately after computing it and exits through the operation's own pre-op state on overflow - its own operands, not its unboxed result - so the flush is ordinary in-range boxed i64 values and the interpreter resumes at the operation's own IP to redo it and heap-promote the result (see Guards and Deoptimization). No raw, out-of-range i64 value is ever assigned to a live SSA value, so every downstream boundary that boxes an i64 - a store, a return, module completion, a deopt flush - only ever boxes one a producer already proved in range.
 
-Only `I64_ADD` compiles through this shape today. `I64_SUB`, `I64_MUL`, `I64_SHL`, `I64_SHR_U`, division, remainder, and float-to-i64 conversion can also leave the boxed range and still decline to the plan pipeline; each can adopt the identical guard once proven.
+Division, remainder, and float-to-i64 conversion can also leave the boxed range and still decline to the plan pipeline: division and remainder need a divide-by-zero guard as well as this one, a differently shaped exit belonging to its own stage, and float-to-i64 conversion's out-of-range and NaN sources are a conversion-semantics question rather than a boxability one.
 
 ## Guards and Deoptimization
 

@@ -186,7 +186,73 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(9), vreg(7)),
 					asmarm64.RET(),
 				},
-				addStub(10, addI64IP),
+				overflowStub(10, guardedI64IP),
+			),
+		},
+		{
+			// SUB shares I64_ADD's shape exactly: two in-range operands can
+			// still differ by more than the boxed payload holds (negate one
+			// operand and the two shapes compute the identical mismatch), so
+			// binary's guard follows the SUB the same way it follows the ADD
+			// above - only the opcode and the demonstration values differ.
+			name: "subs inline i64 values, guarding the boxed payload",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, 500).Emit(instr.I64_CONST, 200).Emit(instr.I64_SUB).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 500, 0),
+					asmarm64.MOVZ(vreg(1), 200, 0),
+					asmarm64.SUB(vreg(2), vreg(0), vreg(1)),
+					asmarm64.SBFX(vreg(6), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(6), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 1),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				overflowStub(10, guardedI64IP),
+			),
+		},
+		{
+			// Unlike ADD/SUB, whose magnitude can at most double a bounded
+			// operand's own range, MUL can leave two in-range operands
+			// (1<<30 each) landing on a product (1<<60) nowhere near the
+			// boxed payload, but the emitted shape is identical either way:
+			// this machine never inspects operand values to skip the guard.
+			name: "muls inline i64 values, guarding the boxed payload",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(1)<<30).Emit(instr.I64_CONST, uint64(1)<<30).Emit(instr.I64_MUL).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 0x4000, 16),
+					asmarm64.MOVZ(vreg(1), 0x4000, 16),
+					asmarm64.MUL(vreg(2), vreg(0), vreg(1)),
+					asmarm64.SBFX(vreg(6), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(6), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 1),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				overflowStub(10, guardedI64IP),
 			),
 		},
 		{
@@ -284,6 +350,74 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(9), vreg(7)),
 					asmarm64.RET(),
 				},
+			),
+		},
+		{
+			// A left shift can grow a bounded value's magnitude the same way
+			// ADD/MUL can, so shift's guard follows it exactly as binary's
+			// follows those: the mask and the shift itself are unchanged
+			// from the unchecked SHR_S golden above, and only the guard and
+			// its cold stub are added.
+			name: "shifts an inline i64 left, guarding the boxed payload",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(1)<<47).Emit(instr.I64_CONST, 1).Emit(instr.I64_SHL).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 0x8000, 32),
+					asmarm64.MOVZ(vreg(1), 1, 0),
+					asmarm64.ANDI(vreg(6), vreg(1), 0x3F),
+					asmarm64.LSL(vreg(2), vreg(0), vreg(6)),
+					asmarm64.SBFX(vreg(7), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(7), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 1),
+				},
+				boxI64(vreg(8), vreg(2), vreg(9)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(8), vreg(3), 0),
+					asmarm64.MOV(vreg(10), vreg(8)),
+					asmarm64.RET(),
+				},
+				overflowStub(11, guardedI64IP),
+			),
+		},
+		{
+			// The SHR_U/SHR_S asymmetry: a logical right shift of a
+			// sign-extended negative value fills in from the top with zeros
+			// it should not have, producing a huge positive value outside
+			// the boxable range, so shift's guard follows I64_SHR_U the same
+			// way it follows I64_SHL above, while I64_SHR_S stays unchecked.
+			name: "shifts an inline i64 right logically, guarding the boxed payload",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, ^uint64(7)).Emit(instr.I64_CONST, 1).Emit(instr.I64_SHR_U).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				asmarm64.LDI(vreg(0), ^uint64(7)),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(1), 1, 0),
+					asmarm64.ANDI(vreg(6), vreg(1), 0x3F),
+					asmarm64.LSR(vreg(2), vreg(0), vreg(6)),
+					asmarm64.SBFX(vreg(7), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(7), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 1),
+				},
+				boxI64(vreg(8), vreg(2), vreg(9)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(8), vreg(3), 0),
+					asmarm64.MOV(vreg(10), vreg(8)),
+					asmarm64.RET(),
+				},
+				overflowStub(11, guardedI64IP),
 			),
 		},
 		{
@@ -953,20 +1087,6 @@ func TestNew(t *testing.T) {
 			}(),
 		},
 		{
-			// The SHR_U/SHR_S asymmetry: a logical right shift of a
-			// sign-extended negative value fills in from the top with zeros
-			// it should not have, producing a huge positive value outside the
-			// boxable range, so I64_SHR_U stays checked and declines here
-			// while I64_SHR_S above compiles unchecked.
-			name: "an i64 logical right shift, which can turn a bounded value huge",
-			input: input(1, &types.Function{
-				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
-				Code: assemble(t, func(b *instr.Builder) {
-					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I64_SHR_U).Emit(instr.RETURN)
-				}),
-			}),
-		},
-		{
 			name: "an i64 divide",
 			input: input(1, &types.Function{
 				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
@@ -1191,20 +1311,21 @@ func stub(first int32, id uint16, live asm.Label, ip int, slot int16, sp uint16)
 const (
 	arrayGetIP  = 5
 	structGetIP = 8
-	// addI64IP is where I64_ADD sits in its own golden stream's bytecode:
-	// two 9-byte I64_CONST instructions (opcode plus 8-byte immediate)
-	// precede it.
-	addI64IP = 18
+	// guardedI64IP is where the guarded op sits in each boxability-guard
+	// golden stream's own bytecode below: every one of them precedes its op
+	// with exactly two 9-byte I64_CONST instructions (opcode plus 8-byte
+	// immediate), so the offset is the same 18 for all of them.
+	guardedI64IP = 18
 )
 
-// addStub is the cold stub behind I64_ADD's boxability guard: both operands
-// flush boxed to their VM stack slots at base (see box's ordinary TypeI64
-// case - each is already proven in range by its own producer, so neither
-// truncates), unlike stub above there is no retain to take because neither
-// is a reference, the stack pointer advances by the two words they
-// occupied, one frame record resumes at ip, and the trap reports fallback.
-// first names the stub's own first virtual register.
-func addStub(first int32, ip int) []asm.Instruction {
+// overflowStub is the cold stub behind an I64_ADD/SUB/MUL/SHL/SHR_U
+// boxability guard: both operands flush boxed to their VM stack slots at
+// base (see box's ordinary TypeI64 case - each is already proven in range by
+// its own producer, so neither truncates), unlike stub above there is no
+// retain to take because neither is a reference, the stack pointer advances
+// by the two words they occupied, one frame record resumes at ip, and the
+// trap reports fallback. first names the stub's own first virtual register.
+func overflowStub(first int32, ip int) []asm.Instruction {
 	ctrl, base := vreg(first), vreg(3)
 	return slices.Concat(
 		boxI64(vreg(first+1), vreg(0), vreg(first+2)),
