@@ -625,7 +625,30 @@ independent contract. Cases MUST be subtests; sibling top-level tests per case
 MUST NOT be created. Setter and getter behavior MUST be tested together under
 the setter owner.
 
-### 12.2 Public Contract Only
+### 12.2 Test First
+
+A test MUST be written before the code it specifies, and MUST be observed
+failing before the implementation makes it pass. The order is the point: a test
+written after the fact is shaped by the implementation it just read, and
+confirms what the code does rather than what it owes.
+
+1. Write the test, stating the contract as the caller sees it.
+2. Run it and watch it fail, for the expected reason. A test that passes before
+   the implementation exists is asserting nothing.
+3. Write the smallest implementation that makes it pass.
+4. Run the §2.3 simplification loop over the result.
+
+For a native backend this is the golden stream (§13): the intended instruction
+sequence is written down and asserted first, and the backend is then made to
+match it. Deriving the golden from whatever the backend emitted inverts the
+specification — it records the behavior instead of requiring it, and a wrong
+representation becomes the expected one.
+
+A test written after the code MUST be verified by mutation: break the line it
+covers, confirm the test fails, restore. Absent that, there is no evidence the
+test constrains anything.
+
+### 12.3 Public Contract Only
 
 Every test package MUST be the production package name plus `_test`, so a test
 is an importing client with no more access than any other caller.
@@ -635,7 +658,7 @@ test from outside is hard to use from outside, and the difficulty is the same
 difficulty: state a caller cannot observe, a result a caller cannot reach, a
 setup a caller cannot perform. Reaching into private state hides that signal
 instead of answering it. When a test cannot say what it needs to say through
-the public surface, the finding is about the API, and §12.2's closing rule
+the public surface, the finding is about the API, and §12.3's closing rule
 decides what to do about it.
 
 Tests are executable specifications. Public-contract tests MUST construct
@@ -662,7 +685,7 @@ generation boundary; being non-importable does not permit private access.
 A test-local implementation of an exported extension interface is a public API
 client and MAY be used when it does not depend on private state.
 
-### 12.3 Arrange Isolation
+### 12.4 Arrange Isolation
 
 Each `t.Run` MUST own its complete arrange. Mutable objects MUST NOT be shared
 between sibling subtests, and a parent test MUST NOT hold the object graph its
@@ -674,15 +697,15 @@ states such as cancellation, invalid input, missing values, exhaustion, or
 concurrent conflict. If no public real mechanism can produce a condition, the
 case MUST NOT be kept alive by a proxy double.
 
-### 12.4 Assertions and Cleanup
+### 12.5 Assertions and Cleanup
 
-* Use `require`, not `assert`, and pass no message argument (§12.5).
+- Use `require`, not `assert`, and pass no message argument (§12.6).
 * Defer cleanup immediately after successful allocation.
 * Keep setup, behavior, and expectation visible in one flow.
 * Aim for at most one `t.Run` level.
 * Table tests SHOULD be used when cases share one shape.
 
-### 12.5 Self-Describing Tests
+### 12.6 Self-Describing Tests
 
 A test MUST read as a specification without commentary. §2.5 applies with no
 exception for test code, and more strictly: a test explaining itself in prose
@@ -706,7 +729,7 @@ The narrow exception is a fact the test cannot express in code: why a case
 exists that looks redundant, where a magic constant came from, or the defect a
 regression test pins. Name the defect or the source.
 
-### 12.6 Runtime Parity
+### 12.7 Runtime Parity
 
 Opcode examples belong to the public `Interpreter.Run` specification. A change
 touching threaded, fused, optimized, or JIT paths MUST test every applicable
@@ -714,7 +737,7 @@ mode or state why a mode is not applicable. Tests MUST assert returned values,
 errors, encoded output, profiling snapshots, or another public observable
 boundary, never dispatch-table or lowering internals.
 
-### 12.7 Fuzzing
+### 12.8 Fuzzing
 
 Fuzz tests SHOULD target trust boundaries and semantic parity: instruction and
 program parsing, verification, type parsing, and optimizer equivalence. Inputs
@@ -820,7 +843,7 @@ Before completing a change, verify:
 * [ ] every touched symbol has a current reason to exist (§2.2);
 * [ ] another simplification pass found no safe improvement (§2.3);
 * [ ] comments carry only facts the code cannot state, in code and tests
-      (§2.5, §12.5);
+      (§2.5, §12.6);
 * [ ] relocated code was re-cut rather than copied (§2.6);
 * [ ] no behavior gained a second implementation (§2 item 11);
 * [ ] names use canonical terms (§4);

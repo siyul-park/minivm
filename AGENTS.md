@@ -39,9 +39,10 @@ A `program.Program` is threaded into one closure per instruction; a profiler pro
 1. Run `git status --short`; never overwrite or commit unrelated user changes.
 2. Read the Task Router docs for the area before changing code or tests.
 3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects. Comments are minimal by §2.5: write one only for a fact the code cannot state.
-4. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
-5. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
-6. Have a completed stage reviewed adversarially by an agent that did not write it, and iterate until that review passes, before starting the next stage. A defect costs less at the stage that introduced it than three stages later.
+4. Work test first (§12.2): write the test, watch it fail for the expected reason, then implement. For a backend, the golden instruction stream is that test - write the intended stream before making the backend match it, never after.
+5. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
+6. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
+7. Have a completed stage reviewed adversarially by an agent that did not write it, and iterate until that review passes, before starting the next stage. A defect costs less at the stage that introduced it than three stages later.
 
 ### Review Contract
 
@@ -65,12 +66,13 @@ Do not report work complete until all of these hold:
 2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
 3. A further simplification pass found no safe improvement.
 4. Code moved across a package or file boundary was re-cut, not copied (§2.6), and no behavior has a second implementation (§2 item 11).
-5. Every comment carries a fact the code cannot state (§2.5); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.5).
-6. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
-7. Performance claims carry the reproducible before/after evidence §14 requires.
-8. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
-9. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
-10. Any intentionally skipped simplification or validation is recorded with its reason.
+5. Every test was written before the code it specifies and observed failing, or was mutation-verified after the fact (§12.2).
+6. Every comment carries a fact the code cannot state (§2.5); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.6).
+7. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
+8. Performance claims carry the reproducible before/after evidence §14 requires.
+9. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
+10. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
+11. Any intentionally skipped simplification or validation is recorded with its reason.
 
 ## Task Router
 
