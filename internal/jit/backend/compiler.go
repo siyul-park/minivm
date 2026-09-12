@@ -501,10 +501,15 @@ func order(f *ssa.Function, traps []int) []int {
 // An i1, i8, and i32 live in the W lane: their whole representation is a raw
 // payload of that width, carrying no runtime tag, so the register the
 // compiler hands out for one is already the view every consumer wants (see
-// docs/value-representation.md). An i64 and a reference still take the X
-// lane - an i64 may be heap-promoted and a reference is held boxed
-// throughout, neither of which this port has narrowed - and so does an f64,
-// paired with an f32's own 32-bit float register.
+// docs/value-representation.md). An i64 takes the X lane at its own full
+// width regardless of what it holds: a machine that has proven a value
+// cannot leave the boxed 49-bit lane may keep it raw there, and one it has
+// not proven that of keeps it boxed, but an i64's raw and boxed forms share
+// one register width either way, unlike i32's narrower one - so bank names
+// only the width, and a machine's own guard is what earns a value the raw
+// form within it. A reference is held boxed throughout, which this port has
+// not narrowed, and so does an f64, paired with an f32's own 32-bit float
+// register.
 func bank(t ssa.Type) (asm.RegType, asm.RegWidth) {
 	switch t {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:

@@ -112,6 +112,37 @@ blk0: ()
 	exit state v3
 `, ssa.Format(out))
 	})
+
+	// An i64 slot may hold either an inline value or a reference to one
+	// Interpreter.boxI64 heap-promoted, and only the tag on the loaded word
+	// tells them apart. load states that as an OpGuardKind immediately after
+	// the OpLoad, carrying the interpreter state OpLoad itself cannot (see
+	// ssa.Verify's rule that OpLoad never deoptimizes): the guard resumes at
+	// the LOCAL_GET's own IP with the stack the load has not pushed onto yet,
+	// which is what lets a heap-promoted value deopt before the opcode ever
+	// runs rather than after. This is a frontend-level fact independent of
+	// which backend later chooses to lower OpGuardKind - see
+	// internal/jit/arm64/guard.go's guardI64 for the one that does.
+	t.Run("guards an i64 slot load against a heap-promoted value", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:i64 = load local[0]
+	v3:state = state {addr=1 base=0 ip=0 returns=1 stack=[]}
+	v2:i64 = guard.kind v1 state v3
+	return v2
+`, ssa.Format(out))
+	})
 }
 
 func TestBody(t *testing.T) {
@@ -696,6 +727,25 @@ func corpus(t *testing.T) []fixture {
 			}),
 		},
 		Globals: []types.Kind{types.KindI32},
+	})
+
+	// The first shape in this corpus to emit OpGuardKind: an i64 local and an
+	// i64 global both round-trip through load's new guard, and the bitwise
+	// op and widen below it exercise the rest of the boxable-by-construction
+	// subset the ARM64 backend narrows to raw. The differential check is
+	// cheap and this is the guard's first tenant in the tree.
+	add("i64 local and global", &jit.Input{
+		Address: 1,
+		Function: &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}},
+			Locals: []types.Type{types.TypeI64},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_TO_I64_S).Emit(instr.LOCAL_SET, 1)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.GLOBAL_GET, 0).Emit(instr.I64_AND).Emit(instr.GLOBAL_SET, 0)
+				b.Emit(instr.GLOBAL_GET, 0).Emit(instr.RETURN)
+			}),
+		},
+		Globals: []types.Kind{types.KindI64},
 	})
 
 	add("unreachable block", &jit.Input{Address: 1, Function: &types.Function{

@@ -453,6 +453,16 @@ func (w *walk) load(space ssa.Space, index int) bool {
 	}
 	value := w.b.Value(t)
 	w.b.Add(w.block, ssa.Operation{Op: ssa.OpLoad, Slot: slot, Results: []ssa.Value{value}})
+	if out.kind == types.KindI64 {
+		guarded := w.b.Value(t)
+		w.b.Add(w.block, ssa.Operation{
+			Op:      ssa.OpGuardKind,
+			Args:    []ssa.Value{value},
+			State:   w.deopt(),
+			Results: []ssa.Value{guarded},
+		})
+		value = guarded
+	}
 	w.push(value, out)
 	return true
 }

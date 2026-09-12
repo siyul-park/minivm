@@ -7965,6 +7965,94 @@ func TestARM64_StructGetFieldKindDeopt(t *testing.T) {
 	}), float64(0))
 }
 
+// TestARM64_I64GuardKind is the end-to-end judgment for the SSA machine's own
+// i64 kind guard: a slot declared i64 may hold either an inline value or a
+// reference to one Interpreter.boxI64 heap-promoted, and only the tag on the
+// loaded word tells them apart. Not the golden stream's instruction shape,
+// but that real ARM64 code produces the right answer for both branches.
+func TestARM64_I64GuardKind(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	// This is the regression test for the box defect this stage fixed: an
+	// i64's top 16 bits are not free the way i32's are, because bit 48 is
+	// the boxed 49-bit payload's own sign bit (types.VBits), not a bit a tag
+	// MOVK may overwrite. A positive-only fixture cannot show that a
+	// MOVK-based box corrupts negative values while leaving positive ones
+	// untouched, because the corruption only touches bit 48 when it is set.
+	t.Run("boxes a negative inline i64 bit-for-bit", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+		}, program.WithGlobals(types.TypeI64))
+
+		profile := prof.New()
+		vm := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
+		defer func() { require.NoError(t, vm.Close()) }()
+
+		// Reset restores every global to its declared zero value (see
+		// Interpreter.seed), so the global is set fresh on each pass rather
+		// than once before the loop.
+		for range 8 {
+			vm.Reset()
+			require.NoError(t, vm.SetGlobal(0, types.BoxI64(-7)))
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI64(-7), got,
+				"native code's boxed word must match types.BoxI64's own bits bit-for-bit")
+		}
+
+		require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_entries_total", func([]prof.Label) bool { return true }), float64(0))
+	})
+
+	// The mirror case: a global declared i64 but holding a reference to a
+	// heap-promoted value must deopt rather than let native code read the
+	// ref's address as though it were the value's own payload. The
+	// heap-promoted value is produced the way the interpreter itself
+	// produces one - I64_CONST's own threaded handler heap-promotes an
+	// out-of-range literal through Interpreter.boxI64 - rather than built by
+	// hand, which is a stronger fixture: it proves the guard fires on a
+	// value the VM actually produces. That constant cannot sit in the same
+	// function the guarded read does, though: an i64 literal outside the
+	// boxed range is refused at the frontend that also handles the read
+	// (frontend/walk.go's constant, shared by both), so the two run as
+	// separate functions - one to poison the global, always threaded, and
+	// one to read it back, which is what this test JIT-compiles and judges.
+	t.Run("exits on a heap-promoted i64", func(t *testing.T) {
+		const outOfRange = int64(1) << 50
+		poison := types.NewFunctionBuilder(&types.FunctionType{}).
+			Emit(instr.New(instr.I64_CONST, uint64(outOfRange)), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+		reader := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
+			Emit(instr.New(instr.GLOBAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+		}, program.WithConstants(poison, reader), program.WithGlobals(types.TypeI64))
+
+		profile := prof.New()
+		vm := interp.New(prog, interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
+		defer func() { require.NoError(t, vm.Close()) }()
+
+		for range 8 {
+			vm.Reset()
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I64(outOfRange), got,
+				"the value must come back correct whichever path handled it, native fallback included")
+		}
+
+		require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_entries_total", func([]prof.Label) bool { return true }), float64(0),
+			"reader's own root - clean of the poisoning function's unboxable constant - must still compile natively")
+		require.Greater(t, jitMetricSum(vm, profile, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+			return jitLabel(labels, "reason") == "guard-kind"
+		}), float64(0), "the guard must actually have fired, not merely have been available to fire")
+	})
+}
+
 func TestARM64_StructGetFieldKinds(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")

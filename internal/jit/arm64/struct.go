@@ -175,9 +175,9 @@ func (e *emitter) hostRead(guard, get ssa.Operation) bool {
 }
 
 // resultKind resolves the types.Kind a STRUCT_GET's SSA result type names, or
-// false for one this machine has no lane for: an i64 result may be
-// heap-promoted and a ref result is owned by whoever receives it, and this
-// machine emits the boxability guard behind neither (see lane).
+// false for one this machine cannot receive: an i64 field may be
+// heap-promoted, and nothing proves a field boxable the way a slot load's own
+// guard does, while a ref result is owned by whoever receives it.
 func resultKind(t ssa.Type) (types.Kind, bool) {
 	switch t {
 	case ssa.TypeI1:

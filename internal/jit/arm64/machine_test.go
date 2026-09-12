@@ -93,6 +93,163 @@ func TestNew(t *testing.T) {
 			}...),
 		},
 		{
+			name: "widens a signed i32 into i64",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, ^uint64(6)).Emit(instr.I32_TO_I64_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(2, 3, 4),
+				asmarm64.LDI(narrow(0), uint64(^uint32(6))),
+				[]asm.Instruction{asmarm64.SXTW(vreg(1), narrow(0))},
+				boxI64(vreg(5), vreg(1), vreg(6)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(5), vreg(2), 0),
+					asmarm64.MOV(vreg(7), vreg(5)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			name: "widens an unsigned i32 into i64",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 7).Emit(instr.I32_TO_I64_U).Emit(instr.RETURN) }),
+			}),
+			want: slices.Concat(
+				prologue(2, 3, 4),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 7, 0),
+					asmarm64.UXTW(vreg(1), narrow(0)),
+				},
+				boxI64(vreg(5), vreg(1), vreg(6)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(5), vreg(2), 0),
+					asmarm64.MOV(vreg(7), vreg(5)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			name: "materializes an inline i64 constant",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I64_CONST, ^uint64(6)).Emit(instr.RETURN) }),
+			}),
+			want: slices.Concat(
+				prologue(1, 2, 3),
+				asmarm64.LDI(vreg(0), ^uint64(6)),
+				boxI64(vreg(4), vreg(0), vreg(5)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(4), vreg(1), 0),
+					asmarm64.MOV(vreg(6), vreg(4)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			name: "ands inline i64 values",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, 7).Emit(instr.I64_CONST, 3).Emit(instr.I64_AND).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 7, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.AND(vreg(2), vreg(0), vreg(1)),
+				},
+				boxI64(vreg(6), vreg(2), vreg(7)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(6), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(6)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			name: "ors inline i64 values",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, 4).Emit(instr.I64_CONST, 3).Emit(instr.I64_OR).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 4, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.ORR(vreg(2), vreg(0), vreg(1)),
+				},
+				boxI64(vreg(6), vreg(2), vreg(7)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(6), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(6)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			name: "xors inline i64 values",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, 7).Emit(instr.I64_CONST, 3).Emit(instr.I64_XOR).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 7, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.EOR(vreg(2), vreg(0), vreg(1)),
+				},
+				boxI64(vreg(6), vreg(2), vreg(7)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(6), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(6)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			name: "shifts an inline i64 right arithmetically",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, ^uint64(7)).Emit(instr.I64_CONST, 1).Emit(instr.I64_SHR_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				asmarm64.LDI(vreg(0), ^uint64(7)),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(1), 1, 0),
+					asmarm64.ANDI(vreg(6), vreg(1), 0x3F),
+					asmarm64.ASR(vreg(2), vreg(0), vreg(6)),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
 			// A constant materializes its unboxed form, which boxing then
 			// masks and tags. The unboxed move is dead whenever every use is
 			// a boxing one, as it is here: removing it needs a sweep over the
@@ -200,6 +357,93 @@ func TestNew(t *testing.T) {
 				asmarm64.MOV(vreg(8), vreg(7)),
 				asmarm64.RET(),
 			}...),
+		},
+		{
+			name: "compares inline i64 values",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI1}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, 7).Emit(instr.I64_CONST, 3).Emit(instr.I64_EQ).Emit(instr.RETURN)
+				}),
+			}),
+			want: append(prologue(3, 4, 5), []asm.Instruction{
+				asmarm64.MOVZ(vreg(0), 7, 0),
+				asmarm64.MOVZ(vreg(1), 3, 0),
+				asmarm64.CMP(vreg(0), vreg(1)),
+				asmarm64.CSET(narrow(2), asmarm64.CondEQ),
+				asmarm64.MOV(vreg(6), vreg(2)),
+				asmarm64.MOVK(vreg(6), tag(types.KindI1), 48),
+				asmarm64.STR(vreg(6), vreg(3), 0),
+				asmarm64.MOV(vreg(7), vreg(6)),
+				asmarm64.RET(),
+			}...),
+		},
+		{
+			name: "tests an inline i64 value for zero",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI1}},
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I64_CONST, 0).Emit(instr.I64_EQZ).Emit(instr.RETURN) }),
+			}),
+			want: append(prologue(2, 3, 4), []asm.Instruction{
+				asmarm64.MOVZ(vreg(0), 0, 0),
+				asmarm64.CMPI(vreg(0), 0),
+				asmarm64.CSET(narrow(1), asmarm64.CondEQ),
+				asmarm64.MOV(vreg(5), vreg(1)),
+				asmarm64.MOVK(vreg(5), tag(types.KindI1), 48),
+				asmarm64.STR(vreg(5), vreg(2), 0),
+				asmarm64.MOV(vreg(6), vreg(5)),
+				asmarm64.RET(),
+			}...),
+		},
+		{
+			name: "loads an inline i64 local through a kind guard",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ:  &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN) }),
+			}),
+			// The guard's own fail label is the compile's first, so it is
+			// label 1 (see shapeExit's identical numbering for the read
+			// goldens above). Its stub flushes nothing - the pre-op stack is
+			// empty for a LOCAL_GET at the top of the function - so it goes
+			// straight from publishing sp to the frame record.
+			want: slices.Concat(
+				prologue(2, 3, 4),
+				[]asm.Instruction{
+					asmarm64.LDR(vreg(0), vreg(2), 0),
+					asmarm64.LSRI(vreg(5), vreg(0), uint8(types.VBits)),
+				},
+				asmarm64.LDI(vreg(6), types.Tag(types.KindI64)>>types.VBits),
+				[]asm.Instruction{
+					asmarm64.CMP(vreg(5), vreg(6)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 1),
+					asmarm64.SBFX(vreg(1), vreg(0), 0, types.VBits),
+				},
+				boxI64(vreg(7), vreg(1), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(2), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+					asmarm64.ADDI(vreg(12), vreg(11), 1),
+					asmarm64.STR(vreg(12), vreg(10), int16(journal.CellSP*8)),
+					asmarm64.MOVZ(vreg(13), 1, 0),
+					asmarm64.STP(vreg(13), vreg(11), vreg(10), int16(journal.At(0, journal.RecordAddr)*8)),
+					asmarm64.MOVZ(vreg(14), 0, 0),
+					asmarm64.MOVZ(vreg(15), 1, 0),
+					asmarm64.STP(vreg(14), vreg(15), vreg(10), int16(journal.At(0, journal.RecordIP)*8)),
+					asmarm64.MOVZ(vreg(16), 1, 0),
+					asmarm64.STR(vreg(16), vreg(10), int16(journal.CellDepth*8)),
+					asmarm64.MOVZ(vreg(17), 1, 0),
+					asmarm64.STR(vreg(17), vreg(10), int16(journal.CellExitID*8)),
+					asmarm64.MOVZ(vreg(18), uint16(journal.TrapFallback), 0),
+					asmarm64.STR(vreg(18), vreg(10), int16(journal.CellTrap*8)),
+					asmarm64.MOVZ(vreg(19), 0, 0),
+					asmarm64.STR(vreg(19), vreg(10), int16(journal.CellNextIP*8)),
+					asmarm64.RET(),
+				},
+			),
 		},
 		{
 			// A float lives in the float bank between operations, so one
@@ -631,15 +875,6 @@ func TestNew(t *testing.T) {
 			}),
 		},
 		{
-			name: "an i64 local, whose load needs a guard",
-			input: input(1, &types.Function{
-				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
-				Code: assemble(t, func(b *instr.Builder) {
-					b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-				}),
-			}),
-		},
-		{
 			name: "a frame holding a reference",
 			input: input(1, &types.Function{
 				Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
@@ -663,8 +898,10 @@ func TestNew(t *testing.T) {
 		},
 		{
 			// An i64 element may be heap-promoted, so reading one needs the
-			// boxability guard and the register lane this machine has neither
-			// of.
+			// boxability guard this machine emits behind no container access -
+			// only a slot load's own kind guard (see guardI64). i64 now shares
+			// i32's lane (see lane), so read's own switch is what still
+			// declines it, by naming no case for types.KindI64.
 			name: "an i64 array element",
 			input: func() *jit.Input {
 				in := input(1, &types.Function{
@@ -677,6 +914,53 @@ func TestNew(t *testing.T) {
 				in.Objects[2] = jit.Object{Array: jit.Itab(types.TypedArray[int64]{1})}
 				return in
 			}(),
+		},
+		{
+			// I64_ADD can overflow the boxed 49-bit payload, so it needs the
+			// checked, heap-promoting path only the plan pipeline has - unlike
+			// I64_AND/OR/XOR and I64_SHR_S, which cannot (see Lowers).
+			name: "an i64 add, which can overflow the boxed payload",
+			input: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
+				}),
+			}),
+		},
+		{
+			// The SHR_U/SHR_S asymmetry: a logical right shift of a
+			// sign-extended negative value fills in from the top with zeros
+			// it should not have, producing a huge positive value outside the
+			// boxable range, so I64_SHR_U stays checked and declines here
+			// while I64_SHR_S above compiles unchecked.
+			name: "an i64 logical right shift, which can turn a bounded value huge",
+			input: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I64_SHR_U).Emit(instr.RETURN)
+				}),
+			}),
+		},
+		{
+			name: "an i64 divide",
+			input: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I64_DIV_S).Emit(instr.RETURN)
+				}),
+			}),
+		},
+		{
+			// A float-to-i64 conversion can produce a magnitude past the
+			// boxable range the same way an out-of-range I64_CONST would,
+			// so it stays on the checked, heap-promoting path.
+			name: "a float-to-i64 conversion",
+			input: input(1, &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeF64}, Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.F64_TO_I64_S).Emit(instr.RETURN)
+				}),
+			}),
 		},
 		{
 			name: "a call, whose frame it does not open",
@@ -801,6 +1085,23 @@ func prologue(base, bp, stack int32) []asm.Instruction {
 		asmarm64.LSLI(vreg(base), vreg(bp), 3),
 		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
 	}
+}
+
+// boxI64 is the instruction sequence box emits for a raw i64 value: mask to
+// the boxed payload width, then OR the kind tag in. It cannot be the MOVK
+// shape i1/i8/i32 use, because bit 48 of the 49-bit payload (types.VBits) is
+// that payload's own sign bit, not a bit box is free to overwrite - a MOVK
+// there would corrupt every negative value. Masking first and using ORR
+// (Tag's own bits never reach below bit 49, so the two halves never overlap)
+// keeps it exact for both signs. src is the raw i64 value being boxed, out
+// is box's own fresh result register, and tagReg is box's own fresh scratch
+// register for the loaded tag word.
+func boxI64(out, src, tagReg asm.VReg) []asm.Instruction {
+	return slices.Concat(
+		[]asm.Instruction{asmarm64.ANDI(out, src, types.VMask)},
+		asmarm64.LDI(tagReg, uint64(types.Tag(types.KindI64))),
+		[]asm.Instruction{asmarm64.ORR(out, out, tagReg)},
+	)
 }
 
 // shapeExit, boundsExit, and kindExit are the labels the guarded reads' cold

@@ -33,6 +33,35 @@ func (e *emitter) fused(guard, get ssa.Operation) bool {
 	return e.lanes(ssa.TypeI32, get.Args[1])
 }
 
+// guardI64 admits only a slot-loaded i64 word whose runtime tag is still
+// inline, and refines it into the raw sign-extended i64 view every consumer
+// this machine emits for one expects. It is what frontend/walk.go's load
+// pairs with an i64-typed OpLoad, because the loaded word may equally be a
+// reference to a value Interpreter.boxI64 heap-promoted, and only the tag
+// says which. It shares cell's own tag test (see admit) rather than
+// reopening it, and the sign-extract mirrors deopt.go's sign64: a value that
+// loads successfully is boxable by construction, so nothing after this
+// re-checks its range.
+func (e *emitter) guardI64(op ssa.Operation) bool {
+	if len(op.Args) != 1 || len(op.Results) != 1 {
+		return false
+	}
+	if e.c.Func().Type(op.Args[0]) != ssa.TypeI64 || e.c.Func().Type(op.Results[0]) != ssa.TypeI64 {
+		return false
+	}
+	fail, ok := e.exit(op.State, prof.ExitGuardKind)
+	if !ok {
+		return false
+	}
+	src := e.c.Reg(op.Args[0])
+	dst := e.c.Reg(op.Results[0])
+	tag := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LSRI(tag, src, uint8(types.VBits)))
+	e.admit(tag, uint64(types.Tag(types.KindI64))>>types.VBits, fail)
+	e.a.Emit(arm64.SBFX(dst, src, 0, types.VBits))
+	return true
+}
+
 // guard admits only a container whose runtime type is the shape this compile
 // was specialized against, and returns the heap cell it walked the reference
 // to, which is what the read behind it loads through instead of resolving the

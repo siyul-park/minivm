@@ -61,6 +61,11 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.I32_EQZ, instr.I32_EQ, instr.I32_NE,
 		instr.I32_LT_S, instr.I32_LE_S, instr.I32_GT_S, instr.I32_GE_S,
 		instr.I32_LT_U, instr.I32_LE_U, instr.I32_GT_U, instr.I32_GE_U,
+		instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQZ,
+		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LE_S,
+		instr.I64_GT_S, instr.I64_GE_S, instr.I64_LT_U, instr.I64_LE_U,
+		instr.I64_GT_U, instr.I64_GE_U, instr.I64_SHR_S,
+		instr.I32_TO_I64_S, instr.I32_TO_I64_U,
 		instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV,
 		instr.F32_ABS, instr.F32_NEG, instr.F32_SQRT,
 		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_LE, instr.F32_GT, instr.F32_GE,
@@ -178,6 +183,11 @@ func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 		return 1, e.store(op)
 	case ssa.OpExec:
 		return 1, e.exec(op)
+	case ssa.OpGuardKind:
+		// guardI64 is the only OpGuardKind admission this machine emits, and
+		// it validates its own arity and type - no fusion window to inspect
+		// here, unlike OpGuardShape below, so nothing is left to check first.
+		return 1, e.guardI64(op)
 	case ssa.OpGuardShape:
 		// The opcode test is load-bearing, not defence in depth. Each of
 		// read, structRead, and hostRead re-derives everything else it needs
@@ -264,6 +274,8 @@ func (e *emitter) constant(op ssa.Operation) bool {
 	switch typ {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
 		e.a.Emit(arm64.LDI(dst, uint64(uint32(op.Const)))...)
+	case ssa.TypeI64:
+		e.a.Emit(arm64.LDI(dst, uint64(op.Const.I64()))...)
 	case ssa.TypeF32:
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDI(bits, uint64(uint32(op.Const)))...)
@@ -300,7 +312,7 @@ func (e *emitter) load(op ssa.Operation) bool {
 	}
 	dst := e.c.Reg(op.Results[0])
 	switch e.c.Func().Type(op.Results[0]) {
-	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32, ssa.TypeRef:
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32, ssa.TypeI64, ssa.TypeRef:
 		e.a.Emit(arm64.LDR(dst, base, int16(off*8)))
 	case ssa.TypeF32:
 		boxed := e.a.Reg(asm.RegTypeInt, asm.Width64)
@@ -357,13 +369,13 @@ func (e *emitter) exec(op ssa.Operation) bool {
 	case instr.I32_XOR:
 		return e.binary(op, ssa.TypeI32, arm64.EOR)
 	case instr.I32_SHL:
-		return e.shift(op, arm64.LSL)
+		return e.shift(op, ssa.TypeI32, 0x1F, arm64.LSL)
 	case instr.I32_SHR_S:
-		return e.shift(op, arm64.ASR)
+		return e.shift(op, ssa.TypeI32, 0x1F, arm64.ASR)
 	case instr.I32_SHR_U:
-		return e.shift(op, arm64.LSR)
+		return e.shift(op, ssa.TypeI32, 0x1F, arm64.LSR)
 	case instr.I32_EQZ:
-		return e.eqz(op)
+		return e.eqz(op, ssa.TypeI32)
 	case instr.I32_EQ:
 		return e.compare(op, ssa.TypeI32, arm64.CondEQ)
 	case instr.I32_NE:
@@ -384,6 +396,41 @@ func (e *emitter) exec(op ssa.Operation) bool {
 		return e.compare(op, ssa.TypeI32, arm64.CondHI)
 	case instr.I32_GE_U:
 		return e.compare(op, ssa.TypeI32, arm64.CondCS)
+
+	case instr.I64_AND:
+		return e.binary(op, ssa.TypeI64, arm64.AND)
+	case instr.I64_OR:
+		return e.binary(op, ssa.TypeI64, arm64.ORR)
+	case instr.I64_XOR:
+		return e.binary(op, ssa.TypeI64, arm64.EOR)
+	case instr.I64_EQZ:
+		return e.eqz(op, ssa.TypeI64)
+	case instr.I64_EQ:
+		return e.compare(op, ssa.TypeI64, arm64.CondEQ)
+	case instr.I64_NE:
+		return e.compare(op, ssa.TypeI64, arm64.CondNE)
+	case instr.I64_LT_S:
+		return e.compare(op, ssa.TypeI64, arm64.CondLT)
+	case instr.I64_LE_S:
+		return e.compare(op, ssa.TypeI64, arm64.CondLE)
+	case instr.I64_GT_S:
+		return e.compare(op, ssa.TypeI64, arm64.CondGT)
+	case instr.I64_GE_S:
+		return e.compare(op, ssa.TypeI64, arm64.CondGE)
+	case instr.I64_LT_U:
+		return e.compare(op, ssa.TypeI64, arm64.CondCC)
+	case instr.I64_LE_U:
+		return e.compare(op, ssa.TypeI64, arm64.CondLS)
+	case instr.I64_GT_U:
+		return e.compare(op, ssa.TypeI64, arm64.CondHI)
+	case instr.I64_GE_U:
+		return e.compare(op, ssa.TypeI64, arm64.CondCS)
+	case instr.I64_SHR_S:
+		return e.shift(op, ssa.TypeI64, 0x3F, arm64.ASR)
+	case instr.I32_TO_I64_S:
+		return e.widen(op, true)
+	case instr.I32_TO_I64_U:
+		return e.widen(op, false)
 
 	case instr.F32_ADD:
 		return e.binary(op, ssa.TypeF32, arm64.FADD)
@@ -462,6 +509,27 @@ func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, s
 	return true
 }
 
+// widen lowers I32_TO_I64_S/U. Either direction is always boxable: an i32's
+// magnitude is at most 2^31, far inside the 49-bit boxed lane, so neither
+// needs the guard an i64 slot load does (see guardI64). Signed widening
+// sign-extends the W-lane value into the X lane with one SXTW; unsigned
+// widening zero-extends it, which every W-register write already does for
+// free (see widen64) - the raw i32 view is already the correct raw i64 one,
+// so UXTW here is the same one-instruction move into the result's own
+// register rather than a reinterpretation of the source's.
+func (e *emitter) widen(op ssa.Operation, signed bool) bool {
+	if len(op.Args) != 1 || len(op.Results) != 1 || e.c.Func().Type(op.Args[0]) != ssa.TypeI32 || e.c.Func().Type(op.Results[0]) != ssa.TypeI64 {
+		return false
+	}
+	dst, src := e.c.Reg(op.Results[0]), e.c.Reg(op.Args[0])
+	if signed {
+		e.a.Emit(arm64.SXTW(dst, src))
+	} else {
+		e.a.Emit(arm64.UXTW(dst, src))
+	}
+	return true
+}
+
 func (e *emitter) unary(op ssa.Operation, want ssa.Type, emit func(dst, src asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
@@ -473,29 +541,38 @@ func (e *emitter) unary(op ssa.Operation, want ssa.Type, emit func(dst, src asm.
 	return true
 }
 
-// shift lowers an i32 shift. The value and the amount already sit raw in the
-// W lane, so nothing prepares either: the amount is masked to five bits,
-// matching what the threaded handler shifts by, and the shift itself runs
-// entirely within the 32 bits the register holds - an arithmetic right shift
-// included, since the sign bit it reads is already bit 31 of a clean value,
-// not bit 63 of a sign-extended one.
-func (e *emitter) shift(op ssa.Operation, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+// shift lowers an i32 or i64 shift. The value and the amount already sit raw
+// in want's own lane, so nothing prepares either: the amount is masked to
+// the width the underlying instruction shifts by (five bits for a 32-bit
+// register, six for a 64-bit one, matching what the threaded handler shifts
+// by), and the shift itself runs entirely within the register's own bits -
+// an arithmetic right shift included, since the sign bit it reads is already
+// the register's own top bit, never one belonging to a wider sign-extended
+// view. Only I64_SHR_S reaches the i64 path (see Lowers): it is the one i64
+// shift that cannot turn a boxable operand into an unboxable result, since
+// shrinking a bounded value's magnitude never grows it.
+func (e *emitter) shift(op ssa.Operation, want ssa.Type, mask uint64, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
-	if !e.lanes(ssa.TypeI32, op.Args[0], op.Args[1], op.Results[0]) || e.c.Func().Type(op.Results[0]) != ssa.TypeI32 {
+	if !e.lanes(want, op.Args[0], op.Args[1]) || e.c.Func().Type(op.Results[0]) != want {
 		return false
 	}
-	amount := e.a.Reg(asm.RegTypeInt, asm.Width32)
-	e.a.Emit(arm64.ANDI(amount, e.c.Reg(op.Args[1]), 0x1F))
+	width := asm.Width32
+	if want == ssa.TypeI64 {
+		width = asm.Width64
+	}
+	amount := e.a.Reg(asm.RegTypeInt, width)
+	e.a.Emit(arm64.ANDI(amount, e.c.Reg(op.Args[1]), mask))
 	e.a.Emit(emit(e.c.Reg(op.Results[0]), e.c.Reg(op.Args[0]), amount))
 	return true
 }
 
 // compare lowers a comparison to the flag test the lane want names and sets
-// the i1 its result is. An integer already sits raw in the W lane it
-// compares on, so a signed and an unsigned condition both read correct flags
-// with no narrowing; a float compares in its own bank.
+// the i1 its result is. An i32 or i64 already sits raw in the lane it
+// compares on - the W lane for the former, the X lane for the latter - so a
+// signed and an unsigned condition both read correct flags with no
+// narrowing; a float compares in its own bank.
 func (e *emitter) compare(op ssa.Operation, want ssa.Type, cond uint8) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -504,7 +581,7 @@ func (e *emitter) compare(op ssa.Operation, want ssa.Type, cond uint8) bool {
 		return false
 	}
 	a, b := e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])
-	if want == ssa.TypeI32 {
+	if want == ssa.TypeI32 || want == ssa.TypeI64 {
 		e.a.Emit(arm64.CMP(a, b))
 	} else {
 		e.a.Emit(arm64.FCMP(a, b))
@@ -513,11 +590,12 @@ func (e *emitter) compare(op ssa.Operation, want ssa.Type, cond uint8) bool {
 	return true
 }
 
-func (e *emitter) eqz(op ssa.Operation) bool {
+// eqz lowers a zero test over want's own lane to the i1 its result is.
+func (e *emitter) eqz(op ssa.Operation, want ssa.Type) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
-	if !e.lanes(ssa.TypeI32, op.Args[0]) || e.c.Func().Type(op.Results[0]) != ssa.TypeI1 {
+	if !e.lanes(want, op.Args[0]) || e.c.Func().Type(op.Results[0]) != ssa.TypeI1 {
 		return false
 	}
 	e.a.Emit(
@@ -634,6 +712,17 @@ func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 	switch typ {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
 		e.a.Emit(arm64.MOV(out, widen64(src)), arm64.MOVK(out, uint16(rawTag(typ)>>48), 48))
+	case ssa.TypeI64:
+		// A raw i64's top 16 bits are not free the way i1/i8/i32's are: bit 48
+		// is the sign bit of the 49-bit boxed payload (types.VBits), not
+		// always zero, so MOVK-ing the tag over bits 48-63 would overwrite it
+		// and corrupt every negative value. Mask to the payload width first,
+		// then OR the tag in - Tag's own bits never reach below bit 49, so the
+		// two halves never collide (see types.Box).
+		e.a.Emit(arm64.ANDI(out, src, maskI64))
+		tag := e.a.Reg(asm.RegTypeInt, asm.Width64)
+		e.a.Emit(arm64.LDI(tag, tagI64)...)
+		e.a.Emit(arm64.ORR(out, out, tag))
 	case ssa.TypeF32:
 		e.a.Emit(arm64.FMOV(out, src), arm64.MOVK(out, uint16(tagF32>>48), 48))
 	case ssa.TypeF64:
@@ -724,13 +813,15 @@ func (e *emitter) pinTo(pr asm.PReg) asm.VReg {
 }
 
 // lane is the register form values of t share, or the zero Type for one no
-// arithmetic here computes in: an i64, which needs the boxability guard this
-// machine does not emit; a reference, which is moved rather than computed;
-// and the interpreter state an OpState defines.
+// arithmetic here computes in: a reference, which is moved rather than
+// computed, and the interpreter state an OpState defines. An i64 holds a lane
+// of its own, which only a value a guard has already proven inline may enter.
 func lane(t ssa.Type) ssa.Type {
 	switch t {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
 		return ssa.TypeI32
+	case ssa.TypeI64:
+		return ssa.TypeI64
 	case ssa.TypeF32, ssa.TypeF64:
 		return t
 	default:

@@ -13,8 +13,10 @@ import (
 // one bytecode operation, so the bounds test leaves through the state the
 // guard carries. Element stride lives in the shape table, not here.
 //
-// An i64 element may be heap-promoted and a reference element is owned by
-// whoever receives it; neither has a lane or a retain here, so both decline.
+// An i64 element may be heap-promoted, and a reference element is owned by
+// whoever receives it: an i64 now shares i32's lane (see lane), but this
+// machine emits the boxability guard behind neither, so the switch below
+// still declines both by naming no case for either kind.
 //
 // The guard emits and reserves a stub before the bounds exit and the element
 // kind can still decline. Sound only because a false anywhere in lowering

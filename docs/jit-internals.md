@@ -453,23 +453,54 @@ is always already zero-extended. Unboxing one is therefore a plain 32-bit LDR
 that reads only the boxed word's low four bytes, arithmetic runs on the W lane
 directly with nothing to mask, and boxing is a 64-bit copy of that clean view
 plus one `MOVK` for the kind tag - never a mask, because there is never a
-dirty bit to remove. An `i64` and a `ref` still take a 64-bit integer register
-(an `i64` may be heap-promoted and a `ref` is held boxed throughout, neither of
-which this port has narrowed); an `f32` and an `f64` live in the float bank at
-their own width, so an arithmetic sequence costs one move in per operand and
-one out at the frame boundary rather than a pair around every opcode.
+dirty bit to remove. An `i64` takes a 64-bit integer register too, and carries
+the same kind of raw payload as `i32` when - and only when - the compiler can
+prove the value never leaves the boxed 49-bit lane (`types.VBits`): a value
+loaded out of a slot through `OpGuardKind` (see Guards below), an in-range
+`I64_CONST`, an `i32`-to-`i64` widen, a bitwise op, or an arithmetic right
+shift, none of which can produce the 49th bit an overflow needs. Boxing one
+cannot reuse `i32`'s bare `MOVK`, because bit 48 of that lane is the payload's
+own sign bit rather than a bit free for a tag to overwrite: `box` masks to
+`types.VMask` first and `ORR`s the tag in instead, since `types.Tag`'s own
+bits never reach below bit 49 and the two halves never collide. Anything that
+can overflow - `I64_ADD`/`SUB`/`MUL`/`SHL`/`SHR_U`, divide, remainder, a float
+conversion, an `i64` container element - stays on the plan pipeline's checked,
+heap-promoting path; a `ref` is held fully boxed throughout for the same
+reason an out-of-range `i64` is, and this port has not narrowed it. An `f32`
+and an `f64` live in the float bank at their own width, so an arithmetic
+sequence costs one move in per operand and one out at the frame boundary
+rather than a pair around every opcode.
 
 What it lowers, and therefore what `Lowers` admits: `i32` arithmetic, bitwise
-operations, shifts, comparisons, and `eqz`; `f32` and `f64` arithmetic, `abs`,
-`neg`, `sqrt`, and comparisons; compile-time constants, a pool reference
-included; local and global slot loads, and stores to a slot that cannot hold a
-reference; `OpGuardShape` over an array or a struct shape; `ARRAY_GET` of a
-scalar element; `STRUCT_GET` of a scalar field, against a `*types.Struct` or a
+operations, shifts, comparisons, and `eqz`; the `i64` subset that cannot
+overflow - `AND`/`OR`/`XOR`, an arithmetic right shift, every comparison, and
+`eqz` - plus `i32`-to-`i64` widening (signed and unsigned); `f32` and `f64`
+arithmetic, `abs`, `neg`, `sqrt`, and comparisons; compile-time constants, a
+pool reference included; local and global slot loads, and stores to a slot
+that cannot hold a reference; `OpGuardKind` over a slot-loaded `i64`;
+`OpGuardShape` over an array or a struct shape; `ARRAY_GET` of a scalar
+element; `STRUCT_GET` of a scalar field, against a `*types.Struct` or a
 `*HostStruct`; `OpJump` and `OpBranch`; and `OpReturn` and `OpComplete` for a
 function and a module entry. `Traps` is false throughout: an opcode this
 machine cannot compute it declines outright rather than running as an exit,
 because an unconditional exit ends the block, and every exit it emits is the
 cold path behind a guard the hot path falls through.
+
+**The `i64` kind guard.** A VM slot declared `i64` may hold either an inline
+value or a reference to one `Interpreter.boxI64` heap-promoted, and only the
+tag on the loaded word tells them apart - the same hazard `deopt.go`'s
+plan-pipeline `guardI64` exists for. `frontend/walk.go`'s `load` states it in
+the IR: an `i64`-typed `OpLoad` is always followed by an `OpGuardKind` over
+its result, carrying the `OpState` the load itself cannot (`ssa.Verify`
+refuses a state on `OpLoad`, since nothing about a plain slot read can fail).
+`guard.go`'s `guardI64` lowers it unfused, unlike a shape guard: nothing about
+proving the tag needs the heap-cell walk `guard`/`cell` do, so it stands alone
+between the `OpLoad` that produced the boxed word and every op that reads the
+now-raw result. It tests the same 3-bit tag field `cell` tests, admits only
+`tagI64`, and - having proved the word inline - sign-extends its 49-bit
+payload to the full raw `i64` view with one `SBFX`, mirroring `deopt.go`'s
+`sign64`. A value that loaded successfully is boxable by construction, so
+nothing downstream re-checks its range.
 
 **Guards and their cold stubs.** `guard.go` lowers `OpGuardShape` as the tag
 test, heap-cell walk, and itab compare the plan pipeline writes once per access
@@ -509,12 +540,14 @@ pointer mismatch is the same shape failure a wrong itab is; `hostRead` walks
 `jit.Layout`'s host offsets exactly as `heap.go`'s `hostGet` does, bounds-
 checks the field index against the view's own layout, and compares the
 field's recorded Go kind against `Shape.Host` before choosing the load width
-and extension `HostShape.Read` names. Neither reads a field whose result kind
-this machine has no lane for: an `i64` field may be heap-promoted (the
-boxability guard this machine does not emit) and a `ref` field is owned by
-whoever receives it (the retain this machine does not emit outside a cold
-stub), so both decline exactly as `read`'s array-element lowering already
-does.
+and extension `HostShape.Read` names. Neither reads an `i64` or a `ref`
+field: an `i64` now shares `i32`'s lane in principle, but a container field's
+own boxability is never proven the way a slot load's is, so `resultKind`
+simply enumerates no case for either kind; a `ref` field is owned by whoever
+receives it, which is the retain this machine does not emit outside a cold
+stub. `read`'s array-element lowering declines both the same way, through its
+own closing `switch`'s missing case rather than through `lane`, which an
+`i64` element no longer reads as zero.
 
 `emitter.exit` resolves the guard's `OpState` through
 `Compiler.Exit`, reserves a label, and queues a `stub`; `Leave` emits every
@@ -533,13 +566,16 @@ Everything else declines, which abandons the compile and leaves the root to the
 plan pipeline. It declines a loop entry (a live frame it must not unwind) and a
 back edge to a block already laid out (a safepoint budget and loop-carried
 registers it does not emit); an edge carrying block-parameter arguments (edge
-copies it does not place); `OpGuardKind`, `OpGuardBounds`, `OpGuardValue`,
-`OpRetain`, `OpRelease`, `OpBridge`, `OpExit`, `OpSuspend`, and `OpTable`; a
-frame declaring a reference local or returning one, and a store into a slot that can
-hold a reference (reference counts it does not account for); an `i64` value
-anywhere (the boxability guard it does not emit); an upvalue slot (a base only
-the closure resolves); and a `Slot` whose `Base` is not the entry frame's (an
-inlined callee's storage).
+copies it does not place); `OpGuardBounds`, `OpGuardValue`, `OpRetain`,
+`OpRelease`, `OpBridge`, `OpExit`, `OpSuspend`, and `OpTable` (`OpGuardKind`
+lowers, but only over an `i64` slot load - see above); a frame declaring a
+reference local or returning one, and a store into a slot that can hold a
+reference (reference counts it does not account for); an `i64` value that can
+overflow the boxed lane - `I64_ADD`/`SUB`/`MUL`/`SHL`/`SHR_U`, divide,
+remainder, a float conversion, and an `i64` container element, each of which
+needs the boxability guard this machine does not emit outside a slot load; an
+upvalue slot (a base only the closure resolves); and a `Slot` whose `Base` is
+not the entry frame's (an inlined callee's storage).
 
 The other heap reads the plan pipeline lowers are blocked by the IR rather than
 by this machine, and unblocking them is a frontend change. `REF_GET`,
