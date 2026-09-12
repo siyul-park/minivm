@@ -1,42 +1,31 @@
 # Memory Model
 
-How minivm heap storage, reference counting, GC, and reference ownership work.
+Heap storage, reference ownership, reference counting, and cycle collection.
 
 ## When to Read
 
-Use this document when changing code that allocates, retains, releases, loads, stores, or moves refs.
-
-For boxed value layout and kind rules, see `docs/value-representation.md`.
+Read when changing allocation, `retain`, `release`, heap objects, refs, GC, or ownership across interpreter/JIT/host boundaries.
 
 ## Source of Truth
 
-| Concern | File |
+| Concern | Owner |
 |---|---|
-| interpreter heap and RC | `interp/interp.go` |
-| threaded ref ownership | `interp/threaded.go` |
-| host heap APIs | `interp/host.go` |
-| arrays, structs, maps | `types/array.go`, `types/struct.go`, `types/map.go` |
-| boxed kind layout | `types/boxed.go` |
+| Heap and RC | `interp/interp.go` |
+| Threaded ownership | `interp/threaded.go` |
+| Host heap APIs | `interp/host.go` |
+| Heap object types | `types/array.go`, `types/struct.go`, `types/map.go` |
+| Boxed values | `types/boxed.go` |
 
-## Summary
+## Model
 
-minivm uses stable heap indices, exact reference counting, and a trial-deletion mark-and-sweep collector for cycles.
+- Heap references are stable integer indexes.
+- Heap index `0` is permanent null.
+- Only `KindRef` participates in reference counting.
+- Heap values that contain refs implement `types.Traceable`.
+- `release` is iterative.
+- Native/JIT paths must preserve the same ownership totals as threaded execution.
 
-Only `KindRef` values participate in reference counting. Primitive boxed values are copied by value and ignored by RC.
-
-Design rules:
-
-- keep ownership explicit
-- keep retain and release symmetric
-- keep heap indices stable
-- keep `release` iterative
-- prefer local ownership rules over hidden lifetime behavior
-
-## Heap Structure
-
-`Interpreter` stores heap state in parallel slices.
-
-```go
+```text
 heap  []types.Value
 rc    []int
 free  []int
@@ -44,307 +33,69 @@ trial []int
 work  []int
 ```
 
-Allocation returns a stable integer heap index. Heap indices never move, because `KindRef` values store heap indices in stack slots, constants, globals, closures, and heap objects.
+## Ownership
+
+| Operation | Ownership |
+|---|---|
+| `Alloc` | returns one owned reference |
+| `Retain` | creates one additional ownership |
+| `Release` | drops one ownership |
+| stack push | owns a pushed `KindRef` |
+| stack load | borrows the slot's ownership |
+| local/global/upvalue store | retains new value and releases old value |
+| `DUP` | creates one additional ownership |
+| `CLOSURE_NEW` | transfers function/capture ownership into closure |
+| `RETURN` | releases the retiring frame's remaining owned slots |
+
+JIT deferred refs may borrow the retain held by backing storage. Before a deopt, bridge, or other interpreter-visible transfer, the native path must restore the ownership the interpreter expects.
 
 ## Reference Counting
 
-Reference counting is handled by threaded handlers and host APIs.
-
-| Operation | RC behavior |
-|---|---|
-| push ref to stack | retain ref |
-| pop or consume ref from stack | release ref |
-| `DUP` ref | retain ref |
-| `DROP` ref | release ref |
-| store ref to local/global/upvalue | retain new ref, release old ref |
-| overwrite ref field/element | retain or transfer new ref, release old ref |
-| map replace/delete/clear | release map-owned refs |
-| `CLOSURE_NEW` | transfer popped function and upvalues into closure |
-| suspend closure coroutine | transfer callable, stack image, and yielded value; trace upvalues through callable |
-| `RETURN` | release every frame slot below the returned values |
-
-A frame owns its params, its locals, and any operands still stacked beneath the
-values it returns. Only the returns pass to the caller, so `RETURN` releases the
-rest before collapsing the frame, exactly as an exception unwind does. Leaving
-them unreleased inflates counts that no owner backs, and trial deletion reads an
-inflated count as ownership outside the heap, so such a leak is unreclaimable.
-
 `retain(addr)` increments `rc[addr]`.
 
-`release(addr)` decrements `rc[addr]`. When the count reaches zero, it collects nested refs from `Traceable.Refs`, closes the value when needed, clears the heap slot, appends the address to `free`, and repeats for nested refs with an explicit work stack.
+`release(addr)` decrements it. A zero count clears the slot, returns the index to `free`, and releases nested references using an explicit work stack.
 
-`release` must remain iterative to avoid deep-recursion failures on large object graphs.
+The count includes every ownership edge, including heap objects, frames, globals, stack values, temporaries, coroutines, and host references.
 
-Counts include every ownership edge, whether it comes from another heap object,
-the VM stack and frames, a global or constant, temporary construction state, or
-the host. The cycle collector relies on this exactness.
-
-The ARM64 JIT may compile a stack copy of a ref as *deferred*: the operand
-borrows the retain already held by its backing storage (a local, global, upval,
-or constant) instead of taking its own, which removes the per-element
-retain/release pair from primitive container loops. The invariant is unchanged:
-every path that hands the value to interpreter-visible state — an ownership
-transfer, a guard exit stub, or a trap-fallback/module-completion redeem — takes
-exactly one retain first, so net counts stay exact and symmetric on every path,
-including deopts. See `docs/jit-internals.md` (Reference Ownership).
-
-## Shared String Buffers
-
-`string.concat` results share one append-only byte buffer per `Interpreter`.
-When a join's left operand ends exactly where that buffer ends, the right
-operand is appended past that end and the result is published as a **new** heap
-ref viewing the longer prefix; any other left operand starts a fresh buffer from
-a copy. Two rules keep this safe without consulting reference counts:
-
-- A published string is never mutated. Growth only writes above every published
-  length, so each ref keeps its own content however many holders it has, and a
-  reallocating append leaves earlier refs pointing at the old array.
-- The buffer is per-interpreter state, so `Reset` clears it and a speculative
-  trace clone starts its own. A committed append must never rewrite bytes a
-  captured string already published.
-
-`tail` keeps its current backing array alive until the next join replaces it, and
-a reallocating append leaves earlier refs owning the array they were published
-from. Retained storage is therefore not bounded to one buffer: every still
-reachable string holds its own backing array, exactly as separately copied
-strings would.
-
-## Traceable Values
-
-Heap objects that can contain refs implement `types.Traceable`.
+## `Traceable`
 
 ```go
 Refs(dst []types.Ref) []types.Ref
 ```
 
-Contract:
+Implementations append child references to `dst` without mutating existing entries and avoid allocation when there are no children.
 
-- append nested refs to `dst`
-- return `dst` unchanged when there are no nested refs
-- do not allocate unless a child ref exists
-- preserve append-only behavior
+## Cycle Collection
 
-This contract lets `release` and GC reuse caller-owned scratch storage.
+GC uses trial deletion over the current heap graph:
 
-## Allocation
+1. copy exact counts into `trial`;
+2. subtract heap-to-heap edges;
+3. treat positive residual counts as external ownership;
+4. mark from externally owned objects;
+5. reclaim allocated unmarked objects;
+6. repair surviving exact counts.
 
-`alloc(val types.Value)` creates one owned heap reference.
+It handles self-cycles and multi-object cycles without moving heap indexes.
 
-Allocation order:
+Collection runs at an adaptive goal and may also run when storage or the hard heap limit requires it. A hard limit is checked after collection and free-list reuse.
 
-1. run GC when occupied slots reach the adaptive goal
-2. reuse an index from `free`
-3. run GC if backing storage or the hard limit is reached and this
-   allocation has not collected yet
-4. reuse a slot freed by GC if available
-5. return `ErrHeapExhausted` if the hard limit still applies
-6. otherwise append or grow heap storage
+## Strings
 
-An allocation attempt runs GC at most once.
+String concatenation may reuse an interpreter-local append buffer, but published strings are immutable. Growth only writes beyond every published length; reallocation leaves older strings attached to their old storage.
 
-`WithHeap(n)` sets initial heap capacity. Subject to the hard limit, the initial
-GC goal is at least that capacity and at least 64 slots beyond the baseline heap.
+## Reset and Reuse
 
-`WithHeapLimit(n)` sets a hard heap entry limit. Values `n <= 0` mean
-unlimited. It also clamps the adaptive goal.
+`Reset` invalidates runtime objects, recomputes the collection goal, and may reuse cleared generic-array headers and backing storage. Pooled headers never retain their previous type or contents.
 
-The max limit is checked after GC and free-list reuse, so collectable objects
-do not block future allocations.
+## Host Rules
 
-Public host APIs that allocate, such as `Alloc`, `Push`, and `Marshal`, return `ErrHeapExhausted` as ordinary errors.
+Host-owned references use the same `Retain`/`Release` model as guest ownership. Host values do not implicitly own VM refs.
 
-### Reset-time generic-array reuse
-
-`Reset` invalidates every live dynamic object. Before clearing those slots, the
-interpreter keeps released `*types.Array` headers in an interpreter-local pool
-capped by that run's dynamic heap size. Generic-array construction may reuse
-those headers and their `[]types.Boxed` backing storage on the next run.
-
-Reset clears the entire retained backing store before the header is pooled. `Typ`
-is cleared, so reuse never observes the previous array's type or contents. Arrays
-detached through `Pop` or reclaimed before reset are not pooled; their returned
-Go values remain intact. `Close` drops the pool.
-
-## GC
-
-GC uses trial deletion to derive roots from exact reference counts instead of
-maintaining a second root registry.
-
-GC runs when occupied slots reach an adaptive goal. Backing-storage
-exhaustion and the hard heap limit remain forced collection points even when
-the goal is higher.
-
-After collection, the next goal is derived from the live set:
-
-```text
-live = len(heap) - len(free)
-dynamic = max(live - base, 0)
-goal = live + max(dynamic, 64)
-```
-
-The hard heap limit clamps `goal`, and `goal` never falls below `live`. The
-64-slot minimum avoids repeated collection for small heaps; larger dynamic live
-sets receive roughly their current size as allocation runway. `Reset` recomputes
-the goal from the baseline heap instead of inheriting the previous run's target.
-
-High-level flow:
-
-1. copy each allocated slot's exact `rc` into the reused `trial` table
-2. subtract every heap-to-heap edge reported by `Traceable.Refs`
-3. treat positive residual counts as owners outside the heap graph
-4. mark transitively from those externally owned objects
-5. reclaim every allocated unmarked slot as cyclic garbage
-6. subtract dead-to-live edges from surviving exact counts
-
-A residual external count covers stack, constant, global, frame, coroutine,
-temporary construction, and host ownership uniformly. Host-held addresses
-therefore survive collection without a separate pin table.
-
-Properties:
-
-- handles self-cycles, multi-object cycles, and duplicate edges
-- preserves objects with any external ownership
-- reuses O(heap slots) trial and work buffers after their first growth
-- does not compact
-- keeps heap indices stable
-- pause cost is proportional to allocated slots plus traced edges
-
-## Invariants
-
-### Heap index 0 is always null
-
-`heap[0]` is reserved for `Null`. `interp.New` initializes index `0` with RC `1` before user code runs.
-
-Rules:
-
-- never free it
-- never put it in `free`
-- releasing `BoxedNull` is a no-op
-- `BoxedNull` is `BoxRef(0)`
-- a null ref is not always the `BoxedNull` bit pattern: `struct.new_default`
-  zero-fills, so an unset `KindRef` field reads back as `Boxed(0)`. Null-ness is
-  `Boxed.Ref() == 0`, a test on the ref payload, and every consumer — threaded,
-  fused, or native — must use it rather than comparing the whole boxed word
-
-### Only refs use RC
-
-Primitive boxed values do not participate in reference counting. Only `KindRef` values are tracked.
-
-### RC must be exact and symmetric
-
-Every ownership edge contributes exactly one count. Every retained non-null ref must be
-released exactly once. `BoxedNull` is the permanent null sentinel and carries no
-heap ownership, so releasing it must not decrement or reclaim heap index 0. Missing
-counts can collect a value too early; excess counts can turn unreachable garbage
-into a false external root.
-
-### Heap indices are stable
-
-Do not keep addresses into the heap slice across any operation that may allocate. Keep integer heap indexes instead.
-
-### Tail-call frame replacement
-
-`RETURN_CALL` replaces the retiring activation. The retiring frame is first checked for
-a safe native release; only then does the replacement activation own forwarded arguments
-and the retiring frame release its slots. The retiring slot sweep excludes those
-forwarded arguments.
-
-Register caching does not define ownership. A ref local remains owned until frame
-retirement even when it has no cached native register; the JIT materializes its boxed
-value from the VM stack when necessary.
-
-### Ref ownership must be explicit
-
-When an operation moves a ref, define whether it copies and retains, consumes and releases, transfers ownership, or overwrites and releases the old value.
-
-Prefer one clear ownership rule per opcode or API.
-
-### Closure frames track two refs
-
-| Field | Meaning |
-|---|---|
-| `addr` | function/template heap index used for code, profiling, and JIT |
-| `ref` | callable heap ref released on return |
-
-For plain functions, `addr == ref`. For closures, `addr` points to the function template and `ref` points to the closure instance.
-
-Profiling and JIT use `addr`. Lifetime release uses `ref`.
-
-## Host Access
-
-Host functions use `Interpreter` APIs to work with heap values.
-
-```go
-addr, err := vm.Alloc(val)
-obj, err := vm.Load(addr)
-err = vm.Store(addr, val)
-obj, err = vm.Retain(addr)
-err = vm.Release(addr)
-```
-
-Rules:
-
-- `Alloc` creates an owned heap ref
-- `Alloc` of an existing ref creates another ownership of the same address
-- `Load` reads an object without changing ownership
-- `Store` overwrites an existing heap slot and finalizes the old value
-- function, closure, and coroutine slots are immutable after allocation because
-  runtime frames borrow their code, captures, and suspension state
-- `Store` accepts the destination's own ref as a no-op but rejects a different
-  heap address; share objects through `Alloc(existingRef)` instead
-- concrete pointer values transferred into heap or stack slots must have unique
-  ownership; use refs to share one object
-- `Retain` creates an additional host-owned ref
-- `Release` drops a host-owned ref
-- every ownership created by `Alloc` or `Retain` must be transferred or released
-
-Leaked host refs keep objects alive. `SetGlobal` and `SetLocal` validate and
-transfer a different ref into the destination, but assigning the destination's
-current boxed value is a no-op and leaves the caller's ownership unchanged.
-
-`Marshal` may allocate nested heap refs while converting Go values. Those refs belong to the interpreter heap. Consume them through VM APIs such as `Push` or `Alloc`, or let `Close` / `Reset` discard temporary allocations.
-
-## Pool Lifetime
-
-Each `Interpreter` owns its heap.
-
-A pooled interpreter is reset when returned to the pool. After `Pool.Put`, all refs from that interpreter are invalid.
-
-Do not store heap refs from a borrowed interpreter beyond its borrow lifetime.
-
-## I64 Heap Spilling
-
-Most `i64` values are stored inline in `types.Boxed`.
-
-Large `int64` values outside the NaN-boxable range spill to the heap as `types.I64`.
-
-Approximate inline range:
-
-```text
-[-2^48, 2^48 - 1]
-```
-
-Spilled `i64` values preserve bytecode semantics, but they cost heap allocation and RC work. Tight loops with non-boxable `i64` values can be significantly slower.
-
-## Maintenance Notes
-
-When changing memory behavior:
-
-- keep ownership visible at the operation boundary
-- avoid hidden retains or releases
-- update old and new refs in the same local block
-- keep `release` iterative
-- use `Refs(dst)` scratch instead of allocating traversal slices eagerly
-- keep heap-edge counts exact so trial deletion can derive external roots
-- never cache heap element indexes as slice addresses across allocation
-- keep `heap[0]` special and simple
-- prefer transfer semantics when values are already being consumed
-- prefer retain semantics when values are being copied or exposed
-- keep interpreter and JIT ref behavior symmetrical
+See `host-integration.md` for public API details.
 
 ## Related Docs
 
-- `docs/value-representation.md` — `KindRef`, boxing, and heap-spilled `i64`
-- `docs/host-integration.md` — host-facing heap APIs
-- `docs/jit-internals.md` — native ref updates and fallback rules
-- `docs/architecture.md` — frame ownership and runtime state
+- `value-representation.md`
+- `host-integration.md`
+- `jit-internals.md`

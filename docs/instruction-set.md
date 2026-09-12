@@ -171,7 +171,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Integers | `I32_TO_F64_S` | `i32.to_f64_s` | ✅ | 🔲 | — |
 | Integers | `I32_REINTERPRET_F32` | `i32.reinterpret_f32` | ✅ | 🔲 | — |
 | Integers | `I64_CONST` | `i64.const` | ◐ | 🔲 | boxable i64 immediates only |
-| Integers | `I64_ADD` | `i64.add` | ✅ | 🔲 | boxability guard for arithmetic results |
+| Integers | `I64_ADD` | `i64.add` | ✅ | 🔲 | bridge at boxed storage boundary |
 | Integers | `I64_SUB` | `i64.sub` | ✅ | 🔲 | boxability guard for arithmetic results |
 | Integers | `I64_MUL` | `i64.mul` | ✅ | 🔲 | boxability guard for arithmetic results |
 | Integers | `I64_DIV_S` | `i64.div_s` | ✅ | 🔲 | division and boxability guards |

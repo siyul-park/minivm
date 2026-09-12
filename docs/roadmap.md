@@ -1,113 +1,54 @@
 # Roadmap
 
-minivm is a Go-native programmable runtime for scripting, rules, DSLs, and plugin-style execution inside Go services.
-
-The near-term focus is simple embedding, bounded execution, clear evaluation, and measured JIT growth. Compatibility and backend expansion should follow real users, tests, and benchmarks.
+Current priorities for minivm as a Go-native bytecode VM for embedded scripting, rules, DSLs, and plugins.
 
 ## Direction
 
-minivm is not trying to replace WebAssembly. It is a custom bytecode VM for Go services, with a WebAssembly-inspired instruction set and Go-first host integration.
+minivm uses a custom bytecode format with a Go-first host API and an optional ARM64 JIT. The threaded interpreter remains the semantic baseline.
 
-Product and engineering principles:
+Priorities:
 
-- keep embedding simple
-- keep runtime behavior safe and predictable
-- keep interpreter and JIT semantics aligned
-- expand JIT coverage only with tests and benchmark evidence
-- prefer small, clear APIs over broad surfaces
-- prefer simple designs when behavior is equivalent
-- use short, standard, consistent names
+- simple embedding
+- bounded and predictable execution
+- interpreter/JIT semantic parity
+- measured performance work
+- small, stable public APIs
+- simple implementations when behavior is equivalent
 
 ## Current Focus
 
-| Area | Focus |
-|---|---|
-| Positioning | Explain minivm as a Go-native bytecode VM for embedded scripting, rules, DSLs, and plugins |
-| Host embedding | Improve function registration, value conversion, error behavior, and runtime options |
-| Execution bounds | Strengthen cancellation, fuel, heap limits, and failure reporting |
-| Benchmarks | Broaden coverage beyond numeric loops to host calls, heap objects, maps, strings, and mixed workloads |
-| JIT | Grow ARM64 trace coverage only where correctness and benchmark value are clear |
-| Docs | Keep architecture, instruction semantics, memory rules, and embedding guidance connected and current |
-
-## Completed
-
-- Added static bytecode verification with `program.Verify`.
-- Added safer embedded execution controls such as `WithHeapLimit` and `ErrHeapExhausted`.
-- Added structured runtime failures with `RuntimeError`, VM call frames, and preserved `errors.Is` / `errors.As` cause checks.
-- Added shared execution infrastructure for pools, including shared JIT cache and aggregate profiling.
-- Expanded ARM64 JIT coverage for direct calls, selected indirect calls, ref-bearing slots, closure-body upvalues, and selected heap reads.
-- Improved coroutine/JIT interaction for `CORO_DONE`, `CORO_VALUE`, and anchor-frame suspension fallback.
-- Replaced the method JIT with a trace JIT, including loop-anchored compilation and native back-edge safepoints.
-
-Detailed implementation behavior belongs in the topic docs, especially `jit-internals.md`, `profile.md`, and `benchmarks.md`.
-
-## Near-Term Work
-
-| Priority | Work | Why |
+| Priority | Area | Goal |
 |---|---|---|
-| P0 | Clarify positioning and execution boundaries | Set correct expectations for Go-native embedding use cases |
-| P1 | Broaden benchmark scenarios | Validate JIT thresholds and runtime tradeoffs on realistic workloads |
-| P1 | Improve host embedding examples | Make adoption easier for Go services |
-| P2 | Refine runtime control APIs | Keep cancellation, fuel, heap limits, and errors consistent |
-| P2 | Decide x86-64 JIT strategy | `internal/asm/amd64` is currently a placeholder; backend work needs users and benchmarks |
+| P0 | Runtime boundaries | Keep verification, execution, ownership, and fallback contracts explicit. |
+| P1 | Host integration | Improve registration, conversion, error handling, and examples. |
+| P1 | Benchmarks | Measure host calls, heap objects, maps, strings, coroutines, and mixed workloads. |
+| P1 | ARM64 JIT | Expand coverage only when correctness and benchmark value are clear. |
+| P2 | Execution policy | Keep cancellation, fuel, heap limits, and frame limits consistent. |
+| P2 | Other architectures | Add a backend only when target users and benchmark evidence justify it. |
 
-## Benchmark Priorities
+## JIT Expansion
 
-Add repeatable workloads for:
+A new native path requires:
 
-- host function calls
-- Go value marshal/unmarshal
-- arrays, structs, maps, and strings
-- coroutine and iterator usage
-- mixed interpreter/JIT execution
-- small scripts typical of rules or DSL engines
-- long-running loops with cancellation and fuel checks
+1. correct threaded semantics and verifier coverage;
+2. explicit native fallback;
+3. matching reference ownership;
+4. success, guard-failure, and fallback tests;
+5. reproducible benchmark evidence.
 
-Performance claims should include:
+Prefer one guarded native fast path over duplicated partial interpreter semantics. When native code cannot fully own an operation, hand it back to threaded execution before the unsupported behavior runs.
 
-```text
-before: ...
-after:  ...
-conclusion: ...
-```
+## Performance
 
-## JIT Expansion Rules
+Benchmark claims belong in `docs/benchmarks.md` and must include reproducible before/after evidence. Do not optimize from aggregate scores alone; measure the workload that exercises the changed path.
 
-Expand native JIT coverage only when all are true:
+## Documentation
 
-1. threaded behavior is already correct and tested
-2. verifier and instruction semantics are clear
-3. native fallback behavior is safe
-4. ref ownership matches the interpreter
-5. benchmarks show the workload matters
-6. tests cover success, guard failure, and fallback paths
-
-Prefer one guarded native fast path over duplicated partial semantics.
-
-If the JIT cannot fully own an operation, deopt before the operation and let the threaded handler run it.
-
-## Future Expansion
-
-- Add an adapter example showing how to pair minivm with an external Wasm runtime for teams that need standard `.wasm`, WASI, or component-model workflows.
-- Extend ARM64 JIT coverage for new workload shapes when correctness tests and benchmarks justify it.
-- Add architecture-specific backends only when target users and benchmark coverage are clear.
-- Improve documentation and examples around embedding, execution policy, and host integration.
-- Keep public APIs small and stable as the project matures.
-
-## Maintenance Notes
-
-When updating the roadmap:
-
-- keep it short and decision-oriented
-- separate completed work from planned work
-- avoid promising backend work without users and benchmarks
-- prefer concrete priorities over broad aspirations
-- keep embedding and measurement ahead of speculative JIT expansion
-- preserve the project rule that equivalent behavior should use the simplest clear design
+Architecture, opcode semantics, value representation, ownership, JIT contracts, and host behavior are maintained in their owning topic documents. Roadmap text describes current priorities, not implementation history.
 
 ## Related Docs
 
-- `docs/benchmarks.md` — current benchmark evidence
-- `docs/jit-internals.md` — JIT implementation status and constraints
-- `docs/host-integration.md` — embedding guidance
-- `docs/compatibility.md` — platform and backend support
+- `benchmarks.md` — measured performance
+- `jit-internals.md` — JIT contracts
+- `host-integration.md` — embedding APIs
+- `compatibility.md` — platform support

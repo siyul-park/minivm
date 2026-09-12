@@ -1,122 +1,96 @@
-# AGENTS.md
+# Agent Instructions
 
-Repository instructions for coding agents. Codex reads this file directly; Claude Code loads `.claude/CLAUDE.md`, which imports it.
+`minivm` is a Go-native bytecode VM embedded in Go services. The threaded interpreter is the semantic baseline; ARM64 JIT execution is an optimization with threaded fallback.
 
-`docs/coding-patterns.md` is the normative coding specification and is binding: a change that violates it is not complete, however well it works. Read the section that governs a change before writing it, and match nearby code only after confirming that precedent is specification-compliant. When instructions conflict, follow the more specific one and record the conflict in the final summary.
+`docs/coding-patterns.md` is the normative coding specification. It is binding for every production and test change. Do not treat repeated nearby code as permission to violate it.
 
-## Commands
+## Rules
 
-```bash
-make init              # install goimports/godoc and go install ./...
-make test              # go test -race ./...
-make lint              # goimports -w . && go vet ./...
-make generate          # regenerate interp/threaded.go from internal/cmd/codegen
-make check-generated   # fail if the generated file is stale
-make build             # build ./dist/minivm
-make fuzz              # bounded trust-boundary fuzz smoke
-make coverage-check    # enforce recorded total-coverage baseline
-make benchmark-pr      # quick pull-request benchmark report
-make benchmark-core    # full canonical package + VM kernel suite
-make benchmark-compare # external runtime comparisons (compare build tag)
-```
-
-Run a subset with `go test -race -run TestFoo ./interp/...`. `./dist/minivm` starts the interactive assembly REPL.
-
-## Architecture
-
-```text
-program.Program -> threader -> []func(*Interpreter) -> Interpreter.Run()
-                                                        |- threaded closures
-                                                        `- hot segments promoted to native ARM64
-```
-
-A `program.Program` is threaded into one closure per instruction; a profiler promotes hot segments to native ARM64 and falls back to the threaded closures for anything the backend cannot lower. `docs/architecture.md` owns package boundaries and execution flow; `docs/README.md` indexes every topic document.
-
-**`interp/threaded.go` is generated.** Edit the emitters in `internal/codegen/` (one file per opcode domain; the composition engine and `lowerers` table live in `lower.go`, fusion patterns in `pattern.go`), then run `make generate`. Never hand-edit the generated file.
+1. Read `AGENTS.md` and `docs/coding-patterns.md` before editing.
+2. Read the task-router document for the affected area before changing code.
+3. Inspect the current implementation before designing a change. Do not infer behavior from names alone.
+4. Obey the repository instructions that cover every touched path. A more-specific nested `AGENTS.md` overrides this file; direct user/system/developer instructions override repository instructions.
+5. Prefer the smallest clear change that preserves ownership, semantics, and compatibility. Do not add speculative abstractions, wrappers, aliases, or compatibility shims.
+6. Work test-first. For native code, write the intended instruction stream before implementing the lowering. Tests written after implementation require mutation validation.
+7. Review every non-trivial change top-down and bottom-up, then run another simplification pass. A removable symbol, duplicated rule, unnecessary abstraction, or avoidable comment is a defect.
+8. Comments are exceptional. Keep only facts the code cannot express: non-obvious invariants, external constraints, rejected alternatives with evidence, or external contracts. Tests must read as specifications without explanatory comments.
+9. One behavior has one implementation. Keep architecture-neutral policy in `internal/jit` and architecture mechanics in `internal/jit/<arch>`.
+10. Generated files are never edited directly. Change the generator and run `make generate`.
+11. Documentation describes the final supported state only. Do not put implementation history, migration narratives, superseded designs, progress logs, or old decisions into long-lived topic docs. Historical material belongs only in explicitly dated plans or audits.
+12. Keep documentation owned by one canonical document. Summaries link to the owner instead of duplicating its details.
+13. Do not overwrite unrelated user changes. Do not commit or stage unless explicitly requested.
 
 ## Workflow
 
-1. Run `git status --short`; never overwrite or commit unrelated user changes.
-2. Read the Task Router docs for the area before changing code or tests.
-3. Apply `docs/coding-patterns.md` §2 and §16 to every code/test change, plus the sections its §1.3 selects. Comments are minimal by §2.5: write one only for a fact the code cannot state.
-4. Work test first (§12.2): write the test, watch it fail for the expected reason, then implement. For a backend, the golden instruction stream is that test - write the intended stream before making the backend match it, never after.
-5. Review top-down from package contract to mechanics, and bottom-up across every affected symbol. Repository-wide refactors MUST inventory every production and test symbol.
-6. Validate the narrowest relevant behavior first, then the race, static, generated, and benchmark checks the change warrants.
-7. Have a completed stage reviewed adversarially by an agent that did not write it, and iterate until that review passes, before starting the next stage. A defect costs less at the stage that introduced it than three stages later.
-
-### Review Contract
-
-An adversarial review MUST enforce `docs/coding-patterns.md`, not merely hunt for bugs. A change that works and violates the specification is not complete, so the reviewer runs the same passes the author owed:
-
-- **§2.1 top-down.** Walk package responsibility, public contract, primary behavior, state and lifecycle ownership, then mechanics. Report any responsibility not held by the narrowest appropriate package, type, or function, and any abstraction whose responsibility needs two independent sentences.
-- **§2.2 bottom-up.** Every changed and nearby symbol, from leaves upward. For each, ask whether it can be removed, inlined, merged with an existing owner, narrowed or privatized, renamed by role, represented by an existing type or operation, or replaced by simpler code. Dead fields, arguments, results, wrappers, aliases, shims, and one-call indirections the change made obsolete are review findings, not style notes.
-- **§2.3 simplification loop.** Run a pass in the stated order and report what a further pass would still find. A rejected simplification MUST be justified by an invariant, a compatibility constraint, or a measured cost; "it works" is not a justification.
-- **§2.4** decides whether a change owed the full review at all; a non-trivial change that skipped it is itself a finding.
-- **§2.5, §2.6, §3.2, §4, §12** and the sections §1.3 selects: comments carrying only facts the code cannot state, relocation re-cut rather than copied, declaration order, naming, and test placement, self-description, and public-contract-only access.
-
-A reviewer MUST verify claims by execution rather than by reading: run the tests, mutate a load-bearing line and confirm something fails, and refute a rationale by building the thing it calls impossible. A stated impossibility that turns out to be false is a higher-value finding than a bug, because the next author inherits it as fact.
-
-Prefer `codegraph` MCP tools over grep for structural questions (definitions, callers, call flow, impact).
-
-### Completion Gate
-
-Do not report work complete until all of these hold:
-
-1. Every changed file was re-read against `docs/coding-patterns.md` §2 and the task-specific sections.
-2. Every affected symbol still has a reason to exist; removable ones were removed, inlined, merged, narrowed, privatized, or renamed by role.
-3. A further simplification pass found no safe improvement.
-4. Code moved across a package or file boundary was re-cut, not copied (§2.6), and no behavior has a second implementation (§2 item 11).
-5. Every test was written before the code it specifies and observed failing, or was mutation-verified after the fact (§12.2).
-6. Every comment carries a fact the code cannot state (§2.5); comments that restate the code were deleted, not reworded. Tests read as specification without commentary (§12.6).
-7. Tests follow §12 and sit with the owner `docs/testing.md` assigns.
-8. Performance claims carry the reproducible before/after evidence §14 requires.
-9. Generated output was regenerated, not hand-edited, and `make check-generated` passes.
-10. Documentation was updated per the §15 owner matrix and unrelated user changes are absent.
-11. Any intentionally skipped simplification or validation is recorded with its reason.
+1. `git status --short`.
+2. Read the relevant code, tests, and owner documents.
+3. State the contract and choose the narrowest test that proves it.
+4. Write the test; observe the expected failure when practical.
+5. Implement the smallest owning change.
+6. Run the simplification and adversarial review passes.
+7. Run focused tests first, then the repository completion checks.
+8. Re-read every changed file against the coding specification before reporting completion.
 
 ## Task Router
 
-| Task | Read | Usually edit | Verify |
+| Task | Read first | Main owners | Verify |
 |---|---|---|---|
-| Opcode semantics | `docs/instruction-set.md`, `docs/guides/add-opcode.md` | `internal/codegen/`, `instr/`, `internal/jit/arm64/` | `go test ./internal/codegen ./internal/cmd/codegen ./instr ./internal/jit/arm64 ./interp` |
-| Runtime/stack/frame bug | `docs/architecture.md`, `docs/memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
-| Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `types/` | `go test ./interp ./types` |
-| JIT/ARM64 backend (golden stream first, §13) | `docs/jit-internals.md`, `docs/value-representation.md` | `internal/jit/`, `internal/jit/arm64/`, `interp/jit_arm64.go`, `interp/jit_stub.go`, `internal/asm/`, `internal/asm/arm64/` | `go test ./internal/... ./interp` |
-| Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/`, `internal/ssa/transform/` | `go test ./analysis ./transform ./optimize ./pass ./internal/ssa/... ./internal/jit/frontend` |
-| Bytecode verification / untrusted input | `docs/verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
-| REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
-| Debugger / stepping | `docs/debugging.md`, `docs/profile.md` | `interp/debugger.go`, `cli/repl.go` | `go test -race -run 'TestInterpreter_WithDebugger\|TestDebugger_Breakpoints' ./interp` |
-| Concurrent VM use | `docs/architecture.md` (`interp/`) | `interp/pool.go` | `go test -race ./interp` |
+| Opcode | `instruction-set.md`, `guides/add-opcode.md` | `instr/`, `internal/codegen/` | `go test ./instr ./internal/codegen ./interp` |
+| Runtime / memory | `architecture.md`, `memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
+| JIT / ARM64 | `jit-internals.md`, `value-representation.md` | `internal/jit/`, `internal/journal/`, `internal/asm/` | `go test ./internal/... ./interp` |
+| Optimization | `pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/`, `internal/ssa/transform/` | relevant package tests |
+| Verification | `verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
+| Debugger / profile | `debugging.md`, `profile.md` | `debug/`, `interp/`, `prof/` | relevant package tests |
 
-## Key Invariants
+## Architecture Invariants
 
-Violations cause silent corruption or invalid execution. `docs/architecture.md` §Key Invariants holds the full list; `docs/jit-internals.md` holds the JIT contracts.
+- Heap index `0` is permanent `Null`; reference cleanup is iterative.
+- A frame keeps function address and callable heap reference distinct.
+- Strings compare by content and published strings are immutable.
+- Threaded execution is the semantic baseline.
+- A JIT lowering that declines or fails leaves threaded execution available.
+- A failed speculative lowering must not partially mutate IR, stack facts, ownership, labels, or published state.
+- Native fallback must materialize exactly the interpreter state required at the resume point.
+- `program.Verify` owns untrusted bytecode validation and is independent of runtime state and optimization policy.
 
-- Heap index `0` is permanently `Null`, and `release()` must stay iterative, never recursive.
-- A `frame` separates `addr` (template/code index) from `ref` (heap index released on `RETURN`); they differ for closures, so every frame-creating `CALL`/fused path sets both and non-closure paths reset `upvals = nil`.
-- Strings compare by content, never identity; `string.concat` publishes a new ref and never mutates a published string.
-- Threaded closure errors `panic`; `interp.Run()` recovers and annotates `at=<ip>`. Compile-time threading advances `c.ip`, runtime execution advances `f.ip`.
-- A JIT handler returns `true` only after lowering the opcode and advancing `s.ip` by its exact width; on type mismatch or unsupported lowering it returns `false` without mutating IR, stack, params, facts, or labels.
-- Any JIT path that can hand state back to the interpreter — guard exit, fallback, spill decision, loop back-edge, hoisted container — has an exact contract in `docs/jit-internals.md`. Read it before touching one.
-- `SSAPass` is the one transform that moves byte offsets: it re-emits the function from its SSA rather than repairing offsets in place, and declines it outright when a branch no longer fits its operand. Any new offset-moving pass must do one or the other.
+## Documentation Ownership
 
-## Tests
+| Topic | Owner |
+|---|---|
+| repository workflow and coding rules | `AGENTS.md`, `docs/coding-patterns.md` |
+| package boundaries and runtime invariants | `docs/architecture.md` |
+| opcode semantics and JIT status | `docs/instruction-set.md` |
+| values and representation | `docs/value-representation.md` |
+| heap ownership and lifecycle | `docs/memory-model.md` |
+| JIT contracts and assembler boundaries | `docs/jit-internals.md` |
+| testing contracts | `docs/testing.md` |
+| benchmark methodology and results | `docs/benchmarks.md` |
+| platform support | `docs/compatibility.md` |
 
-Apply `docs/coding-patterns.md` §12; before adding a **new test file**, read §12.1 and the layer/owner table in `docs/testing.md`, because most new coverage belongs in an existing owner.
+Update the owner, then remove stale copies elsewhere.
 
-- Each test file MUST match the production file owning the symbol: `foo_test.go` requires `foo.go`. Only the per-package `fuzz_test.go` and `example_test.go` conventions are exempt; catch-all concept files MUST NOT be created.
-- A change touching threaded, fused, optimized, or JIT paths MUST cover every applicable mode, or state in the final summary why a mode is not applicable.
-- One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`; sub-cases go under `t.Run`.
-- Every test package uses the production package name plus `_test`, acts as an importing client, and accesses no private symbol or representation. Assert internal invariants through public behavior, generated output, or executable boundaries.
-- Keep setup, execution, and assertions visible unless §12 permits a real reusable abstraction, and use `require`, not `assert`.
+## Completion Gate
 
-## Documentation Maintenance
+Do not report completion until:
 
-Update docs when behavior, invariants, commands, architecture, workflow, or conventions change, using the owner matrix in `docs/coding-patterns.md` §15:
+- ownership and boundaries are clear;
+- every touched symbol still has a reason to exist;
+- a further safe simplification pass finds nothing to remove, merge, inline, narrow, privatize, or rename;
+- tests constrain the intended behavior, with mutation evidence when written after implementation;
+- comments contain only non-obvious facts;
+- no behavior has a second implementation;
+- generated output is current;
+- canonical docs describe the final state without duplicated or obsolete text;
+- relevant tests, race checks, static checks, generated checks, and architecture checks pass;
+- any intentionally skipped validation or simplification is reported with its reason.
 
-- workflow / convention rules -> `AGENTS.md` and `.claude/CLAUDE.md`
-- invariants / pitfalls -> `docs/architecture.md`
-- opcode semantics / JIT status -> `docs/instruction-set.md`
-- JIT contracts / assembler APIs -> `docs/jit-internals.md`
+Required baseline checks for a completed change:
 
-Keep edits terse and factual, document current behavior only, and preserve formatting.
+```bash
+make check-generated check-tidy check-fmt vet
+go test ./...
+go test -race ./...
+GOOS=linux GOARCH=arm64 go build ./...
+GOOS=linux GOARCH=arm64 go test -exec=true ./...
+git diff --check
+```

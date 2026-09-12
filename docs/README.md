@@ -56,10 +56,12 @@ Guides may use task-oriented steps instead.
 
 ## Style Rules
 
+- Describe the final supported state, not the history of how it was reached.
 - Use standard technical terms over project-specific slang.
 - Keep wording direct and general.
 - Prefer short paragraphs and tables for reference material.
 - Avoid repeating the same explanation across documents.
+- Remove obsolete explanations instead of appending corrections.
 - Link only where it improves navigation.
 - Keep examples current with code.
 - Use `minivm` consistently for the project name.
