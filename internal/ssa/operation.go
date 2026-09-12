@@ -275,10 +275,19 @@ func (o Operation) name() string {
 // range guard before it can be boxed. It is a fact about the boxed
 // representation rather than about the opcode, which is why it lives here
 // and not with instr's static instruction facts.
+//
+// DIV_S and DIV_U are included even though bounded operands mostly shrink in
+// magnitude under division, because the payload's range is asymmetric:
+// -2^48 / -1 is 2^48, one past the positive max, and DIV_U's operands are
+// sign-extended from bit 48, so a negative one read as unsigned is enormous
+// and can quotient down to a value still far outside the payload. REM_S and
+// REM_U are excluded: a remainder's magnitude is bounded by its divisor's,
+// which is itself bounded by the payload, so no in-range operand pair can
+// carry a remainder out of range.
 func OverflowsI64(code instr.Opcode) bool {
 	switch code {
 	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_U,
-		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
+		instr.I64_DIV_S, instr.I64_DIV_U:
 		return true
 	default:
 		return false

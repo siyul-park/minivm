@@ -156,14 +156,13 @@ func operation(f *Function, sites []site, o Operation) error {
 			return err
 		}
 		// OverflowsI64 names the opcodes that can overflow the boxed 49-bit
-		// payload. The five that lower today (ADD, SUB, MUL, SHL, SHR_U) guard
-		// the result in their own arm64 lowering and, on overflow, exit
-		// through this operation's own state rather than the arithmetic's
-		// producing an interpreter-visible effect the way a bridge or a
-		// frame/heap write does (see frontend/walk.go's exec). DIV_S, DIV_U,
-		// REM_S, and REM_U are listed because the payload's range is
-		// asymmetric - -2^48 / -1 is 2^48, one past its max - but have no
-		// arm64 lowering yet.
+		// payload (see its own doc comment for which and why). The five that
+		// lower today (ADD, SUB, MUL, SHL, SHR_U) guard the result in their
+		// own arm64 lowering and, on overflow, exit through this operation's
+		// own state rather than the arithmetic's producing an
+		// interpreter-visible effect the way a bridge or a frame/heap write
+		// does (see frontend/walk.go's exec). DIV_S and DIV_U are also named
+		// but have no arm64 lowering yet.
 		deopts = o.Op == OpBridge || o.Code.Writes(instr.Frame) ||
 			(o.Code.Reads(instr.Heap) && o.Code.Writes(instr.Heap)) ||
 			OverflowsI64(o.Code)

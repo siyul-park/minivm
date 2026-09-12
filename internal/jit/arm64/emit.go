@@ -520,7 +520,7 @@ func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, s
 	dst := e.c.Reg(op.Results[0])
 	e.a.Emit(emit(dst, e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])))
 	if op.State != ssa.NoValue {
-		return e.boxable(op.State, dst)
+		return e.guardBoxable(op.State, dst)
 	}
 	return true
 }
@@ -582,7 +582,7 @@ func (e *emitter) shift(op ssa.Operation, want ssa.Type, mask uint64, emit func(
 	dst := e.c.Reg(op.Results[0])
 	e.a.Emit(emit(dst, e.c.Reg(op.Args[0]), amount))
 	if op.State != ssa.NoValue {
-		return e.boxable(op.State, dst)
+		return e.guardBoxable(op.State, dst)
 	}
 	return true
 }

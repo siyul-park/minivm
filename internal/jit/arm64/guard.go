@@ -62,9 +62,9 @@ func (e *emitter) guardI64(op ssa.Operation) bool {
 	return true
 }
 
-// boxable rejects results outside the inline i64 range through the operation's state.
+// guardBoxable rejects results outside the inline i64 range through the operation's state.
 // The state captures the pre-op operands, which remain boxable by construction.
-func (e *emitter) boxable(state ssa.Value, v asm.VReg) bool {
+func (e *emitter) guardBoxable(state ssa.Value, v asm.VReg) bool {
 	fail, ok := e.exit(state, prof.ExitGuardValue)
 	if !ok {
 		return false

@@ -156,12 +156,8 @@ func TestNew(t *testing.T) {
 			// Unlike I64_AND, whose bitwise result cannot leave the boxed
 			// 49-bit payload its operands already sit in, an add of two
 			// in-range operands can carry the sum past it. The add itself
-			// runs unchecked - boxable follows it, sign-extracting the
-			// payload width and comparing against the full sum - and only
-			// the guard's mismatch label and its cold stub differ from the
-			// "ands inline i64 values" golden below; the hot path is
-			// otherwise the same three-instruction shape (load both
-			// operands, compute, box at the boundary).
+			// runs unchecked - guardBoxable follows it, sign-extracting the
+			// payload width and comparing against the full sum.
 			name: "adds inline i64 values, guarding the boxed payload",
 			addr: 1,
 			in: input(1, &types.Function{
@@ -190,11 +186,6 @@ func TestNew(t *testing.T) {
 			),
 		},
 		{
-			// SUB shares I64_ADD's shape exactly: two in-range operands can
-			// still differ by more than the boxed payload holds (negate one
-			// operand and the two shapes compute the identical mismatch), so
-			// binary's guard follows the SUB the same way it follows the ADD
-			// above - only the opcode and the demonstration values differ.
 			name: "subs inline i64 values, guarding the boxed payload",
 			addr: 1,
 			in: input(1, &types.Function{
@@ -223,11 +214,7 @@ func TestNew(t *testing.T) {
 			),
 		},
 		{
-			// Unlike ADD/SUB, whose magnitude can at most double a bounded
-			// operand's own range, MUL can leave two in-range operands
-			// (1<<30 each) landing on a product (1<<60) nowhere near the
-			// boxed payload, but the emitted shape is identical either way:
-			// this machine never inspects operand values to skip the guard.
+			// This machine never inspects operand values to skip the guard.
 			name: "muls inline i64 values, guarding the boxed payload",
 			addr: 1,
 			in: input(1, &types.Function{
@@ -353,11 +340,6 @@ func TestNew(t *testing.T) {
 			),
 		},
 		{
-			// A left shift can grow a bounded value's magnitude the same way
-			// ADD/MUL can, so shift's guard follows it exactly as binary's
-			// follows those: the mask and the shift itself are unchanged
-			// from the unchecked SHR_S golden above, and only the guard and
-			// its cold stub are added.
 			name: "shifts an inline i64 left, guarding the boxed payload",
 			addr: 1,
 			in: input(1, &types.Function{
@@ -390,8 +372,8 @@ func TestNew(t *testing.T) {
 			// The SHR_U/SHR_S asymmetry: a logical right shift of a
 			// sign-extended negative value fills in from the top with zeros
 			// it should not have, producing a huge positive value outside
-			// the boxable range, so shift's guard follows I64_SHR_U the same
-			// way it follows I64_SHL above, while I64_SHR_S stays unchecked.
+			// the boxable range, so shift's guard follows I64_SHR_U, while
+			// I64_SHR_S stays unchecked.
 			name: "shifts an inline i64 right logically, guarding the boxed payload",
 			addr: 1,
 			in: input(1, &types.Function{

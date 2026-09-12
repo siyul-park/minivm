@@ -176,8 +176,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Integers | `I64_MUL` | `i64.mul` | ✅ | 🔲 | boxability guard for arithmetic results |
 | Integers | `I64_DIV_S` | `i64.div_s` | ✅ | 🔲 | division and boxability guards |
 | Integers | `I64_DIV_U` | `i64.div_u` | ✅ | 🔲 | division and boxability guards |
-| Integers | `I64_REM_S` | `i64.rem_s` | ✅ | 🔲 | division and boxability guards |
-| Integers | `I64_REM_U` | `i64.rem_u` | ✅ | 🔲 | division and boxability guards |
+| Integers | `I64_REM_S` | `i64.rem_s` | ✅ | 🔲 | division guard; result cannot overflow the boxed payload |
+| Integers | `I64_REM_U` | `i64.rem_u` | ✅ | 🔲 | division guard; result cannot overflow the boxed payload |
 | Integers | `I64_SHL` | `i64.shl` | ✅ | 🔲 | boxability guard where needed |
 | Integers | `I64_SHR_S` | `i64.shr_s` | ✅ | 🔲 | — |
 | Integers | `I64_SHR_U` | `i64.shr_u` | ✅ | 🔲 | boxability guard where needed |
