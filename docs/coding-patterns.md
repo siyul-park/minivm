@@ -699,7 +699,7 @@ case MUST NOT be kept alive by a proxy double.
 
 ### 12.5 Assertions and Cleanup
 
-- Use `require`, not `assert`, and pass no message argument (§12.6).
+* Use `require`, not `assert`, and pass no message argument (§12.6).
 * Defer cleanup immediately after successful allocation.
 * Keep setup, behavior, and expectation visible in one flow.
 * Aim for at most one `t.Run` level.
@@ -842,6 +842,8 @@ Before completing a change, verify:
 * [ ] top-down design and bottom-up symbol reviews are complete (§2.1-§2.2);
 * [ ] every touched symbol has a current reason to exist (§2.2);
 * [ ] another simplification pass found no safe improvement (§2.3);
+* [ ] tests were written before the code and observed failing, or were
+      mutation-verified (§12.2);
 * [ ] comments carry only facts the code cannot state, in code and tests
       (§2.5, §12.6);
 * [ ] relocated code was re-cut rather than copied (§2.6);
