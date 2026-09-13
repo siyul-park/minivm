@@ -467,11 +467,18 @@ func (w *walk) load(space ssa.Space, index int) bool {
 	return true
 }
 
-// store writes the top operand into a slot, which releases whatever it replaces.
-// A ref hands its retain to the slot, so a borrowed one is owned first and every
-// other operand borrowed from that slot is owned before its content changes
-// underneath it. A tee leaves the value on the stack, which needs a retain of
-// its own.
+// store writes the top operand into a slot, which releases whatever it
+// replaces. A ref hands its retain to the slot, so a borrowed one is owned
+// first and every other operand borrowed from that slot is owned before its
+// content changes underneath it.
+//
+// A tee of a reference is refused whole rather than emitted: leaving the
+// value on the stack needs a second, independent count, but only when the
+// slot's own runtime word is not already that same reference - a store back
+// over itself must not double the count - and that comparison needs the word
+// a store's own backend lowering loads out of the slot, which nothing at IR
+// build time has. Retaining here unconditionally would be wrong exactly when
+// it is a self-store, and there is no way from here to tell the two apart.
 func (w *walk) store(space ssa.Space, index int, pop bool) bool {
 	if len(w.stack) == 0 {
 		return false
@@ -482,11 +489,11 @@ func (w *walk) store(space ssa.Space, index int, pop bool) bool {
 	}
 	top := len(w.stack) - 1
 	if w.stack[top].kind == types.KindRef {
+		if !pop {
+			return false
+		}
 		w.own(top)
 		w.detach(out.backing, out.offset)
-		if !pop {
-			w.retain(w.stack[top].value)
-		}
 	}
 	w.b.Add(w.block, ssa.Operation{
 		Op:    ssa.OpStore,

@@ -8,6 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/jit/backend"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -332,27 +333,55 @@ func (e *emitter) load(op ssa.Operation) bool {
 	return true
 }
 
-// store writes one interpreter slot boxed. Only a slot that cannot be holding
-// a reference: overwriting one releases the reference it replaced and adopts
-// the one it takes, which is the ownership accounting this machine does not
-// emit. The slot decides that and not the value written, because an i32
-// stored over a slot that currently holds a reference drops that count just
-// as a reference would. Only a global is asked: a frame declaring a reference
-// local is refused whole (see Enter), so every local slot reached here is
-// scalar. The rule belongs here rather than with the addressing, because
-// reading the same slot borrows and owes nothing.
+// store writes one interpreter slot boxed. A slot able to hold a reference is
+// refused whenever what is written disagrees with what the slot is declared
+// to hold - a mismatch program.Verify would already have rejected, so this is
+// a defensive shape check rather than a real path - because the release below
+// assumes the word it loads out of the slot is a reference like the one
+// replacing it. Only a global is asked whether it holds references: a frame
+// declaring a reference local is refused whole (see Enter), so every local
+// slot reached here is scalar, and the value's own SSA type already answers
+// the question for it.
+//
+// A ref-capable slot releases the count it held before the write publishes
+// the new one: the old word is not an SSA value the frontend can name, only
+// whatever the interpreter would find sitting in that slot, so this is the
+// one place that count can be dropped at all. The drop is skipped when the
+// old word and the new one are the same reference - storing a value back
+// over itself must not drop the count the store is about to publish - which
+// is exactly the shape frontend/walk.go's own already gave the new value its
+// retain through: a slot store never retains what it writes, only releases
+// what it replaces.
 func (e *emitter) store(op ssa.Operation) bool {
 	base, off, ok := e.slot(op.Slot)
 	if !ok || len(op.Args) != 1 {
 		return false
 	}
-	if op.Slot.Space == ssa.SpaceGlobal && e.c.Input().Globals[op.Slot.Index] == types.KindRef {
+	declared := op.Slot.Space == ssa.SpaceGlobal && e.c.Input().Globals[op.Slot.Index] == types.KindRef
+	ref := e.c.Func().Type(op.Args[0]) == ssa.TypeRef
+	if declared != ref {
 		return false
 	}
 	boxed, ok := e.box(op.Args[0])
 	if !ok {
 		return false
 	}
+	if !ref {
+		e.a.Emit(arm64.STR(boxed, base, int16(off*8)))
+		return true
+	}
+	fail, ok := e.exit(op.State, prof.ExitGuardValue)
+	if !ok {
+		return false
+	}
+	e.spent = append(e.spent, op.State)
+
+	old := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LDR(old, base, int16(off*8)))
+	same := e.a.Label()
+	e.a.Emit(arm64.CMP(old, boxed), arm64.BCondLabel(arm64.OpBEQ, same))
+	e.drop(old, e.pin(scratchCtrl), fail)
+	e.a.Bind(same)
 	e.a.Emit(arm64.STR(boxed, base, int16(off*8)))
 	return true
 }

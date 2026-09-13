@@ -40,26 +40,7 @@ func (e *emitter) release(op ssa.Operation) bool {
 		return false
 	}
 	e.spent = append(e.spent, op.State)
-
-	ctrl := e.pin(scratchCtrl)
-	addr := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	done := e.a.Label()
-	e.a.Emit(
-		arm64.ANDI(addr, e.c.Reg(op.Args[0]), maskI32),
-		arm64.CMPI(addr, 0),
-		arm64.BCondLabel(arm64.OpBEQ, done),
-	)
-	base := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	rc := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	e.a.Emit(
-		arm64.LDR(base, ctrl, int16(journal.CellRC*8)),
-		arm64.LDRR(rc, base, addr),
-		arm64.CMPI(rc, 1),
-		arm64.BCondLabel(arm64.OpBLE, fail),
-		arm64.SUBI(rc, rc, 1),
-		arm64.STRR(rc, base, addr),
-	)
-	e.a.Bind(done)
+	e.drop(e.c.Reg(op.Args[0]), e.pin(scratchCtrl), fail)
 	return true
 }
 
@@ -80,6 +61,36 @@ func (e *emitter) count(boxed, ctrl asm.VReg) {
 		arm64.LDR(base, ctrl, int16(journal.CellRC*8)),
 		arm64.LDRR(rc, base, addr),
 		arm64.ADDI(rc, rc, 1),
+		arm64.STRR(rc, base, addr),
+	)
+	e.a.Bind(done)
+}
+
+// drop decrements the reference count held by the cell boxed names, exiting
+// to fail rather than freeing it when the count would reach zero - freeing
+// needs the interpreter, for the reason release's own doc explains - and
+// does nothing for a null reference, mirroring count's own null skip.
+//
+// release and store's own overwritten-slot release both need exactly this
+// guarded decrement, one on an ssa.Value argument's register and the other on
+// a register a slot's word was loaded into, so this is the shape they share
+// rather than each duplicating.
+func (e *emitter) drop(boxed, ctrl asm.VReg, fail asm.Label) {
+	addr := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	done := e.a.Label()
+	e.a.Emit(
+		arm64.ANDI(addr, boxed, maskI32),
+		arm64.CMPI(addr, 0),
+		arm64.BCondLabel(arm64.OpBEQ, done),
+	)
+	base := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	rc := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(base, ctrl, int16(journal.CellRC*8)),
+		arm64.LDRR(rc, base, addr),
+		arm64.CMPI(rc, 1),
+		arm64.BCondLabel(arm64.OpBLE, fail),
+		arm64.SUBI(rc, rc, 1),
 		arm64.STRR(rc, base, addr),
 	)
 	e.a.Bind(done)

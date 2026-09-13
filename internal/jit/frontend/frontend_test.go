@@ -202,6 +202,13 @@ func TestBody(t *testing.T) {
 				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) }),
 			},
+			"a tee of a reference": {
+				Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny}},
+				Locals: []types.Type{types.TypeAny},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.REF_NULL).Emit(instr.LOCAL_TEE, 0).Emit(instr.RETURN)
+				}),
+			},
 		} {
 			t.Run(name, func(t *testing.T) {
 				out, err := frontend.Body(frontend.Module{}, 1, fn)
@@ -711,7 +718,7 @@ func corpus(t *testing.T) []fixture {
 		Typ:    &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeAny}},
 		Locals: []types.Type{types.TypeAny},
 		Code: assemble(t, func(b *instr.Builder) {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_TEE, 1).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_SET, 1)
 			b.Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
 		}),
 	}})

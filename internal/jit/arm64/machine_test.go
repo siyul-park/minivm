@@ -849,6 +849,90 @@ func TestNew(t *testing.T) {
 			),
 		},
 		{
+			// A ref-capable global store releases the count its slot held
+			// before publishing the one the value carries: frontend/walk.go's
+			// own already gave the incoming value its own retain (see the
+			// count sequence above, shared with "takes the count"), so this
+			// operation's own job is loading the slot's current word and
+			// dropping it - skipped by the CMP/BEQ when that word is the same
+			// reference being written, so a store back over itself never
+			// drops the count it is about to publish. The stub resumes
+			// GLOBAL_SET's own IP, never CONST_GET's: redoing the whole
+			// instruction is what the interpreter needs, and the flushed
+			// operand is already owned, so unwind takes no retain of its own
+			// (compare "drops a reference count the heap cell survives").
+			name: "stores a reference into a global slot, releasing the count it held",
+			addr: 0,
+			in: func() *jit.Input {
+				in := input(0, &types.Function{
+					Typ:  &types.FunctionType{},
+					Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.GLOBAL_SET, 0) }),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Globals = []types.Kind{types.KindRef}
+				return in
+			}(),
+			want: slices.Concat(
+				prologue(1, 2, 3),
+				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+				[]asm.Instruction{
+					// own's retain, materializing the constant pool's borrow
+					// into a count this store's incoming value owns.
+					asmarm64.ANDI(vreg(5), vreg(0), 0xFFFFFFFF),
+					asmarm64.CMPI(vreg(5), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.LDR(vreg(6), vreg(4), int16(journal.CellRC*8)),
+					asmarm64.LDRR(vreg(7), vreg(6), vreg(5)),
+					asmarm64.ADDI(vreg(7), vreg(7), 1),
+					asmarm64.STRR(vreg(7), vreg(6), vreg(5)),
+
+					// The store's own release of whatever the slot held.
+					asmarm64.LDR(vreg(9), vreg(8), 0),
+					asmarm64.CMP(vreg(9), vreg(0)),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 3),
+					asmarm64.ANDI(vreg(11), vreg(9), 0xFFFFFFFF),
+					asmarm64.CMPI(vreg(11), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 4),
+					asmarm64.LDR(vreg(12), vreg(10), int16(journal.CellRC*8)),
+					asmarm64.LDRR(vreg(13), vreg(12), vreg(11)),
+					asmarm64.CMPI(vreg(13), 1),
+					asmarm64.BCondLabel(asmarm64.OpBLE, 2),
+					asmarm64.SUBI(vreg(13), vreg(13), 1),
+					asmarm64.STRR(vreg(13), vreg(12), vreg(11)),
+
+					asmarm64.STR(vreg(0), vreg(8), 0),
+					asmarm64.ADDI(vreg(15), vreg(18), 0),
+					asmarm64.STR(vreg(15), vreg(14), int16(journal.CellSP*8)),
+					asmarm64.MOVZ(vreg(16), 0, 0),
+					asmarm64.STR(vreg(16), vreg(14), int16(journal.CellTrap*8)),
+					asmarm64.MOVZ(vreg(17), 6, 0),
+					asmarm64.STR(vreg(17), vreg(14), int16(journal.CellNextIP*8)),
+					asmarm64.RET(),
+
+					// The stub: the retained value flushes back to its VM
+					// stack slot already owned, so no further retain is
+					// taken, and the frame resumes GLOBAL_SET's own IP (3).
+					asmarm64.STR(vreg(0), vreg(1), 0),
+					asmarm64.ADDI(vreg(21), vreg(20), 1),
+					asmarm64.STR(vreg(21), vreg(19), int16(journal.CellSP*8)),
+					asmarm64.MOVZ(vreg(22), 0, 0),
+					asmarm64.STP(vreg(22), vreg(20), vreg(19), int16(journal.At(0, journal.RecordAddr)*8)),
+					asmarm64.MOVZ(vreg(23), 3, 0),
+					asmarm64.MOVZ(vreg(24), 0, 0),
+					asmarm64.STP(vreg(23), vreg(24), vreg(19), int16(journal.At(0, journal.RecordIP)*8)),
+					asmarm64.MOVZ(vreg(25), 1, 0),
+					asmarm64.STR(vreg(25), vreg(19), int16(journal.CellDepth*8)),
+					asmarm64.MOVZ(vreg(26), 1, 0),
+					asmarm64.STR(vreg(26), vreg(19), int16(journal.CellExitID*8)),
+					asmarm64.MOVZ(vreg(27), uint16(journal.TrapFallback), 0),
+					asmarm64.STR(vreg(27), vreg(19), int16(journal.CellTrap*8)),
+					asmarm64.MOVZ(vreg(28), 3, 0),
+					asmarm64.STR(vreg(28), vreg(19), int16(journal.CellNextIP*8)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
 			// A read speculates: the guard admits only the concrete array
 			// type the access was compiled against, and it runs first, so a
 			// container of any other type leaves before the load. The read
@@ -1420,6 +1504,22 @@ func TestNew(t *testing.T) {
 				return in
 			}(),
 		},
+		{
+			// Nothing in this shape declines but the tee: no ref-typed local
+			// or return is declared, so this isolates frontend/walk.go's own
+			// refusal (see store) from Enter's unrelated ones.
+			name: "a tee of a reference into a global slot",
+			input: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.REF_NULL).Emit(instr.GLOBAL_TEE, 0).Emit(instr.DROP).Emit(instr.RETURN)
+					}),
+				})
+				in.Globals = []types.Kind{types.KindRef}
+				return in
+			}(),
+		},
 	} {
 		t.Run("declines "+tt.name, func(t *testing.T) {
 			declined := asm.New(asmarm64.New())
@@ -1438,18 +1538,17 @@ func TestNew(t *testing.T) {
 		})
 	}
 
-	// A slot store is refused by the slot it writes, never by the value it
-	// writes: overwriting a slot that currently holds a reference releases
-	// that reference, and an i32 written over one drops its count exactly as
-	// a reference would. The two compiles below differ in nothing but the
-	// kind the global can hold, which is what pins the refusal to that rule
-	// rather than to anything upstream of it.
-	//
-	// Neither pipeline lowers the refused half - the plan's own globalSet
-	// declines a scalar written into a reference-kinded global too - so this
-	// case stands outside the table above, whose contract is that the plan
-	// still compiles what this machine declines.
-	t.Run("refuses a store by the slot it writes", func(t *testing.T) {
+	// A store is refused when the value's own SSA type disagrees with what
+	// the slot is declared to hold: an i32 written into a global declared to
+	// hold references would have the release below treat whatever raw i32
+	// word it loads out of the slot as a boxed reference. This is not a real
+	// path - program.Verify rejects the mismatch before either pipeline ever
+	// sees it - but it stands outside the table above, whose contract is that
+	// the plan still compiles what this machine declines: the plan's own
+	// globalSet refuses the identical mismatch, so neither lowers this half.
+	// A store whose value's kind agrees with the slot's, reference included,
+	// is pinned by the golden stream above instead.
+	t.Run("refuses a store whose value's kind disagrees with the slot's", func(t *testing.T) {
 		store := func(holds types.Kind) *jit.Input {
 			in := input(1, &types.Function{
 				Typ: &types.FunctionType{},
@@ -1461,10 +1560,10 @@ func TestNew(t *testing.T) {
 			return in
 		}
 		_, ok := arm64.New().Compile(asm.New(asmarm64.New()), store(types.KindI32), jit.Anchor{Addr: 1})
-		require.True(t, ok, "a global that can only ever hold a scalar takes the store")
+		require.True(t, ok, "a global declared to hold the same scalar kind takes the store")
 
 		_, ok = arm64.New().Compile(asm.New(asmarm64.New()), store(types.KindRef), jit.Anchor{Addr: 1})
-		require.False(t, ok, "a global that can hold a reference does not, because the store would drop its count")
+		require.False(t, ok, "a global declared to hold references refuses a scalar value")
 	})
 }
 

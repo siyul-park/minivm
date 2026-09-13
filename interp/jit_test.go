@@ -929,6 +929,147 @@ func TestCompiler_Compile(t *testing.T) {
 		t.Run("in range", func(t *testing.T) { check(t, 42) })
 		t.Run("heap-promoted", func(t *testing.T) { check(t, math.MaxInt64) })
 	})
+
+	// A reference-typed global store is now something this SSA machine
+	// lowers instead of declining whole (see arm64/emit.go's store and
+	// own.go's drop). What TestNew's own goldens cannot prove is that the
+	// compiled code, run end to end, keeps the same reference counts a
+	// threaded run would - the only thing an interpreter-level test can
+	// establish about which path actually dropped, kept, or double-dropped a
+	// count, since both pipelines report the same profiler labels (see
+	// docs/testing.md).
+	//
+	// Every program below reaches this machine specifically rather than
+	// falling back: REF_NEW is not in Lowers's table, so it would decline
+	// the whole compile the way it declines every opcode the table omits,
+	// and a coverage profile of ./interp confirms which path actually ran
+	// (see the report). CONST_GET sources every reference instead - the
+	// constant pool's own permanent count is what own's retain materializes
+	// (see emit.go's constant and own.go's count) - and the one case that
+	// needs a reference with no such backing count seeds it through Alloc
+	// and SetGlobal before the compiled code ever runs, since neither reads
+	// or writes runtime heap state at compile time. A real bytecode loop
+	// cannot reach this machine either - Term declines any back edge - so a
+	// slot overwritten many times is a straight-line repetition here rather
+	// than a loop.
+	t.Run("a ref global store matches threaded reference counts", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		compile := func(t *testing.T, i *Interpreter) {
+			t.Helper()
+			c, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, c.Close()) })
+			input, ok := i.compileSnapshot(0)
+			require.True(t, ok)
+			result := c.Compile(input, jit.Anchor{})
+			require.NoError(t, result.Err)
+			require.NotEmpty(t, result.Code.Entries)
+			i.install(result.Code)
+		}
+
+		// Each store's overwritten value is a distinct constant one count
+		// short of freeing (each holds only its own pool retain once the
+		// global no longer does): a leaked count would leave a stale
+		// retain on a constant behind it, and a double drop would take an
+		// earlier constant's own pool retain below what it started with.
+		// Comparing every constant's count, not just the survivor's, is
+		// what catches either.
+		t.Run("distinct values leave none leaked and none double-dropped", func(t *testing.T) {
+			elems := []types.Value{
+				types.TypedArray[int32]{1}, types.TypedArray[int32]{2}, types.TypedArray[int32]{3},
+				types.TypedArray[int32]{4}, types.TypedArray[int32]{5},
+			}
+			var ins []instr.Instruction
+			for idx := range elems {
+				ins = append(ins, instr.New(instr.CONST_GET, uint64(idx)), instr.New(instr.GLOBAL_SET, 0))
+			}
+			prog := program.New(ins, program.WithConstants(elems...), program.WithGlobals(types.TypeAny))
+
+			threaded := New(prog, WithThreshold(-1))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			var want []int
+			for idx := range elems {
+				rc, err := threaded.RefCount(threaded.constants[idx].Ref())
+				require.NoError(t, err)
+				want = append(want, rc)
+			}
+
+			native := New(prog, WithThreshold(-1))
+			defer native.Close()
+			compile(t, native)
+			require.NoError(t, native.Run(context.Background()))
+			for idx := range elems {
+				got, err := native.RefCount(native.constants[idx].Ref())
+				require.NoError(t, err)
+				require.Equal(t, want[idx], got)
+			}
+		})
+
+		t.Run("storing a value back over itself matches the threaded count exactly", func(t *testing.T) {
+			ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
+			for range 5 {
+				ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_SET, 0))
+			}
+			prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+
+			threaded := New(prog, WithThreshold(-1))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			want, err := threaded.RefCount(threaded.constants[0].Ref())
+			require.NoError(t, err)
+
+			native := New(prog, WithThreshold(-1))
+			defer native.Close()
+			compile(t, native)
+			require.NoError(t, native.Run(context.Background()))
+			got, err := native.RefCount(native.constants[0].Ref())
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+
+		// seed gives a fresh interpreter a reference with exactly the count
+		// Alloc documents - one, owned by nothing else - already sitting in
+		// global 0 before its own compiled code runs, so the constant this
+		// program then overwrites it with is the one and only count the
+		// store's own release can drop to zero.
+		seed := func(t *testing.T, i *Interpreter) int {
+			t.Helper()
+			addr, err := i.Alloc(types.TypedArray[int32]{9})
+			require.NoError(t, err)
+			require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+			return addr
+		}
+		t.Run("a store dropping the slot's last count exits to the interpreter and frees exactly once", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+
+			threaded := New(prog, WithThreshold(-1))
+			defer threaded.Close()
+			seeded := seed(t, threaded)
+			require.NoError(t, threaded.Run(context.Background()))
+			_, err := threaded.RefCount(seeded)
+			require.ErrorIs(t, err, ErrSegmentationFault)
+			wantLen := threaded.HeapLen()
+			want, err := threaded.RefCount(threaded.constants[0].Ref())
+			require.NoError(t, err)
+
+			native := New(prog, WithThreshold(-1))
+			defer native.Close()
+			compile(t, native)
+			nativeSeeded := seed(t, native)
+			require.NoError(t, native.Run(context.Background()))
+			_, err = native.RefCount(nativeSeeded)
+			require.ErrorIs(t, err, ErrSegmentationFault)
+			require.Equal(t, wantLen, native.HeapLen())
+			got, err := native.RefCount(native.constants[0].Ref())
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	})
 }
 
 // TestARM64_Encloses covers the containment the installer arbitrates on: a
