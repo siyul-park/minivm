@@ -750,6 +750,103 @@ func TestNew(t *testing.T) {
 			}...),
 		},
 		{
+			// The constant pool holds the count the operand borrows, so the
+			// interpreter that adopts what module completion leaves behind is
+			// handed one of its own. A null reference is skipped because
+			// Interpreter.releaseBox drops nothing for cell zero; nothing else
+			// can go wrong, which is why OpRetain carries no state.
+			name: "takes the count a second owner of a reference holds",
+			addr: 0,
+			in: func() *jit.Input {
+				in := input(0, &types.Function{
+					Typ:  &types.FunctionType{},
+					Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				return in
+			}(),
+			want: slices.Concat(
+				prologue(1, 2, 3),
+				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+				[]asm.Instruction{
+					asmarm64.ANDI(vreg(5), vreg(0), 0xFFFFFFFF),
+					asmarm64.CMPI(vreg(5), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.LDR(vreg(6), vreg(4), int16(journal.CellRC*8)),
+					asmarm64.LDRR(vreg(7), vreg(6), vreg(5)),
+					asmarm64.ADDI(vreg(7), vreg(7), 1),
+					asmarm64.STRR(vreg(7), vreg(6), vreg(5)),
+
+					asmarm64.STR(vreg(0), vreg(1), 0),
+					asmarm64.ADDI(vreg(9), vreg(12), 1),
+					asmarm64.STR(vreg(9), vreg(8), int16(journal.CellSP*8)),
+					asmarm64.MOVZ(vreg(10), 0, 0),
+					asmarm64.STR(vreg(10), vreg(8), int16(journal.CellTrap*8)),
+					asmarm64.MOVZ(vreg(11), 3, 0),
+					asmarm64.STR(vreg(11), vreg(8), int16(journal.CellNextIP*8)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
+			// A count that would reach zero frees the cell, which allocates,
+			// finalizes, and cascades through every reference the freed value
+			// held - none of it available to a native frame - so only a count
+			// the reference survives is dropped here and every other one leaves
+			// through the state OpRelease carries. Cell zero is skipped for the
+			// same reason Interpreter.releaseBox skips it.
+			name: "drops a reference count the heap cell survives",
+			addr: 0,
+			in: input(0, &types.Function{
+				Typ:  &types.FunctionType{},
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.DROP) }),
+			}),
+			want: slices.Concat(
+				prologue(1, 2, 3),
+				asmarm64.LDI(vreg(0), uint64(types.BoxedNull)),
+				[]asm.Instruction{
+					asmarm64.ANDI(vreg(5), vreg(0), 0xFFFFFFFF),
+					asmarm64.CMPI(vreg(5), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 2),
+					asmarm64.LDR(vreg(6), vreg(4), int16(journal.CellRC*8)),
+					asmarm64.LDRR(vreg(7), vreg(6), vreg(5)),
+					asmarm64.CMPI(vreg(7), 1),
+					asmarm64.BCondLabel(asmarm64.OpBLE, 1),
+					asmarm64.SUBI(vreg(7), vreg(7), 1),
+					asmarm64.STRR(vreg(7), vreg(6), vreg(5)),
+
+					asmarm64.ADDI(vreg(9), vreg(12), 0),
+					asmarm64.STR(vreg(9), vreg(8), int16(journal.CellSP*8)),
+					asmarm64.MOVZ(vreg(10), 0, 0),
+					asmarm64.STR(vreg(10), vreg(8), int16(journal.CellTrap*8)),
+					asmarm64.MOVZ(vreg(11), 2, 0),
+					asmarm64.STR(vreg(11), vreg(8), int16(journal.CellNextIP*8)),
+					asmarm64.RET(),
+
+					// The operand already owns the count the resumed
+					// interpreter releases, so the stub flushes it and takes
+					// none of its own.
+					asmarm64.STR(vreg(0), vreg(1), 0),
+					asmarm64.ADDI(vreg(15), vreg(14), 1),
+					asmarm64.STR(vreg(15), vreg(13), int16(journal.CellSP*8)),
+					asmarm64.MOVZ(vreg(16), 0, 0),
+					asmarm64.STP(vreg(16), vreg(14), vreg(13), int16(journal.At(0, journal.RecordAddr)*8)),
+					asmarm64.MOVZ(vreg(17), 1, 0),
+					asmarm64.MOVZ(vreg(18), 0, 0),
+					asmarm64.STP(vreg(17), vreg(18), vreg(13), int16(journal.At(0, journal.RecordIP)*8)),
+					asmarm64.MOVZ(vreg(19), 1, 0),
+					asmarm64.STR(vreg(19), vreg(13), int16(journal.CellDepth*8)),
+					asmarm64.MOVZ(vreg(20), 1, 0),
+					asmarm64.STR(vreg(20), vreg(13), int16(journal.CellExitID*8)),
+					asmarm64.MOVZ(vreg(21), uint16(journal.TrapFallback), 0),
+					asmarm64.STR(vreg(21), vreg(13), int16(journal.CellTrap*8)),
+					asmarm64.MOVZ(vreg(22), 1, 0),
+					asmarm64.STR(vreg(22), vreg(13), int16(journal.CellNextIP*8)),
+					asmarm64.RET(),
+				},
+			),
+		},
+		{
 			// A read speculates: the guard admits only the concrete array
 			// type the access was compiled against, and it runs first, so a
 			// container of any other type leaves before the load. The read

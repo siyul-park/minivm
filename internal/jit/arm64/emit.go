@@ -38,6 +38,7 @@ type emitter struct {
 	base  asm.VReg
 	seen  []bool
 	stubs []stub
+	spent []ssa.Value
 }
 
 // maxSlot is the largest slot index a load or store reaches: the offset is
@@ -184,6 +185,10 @@ func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 		return 1, e.store(op)
 	case ssa.OpExec:
 		return 1, e.exec(op)
+	case ssa.OpRetain:
+		return 1, e.retain(op)
+	case ssa.OpRelease:
+		return 1, e.release(op)
 	case ssa.OpGuardKind:
 		// guardI64 is the only OpGuardKind admission this machine emits, and
 		// it validates its own arity and type - no fusion window to inspect

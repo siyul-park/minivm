@@ -2008,6 +2008,58 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 	})
 
+	t.Run("overwriting a reference global neither leaks a count nor drops one twice", func(t *testing.T) {
+		build := func(iterations int) *program.Program {
+			b := program.NewBuilder()
+			first := b.Const(types.TypedArray[int32]{1, 2, 3})
+			second := b.Const(types.TypedArray[int32]{4, 5, 6})
+			b.Globals(types.TypeI32Array).Locals(types.TypeI32)
+			loop, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(iterations)).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.CONST_GET, uint64(first)).Emit(instr.GLOBAL_SET, 0)
+			b.Emit(instr.CONST_GET, uint64(second)).Emit(instr.GLOBAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(loop)
+			b.Bind(done)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(prog))
+			return prog
+		}
+
+		counts := func(iterations int, opts ...interp.Option) map[int]int {
+			i := interp.New(build(iterations), opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+
+			rc := map[int]int{}
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				if count, countErr := i.RefCount(addr); countErr == nil {
+					rc[addr] = count
+				}
+			}
+			return rc
+		}
+
+		require.Equal(t, counts(1, interp.WithThreshold(-1)), counts(4096, interp.WithThreshold(0)))
+
+		profile := prof.New()
+		i := interp.New(build(4096), interp.WithThreshold(0), interp.WithProfiler(profile))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+
+		loopEntries := jitMetricSum(i, profile, "vm_jit_native_entries_total", func(labels []prof.Label) bool {
+			return jitLabel(labels, "kind") == "loop"
+		})
+		require.Greater(t, loopEntries, float64(0))
+		strayExits := jitMetricSum(i, profile, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+			return jitLabel(labels, "kind") == "loop" && jitLabel(labels, "reason") != "loop-exit"
+		})
+		require.Zero(t, strayExits)
+	})
+
 	t.Run("string.concat reads the result after releasing both last operand references", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.STRING_CONCAT)})
 		i := interp.New(prog, interp.WithThreshold(-1))
@@ -4149,6 +4201,20 @@ func(struct {value: i64; left: any; right: any}) i32
 				instr.New(instr.I64_DIV_S),
 			}, program.WithLocals(types.TypeI64)),
 			err: interp.ErrDivideByZero,
+		},
+		{
+			name: "module completion adopts a borrowed constant reference",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+			}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
+		},
+		{
+			name: "an owned reference dropped before module completion keeps every count",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.REF_NULL),
+				instr.New(instr.DROP),
+				instr.New(instr.CONST_GET, 0),
+			}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
 		},
 	}
 	for _, tt := range parity {

@@ -1,6 +1,8 @@
 package arm64
 
 import (
+	"slices"
+
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit/backend"
@@ -158,7 +160,16 @@ func (e *emitter) admit(got asm.VReg, want uint64, fail asm.Label) {
 // exactly one frame, because a deeper chain is a callee a frontend inlined,
 // which this machine declines with the call that opened it, and every
 // coordinate within the range its immediate encodes.
+//
+// A state a release has already spent is refused too. Resuming there hands the
+// interpreter an instruction it redoes whole, including the release native code
+// already performed, so the same count would be dropped twice. The release
+// reserves its own exit before spending the state, which is why its cold path
+// is not refused by its own rule.
 func (e *emitter) exit(state ssa.Value, reason prof.ExitReason) (asm.Label, bool) {
+	if slices.Contains(e.spent, state) {
+		return 0, false
+	}
 	d := e.c.Exit(state, reason, e.opcode(state))
 	if len(d.Frames) != 1 || !addressable(d.SP) || !addressable(d.Frames[0].BP) {
 		return 0, false
@@ -212,7 +223,7 @@ func (e *emitter) unwind(d backend.Deopt) bool {
 		}
 		e.a.Emit(arm64.STR(boxed, e.base, int16(flush.Slot*8)))
 		if !flush.Owned && e.c.Func().Type(flush.Value) == ssa.TypeRef {
-			e.retain(boxed, ctrl)
+			e.count(boxed, ctrl)
 		}
 	}
 
@@ -257,25 +268,4 @@ func (e *emitter) publish(ctrl asm.VReg, at journal.Cell, word uint64) {
 	reg := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDI(reg, word)...)
 	e.a.Emit(arm64.STR(reg, ctrl, int16(at*8)))
-}
-
-// retain skips a null reference: Interpreter.releaseBox drops nothing for
-// cell zero, so a count taken here would have no matching release.
-func (e *emitter) retain(boxed, ctrl asm.VReg) {
-	addr := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	done := e.a.Label()
-	e.a.Emit(
-		arm64.ANDI(addr, boxed, maskI32),
-		arm64.CMPI(addr, 0),
-		arm64.BCondLabel(arm64.OpBEQ, done),
-	)
-	base := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	count := e.a.Reg(asm.RegTypeInt, asm.Width64)
-	e.a.Emit(
-		arm64.LDR(base, ctrl, int16(journal.CellRC*8)),
-		arm64.LDRR(count, base, addr),
-		arm64.ADDI(count, count, 1),
-		arm64.STRR(count, base, addr),
-	)
-	e.a.Bind(done)
 }
