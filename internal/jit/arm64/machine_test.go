@@ -854,13 +854,14 @@ func TestNew(t *testing.T) {
 			// own already gave the incoming value its own retain (see the
 			// count sequence above, shared with "takes the count"), so this
 			// operation's own job is loading the slot's current word and
-			// dropping it - skipped by the CMP/BEQ when that word is the same
-			// reference being written, so a store back over itself never
-			// drops the count it is about to publish. The stub resumes
-			// GLOBAL_SET's own IP, never CONST_GET's: redoing the whole
-			// instruction is what the interpreter needs, and the flushed
-			// operand is already owned, so unwind takes no retain of its own
-			// (compare "drops a reference count the heap cell survives").
+			// dropping it unconditionally - a store back over itself still
+			// only drops the slot's own pre-existing count, since the
+			// incoming value's count is already its own, independent one.
+			// The stub resumes GLOBAL_SET's own IP, never CONST_GET's:
+			// redoing the whole instruction is what the interpreter needs,
+			// and the flushed operand is already owned, so unwind takes no
+			// retain of its own (compare "drops a reference count the heap
+			// cell survives").
 			name: "stores a reference into a global slot, releasing the count it held",
 			addr: 0,
 			in: func() *jit.Input {
@@ -888,11 +889,9 @@ func TestNew(t *testing.T) {
 
 					// The store's own release of whatever the slot held.
 					asmarm64.LDR(vreg(9), vreg(8), 0),
-					asmarm64.CMP(vreg(9), vreg(0)),
-					asmarm64.BCondLabel(asmarm64.OpBEQ, 3),
 					asmarm64.ANDI(vreg(11), vreg(9), 0xFFFFFFFF),
 					asmarm64.CMPI(vreg(11), 0),
-					asmarm64.BCondLabel(asmarm64.OpBEQ, 4),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 3),
 					asmarm64.LDR(vreg(12), vreg(10), int16(journal.CellRC*8)),
 					asmarm64.LDRR(vreg(13), vreg(12), vreg(11)),
 					asmarm64.CMPI(vreg(13), 1),
@@ -1501,22 +1500,6 @@ func TestNew(t *testing.T) {
 				})
 				in.Constants = []types.Boxed{types.BoxRef(2)}
 				in.Objects[2] = jit.Object{Fn: callee}
-				return in
-			}(),
-		},
-		{
-			// Nothing in this shape declines but the tee: no ref-typed local
-			// or return is declared, so this isolates frontend/walk.go's own
-			// refusal (see store) from Enter's unrelated ones.
-			name: "a tee of a reference into a global slot",
-			input: func() *jit.Input {
-				in := input(1, &types.Function{
-					Typ: &types.FunctionType{},
-					Code: assemble(t, func(b *instr.Builder) {
-						b.Emit(instr.REF_NULL).Emit(instr.GLOBAL_TEE, 0).Emit(instr.DROP).Emit(instr.RETURN)
-					}),
-				})
-				in.Globals = []types.Kind{types.KindRef}
 				return in
 			}(),
 		},

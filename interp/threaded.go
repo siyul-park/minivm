@@ -985,10 +985,8 @@ var (
 				}
 				val := i.stack[i.sp-1]
 				old := i.globals[idx]
-				if old != val {
-					i.releaseBox(old)
-				}
 				i.globals[idx] = val
+				i.releaseBox(old)
 				i.sp--
 				i.fr.ip += 3
 			}
@@ -1097,10 +1095,8 @@ var (
 				}
 				val := i.stack[i.sp-1]
 				old := i.stack[addr]
-				if old != val {
-					i.releaseBox(old)
-				}
 				i.stack[addr] = val
+				i.releaseBox(old)
 				i.sp--
 				i.fr.ip += 2
 			}
@@ -1235,10 +1231,8 @@ var (
 				}
 				val := i.stack[i.sp-1]
 				old := i.fr.upvals[idx]
-				if old != val {
-					i.releaseBox(old)
-				}
 				i.fr.upvals[idx] = val
+				i.releaseBox(old)
 				i.sp--
 				i.fr.ip += 2
 			}

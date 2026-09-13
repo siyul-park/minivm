@@ -583,7 +583,6 @@ func (l lowerer) localSet(ctx *lowering, op jit.Step, pop bool) bool {
 		return false
 	}
 	if vp.kind == types.KindRef {
-		deferred := vp.backing != jit.BackingStack
 		boxed, ok := l.box(ctx, *vp)
 		if !ok {
 			return false
@@ -593,7 +592,7 @@ func (l lowerer) localSet(ctx *lowering, op jit.Step, pop bool) bool {
 		addr := l.base(ctx, vStack)
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, addr, int16((f.base+idx)*8)))
-		l.releaseOverwritten(ctx, old, boxed, pop && deferred, pre, op.IP)
+		l.releaseOverwritten(ctx, old, boxed, pop, pre, op.IP)
 		if _, ok := l.own(ctx, vp); !ok {
 			return false
 		}
@@ -673,7 +672,6 @@ func (l lowerer) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
 		return false
 	}
 	var boxed asm.VReg
-	deferred := kind == types.KindRef && vp.backing != jit.BackingStack
 	boxed, ok = l.box(ctx, *vp)
 	if !ok {
 		return false
@@ -683,7 +681,7 @@ func (l lowerer) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		l.releaseOverwritten(ctx, old, boxed, pop && deferred, pre, op.IP)
+		l.releaseOverwritten(ctx, old, boxed, pop, pre, op.IP)
 		if _, ok := l.own(ctx, vp); !ok {
 			return false
 		}

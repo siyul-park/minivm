@@ -202,13 +202,6 @@ func TestBody(t *testing.T) {
 				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) }),
 			},
-			"a tee of a reference": {
-				Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny}},
-				Locals: []types.Type{types.TypeAny},
-				Code: assemble(t, func(b *instr.Builder) {
-					b.Emit(instr.REF_NULL).Emit(instr.LOCAL_TEE, 0).Emit(instr.RETURN)
-				}),
-			},
 		} {
 			t.Run(name, func(t *testing.T) {
 				out, err := frontend.Body(frontend.Module{}, 1, fn)
@@ -216,6 +209,27 @@ func TestBody(t *testing.T) {
 				require.Nil(t, out)
 			})
 		}
+	})
+
+	// LOCAL_TEE and GLOBAL_TEE of a reference used to be refused whole: the
+	// slot's overwritten count and the surviving stack copy's count both need
+	// resolving, and nothing at IR build time could tell a self-store from an
+	// ordinary one. dup composed with store (see walk.go's perform) resolves
+	// both through the same own/detach machinery an ordinary ref store
+	// already uses, so this now translates like any other slot write.
+	t.Run("translates a tee of a reference", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny}},
+			Locals: []types.Type{types.TypeAny},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.REF_NULL).Emit(instr.LOCAL_TEE, 0).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Body(frontend.Module{}, 1, fn)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
 	})
 }
 

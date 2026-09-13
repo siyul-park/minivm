@@ -312,7 +312,6 @@ func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 	if op.Shape.Itab != 0 && op.Shape.Itab != want {
 		return false, false
 	}
-	deferred := kind == types.KindRef && ctx.values[len(ctx.values)-1].backing != jit.BackingStack
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
@@ -369,7 +368,7 @@ func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 	if kind == types.KindRef {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
-		l.releaseOverwritten(ctx, old, val.reg, deferred, pre, op.IP)
+		l.releaseBox(ctx, old, pre, op.IP)
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false, false
 		}
@@ -668,7 +667,6 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 	if op.Shape.Itab != 0 && op.Shape.Itab != jit.HeapStruct {
 		return false, false
 	}
-	deferred := kind == types.KindRef && ctx.values[len(ctx.values)-1].backing != jit.BackingStack
 	container := ctx.values[len(ctx.values)-3]
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
@@ -720,7 +718,7 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 	if kind == types.KindRef {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
-		l.releaseOverwritten(ctx, old, val.reg, deferred, pre, op.IP)
+		l.releaseBox(ctx, old, pre, op.IP)
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false, false
 		}

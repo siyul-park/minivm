@@ -962,7 +962,6 @@ func (l lowerer) upvalSet(ctx *lowering, op jit.Step) bool {
 	}
 	var boxed asm.VReg
 	var ok bool
-	deferred := kind == types.KindRef && vp.backing != jit.BackingStack
 	boxed, ok = l.box(ctx, *vp)
 	if !ok {
 		return false
@@ -972,7 +971,7 @@ func (l lowerer) upvalSet(ctx *lowering, op jit.Step) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		l.releaseOverwritten(ctx, old, boxed, deferred, pre, op.IP)
+		l.releaseBox(ctx, old, pre, op.IP)
 		if _, ok := l.own(ctx, vp); !ok {
 			return false
 		}

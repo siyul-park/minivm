@@ -932,12 +932,13 @@ func TestCompiler_Compile(t *testing.T) {
 
 	// A reference-typed global store is now something this SSA machine
 	// lowers instead of declining whole (see arm64/emit.go's store and
-	// own.go's drop). What TestNew's own goldens cannot prove is that the
-	// compiled code, run end to end, keeps the same reference counts a
-	// threaded run would - the only thing an interpreter-level test can
-	// establish about which path actually dropped, kept, or double-dropped a
-	// count, since both pipelines report the same profiler labels (see
-	// docs/testing.md).
+	// own.go's drop), and GLOBAL_TEE reaches the same store by duplicating
+	// the operand first (see frontend/walk.go's dup). What TestNew's own
+	// goldens cannot prove is that the compiled code, run end to end, keeps
+	// the same reference counts a threaded run would - the only thing an
+	// interpreter-level test can establish about which path actually
+	// dropped, kept, or double-dropped a count, since both pipelines report
+	// the same profiler labels (see docs/testing.md).
 	//
 	// Every program below reaches this machine specifically rather than
 	// falling back: REF_NEW is not in Lowers's table, so it would decline
@@ -1012,6 +1013,28 @@ func TestCompiler_Compile(t *testing.T) {
 			ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
 			for range 5 {
 				ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_SET, 0))
+			}
+			prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+
+			threaded := New(prog, WithThreshold(-1))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			want, err := threaded.RefCount(threaded.constants[0].Ref())
+			require.NoError(t, err)
+
+			native := New(prog, WithThreshold(-1))
+			defer native.Close()
+			compile(t, native)
+			require.NoError(t, native.Run(context.Background()))
+			got, err := native.RefCount(native.constants[0].Ref())
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+
+		t.Run("teeing a value back over itself matches the threaded count exactly", func(t *testing.T) {
+			ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
+			for range 5 {
+				ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_TEE, 0), instr.New(instr.DROP))
 			}
 			prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
 

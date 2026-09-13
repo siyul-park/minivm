@@ -3460,6 +3460,33 @@ func(struct {value: i64; left: any; right: any}) i32
 		require.Equal(t, 1, rc) // global slot keeps the ref alive
 	})
 
+	t.Run("GLOBAL_SET storing a slot back over itself does not leak a count", func(t *testing.T) {
+		build := func(reps int) *program.Program {
+			ins := []instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+				instr.New(instr.GLOBAL_SET, 0),
+			}
+			for range reps {
+				ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_SET, 0))
+			}
+			return program.New(ins, program.WithGlobals(types.TypeAny))
+		}
+
+		i1 := interp.New(build(1), interp.WithThreshold(-1))
+		defer i1.Close()
+		require.NoError(t, i1.Run(context.Background()))
+		rc1, err := i1.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, rc1) // the global slot is the only owner
+
+		i3 := interp.New(build(3), interp.WithThreshold(-1))
+		defer i3.Close()
+		require.NoError(t, i3.Run(context.Background()))
+		rc3, err := i3.RefCount(1)
+		require.NoError(t, err)
+		require.Equal(t, rc1, rc3) // repeating the self-assign must not grow the count
+	})
+
 	t.Run("LOCAL_TEE retains the ref stored into the local slot", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]

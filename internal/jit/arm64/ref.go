@@ -124,13 +124,16 @@ func (l lowerer) retainDeferred(ctx *lowering) {
 }
 
 // releaseOverwritten drops the retain a slot held before it is overwritten.
-// The outgoing and incoming values may be the same address, and releasing it
-// first would free a value the store is about to publish - but only an owned
-// incoming value can alias that way, because a deferred one still borrows its
-// own backing slot's retain. So the aliasing check is needed exactly when the
-// incoming value is not deferred.
-func (l lowerer) releaseOverwritten(ctx *lowering, old, val asm.VReg, deferred bool, pre []value, ip int) {
-	if deferred {
+// A SET always releases unconditionally: releaseRef's own guard never lets a
+// release that would free the object run natively - it exits to the
+// interpreter instead - so a release that aliases the incoming value only
+// ever removes a count kept alive by some other owner, never the last one. A
+// TEE leaves a second, independent copy live on the operand stack instead of
+// consuming one, so an aliased retain/release pair is skipped rather than
+// executed: the two would cancel exactly, and skipping both saves the work.
+// localSet and globalSet pass pop to choose between the two.
+func (l lowerer) releaseOverwritten(ctx *lowering, old, val asm.VReg, pop bool, pre []value, ip int) {
+	if pop {
 		l.releaseBox(ctx, old, pre, ip)
 		return
 	}

@@ -346,12 +346,12 @@ func (e *emitter) load(op ssa.Operation) bool {
 // A ref-capable slot releases the count it held before the write publishes
 // the new one: the old word is not an SSA value the frontend can name, only
 // whatever the interpreter would find sitting in that slot, so this is the
-// one place that count can be dropped at all. The drop is skipped when the
-// old word and the new one are the same reference - storing a value back
-// over itself must not drop the count the store is about to publish - which
-// is exactly the shape frontend/walk.go's own already gave the new value its
-// retain through: a slot store never retains what it writes, only releases
-// what it replaces.
+// one place that count can be dropped at all. The drop always runs, aliased
+// or not: frontend/walk.go's own already gave the new value its own count
+// before this op was built, so releasing the overwritten word - even when it
+// names the same reference - only ever drops that pre-existing count back to
+// what the new value's own count leaves behind. A slot store never retains
+// what it writes, only releases what it replaces.
 func (e *emitter) store(op ssa.Operation) bool {
 	base, off, ok := e.slot(op.Slot)
 	if !ok || len(op.Args) != 1 {
@@ -378,10 +378,7 @@ func (e *emitter) store(op ssa.Operation) bool {
 
 	old := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDR(old, base, int16(off*8)))
-	same := e.a.Label()
-	e.a.Emit(arm64.CMP(old, boxed), arm64.BCondLabel(arm64.OpBEQ, same))
 	e.drop(old, e.pin(scratchCtrl), fail)
-	e.a.Bind(same)
 	e.a.Emit(arm64.STR(boxed, base, int16(off*8)))
 	return true
 }

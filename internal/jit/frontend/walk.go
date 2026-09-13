@@ -173,11 +173,17 @@ func (w *walk) perform(inst instr.Instruction) bool {
 	case instr.GLOBAL_GET:
 		return w.load(ssa.SpaceGlobal, int(inst.Operand(0)))
 	case instr.LOCAL_SET, instr.LOCAL_TEE:
-		return w.store(ssa.SpaceLocal, int(inst.Operand(0)), op == instr.LOCAL_SET)
+		if op == instr.LOCAL_TEE && !w.dup() {
+			return false
+		}
+		return w.store(ssa.SpaceLocal, int(inst.Operand(0)))
 	case instr.GLOBAL_SET, instr.GLOBAL_TEE:
-		return w.store(ssa.SpaceGlobal, int(inst.Operand(0)), op == instr.GLOBAL_SET)
+		if op == instr.GLOBAL_TEE && !w.dup() {
+			return false
+		}
+		return w.store(ssa.SpaceGlobal, int(inst.Operand(0)))
 	case instr.UPVAL_SET:
-		return w.store(ssa.SpaceUpval, int(inst.Operand(0)), true)
+		return w.store(ssa.SpaceUpval, int(inst.Operand(0)))
 
 	case instr.CONST_GET:
 		return w.pool(int(inst.Operand(0)))
@@ -199,17 +205,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		return w.constant(types.BoxedNull, fact{kind: types.KindRef})
 
 	case instr.DUP:
-		// A borrowed duplicate still borrows its own backing storage; an owned
-		// one takes a retain of its own, because two stack copies release twice.
-		if len(w.stack) == 0 {
-			return false
-		}
-		top := w.stack[len(w.stack)-1]
-		if top.kind == types.KindRef && top.backing == jit.BackingStack {
-			w.retain(top.value)
-		}
-		w.stack = append(w.stack, top)
-		return true
+		return w.dup()
 	case instr.SWAP:
 		if len(w.stack) < 2 {
 			return false
@@ -468,18 +464,15 @@ func (w *walk) load(space ssa.Space, index int) bool {
 }
 
 // store writes the top operand into a slot, which releases whatever it
-// replaces. A ref hands its retain to the slot, so a borrowed one is owned
-// first and every other operand borrowed from that slot is owned before its
-// content changes underneath it.
-//
-// A tee of a reference is refused whole rather than emitted: leaving the
-// value on the stack needs a second, independent count, but only when the
-// slot's own runtime word is not already that same reference - a store back
-// over itself must not double the count - and that comparison needs the word
-// a store's own backend lowering loads out of the slot, which nothing at IR
-// build time has. Retaining here unconditionally would be wrong exactly when
-// it is a self-store, and there is no way from here to tell the two apart.
-func (w *walk) store(space ssa.Space, index int, pop bool) bool {
+// replaces, and always consumes that operand. A ref hands its retain to the
+// slot, so a borrowed one is owned first and every other operand borrowed
+// from that slot is owned before its content changes underneath it; a store
+// back over itself is exactly the case detach also owns, so the backend's
+// release of the overwritten word never has to special-case it. A tee
+// duplicates the operand before calling this (see perform), so the surviving
+// stack copy is a second owned operand rather than something this function
+// has to keep alive itself.
+func (w *walk) store(space ssa.Space, index int) bool {
 	if len(w.stack) == 0 {
 		return false
 	}
@@ -489,9 +482,6 @@ func (w *walk) store(space ssa.Space, index int, pop bool) bool {
 	}
 	top := len(w.stack) - 1
 	if w.stack[top].kind == types.KindRef {
-		if !pop {
-			return false
-		}
 		w.own(top)
 		w.detach(out.backing, out.offset)
 	}
@@ -501,9 +491,7 @@ func (w *walk) store(space ssa.Space, index int, pop bool) bool {
 		Args:  []ssa.Value{w.stack[top].value},
 		State: w.deopt(),
 	})
-	if pop {
-		w.stack = w.stack[:top]
-	}
+	w.stack = w.stack[:top]
 	return true
 }
 
@@ -871,6 +859,24 @@ func (w *walk) release(o operand) {
 		return
 	}
 	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
+}
+
+// dup pushes a second copy of the top operand: an owned one takes a retain of
+// its own, because two stack copies release twice, while a still-borrowed one
+// shares the same deferred count without taking one. LOCAL_TEE and GLOBAL_TEE
+// reuse this to produce the operand that survives their store (see perform):
+// own and detach then give it its own count exactly as they would a second
+// DUP'd copy, so the store never has to reason about a surviving value itself.
+func (w *walk) dup() bool {
+	if len(w.stack) == 0 {
+		return false
+	}
+	top := w.stack[len(w.stack)-1]
+	if top.kind == types.KindRef && top.backing == jit.BackingStack {
+		w.retain(top.value)
+	}
+	w.stack = append(w.stack, top)
+	return true
 }
 
 // begin starts one instruction, recording the operands a deopt from it resumes
