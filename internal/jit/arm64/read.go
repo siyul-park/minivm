@@ -13,14 +13,18 @@ import (
 // one bytecode operation, so the bounds test leaves through the state the
 // guard carries. Element stride lives in the shape table, not here.
 //
-// An i64 element may be heap-promoted, and a reference element is owned by
-// whoever receives it: an i64 now shares i32's lane (see lane), but this
-// machine emits the boxability guard behind neither, so the switch below
-// still declines both by naming no case for either kind.
+// A typed array's i64 element is stored raw, unlike a VM slot's boxed word,
+// so there is no tag to admit the way guardI64 admits one: the element loads
+// unconditionally and guardBoxable proves it fits the boxed payload
+// afterward, exiting through the same state the bounds test already resumes
+// through. A reference element is owned by whoever receives it, which this
+// machine has not learned to account for, so the switch below still declines
+// it by naming no case for KindRef.
 //
-// The guard emits and reserves a stub before the bounds exit and the element
-// kind can still decline. Sound only because a false anywhere in lowering
-// abandons the whole Compile and its assembler unpublished.
+// The guard emits and reserves a stub before the bounds exit, the element
+// kind, and (for KindI64) the boxability guard can still decline. Sound only
+// because a false anywhere in lowering abandons the whole Compile and its
+// assembler unpublished.
 func (e *emitter) read(guard, get ssa.Operation) bool {
 	if !e.fused(guard, get) {
 		return false
@@ -62,7 +66,7 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 		e.a.Emit(arm64.LSLI(off, idx, shape.Scale), arm64.ADD(addr, ptr, off))
 	}
 	// Unreachable while the shape table, ssa.TypeOf, and lane agree on these
-	// five kinds; a kind that stops agreeing declines instead of loading at
+	// six kinds; a kind that stops agreeing declines instead of loading at
 	// the wrong width.
 	switch shape.Kind {
 	case types.KindI1:
@@ -76,6 +80,11 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 		// sign-extended - the low 32 bits it reads are the element's own
 		// two's-complement bit pattern either way.
 		e.a.Emit(arm64.LDR(dst, addr, 0))
+	case types.KindI64:
+		e.a.Emit(arm64.LDR(dst, addr, 0))
+		if !e.guardBoxable(guard.State, dst) {
+			return false
+		}
 	case types.KindF32:
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDRSW(bits, addr, 0), arm64.FMOV(dst, narrow32(bits)))

@@ -218,7 +218,11 @@ Tests are executable specifications and use the production package plus `_test`.
 
 ### Test-first
 
-Write the test before implementation and observe the expected failure. For tests added after existing code, deliberately mutate a load-bearing line and confirm the test fails. Restore the mutation before final validation.
+Write the test before implementation and observe the expected failure. That observation is the evidence the test constrains the behavior; nothing further is required for it.
+
+A passing test proves nothing about code it never reached. Confirm reachability with a coverage profile over the package the test drives, not by breaking the code to see what notices.
+
+Mutation is the substitute when the failure was never observed: for a test retrofitted onto existing code, mutate one load-bearing line and confirm that test fails. Stage the work first, revert with a targeted edit, and confirm the tree is clean before continuing.
 
 ### JIT and backend tests
 

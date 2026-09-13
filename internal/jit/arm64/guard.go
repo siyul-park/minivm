@@ -64,8 +64,11 @@ func (e *emitter) guardI64(op ssa.Operation) bool {
 	return true
 }
 
-// guardBoxable rejects results outside the inline i64 range through the operation's state.
-// The state captures the pre-op operands, which remain boxable by construction.
+// guardBoxable rejects a raw i64 outside the inline boxed range through
+// state: an arithmetic op's own overflow guard resumes into its pre-op
+// operands, still boxable by construction, while a container read's resumes
+// into the container and index the access started with, redoing the whole
+// read - either way, the state names where the interpreter picks back up.
 func (e *emitter) guardBoxable(state ssa.Value, v asm.VReg) bool {
 	fail, ok := e.exit(state, prof.ExitGuardValue)
 	if !ok {

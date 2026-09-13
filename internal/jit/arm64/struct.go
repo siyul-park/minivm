@@ -20,11 +20,16 @@ import (
 // A struct field's storage slot is a full 8-byte word already holding the
 // value in its VM raw register form (types.Struct.SetField), so one LDRR
 // reads any kind; only a float result needs the extra FMOV that moves it
-// into the float bank this backend's register allocator gives it.
+// into the float bank this backend's register allocator gives it. An i64
+// field's raw word is not tag-boxed the way a VM slot's is - SetField stores
+// it as a plain 64-bit int - so guardBoxable proves it fits the boxed payload
+// after the load, the same check read uses for a typed array's own raw i64
+// element.
 //
-// The guard emits and reserves a stub before the bounds and kind exits, and
-// either can still decline. Sound only because a false anywhere in lowering
-// abandons the whole Compile and its assembler unpublished.
+// The guard emits and reserves a stub before the bounds exit, the kind exit,
+// and (for KindI64) the boxability guard can still decline. Sound only
+// because a false anywhere in lowering abandons the whole Compile and its
+// assembler unpublished.
 func (e *emitter) structRead(guard, get ssa.Operation) bool {
 	if !e.fused(guard, get) {
 		return false
@@ -76,6 +81,9 @@ func (e *emitter) structRead(guard, get ssa.Operation) bool {
 		e.a.Emit(arm64.LDRR(bits, dataPtr, idx), arm64.FMOV(dst, bits))
 	default:
 		e.a.Emit(arm64.LDRR(dst, dataPtr, idx))
+	}
+	if kind == types.KindI64 {
+		return e.guardBoxable(guard.State, dst)
 	}
 	return true
 }
@@ -151,7 +159,11 @@ func (e *emitter) hostRead(guard, get ssa.Operation) bool {
 	// 64-bit form this backend used before this port. The size-4 case reads
 	// through a plain LDR rather than LDRSW for the same reason: dst wants
 	// its low 32 bits - already the field's own two's-complement pattern
-	// either way - zero-extended, not sign-extended.
+	// either way - zero-extended, not sign-extended. Size 8 is the only width
+	// hostShapes maps to KindI64 (int, int64, uint, uint64, uintptr): dst
+	// already wants the field's full 64 bits, so the same plain LDR takes it
+	// whole, and guardBoxable below proves it fits the boxed payload the way
+	// it does for a typed array's own raw i64 element.
 	switch {
 	case size == 1 && signed:
 		raw := e.a.Reg(asm.RegTypeInt, asm.Width64)
@@ -168,16 +180,21 @@ func (e *emitter) hostRead(guard, get ssa.Operation) bool {
 	case kind == types.KindF64:
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDR(bits, target, 0), arm64.FMOV(dst, bits))
-	case size == 4:
+	case size == 4, size == 8:
 		e.a.Emit(arm64.LDR(dst, target, 0))
+	}
+	if kind == types.KindI64 {
+		return e.guardBoxable(guard.State, dst)
 	}
 	return true
 }
 
 // resultKind resolves the types.Kind a STRUCT_GET's SSA result type names, or
-// false for one this machine cannot receive: an i64 field may be
-// heap-promoted, and nothing proves a field boxable the way a slot load's own
-// guard does, while a ref result is owned by whoever receives it.
+// false for one this machine cannot receive: a ref result is owned by
+// whoever receives it, which structRead and hostRead have not learned to
+// account for. An i64 field is admitted - structRead and hostRead each prove
+// it boxable with guardBoxable after loading it, since neither field storage
+// carries a tag the way a slot's own boxed word does.
 func resultKind(t ssa.Type) (types.Kind, bool) {
 	switch t {
 	case ssa.TypeI1:
@@ -186,6 +203,8 @@ func resultKind(t ssa.Type) (types.Kind, bool) {
 		return types.KindI8, true
 	case ssa.TypeI32:
 		return types.KindI32, true
+	case ssa.TypeI64:
+		return types.KindI64, true
 	case ssa.TypeF32:
 		return types.KindF32, true
 	case ssa.TypeF64:

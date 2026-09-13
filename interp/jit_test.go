@@ -225,12 +225,16 @@ func TestCompiler_Compile(t *testing.T) {
 			require.Equal(t, counted-1, i.rc[value.Ref()], "the overwritten reference is released exactly once")
 		})
 
-		// An i64 element keeps this on the plan pipeline, whose own index
-		// guard is what the exit below names: the SSA machine declines an
-		// i64 read, so the compiler still selects a plan for this root. The
-		// SSA machine's own bounds test is covered where it is emitted, in
-		// the guarded-read golden stream and in the subtest above.
-		t.Run("guard bounds", func(t *testing.T) {
+		// An i64 element lowers through the SSA machine the same way an i32's
+		// does (see arm64/read.go): the shape guard, its own bounds test, and
+		// the boxability guard the raw i64 element needs once loaded, since a
+		// typed array stores it unboxed rather than tag-boxed. This subtest
+		// pins that the bounds test still resumes correctly for an i64
+		// element specifically; the shape guard's own stub is covered where
+		// every read shares it, in "a cold stub resumes the interpreter"
+		// above, and the boxability guard's stub in
+		// TestNew's own i64 goldens.
+		t.Run("guard bounds, i64 element", func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
 			}, program.WithConstants(types.TypedArray[int64]{1}), program.WithGlobals(types.TypeAny, types.TypeI32))
@@ -256,6 +260,12 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotNil(t, compiled.Code, "%+v", compiled)
 			entry, ok := compiled.Code.Entries[root]
 			require.True(t, ok)
+			require.Equal(t, []jit.Exit{
+				{Reason: prof.ExitGuardShape, Opcode: int(instr.ARRAY_GET)},
+				{Reason: prof.ExitGuardBounds, Opcode: int(instr.ARRAY_GET)},
+				{Reason: prof.ExitGuardValue, Opcode: int(instr.ARRAY_GET)},
+			}, entry.Exits, "the SSA machine emits the shape guard, the read's bounds test, and the i64 boxability guard, in that order")
+
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
 			require.NoError(t, entry.Callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(journal.TrapFallback), i.journal[journal.CellTrap])
@@ -861,6 +871,64 @@ func TestCompiler_Compile(t *testing.T) {
 		require.Equal(t, want, got)
 	})
 
+	// A typed array's i64 element now lowers through the SSA machine, which
+	// TestNew's own goldens pin structurally. What they cannot prove is that
+	// running the compiled code end to end produces the value a threaded run
+	// would: this does, for an element the boxed payload holds inline and one
+	// Interpreter.boxI64 heap-promotes instead, resolving either result
+	// through Load so a promoted ref's own heap address - necessarily
+	// different between the two independent interpreters below - never
+	// enters the comparison, and balancing the reference PopBoxed hands over
+	// with Release once RefCount has confirmed the resumed read left it
+	// owned exactly once.
+	t.Run("i64 array element matches threaded execution", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		resolve := func(t *testing.T, i *Interpreter) types.Value {
+			t.Helper()
+			boxed, err := i.PopBoxed()
+			require.NoError(t, err)
+			if boxed.Kind() != types.KindRef {
+				return types.Unbox(boxed)
+			}
+			count, err := i.RefCount(boxed.Ref())
+			require.NoError(t, err)
+			require.Equal(t, 1, count)
+			val, err := i.Load(boxed.Ref())
+			require.NoError(t, err)
+			require.NoError(t, i.Release(boxed.Ref()))
+			return val
+		}
+		check := func(t *testing.T, elem int64) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int64]{elem}))
+
+			threaded := New(prog, WithThreshold(-1))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			want := resolve(t, threaded)
+
+			native := New(prog, WithThreshold(-1))
+			defer native.Close()
+			c, err := newCompiler()
+			require.NoError(t, err)
+			defer c.Close()
+			input, ok := native.compileSnapshot(0)
+			require.True(t, ok)
+			result := c.Compile(input, jit.Anchor{})
+			require.NoError(t, result.Err)
+			require.NotEmpty(t, result.Code.Entries)
+			native.install(result.Code)
+			require.NoError(t, native.Run(context.Background()))
+			got := resolve(t, native)
+
+			require.Equal(t, want, got)
+		}
+		t.Run("in range", func(t *testing.T) { check(t, 42) })
+		t.Run("heap-promoted", func(t *testing.T) { check(t, math.MaxInt64) })
+	})
 }
 
 // TestARM64_Encloses covers the containment the installer arbitrates on: a

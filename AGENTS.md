@@ -77,6 +77,7 @@ Do not report completion until:
 - every touched symbol still has a reason to exist;
 - a further safe simplification pass finds nothing to remove, merge, inline, narrow, privatize, or rename;
 - tests constrain the intended behavior, with mutation evidence when written after implementation;
+- every test reaches the code it names, confirmed by a coverage profile rather than assumed from a pass;
 - comments contain only non-obvious facts;
 - no behavior has a second implementation;
 - generated output is current;

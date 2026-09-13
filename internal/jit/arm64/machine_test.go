@@ -59,7 +59,9 @@ func TestNew(t *testing.T) {
 	// then derive the frame base local slots are addressed from - because
 	// every entry this machine takes reads its state from there.
 	elems := types.TypedArray[int32]{10, 20, 30}
+	elems64 := types.TypedArray[int64]{10, 20, 30}
 	fieldsTyp := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))
+	fieldsTyp64 := types.NewStructType(types.NewStructField(types.TypeI64), types.NewStructField(types.TypeF64))
 	for _, tt := range []struct {
 		name string
 		addr int
@@ -979,6 +981,149 @@ func TestNew(t *testing.T) {
 				)
 			}(),
 		},
+		{
+			// A typed array's i64 element is stored raw, not tag-boxed the way a
+			// VM slot's own word is, so nothing short of loading it says whether
+			// it still fits the boxed payload. The load runs unconditionally and
+			// guardBoxable follows it, exiting through the same state the bounds
+			// test above it already resumes through - the third exit a guarded
+			// i64 read reserves, landing at the same label number kindExit would
+			// if this were a struct's, since no kind check precedes it here.
+			name: "reads an in-range i64 array element, guarding the boxed payload",
+			addr: 1,
+			in: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Array: jit.Itab(elems64)}
+				return in
+			}(),
+			want: slices.Concat(
+				prologue(4, 5, 6),
+				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+				[]asm.Instruction{
+					asmarm64.LDR(narrow(1), vreg(4), 0),
+					asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits)),
+				},
+				asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
+				[]asm.Instruction{
+					asmarm64.CMP(vreg(7), vreg(8)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+					asmarm64.ANDI(vreg(9), vreg(0), 0xFFFFFFFF),
+					asmarm64.LDR(vreg(10), vreg(15), int16(journal.CellHeap*8)),
+					asmarm64.LSLI(vreg(11), vreg(9), 4),
+					asmarm64.ADD(vreg(12), vreg(10), vreg(11)),
+					asmarm64.LDR(vreg(13), vreg(12), 0),
+					asmarm64.LDR(vreg(14), vreg(12), 8),
+				},
+				asmarm64.LDI(vreg(16), uint64(jit.Itab(elems64))),
+				[]asm.Instruction{
+					asmarm64.CMP(vreg(13), vreg(16)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+					asmarm64.MOV(vreg(2), vreg(0)),
+
+					asmarm64.LDR(vreg(17), vreg(14), 0),
+					asmarm64.LDR(vreg(18), vreg(14), 8),
+					asmarm64.SXTW(vreg(19), narrow(1)),
+					asmarm64.CMP(vreg(19), vreg(18)),
+					asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
+					asmarm64.LSLI(vreg(21), vreg(19), 3),
+					asmarm64.ADD(vreg(20), vreg(17), vreg(21)),
+					asmarm64.LDR(vreg(3), vreg(20), 0),
+					asmarm64.SBFX(vreg(22), vreg(3), 0, types.VBits),
+					asmarm64.CMP(vreg(22), vreg(3)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 3),
+				},
+				boxI64(vreg(23), vreg(3), vreg(24)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(23), vreg(4), 0),
+					asmarm64.MOV(vreg(25), vreg(23)),
+					asmarm64.RET(),
+				},
+				stub(26, 1, 4, arrayGetIP, 8, 3),
+				stub(40, 2, 5, arrayGetIP, 8, 3),
+				stub(54, 3, 6, arrayGetIP, 8, 3),
+			),
+		},
+		{
+			name: "reads an in-range i64 struct field, guarding the boxed payload",
+			addr: 1,
+			in: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Typ: fieldsTyp64}
+				return in
+			}(),
+			want: func() []asm.Instruction {
+				typ := fieldsTyp64
+				return slices.Concat(
+					prologue(4, 5, 6),
+					asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+					[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
+					[]asm.Instruction{
+						asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits)),
+					},
+					asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
+					[]asm.Instruction{
+						asmarm64.CMP(vreg(7), vreg(8)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+						asmarm64.ANDI(vreg(9), vreg(0), 0xFFFFFFFF),
+						asmarm64.LDR(vreg(10), vreg(15), int16(journal.CellHeap*8)),
+						asmarm64.LSLI(vreg(11), vreg(9), 4),
+						asmarm64.ADD(vreg(12), vreg(10), vreg(11)),
+						asmarm64.LDR(vreg(13), vreg(12), 0),
+						asmarm64.LDR(vreg(14), vreg(12), 8),
+					},
+					asmarm64.LDI(vreg(16), uint64(jit.HeapStruct)),
+					[]asm.Instruction{
+						asmarm64.CMP(vreg(13), vreg(16)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+						asmarm64.MOV(vreg(2), vreg(0)),
+						asmarm64.LDR(vreg(17), vreg(14), 0),
+					},
+					asmarm64.LDI(vreg(18), uint64(uintptr(unsafe.Pointer(typ)))),
+					[]asm.Instruction{
+						asmarm64.CMP(vreg(17), vreg(18)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+						asmarm64.LDR(vreg(19), vreg(17), 0),
+						asmarm64.LDR(vreg(20), vreg(17), 8),
+						asmarm64.SXTW(vreg(21), narrow(1)),
+						asmarm64.CMP(vreg(21), vreg(20)),
+						asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
+						asmarm64.MOVZ(vreg(22), 40, 0),
+						asmarm64.MUL(vreg(22), vreg(21), vreg(22)),
+						asmarm64.ADD(vreg(23), vreg(19), vreg(22)),
+						asmarm64.LDRB(vreg(24), vreg(23), 32),
+						asmarm64.CMPI(vreg(24), uint16(types.KindI64)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, kindExit),
+						asmarm64.LDR(vreg(25), vreg(14), 8),
+						asmarm64.LDRR(vreg(3), vreg(25), vreg(21)),
+						asmarm64.SBFX(vreg(26), vreg(3), 0, types.VBits),
+						asmarm64.CMP(vreg(26), vreg(3)),
+						asmarm64.BCondLabel(asmarm64.OpBNE, valueExit),
+					},
+					boxI64(vreg(27), vreg(3), vreg(28)),
+					[]asm.Instruction{
+						asmarm64.STR(vreg(27), vreg(4), 0),
+						asmarm64.MOV(vreg(29), vreg(27)),
+						asmarm64.RET(),
+					},
+					stub(30, 1, 5, structGetIP, 0, 2),
+					stub(44, 2, 6, structGetIP, 0, 2),
+					stub(58, 3, 7, structGetIP, 0, 2),
+					stub(72, 4, 8, structGetIP, 0, 2),
+				)
+			}(),
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			assembler := asm.New(asmarm64.New())
@@ -1089,6 +1234,100 @@ func TestNew(t *testing.T) {
 		require.NotEmpty(t, code)
 	})
 
+	t.Run("reads an in-range i64 *HostStruct field, guarding the boxed payload", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.RETURN)
+			}),
+		}
+		in := input(1, fn)
+		in.Constants = []types.Boxed{types.BoxRef(2)}
+		layout := jit.Layout{
+			HostFields:      0,
+			HostPtr:         8,
+			HostFieldOffset: 0,
+			HostFieldConv:   8,
+			HostFieldSize:   16,
+			HostConvKind:    0,
+			HostStructItab:  0xABCDEF,
+		}
+		in.Layout = layout
+
+		rec := &tape{}
+		rec.at(fn, 1, 0, 0)
+		rec.at(fn, 1, 3, 0)
+		get := rec.at(fn, 1, structGetIP, 0)
+		get.Arg = types.BoxI32(0)
+		get.Shape = jit.Shape{Itab: layout.HostStructItab, Field: reflect.Int64}
+		get.Seen = types.BoxI64(11)
+		rec.at(fn, 1, structGetIP+1, 0)
+		in.Traces = fakeTraces{{Addr: 1}: {Root: &jit.Trace{Anchor: jit.Anchor{Addr: 1}, Ops: rec.ops, Status: jit.StatusReturned}}}
+
+		assembler := asm.New(asmarm64.New())
+		entry, ok := arm64.New().Compile(assembler, in, jit.Anchor{Addr: 1})
+		require.True(t, ok)
+		require.Equal(t, prof.FrontendTrace, entry.Frontend)
+
+		want := slices.Concat(
+			prologue(4, 5, 6),
+			asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
+			[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
+			[]asm.Instruction{asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits))},
+			asmarm64.LDI(vreg(8), uint64(types.Tag(types.KindRef))>>types.VBits),
+			[]asm.Instruction{
+				asmarm64.CMP(vreg(7), vreg(8)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+				asmarm64.ANDI(vreg(9), vreg(0), 0xFFFFFFFF),
+				asmarm64.LDR(vreg(10), vreg(15), int16(journal.CellHeap*8)),
+				asmarm64.LSLI(vreg(11), vreg(9), 4),
+				asmarm64.ADD(vreg(12), vreg(10), vreg(11)),
+				asmarm64.LDR(vreg(13), vreg(12), 0),
+				asmarm64.LDR(vreg(14), vreg(12), 8),
+			},
+			asmarm64.LDI(vreg(16), uint64(layout.HostStructItab)),
+			[]asm.Instruction{
+				asmarm64.CMP(vreg(13), vreg(16)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, shapeExit),
+				asmarm64.MOV(vreg(2), vreg(0)),
+				asmarm64.LDR(vreg(17), vreg(14), int16(layout.HostFields)),
+				asmarm64.LDR(vreg(18), vreg(14), int16(layout.HostFields+8)),
+				asmarm64.SXTW(vreg(19), narrow(1)),
+				asmarm64.CMP(vreg(19), vreg(18)),
+				asmarm64.BCondLabel(asmarm64.OpBCS, boundsExit),
+				asmarm64.MOVZ(vreg(20), uint16(layout.HostFieldSize), 0),
+				asmarm64.MUL(vreg(20), vreg(19), vreg(20)),
+				asmarm64.ADD(vreg(21), vreg(17), vreg(20)),
+				asmarm64.LDR(vreg(22), vreg(21), int16(layout.HostFieldConv)),
+				asmarm64.LDRB(vreg(23), vreg(22), int16(layout.HostConvKind)),
+				asmarm64.CMPI(vreg(23), uint16(reflect.Int64)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, kindExit),
+				asmarm64.LDR(vreg(24), vreg(21), int16(layout.HostFieldOffset)),
+				asmarm64.LDR(vreg(25), vreg(14), int16(layout.HostPtr)),
+				asmarm64.ADD(vreg(26), vreg(25), vreg(24)),
+				asmarm64.LDR(vreg(3), vreg(26), 0),
+				asmarm64.SBFX(vreg(27), vreg(3), 0, types.VBits),
+				asmarm64.CMP(vreg(27), vreg(3)),
+				asmarm64.BCondLabel(asmarm64.OpBNE, valueExit),
+			},
+			boxI64(vreg(28), vreg(3), vreg(29)),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(28), vreg(4), 0),
+				asmarm64.MOV(vreg(30), vreg(28)),
+				asmarm64.RET(),
+			},
+			stub(31, 1, 5, structGetIP, 0, 2),
+			stub(45, 2, 6, structGetIP, 0, 2),
+			stub(59, 3, 7, structGetIP, 0, 2),
+			stub(73, 4, 8, structGetIP, 0, 2),
+		)
+		require.Equal(t, want, assembler.Instructions())
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+	})
+
 	// Declining is the correct answer for everything the SSA machine has not
 	// learned yet, and it must cost no coverage: the same root still compiles
 	// through the plan pipeline this machine is being ported off.
@@ -1145,25 +1384,6 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 				}),
 			}),
-		},
-		{
-			// An i64 element may be heap-promoted, so reading one needs the
-			// boxability guard this machine emits behind no container access -
-			// only a slot load's own kind guard (see guardI64). i64 now shares
-			// i32's lane (see lane), so read's own switch is what still
-			// declines it, by naming no case for types.KindI64.
-			name: "an i64 array element",
-			input: func() *jit.Input {
-				in := input(1, &types.Function{
-					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
-					Code: assemble(t, func(b *instr.Builder) {
-						b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
-					}),
-				})
-				in.Constants = []types.Boxed{types.BoxRef(2)}
-				in.Objects[2] = jit.Object{Array: jit.Itab(types.TypedArray[int64]{1})}
-				return in
-			}(),
 		},
 		{
 			name: "an i64 divide",
@@ -1328,14 +1548,17 @@ func boxI64(out, src, tagReg asm.VReg) []asm.Instruction {
 	)
 }
 
-// shapeExit, boundsExit, and kindExit are the labels the guarded reads' cold
-// stubs take, in the order a guard and its read reserve them; each stub then
-// takes one more, for the retain its null-reference test skips. STRUCT_GET is
-// the only read that ever reaches kindExit - see structRead.
+// shapeExit, boundsExit, kindExit, and valueExit are the labels the guarded
+// reads' cold stubs take, in the order a guard and its read reserve them;
+// each stub then takes one more, for the retain its null-reference test
+// skips. STRUCT_GET is the only read that ever reaches kindExit - see
+// structRead - and an ARRAY_GET read's own valueExit lands at kindExit's own
+// number instead of this one, since no kind check precedes it there.
 const (
 	shapeExit asm.Label = iota + 1
 	boundsExit
 	kindExit
+	valueExit
 )
 
 // stub is one cold stub of a guarded-read stream: the container and index
