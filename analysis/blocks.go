@@ -30,15 +30,6 @@ func NewBlocksAnalysis() *BlocksAnalysis {
 // Blocks builds the control-flow blocks for fn.
 func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
-	mark := func(ip, target int) error {
-		if target < 0 || target > len(fn.Code) {
-			return invalidJumpError(ip, target)
-		}
-		if target < len(fn.Code) {
-			offsets = append(offsets, target)
-		}
-		return nil
-	}
 	for ip := 0; ip < len(fn.Code); {
 		inst := instr.Instruction(fn.Code[ip:])
 		next := ip + inst.Width()
@@ -49,8 +40,11 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 			}
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
 			for _, offset := range instr.Targets(fn.Code, ip) {
-				if err := mark(ip, offset); err != nil {
-					return nil, err
+				if offset < 0 || offset > len(fn.Code) {
+					return nil, invalidJumpError(ip, offset)
+				}
+				if offset < len(fn.Code) {
+					offsets = append(offsets, offset)
 				}
 			}
 			if inst.Opcode() != instr.BR_TABLE && next < len(fn.Code) {
@@ -115,13 +109,11 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 				}
 			}
 			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
-				blk.Succs = append(blk.Succs, j+1)
-				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
+				link(blocks, indexByStart, j, blocks[j+1].Start)
 			}
 		default:
 			if j+1 < len(blocks) {
-				blk.Succs = append(blk.Succs, j+1)
-				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
+				link(blocks, indexByStart, j, blocks[j+1].Start)
 			}
 		}
 	}
