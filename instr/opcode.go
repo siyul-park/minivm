@@ -271,8 +271,6 @@ const (
 	STRING_ITER
 )
 
-const opcodeCount = STRING_ITER + 1
-
 // isBranch reports whether op names its branch targets in its own operands
 // (BR / BR_IF / BR_TABLE), which is what decoding and labelling need. A control
 // transfer that names no target - RETURN, THROW, UNREACHABLE - is not one;

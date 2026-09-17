@@ -316,10 +316,7 @@ var types = map[Opcode]Type{
 }
 
 func TypeOf(op Opcode) Type {
-	if t, ok := types[op]; ok {
-		return t
-	}
-	return Type{}
+	return types[op]
 }
 
 // Valid reports whether op is a defined opcode with encoding metadata.

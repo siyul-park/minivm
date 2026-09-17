@@ -117,26 +117,51 @@ func TestBuilder_Try(t *testing.T) {
 }
 
 func TestBuilder_Assemble(t *testing.T) {
-	t.Run("unbound label", func(t *testing.T) {
-		b := instr.NewBuilder()
-		b.Br(b.Label())
-
-		_, err := b.Assemble()
-		require.ErrorIs(t, err, instr.ErrUnboundLabel)
-	})
-
-	t.Run("offset out of range", func(t *testing.T) {
-		b := instr.NewBuilder()
-		end := b.Label()
-		b.Br(end)
-		for i := 0; i < math.MaxInt16+1; i++ {
-			b.Emit(instr.NOP)
-		}
-		b.Bind(end).Emit(instr.RETURN)
-
-		_, err := b.Assemble()
-		require.ErrorIs(t, err, instr.ErrOffsetRange)
-	})
+	tests := []struct {
+		name    string
+		offset  int
+		unbound bool
+		wantErr error
+	}{
+		{name: "unbound label", unbound: true, wantErr: instr.ErrUnboundLabel},
+		{name: "below minimum offset", offset: math.MinInt16 - 1, wantErr: instr.ErrOffsetRange},
+		{name: "minimum offset", offset: math.MinInt16},
+		{name: "maximum offset", offset: math.MaxInt16},
+		{name: "above maximum offset", offset: math.MaxInt16 + 1, wantErr: instr.ErrOffsetRange},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := instr.NewBuilder()
+			target := b.Label()
+			if tt.offset < 0 {
+				b.Bind(target)
+				for range -tt.offset - 3 {
+					b.Emit(instr.NOP)
+				}
+				b.Br(target)
+			} else {
+				b.Br(target)
+				for range tt.offset {
+					b.Emit(instr.NOP)
+				}
+				if !tt.unbound {
+					b.Bind(target)
+				}
+			}
+			instructions, err := b.Assemble()
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				require.Nil(t, instructions)
+				return
+			}
+			require.NoError(t, err)
+			branch := instructions[0]
+			if tt.offset < 0 {
+				branch = instructions[len(instructions)-1]
+			}
+			require.Equal(t, tt.offset, instr.ParseI16(branch, 1))
+		})
+	}
 }
 
 func TestBuilder_Handlers(t *testing.T) {
