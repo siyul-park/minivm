@@ -54,6 +54,7 @@ func TestEncoder_Encode(t *testing.T) {
 		{"SUBI X1,X2,#42", arm64.SUBI(arm64.X1, arm64.X2, 42), 0xD100A841},
 		{"SUBSI X1,X2,#42", arm64.SUBSI(arm64.X1, arm64.X2, 42), 0xF100A841},
 		{"ANDI X1,X2,#0xFF", arm64.ANDI(arm64.X1, arm64.X2, 0xFF), 0x92401C41},
+		{"ANDI repeated 16-bit element", arm64.ANDI(arm64.X1, arm64.X2, 0x00FF00FF00FF00FF), 0x92409C41},
 		{"ANDSI X1,X2,#0xFF", arm64.ANDSI(arm64.X1, arm64.X2, 0xFF), 0xF2401C41},
 		{"ORRI X1,X2,#0xFF", arm64.ORRI(arm64.X1, arm64.X2, 0xFF), 0xB2401C41},
 		{"EORI X1,X2,#0xFF", arm64.EORI(arm64.X1, arm64.X2, 0xFF), 0xD2401C41},

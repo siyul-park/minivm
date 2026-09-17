@@ -1519,21 +1519,12 @@ func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 			continue
 		}
 
-		// Encode N, immr, imms.
-		// N  = 1 if esize==64, else 0
+		// Encode immr, imms.
 		// immr = rotation amount (6 bits)
-		// imms encodes element size and number of ones:
-		//   imms = NOT(esize) | (ones-1)  — the upper bits encode the element size
-		var N uint32
-		if esize == 64 {
-			N = 1
-		}
+		// imms = NOT(esize) within 6 bits, then ones-1 in the low bits:
+		// esize=2 → imms[5:1]=11111 ... esize=64 → imms[5:1]=11110
 		immrVal := uint32(ro) & 0x3F
-		// imms[5:0]: 0b0xxxxx where x encodes (esize, ones)
-		// Standard encoding: imms = ~(esize) truncated to 6 bits, then OR ones-1
-		immsVal := (^uint32(esize)&0x3F)&^(uint32(esize)-1) | uint32(ones-1)
-		_ = N // N is packed into bit 22 of the instruction by the caller as the "N" field
-		// For 64-bit logical immediates N=1 is handled by the caller OR'ing 1<<22.
+		immsVal := ((^uint32(esize-1) & 0x3F) << 1) & 0x3E | uint32(ones-1)
 		return immrVal, immsVal, true
 	}
 	return 0, 0, false
