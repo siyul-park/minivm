@@ -1,5 +1,7 @@
 package asm
 
+import "sort"
+
 // useIndex maps a vreg id to every instruction position that reads it,
 // ascending. It backs crosses' dominance check: whether a spill's store
 // dominates every read still pending after it. A definition needs no entry
@@ -24,21 +26,6 @@ func buildUseIndex(insts []Instruction, count int) useIndex {
 // futureUses returns id's use positions strictly after i, ascending.
 func (idx useIndex) futureUses(id int32, i int) []int32 {
 	positions := idx[id]
-	lo := searchAfter(positions, i)
+	lo := sort.Search(len(positions), func(j int) bool { return positions[j] > int32(i) })
 	return positions[lo:]
-}
-
-// searchAfter returns the index of the first position strictly greater
-// than i in the ascending slice positions.
-func searchAfter(positions []int32, i int) int {
-	lo, hi := 0, len(positions)
-	for lo < hi {
-		mid := (lo + hi) / 2
-		if positions[mid] <= int32(i) {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	return lo
 }
