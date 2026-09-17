@@ -82,13 +82,7 @@ func (p *Program) String() string {
 		sb.WriteString(".constants\n")
 		for i, v := range p.Constants {
 			if fn, ok := v.(*types.Function); ok {
-				head, tail, _ := strings.Cut(fn.String(), "\n")
-				sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, head))
-				for tail != "" {
-					var line string
-					line, tail, _ = strings.Cut(tail, "\n")
-					sb.WriteString(fmt.Sprintf("\t%s\n", line))
-				}
+				writeEntry(&sb, i, fn.String())
 			} else {
 				sb.WriteString(fmt.Sprintf("%04d:\t%s %s\n", i, v.Type().String(), v.String()))
 			}
@@ -109,12 +103,16 @@ func (p *Program) String() string {
 
 func writeIndexed[T fmt.Stringer](sb *strings.Builder, items []T) {
 	for i, item := range items {
-		head, tail, _ := strings.Cut(item.String(), "\n")
-		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, head))
-		for tail != "" {
-			var line string
-			line, tail, _ = strings.Cut(tail, "\n")
-			sb.WriteString(fmt.Sprintf("\t%s\n", line))
-		}
+		writeEntry(sb, i, item.String())
+	}
+}
+
+func writeEntry(sb *strings.Builder, index int, s string) {
+	head, tail, _ := strings.Cut(s, "\n")
+	sb.WriteString(fmt.Sprintf("%04d:\t%s\n", index, head))
+	for tail != "" {
+		var line string
+		line, tail, _ = strings.Cut(tail, "\n")
+		sb.WriteString(fmt.Sprintf("\t%s\n", line))
 	}
 }
