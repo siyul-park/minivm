@@ -25,17 +25,20 @@ Smaller code is not automatically simpler. Optimize conceptual surface and respo
 
 Start from the requirement, not the diff. Identify affected files, entry points, owners, constraints, and the responsibility changed by the work. State that responsibility in one sentence.
 
+Review successively within a file, across files in a package, and across packages in a module. At each level, inspect cohesion, ownership, dependency direction, and the necessity of each boundary. For repository-wide work, process lower-dependency packages before their consumers. A local fixed point does not establish a package or module fixed point.
+
 ### Top Down
 
-Review in order:
+“Top” is the owning scope under review: a file, package, or module, not necessarily a function. Review from that scope's contract down to its implementation:
 
-1. package responsibility and dependency direction;
+1. file, package, or module responsibility and dependency direction;
 2. public contract and ownership boundary;
 3. behavior and control flow;
 4. state and lifecycle;
 5. implementation mechanics.
 
 Ask: Is each responsibility in its narrowest correct owner? Is dependency direction valid? Is ownership explicit? Did the change add a layer without a contract?
+
 ### Bottom Up
 
 Review every changed symbol and every nearby symbol whose ownership, visibility, call relationship, or contract changed. For each retained symbol ask: **Why does this symbol exist now?**
@@ -53,6 +56,7 @@ Apply passes in this order:
 5. **Tests / docs** — preserve contract tests; remove structure-only tests; describe final state.
 
 Do not create an abstraction merely to move complexity elsewhere. Prefer one cohesive symbol serving all legitimate callers over parallel variants.
+
 ### Fixed Point
 
 Any structural change to ownership, control flow, interfaces, abstractions, or package boundaries restarts review from **Top Down**.
@@ -65,7 +69,7 @@ Top Down → Bottom Up → Simplify
           └── no change → Validate
 ```text
 
-Stop only when a complete pass finds no further **safe structural improvement within scope**. This is the simplification fixed point.
+Stop only when a complete pass finds no further **safe structural improvement within scope**. This is the simplification fixed point. For repository-wide work, this requires file, package, and module review; record the contract or evidence blocking each meaningful remaining candidate.
 
 ### Validate
 
