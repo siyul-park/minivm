@@ -1739,6 +1739,50 @@ func overflowStub(first int32, ip int) []asm.Instruction {
 	)
 }
 
+// TestARM64_PlanUpvalSetNeverGatesReleaseOnAliasing counts CMP+BEQ pairs
+// rather than asserting a fixed value at one repetition count: a stray
+// CMP+BEQ pair elsewhere in the compiled body, unrelated to UPVAL_SET, would
+// make a bare fixed count fragile.
+func TestARM64_PlanUpvalSetNeverGatesReleaseOnAliasing(t *testing.T) {
+	cmpBranches := func(t *testing.T, sets int) int {
+		t.Helper()
+		body := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)}
+		for range sets {
+			body = append(body, instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0))
+		}
+		body = append(body, instr.New(instr.RETURN))
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).
+			Captures(types.TypeAny).
+			Emit(body...).
+			MustBuild()
+		input := &jit.Input{
+			Address:  0,
+			Function: fn,
+			Objects:  jit.Objects{0: {Fn: fn}},
+		}
+		plans, err := jit.StaticPlan(input)
+		require.NoError(t, err)
+		require.NotEmpty(t, plans)
+
+		a := asm.New(asmarm64.New())
+		_, ok := arm64.New().Lower(a, input, plans[0], false)
+		require.True(t, ok)
+
+		insts := a.Instructions()
+		count := 0
+		for idx := 0; idx+1 < len(insts); idx++ {
+			if insts[idx].Op == uint16(asmarm64.OpCMP) && insts[idx+1].Op == uint16(asmarm64.OpBEQ) {
+				count++
+			}
+		}
+		return count
+	}
+
+	c2, c5 := cmpBranches(t, 2), cmpBranches(t, 5)
+	require.Equal(t, 1, c2)
+	require.Equal(t, c2, c5)
+}
+
 // vreg, freg, freg32, and narrow name one virtual register of the stream a
 // compile emits: the integer bank, the float bank at f64's width, the float
 // bank at f32's own narrower width, and the 32-bit view of an integer

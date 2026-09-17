@@ -1178,6 +1178,197 @@ func TestARM64_Encloses(t *testing.T) {
 	})
 }
 
+// TestARM64_PlanReferenceStoresMatchThreadedOwnership drives LOCAL_SET,
+// GLOBAL_SET, UPVAL_SET, ARRAY_SET, and STRUCT_SET's ref-typed self-store
+// through the ARM64 plan pipeline, not the SSA machine: every program plants
+// a REF_NEW, an opcode absent from emit.go's Lowers table, so the SSA machine
+// declines the whole compile and jit.Compiler falls through to StaticPlan +
+// Machine.Lower. result.Frontend cannot certify this itself - the SSA-static
+// frontend and this fallback both report prof.FrontendStatic.
+func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	compile := func(t *testing.T, i *Interpreter) {
+		t.Helper()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, c.Close()) })
+		input, ok := i.compileSnapshot(0)
+		require.True(t, ok)
+		result := c.Compile(input, jit.Anchor{})
+		require.NoError(t, result.Err)
+		require.NotEmpty(t, result.Code.Entries)
+		i.install(result.Code)
+	}
+
+	check := func(t *testing.T, prog *program.Program) {
+		t.Helper()
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want := refCounts(threaded)
+
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		compile(t, native)
+		require.NoError(t, native.Run(context.Background()))
+		require.Equal(t, want, refCounts(native))
+	}
+
+	t.Run("local self-store releases the overwritten reference", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			b.Locals(types.TypeAny)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.REF_NEW).Emit(instr.DUP).Emit(instr.LOCAL_SET, 0)
+			for range reps {
+				b.Emit(instr.DUP).Emit(instr.LOCAL_SET, 0)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
+		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+	})
+
+	t.Run("global self-store releases the overwritten reference", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			b.Globals(types.TypeAny)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.REF_NEW).Emit(instr.DUP).Emit(instr.GLOBAL_SET, 0)
+			for range reps {
+				b.Emit(instr.DUP).Emit(instr.GLOBAL_SET, 0)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
+		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+	})
+
+	t.Run("array self-store releases the overwritten reference", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			arrayType := b.Type(types.NewArrayType(types.TypeAny))
+			b.Locals(types.NewArrayType(types.TypeAny))
+			b.Emit(instr.I32_CONST, 1).
+				Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).
+				Emit(instr.LOCAL_SET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.REF_NEW)
+			for range reps + 1 {
+				b.Emit(instr.DUP).
+					Emit(instr.LOCAL_GET, 0).
+					Emit(instr.SWAP).
+					Emit(instr.I32_CONST, 0).
+					Emit(instr.SWAP).
+					Emit(instr.ARRAY_SET)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
+		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+	})
+
+	t.Run("struct self-store releases the overwritten reference", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			structType := b.Type(types.NewStructType(types.NewStructField(types.TypeAny)))
+			b.Locals(types.NewStructType(types.NewStructField(types.TypeAny)))
+			b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(structType)).
+				Emit(instr.LOCAL_SET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.REF_NEW)
+			for range reps + 1 {
+				b.Emit(instr.DUP).
+					Emit(instr.LOCAL_GET, 0).
+					Emit(instr.SWAP).
+					Emit(instr.I32_CONST, 0).
+					Emit(instr.SWAP).
+					Emit(instr.STRUCT_SET)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
+		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+	})
+
+	t.Run("upval self-store releases the overwritten reference", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			body := []instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+				instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0),
+			}
+			for range reps {
+				body = append(body, instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0))
+			}
+			body = append(body, instr.New(instr.DROP), instr.New(instr.RETURN))
+			fn := types.NewFunctionBuilder(&types.FunctionType{}).
+				Captures(types.TypeAny).
+				Emit(body...).
+				MustBuild()
+			return program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.GLOBAL_SET, 1),
+				instr.New(instr.CALL),
+			}, program.WithConstants(fn), program.WithGlobals(types.TypeAny, types.TypeAny))
+		}
+
+		checkFn := func(t *testing.T, prog *program.Program) {
+			t.Helper()
+			threaded := New(prog, WithThreshold(-1))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			want := refCounts(threaded)
+
+			native := New(prog, WithThreshold(-1))
+			defer native.Close()
+			c, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, c.Close()) })
+			addr := int(native.constants[0].Ref())
+			input, ok := native.compileSnapshot(addr)
+			require.True(t, ok)
+			result := c.Compile(input, jit.Anchor{Addr: addr})
+			require.NoError(t, result.Err)
+			require.NotEmpty(t, result.Code.Entries)
+			native.install(result.Code)
+			require.NoError(t, native.Run(context.Background()))
+			require.Equal(t, want, refCounts(native))
+		}
+		t.Run("2 repetitions", func(t *testing.T) { checkFn(t, build(t, 2)) })
+		t.Run("5 repetitions", func(t *testing.T) { checkFn(t, build(t, 5)) })
+	})
+}
+
+func refCounts(i *Interpreter) map[int]int {
+	out := map[int]int{}
+	for addr := 1; addr < i.HeapLen(); addr++ {
+		count, err := i.RefCount(addr)
+		if err == nil {
+			out[addr] = count
+		}
+	}
+	return out
+}
+
 // TestFrontend_Trace drives the SSA trace frontend against recordings the real
 // recorder produced, which no test outside interp can obtain: capture clones a
 // running interpreter and single-steps its threaded closures, and the snapshot
