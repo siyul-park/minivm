@@ -1,6 +1,9 @@
 package prof
 
-import "strconv"
+import (
+	"slices"
+	"strconv"
+)
 
 // Collector records execution samples and named metrics.
 type Collector struct {
@@ -27,7 +30,7 @@ func (c *Collector) Value(name string, labels ...Label) float64 {
 
 func (c *Collector) Metric(name string, labels ...Label) (float64, bool) {
 	for _, m := range c.Metrics() {
-		if m.Name == name && sameLabels(m.Labels, labels) {
+		if m.Name == name && slices.Equal(m.Labels, labels) {
 			return m.Value, true
 		}
 	}
@@ -68,7 +71,10 @@ func (c *Collector) Metrics() []Metric {
 			Value:  float64(n),
 		})
 	}
-	out = append(out, c.metrics...)
+	for _, metric := range c.metrics {
+		metric.Labels = append([]Label(nil), metric.Labels...)
+		out = append(out, metric)
+	}
 	out = c.jit.appendMetrics(out)
 	return out
 }
@@ -87,7 +93,7 @@ func (c *Collector) Add(fn, ip int, op byte) {
 
 func (c *Collector) AddMetric(name string, value float64, labels ...Label) {
 	for i := range c.metrics {
-		if c.metrics[i].Name == name && sameLabels(c.metrics[i].Labels, labels) {
+		if c.metrics[i].Name == name && slices.Equal(c.metrics[i].Labels, labels) {
 			c.metrics[i].Value += value
 			return
 		}
@@ -195,6 +201,7 @@ func (c *Collector) reset() {
 		clear(c.funcs[i].ips)
 	}
 	clear(c.ops[:])
+	clear(c.metrics)
 	c.metrics = c.metrics[:0]
 	c.jit.reset()
 }
