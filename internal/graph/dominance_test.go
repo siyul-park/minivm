@@ -50,6 +50,18 @@ func TestNewDominance(t *testing.T) {
 }
 
 func TestFrontier(t *testing.T) {
+	t.Run("includes the entry in its own self-loop frontier", func(t *testing.T) {
+		g := newFixture(1, [][2]int{{0, 0}})
+
+		require.Equal(t, [][]int{{0}}, graph.Frontier(g, graph.NewDominance(g)))
+	})
+
+	t.Run("includes the entry in every returning predecessor's frontier", func(t *testing.T) {
+		g := newFixture(4, [][2]int{{0, 1}, {1, 2}, {2, 0}, {3, 0}})
+
+		require.Equal(t, [][]int{{0}, {0}, {0}, nil}, graph.Frontier(g, graph.NewDominance(g)))
+	})
+
 	t.Run("names the join each arm of a diamond stops being the only definition at", func(t *testing.T) {
 		entry, left, right, join := 0, 1, 2, 3
 		g := newFixture(4, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}})

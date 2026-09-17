@@ -85,7 +85,7 @@ func Frontier(g Graph, d *Dominance) [][]int {
 	for b := range g.Len() {
 		idom := d.IDom(b)
 		preds := g.Pred(b)
-		if idom < 0 || len(preds) < 2 {
+		if b != 0 && (idom < 0 || len(preds) < 2) {
 			continue
 		}
 		for _, p := range preds {
