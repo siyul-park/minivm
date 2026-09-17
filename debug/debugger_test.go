@@ -40,6 +40,33 @@ func TestDebugger_Stop(t *testing.T) {
 	require.Equal(t, debug.Stop{Func: 0, IP: 0, Breakpoint: id}, dbg.Stop())
 }
 
+func TestDebugger_Reset(t *testing.T) {
+	dbg := debug.NewDebugger()
+	id := dbg.Break(0, 1)
+	prog := program.New([]instr.Instruction{instr.New(instr.NOP), instr.New(instr.NOP)})
+	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	defer vm.Close()
+
+	dbg.Step()
+	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
+	dbg.Next()
+	dbg.Reset()
+	vm.Reset()
+	dbg.Step()
+	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
+	require.Equal(t, debug.Stop{Func: 0, IP: 0}, dbg.Stop())
+	dbg.Continue()
+	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
+	require.Equal(t, debug.Stop{Func: 0, IP: 1, Breakpoint: id}, dbg.Stop())
+
+	dbg.Reset()
+	require.Zero(t, dbg.Stop())
+	require.Equal(t, []debug.Breakpoint{{ID: id, Func: 0, IP: 1, Enabled: true, Hits: 1}}, dbg.Breakpoints())
+	require.True(t, dbg.Clear(id))
+	require.NoError(t, vm.Run(context.Background()))
+	require.Greater(t, dbg.Break(0, 0), id)
+}
+
 func TestDebugger_Continue(t *testing.T) {
 	dbg := debug.NewDebugger()
 	dbg.Continue()

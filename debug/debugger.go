@@ -94,6 +94,14 @@ func (d *Debugger) Stop() Stop {
 	return *d.stop
 }
 
+func (d *Debugger) Reset() {
+	d.mode = debugContinue
+	d.stop = nil
+	d.skip = nil
+	d.pauseDepth = 0
+	d.depth = 0
+}
+
 func (d *Debugger) Continue() {
 	d.mode = debugContinue
 	d.resume()
