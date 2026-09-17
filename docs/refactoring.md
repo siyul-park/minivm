@@ -1,0 +1,110 @@
+# Refactoring
+
+Owns structural review for non-trivial changes. `coding-patterns.md` defines the design target; `testing.md` defines test evidence; `benchmarks.md` defines performance evidence.
+
+## Scope
+
+Apply when a change alters package/type boundaries, ownership, lifecycle, control flow, abstractions, public contracts, or performance-sensitive structure. Skip formatting, isolated mechanical edits, and trivial renames.
+
+Do not widen the task merely to refactor unrelated code. Simplify the affected design until the scope reaches a fixed point.
+
+## Invariants
+
+A simplification is valid only when it preserves:
+
+- required behavior, outputs, and failure semantics;
+- ownership, lifecycle, concurrency, and ordering;
+- public compatibility unless explicitly changed;
+- relevant performance constraints.
+
+Smaller code is not automatically simpler. Optimize conceptual surface and responsibility boundaries, not line count.
+
+## Review
+
+### Scope
+
+Start from the requirement, not the diff. Identify affected files, entry points, owners, constraints, and the responsibility changed by the work. State that responsibility in one sentence.
+
+### Top Down
+
+Review in order:
+
+1. package responsibility and dependency direction;
+2. public contract and ownership boundary;
+3. behavior and control flow;
+4. state and lifecycle;
+5. implementation mechanics.
+
+Ask: Is each responsibility in its narrowest correct owner? Is dependency direction valid? Is ownership explicit? Did the change add a layer without a contract?
+### Bottom Up
+
+Review every changed symbol and every nearby symbol whose ownership, visibility, call relationship, or contract changed. For each retained symbol ask: **Why does this symbol exist now?**
+
+Remove, inline, merge, narrow, privatize, rename, or replace a symbol when an existing symbol or simpler structure provides the same contract. Check for dead fields, stale parameters, wrappers, aliases, shims, one-call indirections, duplicate state, and duplicate ownership.
+
+### Simplify
+
+Apply passes in this order:
+
+1. **Remove / merge** — dead symbols, duplicate state/helpers, redundant owners.
+2. **Narrow** — visibility, fields, operations, lifetime, ownership.
+3. **Control flow** — branches, state transitions, temporaries, delegation.
+4. **Mechanics** — redundant work, allocation, conversion, traversal, or lookup when behavior and required performance remain intact.
+5. **Tests / docs** — preserve contract tests; remove structure-only tests; describe final state.
+
+Do not create an abstraction merely to move complexity elsewhere. Prefer one cohesive symbol serving all legitimate callers over parallel variants.
+### Fixed Point
+
+Any structural change to ownership, control flow, interfaces, abstractions, or package boundaries restarts review from **Top Down**.
+
+```text
+Top Down → Bottom Up → Simplify
+    ↑                     │
+    └── structural change ┘
+          │
+          └── no change → Validate
+```text
+
+Stop only when a complete pass finds no further **safe structural improvement within scope**. This is the simplification fixed point.
+
+### Validate
+
+Confirm the originating contract, inspect the final diff as a reviewer, search for obsolete symbols/docs, and run validation from `testing.md` and `AGENTS.md`. Use `benchmarks.md` when structure can affect measured cost.
+
+Tests prove behavior; they do not prove structural completeness. Benchmark evidence proves measured cost; it does not justify unrelated structural changes.
+
+## Rejected Simplifications
+
+Record only meaningful candidates that were considered and rejected. State the candidate and the evidence blocking it: invariant, compatibility, ownership, or measured cost.
+
+```text
+Rejected: inline X.
+Blocked by: Y owns a shared invariant.
+
+Rejected: remove interface Z.
+Blocked by: public compatibility.
+
+Rejected: replace traversal with lookup.
+Blocked by: measured hot-path regression.
+```text
+
+Do not record speculative or trivial alternatives.
+## Review Output
+
+Report:
+
+- **Top Down** — findings or PASS
+- **Bottom Up** — findings or PASS
+- **Simplification** — remaining safe improvements or FIXED POINT
+- **Validation** — findings or PASS
+- **Changes** — meaningful structural simplifications
+- **Rejected** — evidence-backed rejected candidates only
+- **Risk** — unresolved correctness, compatibility, lifecycle, concurrency, or performance concerns
+
+Do not report completion while a known safe structural improvement or unresolved review finding remains.
+
+## Related
+
+- `coding-patterns.md` — code-design rules
+- `testing.md` — test evidence
+- `benchmarks.md` — performance evidence

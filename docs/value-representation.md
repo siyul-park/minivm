@@ -1,19 +1,15 @@
 # Value Representation
 
-Runtime values use one 64-bit `types.Boxed` word at interpreter stack and global boundaries.
+Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may use static-type representations internally.
 
-## When to Read
-
-Read when changing boxing, kind encoding, scalar representation, dynamic values, or JIT value passing.
-
-## Source of Truth
+## Ownership
 
 | Concern | Owner |
 |---|---|
 | Boxed layout | `types/boxed.go` |
 | Kinds | `instr/kind.go` |
 | Runtime types | `types/type.go` |
-| Host conversion | `interp/codec.go`, `interp/encode.go`, `interp/decode.go` |
+| Host conversion | `interp/codec.go`, `encode.go`, `decode.go` |
 | Native representation | `internal/jit/arm64/` |
 
 ## Boxed Layout
@@ -26,48 +22,48 @@ minivm uses NaN boxing.
 │  0x7FF  │  Kind │            payload              │
 └─────────┴───────┴────────────────────────────────┘
            3 bits              49 bits
-```
+```text
 
-- non-NaN values are `f64`
-- non-`f64` values use quiet-NaN tags
-- `KindRef` stores a heap index
-- tag `111` is reserved
-- `KindAny` is verifier-only
+- non-NaN values are `f64`;
+- non-`f64` values use quiet-NaN tags;
+- `KindRef` stores a heap index;
+- tag `111` is reserved;
+- `KindAny` is verifier-only.
 
 | Kind | Payload |
 |---|---|
 | `KindF64` | IEEE-754 `float64` |
 | `KindF32` | low 32 bits |
-| `KindI64` | 49-bit signed integer |
+| `KindI64` | inline signed 49-bit integer |
 | `KindRef` | heap index |
-| `KindI32` | signed 32-bit value |
-| `KindI8` | signed 8-bit value |
+| `KindI32` | signed 32-bit integer |
+| `KindI8` | signed 8-bit integer |
 | `KindI1` | `0` or `1` |
 
 ## Computational Types
 
-`i1`, `i8`, and `i32` use the same 32-bit computational representation. Their runtime kinds remain distinct.
+`i1`, `i8`, and `i32` share one 32-bit computational representation while retaining distinct runtime kinds.
 
 ```text
 i8 & i8 → i8
 i1 ^ i1 → i1
 i8 + i8 → i32
 comparison / eqz → i1
-```
+```text
 
-Constant folding must preserve these result kinds.
+Constant folding preserves result kinds.
 
 ## I64
 
-Only signed values in the inline range are represented as `KindI64`:
+`KindI64` covers:
 
 ```text
 -2^48 <= v <= 2^48 - 1
-```
+```text
 
-Larger values are heap-backed `types.I64` values represented as `KindRef`.
+Larger signed values use heap-backed `types.I64` objects and `KindRef`.
 
-`BoxI64` requires an inline value. The interpreter handles heap promotion; native ARM64 computation may keep an `i64` raw and cross back to boxed form only at a representation boundary.
+`BoxI64` accepts only inline values. The interpreter performs heap promotion; native ARM64 may compute raw `i64` values until a boxing boundary.
 
 ## Boxing API
 
@@ -81,13 +77,21 @@ Larger values are heap-backed `types.I64` values represented as `KindRef`.
 | `BoxF64` | `KindF64` |
 | `BoxRef` | `KindRef` |
 
-Typed unboxing methods are `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, and `Bool`. Check `Kind()` unless the instruction contract already proves the kind.
+Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Check `Kind()` unless the contract proves the kind.
 
-## Boundaries
+## Native Representation
 
-`Boxed` is the interpreter/global/storage currency. Native code may use narrower raw representations internally, but every interpreter-visible boundary must restore the exact boxed representation and ownership semantics.
+| Static type | Native representation |
+|---|---|
+| `i1`, `i8`, `i32` | 32-bit integer lane |
+| `i64` | 64-bit integer lane |
+| `f32` | 32-bit float lane |
+| `f64` | 64-bit float lane |
+| `ref` | boxed 64-bit value |
 
-## Related Docs
+Every interpreter, container, storage, or host boundary restores the exact boxed representation and ownership.
+
+## Related
 
 - `memory-model.md`
 - `jit-internals.md`

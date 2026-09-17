@@ -1,50 +1,44 @@
 # JIT Internals
 
-Current contracts for the ARM64 JIT and its interpreter boundary.
+ARM64 JIT contracts at the interpreter boundary. `architecture.md` owns package/runtime boundaries; `instruction-set.md` owns opcode status; `value-representation.md` owns value representation; `testing.md` owns tests.
 
-## When to Read
-
-Read when changing `internal/jit`, `internal/jit/frontend`, `internal/jit/backend`, `internal/jit/arm64`, tracing, tiering, deoptimization, or native installation.
-
-## Source of Truth
+## Ownership
 
 | Concern | Owner |
 |---|---|
-| Opcode semantics | `instruction-set.md`, `instr/type.go` |
 | Threaded execution | `interp/threaded.go` |
 | Trace recording | `interp/trace.go` |
 | JIT planning | `internal/jit/` |
 | SSA frontend | `internal/jit/frontend/` |
-| SSA backend seam | `internal/jit/backend/` |
+| SSA backend | `internal/jit/backend/` |
 | ARM64 lowering | `internal/jit/arm64/` |
 | Compile coordination | `internal/jit/compile/` |
-| Tiering and retirement | `interp/tier.go`, `internal/jit/tier/` |
+| Tiering/retirement | `interp/tier.go`, `internal/jit/tier/` |
 | Frame journal | `internal/journal/` |
 | Callable ABI | `internal/asm/` |
-| Value representation | `value-representation.md` |
-| Hotness policy | `profile.md` |
+| Hotness | `profile.md` |
 
 ## Model
 
-The threaded interpreter is the correctness baseline. JIT execution is optional and every native path has a threaded fallback.
+Threaded execution is the correctness baseline. Every native path has a threaded fallback.
 
 ```text
 bytecode
   ↓
-threaded handlers
-  ↓ hot root
-trace snapshot / static plan
+threaded root
+  ↓
+StaticPlan / TracePlan
   ↓
 SSA frontend
   ↓
 backend.Machine
   ↓
-ARM64 native code
+ARM64 code
   ↕
 threaded fallback / bridge
-```
+```text
 
-Native compilation reads an immutable `jit.Input`. Recording, snapshot creation, installation, and interpreter state mutation stay on the interpreter goroutine. Compilation itself may run synchronously or on the shared compile worker.
+Compilation consumes immutable input. Recording, snapshot creation, installation, and interpreter state mutation remain on the interpreter goroutine; compilation may run inline or on the shared worker.
 
 ## Roots
 
@@ -54,135 +48,108 @@ Native compilation reads an immutable `jit.Input`. Recording, snapshot creation,
 | function entry | function start |
 | loop header | hot backward-branch target |
 
-Entry and loop callables have different frame ownership. An entry owns and tears down its frame; a loop re-enters a live frame and must not unwind it.
+Entry roots own and tear down their frame. Loop roots re-enter a live frame and do not unwind it.
 
 ## Compilation
 
-`jit.Compiler` tries the SSA backend first. If the machine declines or emitted code cannot build, the assembler is discarded and the existing plan pipeline remains available. A compiler never mutates live interpreter state.
+`jit.Compiler` tries the SSA backend. If lowering declines or emission/build fails, discard native artifacts and retain the existing threaded/plan path. Compilation never mutates live interpreter state.
 
-Two frontends produce the same plan model:
+`StaticPlan` uses verified bytecode and forward dataflow. `TracePlan` uses immutable recorded execution.
 
-- `StaticPlan` uses verified bytecode and a forward dataflow pass.
-- `TracePlan` uses immutable recorded execution.
-
-The plan contains blocks, entry state, operations, and explicit edges. Build, layout, metadata, validation, and publication belong to the compiler/backend boundary.
+A plan contains blocks, entry state, operations, and explicit edges. Build, layout, metadata, validation, and publication belong to the backend/compiler boundary.
 
 ## Static Planning
 
-Static planning resolves only facts available without execution:
+Static facts may include:
 
-- stack kinds
-- known constants and reference provenance
-- declared array and struct types
-- direct call targets
-- dynamic arities whose counts are statically known
+- stack kinds;
+- constants and reference provenance;
+- declared aggregate types;
+- direct call targets;
+- statically known dynamic arities.
 
-Runtime shape, type, bounds, and kind checks remain guards. A root is rejected when a required fact cannot be proven.
-
-Loop plans are pruned to blocks reachable from their own root. This prevents unrelated blocks from increasing code size, register pressure, and bridge state.
+Runtime shape/type/bounds/kind checks remain guards. Reject a root when a required fact is unprovable. Prune blocks unreachable from the root.
 
 ## Trace Planning
 
-Trace recording clones the interpreter and runs threaded handlers until return, a loop boundary, branch exit, unsupported operation, trace limit, or abort. The live interpreter is never mutated by speculative execution.
+Trace recording clones the interpreter and runs threaded handlers until return, loop boundary, branch exit, unsupported operation, trace limit, or abort. It never mutates the live interpreter.
 
-Recorded observations provide specialized call targets and heap shapes. A recursive call from a non-entry loop trace is a fallback boundary because the recorder cannot model the recursive callee safely. Aborted recordings are never published.
-
-Trace snapshots are immutable. Shared tracers synchronize tree publication; compilation consumes snapshots without accessing live heap state.
+Recorded observations specialize call targets and heap shapes. Recursive calls from non-entry loop traces are fallback boundaries. Aborted recordings are never published. Snapshots are immutable; compilation does not access live heap state.
 
 ## SSA Backend
 
-`internal/jit/backend` owns target-neutral compilation state:
+`internal/jit/backend` owns:
 
-- block layout
-- value-to-register binding
-- block-parameter moves
-- `Deopt` metadata
-- bridge resume points
+- block layout;
+- value/register bindings;
+- block-parameter moves;
+- `Deopt` metadata;
+- bridge resume points.
 
-`backend.Machine` owns target decisions:
+`backend.Machine` hooks:
 
-| Hook | Role |
+| Hook | Contract |
 |---|---|
-| `Lowers` | opcode has native lowering |
-| `Traps` | lowering ends the block in threaded control |
-| `Open` | creates per-compile lowering state |
+| `Lowers` | native lowering exists |
+| `Traps` | lowering terminates in threaded control |
+| `Open` | creates per-compile state |
 | `Enter` | emits callable prologue |
-| `Lower` | lowers operations and may fuse adjacent operations |
-| `Term` | lowers the block terminator |
+| `Lower` | lowers/fuses operations |
+| `Term` | lowers block terminator |
 | `Leave` | emits deferred cold paths |
 
-The backend emits no architecture instructions itself.
+The backend emits no target instructions.
 
 ## ARM64 Representation
 
-Native computation uses the representation implied by `ssa.Type`:
+Native representation is defined in `value-representation.md`; interpreter-visible values remain boxed.
 
-| Type | Native representation |
-|---|---|
-| `i1`, `i8`, `i32` | 32-bit integer lane |
-| `i64` | 64-bit integer lane |
-| `f32` | 32-bit float lane |
-| `f64` | 64-bit float lane |
-| `ref` | boxed 64-bit value |
+`I64_ADD`, `I64_SUB`, `I64_MUL`, `I64_SHL`, and `I64_SHR_U` can leave the inline boxed range. Each lowering guards immediately after computing.
 
-Interpreter-visible values are always boxed.
+Overflow deopts through that operation's pre-op state, which contains the original operands. The interpreter resumes at the operation and re-executes it for heap promotion. No raw out-of-range i64 enters a live SSA value.
 
-`I64_ADD`, `I64_SUB`, `I64_MUL`, `I64_SHL`, and `I64_SHR_U`, out of `ssa.OverflowsI64`'s full set, each have an arm64 lowering today and can produce a result outside the inline boxed range. Each one's own lowering guards the result immediately after computing it and exits through the operation's own pre-op state on overflow - its own operands, not its unboxed result - so the flush is ordinary in-range boxed i64 values and the interpreter resumes at the operation's own IP to redo it and heap-promote the result (see Guards and Deoptimization). No raw, out-of-range i64 value is ever assigned to a live SSA value, so every downstream boundary that boxes an i64 - a store, a return, module completion, a deopt flush - only ever boxes one a producer already proved in range.
-
-Division and float-to-i64 conversion can also leave the boxed range and still decline to the plan pipeline: division needs a divide-by-zero guard as well as this one, a differently shaped exit belonging to its own stage, and float-to-i64 conversion's out-of-range and NaN sources are a conversion-semantics question rather than a boxability one. Remainder cannot leave the boxed range from in-range operands (see `ssa.OverflowsI64`), so it carries neither guard.
+Division also needs a divide-by-zero guard. Float-to-i64 conversion has conversion-specific range/NaN semantics. Remainder cannot overflow the inline boxed range for in-range operands and needs only its division guard.
 
 ## Guards and Deoptimization
 
-A guard has two products:
+A guard provides:
 
-1. hot-path proof that allows native execution;
-2. `OpState` metadata sufficient to reconstruct interpreter state on failure.
+1. native-path proof;
+2. `OpState` sufficient to rebuild interpreter state.
 
-`backend.Deopt` describes the state. ARM64 emits the journal stores and cold stub.
-
-A deoptimization materializes live VM slots, frame records, stack pointer, resume IP, trap state, and required retains. Interpreter code then resumes threaded execution.
+`backend.Deopt` describes the state; ARM64 emits journal stores and the cold stub. Deopt materializes VM slots, frames, stack pointer, resume IP, trap state, and required retains before threaded resume.
 
 ## Bridge
 
-A bridge transfers one operation to threaded execution and resumes native execution afterward.
-
-`IsBridgeable` covers operations the current native backend cannot lower but whose stack effect can still be modeled. The bridged block resumes at the block after the operation.
+A bridge executes one unsupported operation in threaded code, then resumes native execution. `IsBridgeable` covers operations whose stack effect remains modelable. The native block resumes after the bridged operation.
 
 ## Frame Journal
 
-`internal/journal` is the ABI between native code and the interpreter. Header cells carry stack/global/frame pointers, entry and resume IPs, trap state, exit metadata, and native runtime state. Frame records describe inlined frames.
+`internal/journal` is the native/interpreter ABI. Header cells carry stack/global/frame pointers, entry/resume IPs, trap state, exit metadata, and native runtime state. Frame records represent inlined frames.
 
-## Calls, Loops, and Suspension
+## Calls, Loops, Suspension
 
-Native calls use interpreter-owned native-entry slots and fall back when the target is not installed. Native loop back-edges commit the state required by a future deoptimization and use a safepoint budget.
+Native calls use interpreter-owned native-entry slots and fall back when the target is absent. Loop back-edges commit deopt state and use a safepoint budget.
 
-Suspension is a terminal fallback boundary. Native code never resumes in the middle of a suspended native frame.
+Suspension is terminal fallback; native code never resumes inside a suspended native frame.
 
-`RETURN_CALL` remains a threaded boundary for the SSA backend because it changes frame identity rather than simply changing control flow inside one SSA function.
+`RETURN_CALL` remains a threaded boundary for the SSA backend because it changes frame identity.
 
 ## Ownership
 
-Native values are borrowed from VM storage unless the IR explicitly owns them. Cold paths must restore the same ownership the interpreter expects.
+Native values borrow VM storage unless the IR owns them. Cold paths restore interpreter ownership.
 
-- references loaded from slots remain borrowed
-- produced references are owned
-- `OpRetain` / `OpRelease` describe ownership transitions
-- deopt state records ownership per stack entry
-- a deferred reference cannot cross a committing loop back-edge without being materialized
+- slot-loaded refs are borrowed;
+- produced refs are owned;
+- `OpRetain` / `OpRelease` encode ownership transitions;
+- deopt records ownership per stack entry;
+- deferred refs must materialize before a committing loop back-edge.
 
-## Native Coverage
+## Backend Status
 
-The ARM64 backend currently supports the native operations listed in `instruction-set.md`. Unsupported operations either bridge when their stack effect is modelable or remain on the plan/threaded path. A machine decline never changes interpreter semantics.
+Per-opcode status belongs to `instruction-set.md`. Unsupported lowering either bridges when stack effects are modelable or remains threaded. A machine decline never changes interpreter semantics.
 
-## Testing Contract
-
-- frontend tests compare static/trace acceptance with their plan counterparts and run `ssa.Verify`
-- backend tests assert layout, register bindings, moves, deopt metadata, and bridge resume points
-- ARM64 tests use exact instruction goldens
-- interpreter tests compare JIT and threaded observable behavior
-- mutations must make the corresponding test fail
-
-## Related Docs
+## Related
 
 - `architecture.md`
 - `instruction-set.md`

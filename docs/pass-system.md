@@ -1,50 +1,41 @@
 # Pass System
 
-Analyses, transforms, and optimization pipelines.
-
-## When to Read
-
-Read when changing `pass/`, `analysis/`, `transform/`, `optimize/`, or `internal/ssa/transform/`.
+Analysis caching, bytecode transforms, SSA transforms, optimization composition.
 
 ## Model
 
 ```text
-analysis:  IR → cached facts
-transform: IR → mutate in place
-pipeline:  ordered transforms + invalidation
-```
+analysis  IR → cached facts
+transform IR → mutation
+pipeline   ordered transforms + invalidation
+```text
 
-- `pass.Manager` owns analysis caching and invalidation.
-- `pass.Pipeline` runs transforms in order.
-- Analyses do not mutate IR.
-- Transforms report preserved analyses through `pass.Preserved`.
+`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses do not mutate IR. Transforms report preserved analyses through `pass.Preserved`.
 
 ## Layers
 
-| Layer | Responsibility |
+| Layer | Owns |
 |---|---|
 | `analysis` | reusable program facts |
 | `transform` | bytecode transforms and bytecode↔SSA conversion |
 | `internal/ssa/transform` | standalone SSA transforms |
 | `optimize` | user-facing optimization levels |
-| `pass` | generic pipeline infrastructure |
+| `pass` | pipeline infrastructure |
 
-## SSA Transforms
+## SSA
 
-Each SSA pass owns one policy. Current passes cover constant folding, algebraic simplification, local promotion, load forwarding, common-subexpression elimination, guard elimination, loop-invariant code motion, and dead-code elimination.
+Each pass owns one policy. Current passes include constant folding, algebraic simplification, local promotion, load forwarding, CSE, guard elimination, LICM, and DCE.
 
-SSA passes are target-independent and must work on any valid `ssa.Function`, including one with no JIT-specific state.
+SSA transforms are target-independent and accept any valid `ssa.Function`.
 
-## Bytecode Transforms
+## Bytecode
 
-A bytecode transform that changes code size must repair all position-sensitive metadata or leave the function unchanged. `transform.SSAPass` instead re-emits from SSA and declines the whole function when the new encoding is invalid.
+A size-changing transform repairs all position-sensitive metadata or leaves the function unchanged. `transform.SSAPass` re-emits from SSA and declines when the encoding is invalid.
 
-## Rules
+Prefer local passes. Reuse existing analyses. Keep target-specific policy out of target-independent passes.
 
-Prefer a small local pass over a broad rewrite. Do not duplicate an existing analysis inside a transform. Do not move target-specific optimization into a target-independent pass.
+## Related
 
-## Related Docs
-
-- `verification.md`
+- `architecture.md`
 - `jit-internals.md`
-- `coding-patterns.md`
+- `verification.md`

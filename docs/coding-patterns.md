@@ -1,291 +1,119 @@
-# Go Coding Patterns
+# Coding Patterns
 
-Normative specification for all production and test code in `minivm`.
-A changed file that violates this document is incomplete even when tests pass.
+Normative code-design rules for `minivm`. `AGENTS.md` owns workflow; `testing.md` owns test contracts and structure; `refactoring.md` owns structural review; topic docs own architecture facts.
 
-## 1. How to Apply This Document
+## Design
 
-Read the rules for the affected layer before editing. `AGENTS.md` defines repository workflow; this document defines code and test design. More-specific path instructions override this document only when they explicitly define a narrower rule. Direct user/system/developer instructions take precedence over repository files.
+Implement required behavior with the fewest necessary symbols and least necessary code without weakening responsibility boundaries. Minimize **conceptual surface**, not line count.
 
-When a rule is unclear, inspect the owning package and its current contract before adding a new pattern. Repetition in nearby code is not evidence that an exception is valid.
+Every symbol must earn its existence through a distinct responsibility, invariant, ownership boundary, or reusable abstraction. Every behavior has one implementation and every semantic rule has one owner; other code calls, composes, or encodes that owner.
 
-Every non-trivial change must complete three reviews before it is done:
+Design symbols for **high cohesion and legitimate reuse**: one coherent responsibility, narrow contract, broad enough to serve every caller that needs that responsibility. Reuse does not justify combining unrelated roles.
 
-1. **Top-down:** package responsibility → public contract → control flow → state/lifecycle → mechanics.
-2. **Bottom-up:** every changed or nearby affected symbol → ownership → visibility → naming → necessity.
-3. **Simplification:** remove or merge symbols, narrow ownership, simplify control flow, then re-check tests and docs.
+1. **Abstract semantic duplication.** When multiple sites implement the same behavior or rule, move it into one owner. Similar syntax is not enough.
+2. **Merge overlapping symbols.** When symbols have substantially the same responsibility at the same abstraction level, consolidate them. Prefer one general symbol over parallel variants, wrappers, aliases, or coordinators.
+3. **Split real boundaries.** Separate symbols only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. Do not split to shorten code or create symmetry.
+4. **Reuse before extension.** Prefer existing symbols and composition before adding layers, extension points, policy knobs, or parallel mechanisms.
 
-A rejected simplification needs a concrete reason: invariant, compatibility requirement, or measured cost.
+Keep related state and behavior together, dependency direction explicit, and public contracts no larger than required.
 
-## 2. Core Design
+## Functions
 
-Code is the specification. A reader should see what happens, who owns it, and where control moves without reconstructing the design from mechanics.
+Extract a helper only when it removes semantic duplication, names reusable behavior or policy, isolates an abstraction level, or is required as a function value. A private helper normally has at least two callers; inline single-use helpers unless the name expresses a real policy or mechanic.
 
-- One function, one abstraction level.
-- One behavior, one implementation.
-- Put each rule in the narrowest package and type that owns it.
-- Keep related state and behavior together.
-- Keep the exported API to the smallest complete contract.
-- Prefer direct, conventional code over clever or speculative structure.
-- Preserve interpreter/JIT semantic parity even when implementations differ.
-- Do not add structure merely for symmetry, future flexibility, or shorter functions.
-- Performance changes require reproducible evidence.
+Use methods for receiver-owned behavior and package functions for construction or behavior with no natural receiver. Keep one function at one abstraction level.
 
-Do not duplicate one rule across bytecode metadata, SSA, generator tables, and backend code when an existing owner can express it. Separate representations may encode a rule differently, but they must not define it independently.
+Order declarations for reading: callers before callees, related symbols adjacent, type and methods together.
 
-## 3. Functions
+## Naming
 
-A function should read as a short behavior description. It must not mix unrelated levels such as bytecode decoding with optimization policy or register allocation with JIT orchestration.
+Names describe role, contract, or ownership. Use one word by default. A multi-word name is an exception and is allowed only when one word cannot express the required distinction; add only the minimum necessary qualifier.
 
-Extract a helper only when it:
-
-- removes real duplication;
-- gives reusable behavior a meaningful name;
-- isolates mechanics needed to keep one abstraction level; or
-- is required as a function value.
-
-A private helper should normally have two real callers. A single-use helper is inlined unless it names a real policy or mechanic whose extraction clarifies the design.
-
-Use methods when behavior belongs to a receiver; use package functions for constructors and behavior with no natural receiver. Do not keep receiver-owned behavior in package helpers.
-
-Declare callers before callees. Read downward from public behavior to lower-level mechanics. Keep related declarations adjacent and in call order rather than alphabetically.
-
-## 4. Naming
-
-Names describe roles and contracts, not implementation steps.
-
-- Prefer one word.
-- Add words only when context cannot distinguish the concept.
-- Use one canonical term for one concept across packages.
-- Do not repeat package, receiver, phase, or representation without a real need.
-- Keep standard terms and established abbreviations such as `ID`, `IP`, `ABI`, `JIT`, `VM`, `SSA`, `CFG`, `GVN`, and `DCE`.
-- One-letter names are for conventional receivers, indexes, and tiny scopes.
-
-Predicates follow this vocabulary:
+- One word is the rule, not a preference.
+- Use one term for one concept across packages.
+- Do not repeat package, receiver, phase, or representation without meaning.
+- Keep standard abbreviations: `ID`, `IP`, `ABI`, `JIT`, `VM`, `SSA`, `CFG`, `GVN`, `DCE`.
+- Use one-letter names only for conventional receivers, indexes, and tiny scopes.
 
 | Form | Meaning |
 |---|---|
-| `HasX` | contains or is registered with X |
+| `HasX` | contains or registers X |
 | `IsX` | state predicate |
 | `MatchX` | comparison or validation against X |
 | `X` | direct boolean value |
 
-Use `At` when the predicate is evaluated at a supplied position or time. Reserve verbs such as `Build`, `Compile`, `Publish`, `Capture`, and `Use` for actions or transitions, not simple lookups.
+Use `At` for position/time predicates. Reserve `Build`, `Compile`, `Publish`, `Capture`, and `Use` for actions or transitions. Capability names are singular; collections and stores are plural.
 
-Injected capabilities use singular role names. Collections, registries, and stores use plural names.
-
-## 5. Types and APIs
+## Types and APIs
 
 Every exported symbol is a maintenance commitment.
 
-- Accept interfaces only when callers supply behavior.
-- Return concrete types from constructors.
-- Define interfaces where behavior is consumed.
-- Keep exported structs small and intentional.
+- Accept interfaces only when callers supply behavior; define them where behavior is consumed.
+- Return concrete constructor types.
+- Keep exported structs small and writable state behind its owner.
 - Prefer immutable values and defensive copies at ownership boundaries.
-- Do not export writable aggregate fields without an explicit ownership contract.
-- Do not add `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` containers only to group parameters.
+- Do not add parameter-group structs named `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` without a contract.
 - Do not expose speculative options, algorithms, extension points, or policy knobs.
 - Do not add aliases or pass-through wrappers without a distinct contract.
 
-Constructors require only values with no safe default that are necessary for primary behavior. Optional choices use functional options when that is clearer than direct arguments. Validate required shape and dependencies at construction time; validate complete builders at `Build`.
+Constructors require inputs with no safe default. Functional options are for optional behavior only when they improve the API. Validate required dependencies/shape at construction; validate complete builders at `Build`.
 
-A type owns its invariants and transitions. Workflow operations such as compile, publish, install, reset, retain, release, and close are methods rather than field assignments.
+Types own invariants and transitions. Compile, publish, install, reset, retain, release, and close are behavior, not field assignments.
 
-An exported type's private state remains behind its public boundary. Another type must not construct its private fields directly. Use its public constructor or behavior.
+## Errors
 
-## 6. Package Ownership
+- Use stable `ErrXxx` sentinels for semantic errors.
+- Preserve dependency identity when callers depend on it; use `%w` when adding context.
+- Translate error categories only at their owning boundary.
+- Do not create semantic categories with `fmt.Errorf` alone.
+- Do not expose private or sensitive process state in errors.
 
-| Package | Owns |
-|---|---|
-| `instr` | opcode vocabulary, widths, encoding, metadata |
-| `types` | VM values, kinds, value invariants |
-| `program` | bytecode, builders, verification boundary |
-| `interp` | runtime state, threaded execution, host calls, JIT installation |
-| `internal/codegen` | generated threaded handlers and fusion selection |
-| `internal/ssa` | SSA IR and verification |
-| `internal/ssa/transform` | individual SSA transformations |
-| `internal/asm` | machine IR, allocation, linking, executable memory |
-| `internal/asm/<arch>` | ISA encoding and ABI details |
-| `internal/jit` | architecture-neutral JIT plans, frontend/backend seam, runtime layout |
-| `internal/jit/frontend` | bytecode/trace → SSA |
-| `internal/jit/backend` | SSA → machine orchestration and deopt metadata |
-| `internal/jit/<arch>` | native lowering |
-| `internal/journal` | native/interpreter frame-journal ABI |
-| `internal/jit/compile` | compilation queue and published code store |
-| `internal/jit/tier` | JIT tiering and retirement policy |
-| `prof` | profiling and aggregation |
-| `analysis` | reusable read-only facts |
-| `transform` | transformation policies |
-| `optimize` | optimization composition |
-| `pass` | pass lifecycle and analysis cache |
-| `debug` | debugging policy |
-| `cli` | command parsing and presentation |
+Panic is for impossible programmer errors, `Must*` APIs, or documented hot-path invariants with one recovery boundary. Normal runtime failures return errors.
 
-Place behavior by its dominant rule, not by convenience of imports. Prefer extending an existing owner over adding a coordinator. Generic `Service`, `Manager`, `Util`, and `Helper` abstractions are forbidden unless an existing standard term accurately names the owner.
+## Ownership and Concurrency
 
-## 7. Runtime and JIT Boundaries
+Ownership is explicit. Keep mutable storage within its owner; borrowed values do not cross ownership boundaries. Retain/release transitions belong to the owner of the transition.
 
-`program.Verify` is the untrusted bytecode boundary. It must not depend on interpreter state or optimization policy.
+Contexts are first parameters for blocking, I/O, or process-boundary operations; never store request contexts in long-lived objects.
 
-`interp.Interpreter` owns execution state and is single-goroutine-owned during active execution. Threaded execution is the semantic baseline.
+Shared mutable state has one owner and synchronization strategy. Long-lived goroutines have explicit shutdown. Resources are released exactly once.
 
-The JIT is an optimization over that baseline:
-
-- architecture-neutral policy stays out of architecture packages;
-- unsupported lowering returns `false` without partial state mutation;
-- speculative guards deopt before behavior the native path cannot own;
-- native publication preserves immutable code and interpreter-local dispatch ownership;
-- fallback reconstructs the exact interpreter state required at the resume point;
-- observable parity is tested through public behavior.
-
-`internal/asm` owns allocation, linking, and executable memory. Architecture packages own concrete encoding and ABI mechanics. Executable memory is written privately, sealed executable, then published; published code stays immutable.
-
-## 8. Values, Ownership, and Errors
-
-Prefer values when they carry meaningful invariants. Mutable backing storage must not escape an ownership boundary.
-
-Reference ownership must be explicit. Borrowed values must not cross a boundary that requires ownership. Retain/release transitions belong to the owner of the transition.
-
-Errors are part of the contract:
-
-- semantic package errors use stable `ErrXxx` sentinels;
-- dependency errors remain identifiable when callers depend on them;
-- only the current boundary may translate an error category;
-- `%w` is used when added context preserves identity;
-- do not create semantic categories with `fmt.Errorf` alone;
-- do not leak private state or sensitive process values through messages.
-
-Panic is reserved for impossible programmer errors, `Must*` APIs, and documented hot-path invariants with a single recovery boundary. Normal runtime failures return errors.
-
-## 9. Concurrency and Lifecycle
-
-Contexts are first parameters of operations that may block, perform I/O, or cross process boundaries. Never store a request context in a long-lived object.
-
-Shared mutable state has one clear owner and synchronization strategy. Long-lived goroutines have an explicit shutdown path. Native memory, heap references, executable buffers, and queue claims are released exactly once according to their owner contract.
-
-Race tests are required when changing pools, caches, profilers, compilation publication, or shared lifecycle state.
-
-## 10. File and Declaration Order
+## File Order
 
 Within a Go file:
 
-1. public types;
-2. private types;
-3. public constants;
-4. private constants;
-5. variables;
-6. `init`;
-7. public options/functions;
-8. public constructors;
-9. public methods;
-10. clone/conversion and interface hooks;
-11. private functions and methods.
+1. public types
+2. private types
+3. public constants
+4. private constants
+5. variables
+6. `init`
+7. public options/functions
+8. public constructors
+9. public methods
+10. clone/conversion and interface hooks
+11. private functions/methods
 
-Keep a type and its methods together. Split a large type only along a real concern. JIT-neutral code belongs in `internal/jit`; architecture lowering belongs in `internal/jit/<arch>`.
+Struct fields read from ownership/policy toward runtime state; synchronization fields are last.
 
-Struct fields should read from ownership and policy to runtime state. Keep synchronization fields last.
+## Comments
 
-## 11. Comments
+Comments state facts the code cannot express:
 
-Comments are exceptions, not a second specification.
+- invariants and consequences;
+- external or cross-package constraints;
+- rejected alternatives with evidence;
+- external contracts/specifications.
 
-Keep only facts the code cannot express:
+Do not narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Improve names, types, or structure instead. Exported symbols need normal Go doc comments.
 
-- an invariant and what breaks without it;
-- an external or cross-package constraint;
-- a rejected alternative with measured cost or a concrete defect;
-- an external contract or specification reference.
+## Generated and Platform Code
 
-Do not narrate statements, restate symbol names, label `arrange/act/assert`, or explain obvious control flow. Improve names, types, structure, or ownership instead.
+Generated files change only through their generator. Platform mechanics stay behind matching build constraints and owner packages.
 
-Exported Go symbols still need normal doc comments stating their contract.
+## Related
 
-## 12. Tests
-
-Tests are executable specifications and use the production package plus `_test`.
-
-- Tests live beside the production owner.
-- Each test file belongs to the production file owning the symbol; do not create catch-all concept files.
-- One top-level test owns one independent exported contract; cases are subtests.
-- Test names state behavior, not implementation steps.
-- Arrange, execute, and assert remain visible.
-- Sibling subtests own independent mutable fixtures.
-- Use real in-memory behavior by default.
-- Use `require`, not `assert`, and no assertion message strings.
-- Do not access private symbols or representation.
-- Do not add production APIs or proxies solely for tests.
-
-### Test-first
-
-Write the test before implementation and observe the expected failure. That observation is the evidence the test constrains the behavior; nothing further is required for it.
-
-A passing test proves nothing about code it never reached. Confirm reachability with a coverage profile over the package the test drives, not by breaking the code to see what notices.
-
-Never mutate, break, or inject a panic into production code to find out whether a test notices. A probe left live is a silent semantic change indistinguishable from a bug, and the restore step has already been mishandled here at real cost. Retrofitting a test onto existing code is not an exception; it is the case the rule exists for.
-
-When behavior already exists and no red is available, say so plainly rather than manufacturing one, and prove the test reaches what it names with a coverage profile. A test that neither observed a failure nor demonstrated reachability is not evidence: make it observable, or drop it and record the claim it was meant to hold.
-
-### JIT and backend tests
-
-Frontend tests prove plan/SSA contracts and `ssa.Verify`. Backend tests prove layout, register bindings, moves, metadata, and bridge/deopt points. ARM64 tests specify exact emitted instruction streams with goldens. Interpreter tests prove threaded/JIT parity through public results, errors, ownership effects, and native execution.
-
-A backend golden is written before the backend is made to match it. Do not derive expected output from the current emitter.
-
-## 13. Generated and Architecture-Specific Code
-
-Generated files are changed only through their generator. Run `make generate` and `make check-generated`.
-
-Portable behavior stays in shared files. Architecture-specific behavior stays behind matching build tags and has a corresponding native test path.
-
-A native backend is specified by the instruction stream it emits, not only by end-to-end behavior.
-
-## 14. Performance
-
-Performance work follows this order:
-
-1. define workload and comparison;
-2. capture baseline;
-3. identify the real hot path;
-4. change the narrowest owning layer;
-5. rerun correctness, race, and parity checks;
-6. report reproducible before/after results.
-
-Benchmarks keep setup, reset, cleanup, and expected-result computation outside the timer unless they are the measured operation. Warm JIT benchmarks must prove native installation and must not time threaded fallback as native throughput.
-
-## 15. Documentation
-
-Documentation is part of the contract. Each topic has one owner; other documents summarize and link.
-
-Long-lived documents describe the final supported state. They must not contain migration narratives, implementation chronology, obsolete alternatives, progress logs, or superseded terminology. Put history only in explicitly historical audits or dated plans.
-
-Update the owning document when behavior changes, then remove stale duplicates.
-
-| Topic | Owner |
-|---|---|
-| package boundaries and invariants | `docs/architecture.md` |
-| opcode semantics and JIT status | `docs/instruction-set.md` |
-| value representation | `docs/value-representation.md` |
-| memory ownership | `docs/memory-model.md` |
-| JIT and assembler contracts | `docs/jit-internals.md` |
-| test contracts | `docs/testing.md` |
-| benchmarks | `docs/benchmarks.md` |
-| platform support | `docs/compatibility.md` |
-
-Keep docs short, factual, current, and directly useful to the next engineer.
-
-## 16. Completion
-
-A change is complete only when:
-
-- ownership, boundaries, and names are clear;
-- top-down and bottom-up reviews are complete;
-- another simplification pass found no safe improvement;
-- no behavior has a second implementation;
-- tests constrain the intended contract, with the expected failure observed before the implementation or reachability proven by a coverage profile;
-- comments carry only non-obvious facts;
-- generated and architecture-specific output is synchronized;
-- docs describe the final state without duplicates or history;
-- relevant tests and static checks pass;
-- performance claims have evidence;
-- unrelated changes remain untouched.
+- `AGENTS.md` — workflow and delegation
+- `refactoring.md` — structural review and simplification
+- `architecture.md` — package/runtime architecture
+- `testing.md` — test contract, structure, methodology, and validation

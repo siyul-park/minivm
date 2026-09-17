@@ -1,99 +1,103 @@
 # Architecture
 
-Package boundaries, ownership, and execution flow.
-
-## When to Read
-
-Read when changing package boundaries, runtime state, verification, optimization, JIT, profiling, or debugging.
+Package ownership, dependencies, execution flow, and runtime/JIT boundaries.
 
 ## Instruction Levels
 
-| Level | Owner | Form |
-|---|---|---|
-| Bytecode | `instr` | `instr.Instruction` / `instr.Opcode` |
-| SSA | `internal/ssa` | `ssa.Operation` / `ssa.Function` |
-| Machine | `internal/asm/<arch>` | `asm.Instruction` / architecture opcode |
-
-Bytecode opcodes remain the semantic vocabulary. SSA adds only compiler concepts such as guards, state, ownership, and control-flow edges. Machine IR is architecture-specific.
-
-## Package Boundaries
-
-| Package | Responsibility |
+| Level | Owner |
 |---|---|
-| `program` | bytecode, builders, constants, types, verification entry point |
-| `instr` | opcode definitions, encoding, decoding, metadata |
-| `types` | values, boxed representation, heap object types |
-| `interp` | execution state, threaded dispatch, host calls, tracing, JIT installation |
-| `internal/jit` | architecture-neutral JIT plans and driver |
-| `internal/jit/frontend` | snapshot → SSA frontend translation |
-| `internal/jit/backend` | SSA backend orchestration and target-neutral metadata |
-| `internal/jit/<arch>` | target lowering |
+| Bytecode | `instr` — `Instruction`, `Opcode` |
+| SSA | `internal/ssa` — `Operation`, `Function` |
+| Machine | `internal/asm/<arch>` — machine instructions |
+
+Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machine IR is target-specific.
+
+## Package Ownership
+
+| Package | Owns |
+|---|---|
+| `instr` | opcode vocabulary, widths, encoding, metadata |
+| `types` | VM values, kinds, boxed values, heap types |
+| `program` | bytecode, builders, verification boundary |
+| `interp` | runtime state, threaded execution, host calls, JIT installation |
+| `internal/codegen` | generated threaded handlers and fusion |
 | `internal/ssa` | SSA IR and verification |
-| `internal/ssa/transform` | target-independent SSA passes |
-| `internal/asm` | native-code abstraction, allocation, linking, executable memory |
-| `internal/journal` | interpreter/native frame-journal ABI |
-| `internal/codegen` | threaded-handler generation and fusion |
-| `pass` / `analysis` / `transform` / `optimize` | analysis and optimization infrastructure |
-| `debug` / `prof` / `cli` | debugging, profiling, user-facing commands |
+| `internal/ssa/transform` | target-independent SSA transforms |
+| `internal/asm` | machine IR, allocation, linking, executable memory |
+| `internal/asm/<arch>` | ISA encoding and ABI mechanics |
+| `internal/jit` | architecture-neutral plans and driver |
+| `internal/jit/frontend` | bytecode/trace → SSA |
+| `internal/jit/backend` | SSA → machine orchestration, target-neutral metadata |
+| `internal/jit/<arch>` | native lowering |
+| `internal/journal` | native/interpreter frame-journal ABI |
+| `internal/jit/compile` | compile admission and published code store |
+| `internal/jit/tier` | tiering and retirement policy |
+| `analysis` | reusable read-only facts |
+| `transform` | bytecode transforms |
+| `optimize` | optimization composition |
+| `pass` | pass lifecycle and analysis cache |
+| `prof` | profiling and aggregation |
+| `debug` | debugging policy |
+| `cli` | command parsing and presentation |
 
-## Dependency Rules
+Place behavior by dominant ownership, not import convenience. Extend an owner before adding a coordinator.
 
-- `instr` and `internal/graph` stay leaf-like.
-- `internal/ssa` and `internal/ssa/transform` do not depend on `interp`, JIT, or architecture packages.
-- `internal/jit/frontend` does not depend on `interp`, `asm`, or a backend.
-- `internal/jit/backend` depends on no architecture package.
-- Architecture code stays under `internal/asm/<arch>` and `internal/jit/<arch>`.
-- `program.Verify` stays independent of `analysis` and `pass` to avoid cycles.
+## Dependencies
+
+- `instr` and `internal/graph` remain leaf-like.
+- `internal/ssa` and `internal/ssa/transform` do not depend on runtime, JIT, or target packages.
+- `internal/jit/frontend` does not depend on `interp`, `asm`, or backend packages.
+- `internal/jit/backend` does not depend on target packages.
+- Target code stays under `internal/asm/<arch>` and `internal/jit/<arch>`.
+- `internal/jit` imports no target package; arch selection belongs in `interp`.
+- `program.Verify` is independent of runtime and optimization policy.
 
 ## Execution
 
 ```text
-program.Builder / program.New
-        ↓
-program.Verify (untrusted input)
-        ↓
-optimize (optional)
-        ↓
-interp.New
-        ↓
-threaded execution
-        ↓
-hot trace / loop event
-        ↓
-JIT compile on ARM64
-        ↓
-native execution ↔ threaded fallback
-```
+program → Verify → optimize? → interp → threaded
+                                         ↓ hot root
+                                      JIT compile
+                                         ↓
+                              native ↔ threaded fallback
+```text
 
-The threaded interpreter is the semantic baseline. Native execution is an optimization and must preserve observable behavior.
+Threaded execution is the semantic baseline. Native execution must preserve observable behavior.
 
-## Runtime State
+## Runtime
 
-`Interpreter` owns the operand stack, frames, globals, heap, reference counts, threaded dispatch table, tracing state, and JIT installation state. A `Pool` shares compile coordination while each interpreter keeps its own execution state and dispatch table.
+`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. A shared `Pool` owns compile coordination; an interpreter owns its execution state and dispatch table.
 
-The runtime is single-goroutine-owned during execution. Background compilation reads an immutable snapshot and never mutates live interpreter state.
+Execution is single-goroutine-owned. Background compilation consumes immutable input and does not mutate live interpreter state.
 
-## Core Invariants
+## Invariants
 
-- Heap index `0` is the permanent null sentinel.
+- Heap index `0` is permanent null.
 - Only `KindRef` participates in reference counting.
-- Heap indices are stable.
-- Reference cleanup is iterative.
-- External bytecode is verified before execution.
+- Heap indexes are stable; reference cleanup is iterative.
 - A frame distinguishes function address from callable reference.
-- A native fallback materializes the state required by threaded execution.
-- Debugger mode disables JIT and preserves bytecode instruction boundaries.
+- External bytecode is verified before execution.
+- Native fallback materializes exactly the state required by threaded execution.
+- Debugger mode disables JIT and preserves bytecode boundaries.
+
+## JIT Boundary
+
+- Architecture-neutral policy stays in `internal/jit`.
+- Target mechanics stay in `internal/jit/<arch>` and `internal/asm/<arch>`.
+- Unsupported lowering declines without partial IR/state mutation.
+- Guards deopt before native code executes unsupported behavior.
+- Published code is immutable and interpreter dispatch remains interpreter-owned.
+- `internal/asm` owns allocation, linking, and executable memory.
 
 ## Optimization
 
-Bytecode transforms must repair all position-sensitive data or leave the function unchanged. SSA transforms re-emit code from the SSA layout and decline the whole function when the result cannot be encoded safely.
+Bytecode transforms repair position-sensitive metadata or leave the function unchanged. SSA transforms re-emit from SSA and decline when the result cannot be encoded safely.
 
-## Related Docs
+## Related
 
-- `instruction-set.md` — opcode semantics and backend status
-- `verification.md` — bytecode validation
-- `value-representation.md` — boxed values and computational types
-- `memory-model.md` — ownership and heap lifecycle
-- `jit-internals.md` — JIT contracts
-- `pass-system.md` — analyses and transforms
-- `compatibility.md` — platform support
+- `instruction-set.md`
+- `verification.md`
+- `memory-model.md`
+- `value-representation.md`
+- `jit-internals.md`
+- `pass-system.md`

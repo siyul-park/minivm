@@ -1,146 +1,96 @@
-# Guide: Adding a New Opcode
+# Add an Opcode
 
-End-to-end checklist for adding one bytecode instruction.
+End-to-end checklist. `instruction-set.md` owns semantics; this guide owns change order.
 
-## When to Read
+## Ownership
 
-Use this guide when adding or changing an opcode. For canonical semantics, keep `docs/instruction-set.md` as the reference and link there instead of repeating full opcode behavior here.
-
-## Source of Truth
-
-| Concern | File |
+| Concern | Owner |
 |---|---|
-| Opcode value and append order | `instr/opcode.go` |
-| Mnemonic, operand widths, fixed stack effects | `instr/type.go` |
-| Static validation | `program/verify.go` |
-| Runtime lowering | `internal/codegen/` (`array.go`, `numeric.go`, `ref.go`, … by domain) |
-| Fusion patterns | `internal/codegen/pattern.go` |
-| Generated runtime semantics | `interp/threaded.go` |
-| ARM64 native lowering | `internal/jit/arm64/` |
-| Public reference | `docs/instruction-set.md` |
+| opcode value | `instr/opcode.go` |
+| mnemonic/width/stack effects | `instr/type.go` |
+| verifier | `program/verify.go` |
+| threaded lowering | `internal/codegen/` |
+| fusion patterns | `internal/codegen/pattern.go` |
+| generated handlers | `interp/threaded.go` |
+| ARM64 lowering | `internal/jit/arm64/` |
+| tests | `interp/*_test.go`, owner tests |
+| reference | `instruction-set.md` |
 
-Threaded support is required. JIT support is optional and should be added only when it can preserve exact threaded fallback semantics.
+## Opcode
 
-## Step 1 — Define the Opcode
+Append to `instr/opcode.go`; never insert between existing values. `iota` is the encoded byte.
 
-Append the new value to the existing `const` block in `instr/opcode.go`.
+## Metadata
 
-```go
-const (
-    // existing opcodes
-    I32_MY_OP
-)
-```
-
-Do not insert new values between existing opcodes. The `iota` value is the encoded opcode byte.
-
-## Step 2 — Declare Metadata
-
-Add the opcode to the `types` map in `instr/type.go`.
+Add one entry to `instr/type.go`:
 
 ```go
 I32_MY_OP: {Mnemonic: "i32.my_op", Pop: []Kind{KindI32}, Push: []Kind{KindI32}},
 ```
 
-Use `Widths` for bytecode operands.
+Declare fixed `Widths`. Leave stack effects dynamic when they depend on operands, constants, declared types, or runtime values.
 
-| Width form | Meaning |
+## Verification
+
+Change `checker.step` only when metadata cannot validate the instruction. Handle operand-dependent stack effects, type-indexed allocation, call/tail-call arity, counted constructors, and control/termination rules.
+
+Reject statically malformed bytecode. Leave runtime-dependent behavior to runtime.
+
+## Threaded Semantics
+
+Add one domain emitter. Register it once in `internal/codegen/lower.go`, then run `make generate`.
+
+The emitter serves standalone and fused lowering from one semantic implementation. Patterns select sequences and compile-time guards only.
+
+Do not edit `interp/threaded.go` directly.
+
+Preserve:
+
+- compile-time IP advancement by the first absorbed instruction width;
+- runtime IP advancement by exact instruction width;
+- stack bounds checks;
+- borrow/retain/release ownership;
+- existing runtime error/panic conventions.
+
+## JIT
+
+Add ARM64 lowering only when guards and fallback are explicit:
+
+- decline before mutating lowering state when unsupported;
+- deopt before unsupported behavior executes;
+- prefer terminal fallback over duplicated interpreter behavior;
+- preserve stack/local/global/upvalue/ref ownership.
+
+See `jit-internals.md`.
+
+## Tests
+
+Add runtime behavior to the existing opcode corpus when one row proves it. Add verifier cases for rejected bytecode and architecture-specific tests for native contracts. Follow `testing.md` for TDD and golden rules.
+
+## Documentation
+
+Update only owner docs:
+
+| Change | Owner |
 |---|---|
-| omitted or empty | no operands |
-| `[]int{1}` / `[]int{2}` / `[]int{4}` / `[]int{8}` | one fixed-width operand |
-| `[]int{-2, 2}` | count byte plus `count * 2` bytes |
+| semantics/status | `instruction-set.md` |
+| verification | `verification.md` |
+| ownership | `memory-model.md` |
+| representation/kinds | `value-representation.md` |
+| JIT contract | `jit-internals.md` |
 
-Declare `Pop` and `Push` when the stack effect is fixed. If the effect depends on operands, constants, declared types, or runtime values, leave it dynamic and handle it explicitly in `program/verify.go`.
-
-## Step 3 — Update Verification
-
-Update `checker.step` in `program/verify.go` when metadata alone is not enough.
-
-Typical dynamic cases include:
-
-- operand-dependent stack effects
-- type-indexed allocation instructions
-- call and tail-call arity
-- stack-counted constructors
-- branch or termination behavior
-
-Verifier changes should reject only statically malformed bytecode. Runtime traps remain runtime behavior.
-
-## Step 4 — Implement Threaded Semantics
-
-Add one opcode emitter to the `internal/codegen` file that owns its domain (`array.go`, `map.go`, `numeric.go`, `ref.go`, `string.go`, `struct.go`, `unary.go`, `control.go`, `coroutine.go`, `call.go`, `slot.go`), map it once in the `lowerers` table in `internal/codegen/lower.go`, then run `make generate`. The emitter receives a `state` and must define the opcode semantics once for standalone materialization and fused composition. Add a pattern in `internal/codegen/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and compile-time guards; they never define opcode behavior. Do not edit `interp/threaded.go` directly.
-
-Checklist:
-
-- map the opcode exactly once in `lowerers` and avoid standalone/fusion semantic copies
-- advance `c.ip` by the first absorbed instruction width during fusion compilation
-- advance `i.fr.ip` by the exact instruction width during execution
-- check stack underflow and overflow where applicable
-- retain borrowed storage refs only when materializing them on the VM stack
-- release owned resident refs when consuming or overwriting them
-- panic with the existing runtime sentinel errors and let `interp.Run` recover
-
-Keep the generated handler explicit. Generator-only lowering methods may remove real generation duplication, but generated runtime helpers are not allowed; use existing `Interpreter` methods or emit the opcode logic directly.
-
-## Step 5 — Add JIT Support When Appropriate
-
-Add ARM64 lowering in `internal/jit/arm64/` only when the operation can be lowered with clear guards and correct fallback.
-
-Rules:
-
-- unsupported kinds, operands, or heap shapes must return `false` before mutating lowering state
-- guard failures must deopt before executing behavior the JIT cannot fully own
-- terminal fallback is preferable to duplicating complex interpreter behavior
-- stack, local, global, upvalue, and ref ownership must match the threaded interpreter
-
-For the lowering contracts, use `docs/jit-internals.md`; do not repeat the full JIT model here.
-
-## Step 6 — Write Tests
-
-Add runtime cases to the existing `runTests` table in `interp/interp_test.go` when the behavior fits one row.
-
-```go
-{
-    program: program.New([]instr.Instruction{
-        instr.New(instr.I32_CONST, 21),
-        instr.New(instr.I32_MY_OP),
-    }),
-    values: []types.Value{types.I32(42)},
-},
-```
-
-Use explicit subtests only when the behavior needs separate setup, such as coroutine resume behavior, debugger state, or host integration.
-
-Also update verifier tests when malformed bytecode should be rejected before execution.
-
-## Step 7 — Update Documentation
-
-Update only the canonical docs that own the changed behavior.
-
-| Change | Documentation |
-|---|---|
-| opcode semantics, stack effect, JIT status | `docs/instruction-set.md` |
-| verifier behavior | `docs/verification.md` |
-| ref ownership or GC behavior | `docs/memory-model.md` |
-| boxing or kind rules | `docs/value-representation.md` |
-| JIT contract | `docs/jit-internals.md` |
-| contributor checklist | this guide |
-
-Avoid repeating the same explanation in multiple documents. Link to the canonical document instead.
-
-## Step 8 — Verify
+## Validation
 
 ```bash
-make test
-make lint
 make check-generated
+make check-tidy check-fmt vet
 ```
 
-If JIT support was added, also run the relevant ARM64 tests or benchmarks on ARM64 hardware.
+With JIT changes, run the relevant ARM64 tests/benchmarks on ARM64.
 
-## Related Docs
+## Related
 
-- `docs/instruction-set.md` — opcode reference
-- `docs/verification.md` — static validation rules
-- `docs/jit-internals.md` — native lowering and fallback contracts
-- `docs/memory-model.md` — ref ownership and heap lifecycle
+- `instruction-set.md`
+- `verification.md`
+- `jit-internals.md`
+- `testing.md`

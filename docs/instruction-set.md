@@ -1,10 +1,6 @@
-# Instruction Set Reference
+# Instruction Set
 
 Opcode reference for minivm bytecode.
-
-## When to Read
-
-Use this document when adding, changing, debugging, or testing bytecode instructions. This document owns opcode semantics; other docs should link here instead of repeating opcode behavior.
 
 ## Source of Truth
 
@@ -20,14 +16,13 @@ Use this document when adding, changing, debugging, or testing bytecode instruct
 
 ## Core Rules
 
-- All opcodes are one byte.
-- Operands are fixed-width or length-prefixed.
-- Operands are little-endian unless stated otherwise.
-- Stack operands pop right-to-left.
-- Boolean results use runtime kind `i1`.
-- `i1`, `i8`, and `i32` share the same computational representation.
-- Ref-exposing instructions retain refs.
-- Ref-overwriting instructions release replaced refs.
+- one-byte opcodes;
+- fixed-width or length-prefixed operands;
+- little-endian operands unless specified otherwise;
+- stack operands pop right-to-left;
+- boolean results use `i1`;
+- `i1`/`i8`/`i32` share one computational representation;
+- ref-exposing instructions retain refs; ref-overwriting instructions release replaced refs.
 
 ## JIT Status
 
@@ -42,33 +37,21 @@ JIT status is per opcode and per backend. It describes whether a recorded trace 
 
 AMD64 currently has no active JIT backend. `internal/asm/amd64` is a placeholder and `interp/jit_stub.go` disables compiler construction on non-ARM64 platforms, so every AMD64 entry is `🔲`.
 
-ARM64 native branches are range-checked before encoding. Conditional label branches outside their signed imm19 range are relaxed to an inverted conditional skip plus an unconditional imm26 branch when that replacement can reach the target; otherwise JIT compilation cleanly falls back to threaded execution.
+ARM64 branches are range-checked before encoding. A conditional branch outside signed imm19 range is relaxed to an inverted conditional skip plus an imm26 branch when reachable. Otherwise JIT compilation falls back to threaded execution.
 
 ## Operand Widths
 
-Operand widths are declared in `instr/type.go`.
-
-| Notation | Meaning |
-|---|---|
-| `{}` | no operands |
-| `{n}` | one fixed `n`-byte operand |
-| `{-n, n}` | count byte plus `count × n`-byte operands |
-
-Branch operands are signed 16-bit offsets relative to the end of the branch instruction.
+Declared in `instr/type.go`. `{}` has no operands; `{n}` has one fixed-width operand; `{-n, n}` is a count byte followed by `count × n`-byte operands. Branch offsets are signed 16-bit offsets from the end of the branch instruction:
 
 ```text
 target = instruction_start + instruction_width + operand
-```
+```text
 
 ## Operand Kinds
 
-`i1`, `i8`, and `i32` share one representation class. An opcode that accepts the `i32` representation can also accept `i1` and `i8` when the verifier can prove representation compatibility.
+`i1`, `i8`, and `i32` share one computational class. An opcode accepting `i32` may accept `i1`/`i8` when the verifier proves compatibility.
 
-Narrow result rules:
-
-- comparisons, `eqz`, `ref.test`, `ref.eq`, and `ref.ne` produce `i1`
-- `i32.and`, `i32.or`, and `i32.xor` preserve a shared narrow kind for `i1`/`i8`
-- other arithmetic widens narrow operands to `i32`
+Comparisons, `eqz`, and ref tests produce `i1`. `i32.and/or/xor` preserve the narrow kind; other integer arithmetic widens to `i32`.
 
 ## Machine Effects
 
@@ -93,7 +76,7 @@ A new opcode declares its effects in the same table entry as its stack effect. C
 
 ## Opcode Reference
 
-Do not group multiple opcodes in one row. Keep this table in opcode-value order so it can be compared directly with `instr/opcode.go`.
+One opcode per row, in opcode-value order.
 
 | Family | Opcode | Mnemonic | ARM64 JIT | AMD64 JIT | Notes |
 |---|---|---|---:|---:|---|
@@ -312,86 +295,50 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 
 ### Control
 
-Branch offsets are relative to the end of the branch instruction. `RETURN_CALL` is the tail-call primitive. Function bodies must end with `RETURN`, `RETURN_CALL`, or `UNREACHABLE`; top-level code may fall through. Tail replacement transfers ownership to the new activation and releases the retiring activation's owned slots exactly once.
+Branch offsets are relative to instruction end. Function bodies terminate with `RETURN`, `RETURN_CALL`, or `UNREACHABLE`; top-level code may fall through.
+
+`RETURN_CALL` transfers ownership to the new activation and releases the retiring activation exactly once.
 
 ### References
 
-An `any` slot is the VM dynamic value type. It can hold an inline primitive or a heap reference. Use `REF_TEST` and `REF_CAST` to recover dynamic runtime types.
-`REF_SET` mutates scalar cells created by `REF_NEW`; non-scalar targets trap.
-Coroutine tail calls preserve the current coroutine. On completion, `CORO_VALUE` exposes the last declared return; earlier returns are discarded.
+`any` is the dynamic VM value type. `REF_TEST`/`REF_CAST` recover dynamic types. `REF_SET` mutates scalar cells from `REF_NEW`; other targets trap. Coroutine tail calls preserve the coroutine; completion exposes the last declared return.
 
 ### Arrays
 
-`ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET` and `ARRAY_SLICE` retain copied ref elements. `ARRAY_SLICE` consumes the source array ref; use `DUP` first to keep it.
+`ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET`/`ARRAY_SLICE` retain copied refs. `ARRAY_SLICE` consumes the source ref; use `DUP` to preserve it.
 
 ### Strings
 
-Every string comparison, `string.eq` and `string.ne` included, compares content. Two strings with equal content compare equal whatever heap refs they occupy, so a computed join equals the literal it spells. All six comparisons require string operands and trap `ErrTypeMismatch` on any other ref; use `REF_EQ`, `REF_NE`, or `REF_IS_NULL` to test identity or null.
+All string comparisons are by content and require string operands. Mismatches trap `ErrTypeMismatch`; `REF_EQ`/`REF_NE` test identity.
 
-`string.concat` allocates a fresh ref and never mutates a string already published. Successive joins share one append-only byte buffer, so accumulating a string in a loop costs no repeated prefix copy.
+`string.concat` allocates a fresh ref and may reuse append-only storage without mutating published strings.
 
 ### Maps
 
-Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`, with `i1` and `i8` keying through their `i32` representation. Strings key by content, whether the declared key type is `string` or the key merely happens to be one. Every other ref key uses heap ref identity. `(*Interpreter).mapKey` owns this rule for every map opcode and for `Marshal`, so a key written under one spelling is always found under an equal one. Missing keys read as the element zero value. `MAP_LOOKUP` also returns an `i1` presence flag.
+Primitive keys use value identity; `i1`/`i8` use their `i32` representation. Strings use content. Other refs use heap identity.
+
+`(*Interpreter).mapKey` owns the rule for map operations and `Marshal`. Missing keys return element zero values. `MAP_LOOKUP` also returns an `i1` presence flag.
 
 ### Structured Errors
 
-Exception handling uses per-function handler tables. `types.Error` is the canonical structured exception payload. Error code `0` is unclassified, VM traps use negative trap-code values, and source-language errors should use `types.ErrorCodeUserBase` and above.
+Handler tables own exception routing. `types.Error` is the structured payload. Code `0` is unclassified; VM traps use negative codes; source errors use `types.ErrorCodeUserBase` and above.
 
-## Fusion Notes
+## Fusion
 
-Threaded execution may fuse common opcode sequences in non-exact mode. Debugging with `WithTick(1)` preserves bytecode-level instruction boundaries.
-
-Examples:
-
-- primitive constants feeding primitive binary operations
-- typed locals feeding primitive binary operations
-- typed locals plus primitive constants feeding binary operations
-- non-trapping primitive binary results stored directly into typed locals
-- typed-array constants plus scalar index producers feeding `array.get`
-- typed-array `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` containers (declared,
-  concrete element type) plus scalar index producers feeding `array.get`
-- constant indexes feeding `array.get` or `struct.get`
-- struct `LOCAL_GET`/`GLOBAL_GET`/`UPVAL_GET` containers (declared, concrete
-  `*types.StructType`) plus a constant field index feeding `struct.get`
-- constant ref cell plus `ref.get`
-- structured-error creation followed by a raise
-
-A fused source stays in a temporary instead of being pushed, so a fused
-handler checks stack room once for its own net push rather than once per
-folded source. Bounds, segmentation, and underflow checks stay per source.
-Trapping arithmetic (`div`/`rem`/`mod`) still materializes its operands on the
-stack, so it keeps a check per push. Typed-array constant and typed-array
-container loads validate the current heap value's concrete array type and
-bounds on every execution; a typed-array local, global, or upvalue container
-is read fresh from its slot and borrowed (no retain/release) because
-`array.get` fully consumes it within the fused sequence. A struct container
-(local, global, or upvalue) is read and borrowed the same way; because a
-struct field's Kind depends on the runtime `StructType`, not a Go type the
-generator can name, threading picks one specialized handler per Kind from the
-container's *declared* type, while every execution still validates the ref
-kind, the heap value's concrete type, the field index against the *runtime*
-struct's field count, and the runtime field's actual Kind before boxing it.
-On a specialized-type miss (the heap value is the generic `*types.Array`
-representation instead), both fusions fall back to the same unfused arm the
-standalone `array.get`/`struct.get` handler runs, instead of trapping a case
-the unfused handler accepts.
+Threaded fusion rules are owned by `fusion.md`.
 
 ## Maintenance Notes
 
 When changing the instruction set:
 
-- append opcodes only
-- keep names short, standard, and consistent
-- prefer one general opcode over several narrow variants
-- do not add an opcode when existing opcodes compose cleanly
-- update widths, verifier, threaded runtime, per-backend JIT status, tests, and this document together
-- keep stack effects explicit
-- keep ref ownership rules visible
-- preserve interpreter/JIT semantic symmetry
-- keep opcode status split by ARM64 and AMD64 instead of grouping several opcodes in one row
+- append opcodes only;
+- keep names short and standard;
+- prefer composition over narrow variants;
+- update metadata, verifier, threaded lowering, backend status, tests, and owner docs together;
+- keep stack effects and ownership explicit;
+- preserve threaded/native semantic parity.
 
-## Related Docs
+## Related
 
 - `docs/guides/add-opcode.md` — checklist for adding or changing an opcode
 - `docs/verification.md` — static validation and stack rules

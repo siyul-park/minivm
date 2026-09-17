@@ -1,40 +1,33 @@
 # Compatibility
 
-Supported platforms, build constraints, and native backend availability.
+Supported platforms and native backend availability.
 
-## Summary
-
-- Threaded interpreter: portable across supported Go platforms.
-- AOT optimizer: portable across supported Go platforms.
-- ARM64 JIT: ARM64 only.
-- Darwin/ARM64 JIT execution requires CGO for instruction-cache coherence.
-- AMD64 native JIT is not implemented.
-
-## Platform Matrix
+## Matrix
 
 | Platform | Threaded | AOT | ARM64 JIT |
 |---|---:|---:|---:|
-| Any supported OS / arch | ✅ | ✅ | — |
+| Other Go-supported platforms | ✅ | ✅ | — |
 | Darwin / ARM64 | ✅ | ✅ | ✅, CGO |
 | Linux / ARM64 | ✅ | ✅ | ✅ |
 | Darwin / x86-64 | ✅ | ✅ | — |
 | Linux / x86-64 | ✅ | ✅ | — |
 
-## Go Version
+ARM64 is the only native JIT target. AMD64 JIT is not implemented.
 
-The minimum Go version is the one declared in `go.mod`.
+The minimum Go version is the version declared in `go.mod`.
 
-## Native Memory
+## Build
 
-Executable buffers are allocated and released through `internal/asm`. Published native code remains valid until all owners release it.
+Architecture selection is in `interp/jit_arm64.go` and `interp/jit_stub.go`; normal builds need no manual tags.
 
-On ARM64, branch range is validated before encoding. If a safe long-branch form cannot be produced, native compilation falls back to threaded execution.
+Darwin/ARM64 JIT requires CGO for instruction-cache synchronization. Linux/ARM64 does not.
 
-## Build Constraints
+## Ownership
 
-Architecture selection is isolated in `interp/jit_arm64.go` and `interp/jit_stub.go`. Normal builds do not require manual build tags.
+Executable memory and target mechanics belong to `internal/asm` and target packages. JIT contracts belong to `jit-internals.md`; opcode status belongs to `instruction-set.md`.
 
-## Related Docs
+## Related
 
 - `jit-internals.md`
+- `instruction-set.md`
 - `guides/add-architecture.md`

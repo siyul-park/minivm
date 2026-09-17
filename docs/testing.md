@@ -1,97 +1,105 @@
 # Testing
 
-Executable contracts and test ownership.
+Owns test contracts, structure, methodology, reachability, completeness, and validation. `coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
 
-## When to Read
+## Contract
 
-Read when changing public APIs, opcodes, verification, runtime behavior, optimization, JIT lowering, or benchmark fixtures.
+Tests are the executable specification of a feature. A test must show how the feature is used and what behavior it promises; test structure exists to preserve that specification, not to mirror implementation or maximize coverage.
 
-## Source of Truth
+### Public Boundary
 
-| Concern | Owner |
+Feature contract tests use only target-package public symbols and live in an external test package (`package <target>_test`). This makes the user-visible boundary explicit and prevents unexported implementation dependencies.
+
+Do not wrap or re-abstract the target package merely to remove duplication. A wrapper that hides target API usage cannot serve as the feature specification. Setup helpers are allowed only when they do not hide the specified behavior.
+
+### Readability
+
+Keep tests clear, concise, and directly understandable. Each case shows one meaningful, representative usage of the symbol under test, with input, operation, and expected result visible. A case represents behavior, not a branch or implementation path.
+
+### Organization
+
+Each public symbol under test has one top-level test function as its test owner. Its detailed cases belong directly under that function; test hierarchy is limited to one level and nested cases are prohibited.
+
+Use one case representation per test function: direct cases or table-driven cases, never both. Do not mix cases with different abstraction levels or depths.
+
+When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice is allowed. The data and generation code must remain simple enough to read as specification.
+
+### F.I.R.S.T.
+
+Tests must be **Fast, Independent, Repeatable, Self-validating, and Timely**. Do not depend on other tests, uncontrolled mutable state, manual inspection, or unnecessary setup.
+
+## Internal Contracts
+
+Internal tests are allowed only when an internal boundary is itself a contract, such as verifier policy, frontend acceptance or SSA shape, backend lowering, or native instruction output. Use the smallest owning boundary and apply the same clarity, organization, and F.I.R.S.T. rules.
+
+## TDD
+
+For each behavior change: state the contract and invariants; write the narrowest falsifying test; observe the expected failure when practical; implement the smallest owning change; run focused checks, then applicable structural and repository gates.
+
+Cover applicable success, failure, boundaries, ownership/lifecycle, compatibility, parity, and architecture contracts. Use the lowest test layer that proves the contract.
+
+## Evidence
+
+Coverage measures reachability, not quality. When behavior already exists and no red phase is available, use coverage to prove reachability without changing production behavior to manufacture a failure.
+
+| Layer | Proves |
 |---|---|
-| Test shape and naming | `coding-patterns.md` §12 |
-| Opcode metadata | `instr/type.go` and `TestValid` |
-| Verification policy | `program/verify.go` and its completeness test |
-| Runtime opcode corpus | `interp/interp_test.go` |
-| Backend support | `instruction-set.md` |
+| Public | exported behavior, errors, lifecycle |
+| Runtime | opcode behavior, traps, ownership |
+| Parity | threaded vs optimized/fused/JIT behavior |
+| Frontend | acceptance, plan/SSA shape, `ssa.Verify` |
+| Backend | layout, bindings, moves, metadata, bridge/deopt points |
+| Golden | exact native instruction stream for a specified input shape |
+| Async | publication, shutdown, race behavior |
+| Fuzz | bounded trust-boundary or differential properties |
+| Integration | public end-to-end behavior |
 
-## Rules
+## Native / JIT
 
-Tests are specifications, not implementation snapshots.
+Frontend tests prove frontend contracts. Backend tests prove machine layout, bindings, moves, metadata, and bridge/deopt points. Interpreter tests prove threaded/native parity through public results, errors, ownership, and execution.
 
-- Tests live beside their production owner.
-- External tests use `package <name>_test`.
-- One top-level test owns each independent exported contract; cases are subtests.
-- Test names state behavior, not implementation steps.
-- Write the test first and observe the expected failure.
-- Tests written after code must be mutation-validated.
-- Do not add production APIs or proxies solely for tests.
-- Test internal invariants through public behavior, generated output, or executable artifacts.
+ARM64 goldens are the native instruction specification: define expected instructions independently of the emitter, build the input shape explicitly, fix the expected stream first, then build the assembler, and assert the complete stream and relevant metadata.
 
-## Test Layers
+## Validation
 
-| Layer | Contract |
-|---|---|
-| Public | exported API behavior, errors, lifecycle |
-| Runtime | one visible fixture per opcode behavior, including traps and ownership |
-| Parity | threaded vs optimized/fused/JIT observable behavior |
-| Backend | layout, register bindings, moves, entry kind, bridge points, deopt metadata |
-| Golden | exact machine instruction stream for a specified shape |
-| Frontend | static/trace acceptance, `ssa.Verify`, plan/SSA graph equivalence |
-| Async | queue publication, adoption, shutdown, race safety |
-| Fuzz | bounded trust-boundary and differential properties |
-| Integration | real public parse-to-close flows |
+Run the smallest falsifying command first, then applicable package, race, coverage, architecture, and repository checks. Skip only inapplicable checks and report the skip.
 
-## White-Box Exceptions
+Typical package checks:
 
-A test may use the production package name only when the required contract cannot be expressed through a public boundary. Each exception must document why it exists and its removal condition. Do not create new white-box tests when an observable contract already exists.
-
-## Golden Machine Code
-
-ARM64 golden tests are the native-code specification.
-
-A golden test must:
-
-1. construct the input shape explicitly;
-2. define the expected instruction stream before comparing output;
-3. assert `asm.Assembler.Instructions()` exactly;
-4. assert relevant entry/layout metadata;
-5. build the assembler successfully.
-
-Do not compare only selected opcodes or offsets when the emitted stream itself is the contract.
-
-## Mutation
-
-A new test is considered effective only after a covered production line is deliberately broken and the test fails. Restore the mutation before final validation.
-
-Useful mutations for JIT work include removing a guard, changing a representation width, changing bridge classification, skipping a journal field, or bypassing native execution.
+```bash
+go test ./...
+go test -race ./...
+go test -coverprofile=coverage.out ./<affected-package>
+```
 
 ## Completeness
 
-Repository completeness gates enforce:
-
-- every opcode has valid metadata and runtime coverage;
+- every opcode has metadata and runtime coverage;
 - verifier policy covers every opcode;
-- native opcode status matches the current backend;
-- exported contracts have an owner test;
-- generated code and documentation indexes stay synchronized.
+- backend status matches `instruction-set.md`;
+- exported contracts have owner tests;
+- architecture-specific contracts have architecture-specific evidence.
 
-## Required Validation
+Generated output and documentation index freshness are repository gates, not test-completeness rules.
 
-```text
-go test ./...
-go test -race ./...
-make check-generated check-tidy check-fmt vet
-GOOS=linux GOARCH=arm64 go build ./...
-GOOS=linux GOARCH=arm64 go test -exec=true ./...
-git diff --check
-```
+## Ownership
 
-## Related Docs
+| Concern | Owner |
+|---|---|
+| Test contracts and structure | `testing.md` |
+| General test code style | `coding-patterns.md` |
+| Opcode metadata | `instr/type.go`, `TestValid` |
+| Verification | `program/verify.go`, verifier tests |
+| Runtime opcode corpus | `interp/interp_test.go` |
+| Backend status | `instruction-set.md` |
+| JIT contracts | `jit-internals.md` |
+| Performance evidence | `benchmarks.md` |
 
-- `coding-patterns.md`
-- `instruction-set.md`
-- `verification.md`
-- `jit-internals.md`
-- `benchmarks.md`
+## Related
+
+- `coding-patterns.md` — general code design and style
+- `refactoring.md` — structural review
+- `instruction-set.md` — opcode/backend contracts
+- `verification.md` — bytecode validation
+- `jit-internals.md` — JIT contracts
+- `benchmarks.md` — performance evidence

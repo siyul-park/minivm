@@ -1,29 +1,24 @@
 # Memory Model
 
-Heap storage, reference ownership, reference counting, and cycle collection.
+Heap storage, reference ownership, RC, cycle collection.
 
-## When to Read
-
-Read when changing allocation, `retain`, `release`, heap objects, refs, GC, or ownership across interpreter/JIT/host boundaries.
-
-## Source of Truth
+## Ownership
 
 | Concern | Owner |
 |---|---|
-| Heap and RC | `interp/interp.go` |
+| Heap / RC | `interp/interp.go` |
 | Threaded ownership | `interp/threaded.go` |
-| Host heap APIs | `interp/host.go` |
-| Heap object types | `types/array.go`, `types/struct.go`, `types/map.go` |
+| Host heap API | `interp/host.go` |
+| Heap object types | `types/array.go`, `struct.go`, `map.go` |
 | Boxed values | `types/boxed.go` |
 
 ## Model
 
-- Heap references are stable integer indexes.
-- Heap index `0` is permanent null.
-- Only `KindRef` participates in reference counting.
-- Heap values that contain refs implement `types.Traceable`.
+- Heap refs are stable indexes.
+- Index `0` is permanent null.
+- Only `KindRef` is reference-counted.
+- Ref-containing heap values implement `types.Traceable`.
 - `release` is iterative.
-- Native/JIT paths must preserve the same ownership totals as threaded execution.
 
 ```text
 heap  []types.Value
@@ -31,71 +26,69 @@ rc    []int
 free  []int
 trial []int
 work  []int
-```
+```text
+
+Native/JIT paths preserve threaded ownership totals.
 
 ## Ownership
 
 | Operation | Ownership |
 |---|---|
-| `Alloc` | returns one owned reference |
-| `Retain` | creates one additional ownership |
-| `Release` | drops one ownership |
-| stack push | owns a pushed `KindRef` |
-| stack load | borrows the slot's ownership |
-| local/global/upvalue store | retains new value and releases old value |
-| `DUP` | creates one additional ownership |
-| `CLOSURE_NEW` | transfers function/capture ownership into closure |
-| `RETURN` | releases the retiring frame's remaining owned slots |
+| `Alloc` | one owned ref |
+| `Retain` | +1 ownership |
+| `Release` | -1 ownership |
+| stack push | owns pushed ref |
+| stack load | borrows slot ownership |
+| local/global/upvalue store | retain new, release old |
+| `DUP` | +1 ownership |
+| `CLOSURE_NEW` | transfers function/capture ownership |
+| `RETURN` | releases retiring frame ownership |
 
-JIT deferred refs may borrow the retain held by backing storage. Before a deopt, bridge, or other interpreter-visible transfer, the native path must restore the ownership the interpreter expects.
+Deferred native refs may borrow backing ownership only until an interpreter-visible transfer; deopt and bridges must restore interpreter ownership.
 
 ## Reference Counting
 
-`retain(addr)` increments `rc[addr]`.
+`retain(addr)` increments `rc[addr]`. `release(addr)` decrements; zero clears the slot, returns the index to `free`, and releases child refs through an explicit work stack.
 
-`release(addr)` decrements it. A zero count clears the slot, returns the index to `free`, and releases nested references using an explicit work stack.
+The count includes heap objects, frames, globals, stack values, temporaries, coroutines, and host references.
 
-The count includes every ownership edge, including heap objects, frames, globals, stack values, temporaries, coroutines, and host references.
-
-## `Traceable`
+## Traceable
 
 ```go
 Refs(dst []types.Ref) []types.Ref
-```
+```go
 
-Implementations append child references to `dst` without mutating existing entries and avoid allocation when there are no children.
+Implementations append child refs without mutating existing entries and allocate nothing for no-child traversal.
 
 ## Cycle Collection
 
-GC uses trial deletion over the current heap graph:
+Trial deletion:
 
-1. copy exact counts into `trial`;
+1. copy exact counts to `trial`;
 2. subtract heap-to-heap edges;
-3. treat positive residual counts as external ownership;
+3. treat positive residuals as external ownership;
 4. mark from externally owned objects;
 5. reclaim allocated unmarked objects;
-6. repair surviving exact counts.
+6. repair surviving counts.
 
-It handles self-cycles and multi-object cycles without moving heap indexes.
-
-Collection runs at an adaptive goal and may also run when storage or the hard heap limit requires it. A hard limit is checked after collection and free-list reuse.
+Heap indexes never move. Collection runs adaptively and before enforcing the hard heap limit.
 
 ## Strings
 
-String concatenation may reuse an interpreter-local append buffer, but published strings are immutable. Growth only writes beyond every published length; reallocation leaves older strings attached to their old storage.
+Published strings are immutable. Concatenation may reuse interpreter-local append storage; writes occur beyond published lengths, and reallocation preserves old storage.
 
-## Reset and Reuse
+## Reset
 
-`Reset` invalidates runtime objects, recomputes the collection goal, and may reuse cleared generic-array headers and backing storage. Pooled headers never retain their previous type or contents.
+`Reset` invalidates runtime objects, recomputes collection goals, and may reuse cleared generic-array headers/storage. Reused headers carry no prior type or contents.
 
-## Host Rules
+## Host
 
-Host-owned references use the same `Retain`/`Release` model as guest ownership. Host values do not implicitly own VM refs.
+Host refs use the same retain/release model. Host values do not implicitly own VM refs.
 
-See `host-integration.md` for public API details.
+See `host-integration.md` for host API behavior.
 
-## Related Docs
+## Related
 
-- `value-representation.md`
 - `host-integration.md`
+- `value-representation.md`
 - `jit-internals.md`

@@ -1,23 +1,19 @@
-# minivm Benchmarks
+# Benchmarks
 
 Comparisons here are tier-matched: minivm `threaded` is a bytecode interpreter and is
 compared against interpreters, while `default` and `jit` promote hot code to native
 and are compared against Wazero's compiler backend. Native Go is a reference bound,
 not a peer.
 
-**Benchmark summary.** The threaded interpreter remains competitive with other interpreters, while native execution provides the largest gains on tight arithmetic, loops, and indexed memory access. The native tier still trails Wazero on most shared kernels.
-
 | Kernel | `default` | `threaded` | Wazero |
 |---|---:|---:|---:|
 | `RecursiveFib(35)` | 59.59 ms | 415.3 ms | 44.4 ms |
 | `RecursiveFib(20)` | 44.39 µs | 318.03 µs | 33.2 µs |
 
-`default` is 7.2x faster than `threaded` at depth 20. Wazero remains faster on this workload.
-
 > **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
 > **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median.
 
-## 1. Controls
+## Controls
 
 | Tier | Control | Meaning |
 |---|---|---|
@@ -31,34 +27,13 @@ not a peer.
 A cell reads `—` when that runtime has no fixture for the operation. Bold marks the
 fastest runtime **within its own tier**.
 
-## 2. Reading these results
+## Reading Results
 
-Read the tables row by row rather than through an aggregate. Each row is an
-independent statement with its own tier controls and memory behavior.
+Compare within the same tier.
 
-Compare within a tier. An interpreter losing to a compiler is not a finding, and
-`threaded` beating `default` on a kernel is a statement about promotion policy, not
-about interpreters. `ClosureCounter`, `AllocationGraph`, `PermutationFlips`, and
-`Fannkuch` currently run fastest under `threaded`.
+For external runtimes, `B/op` and `allocs/op` describe the Go harness; use `ns/op` for CPython. Performance changes reproduce the same row and protocol.
 
-`NQueens`, `Fannkuch`, `SortStress`, `StringBuild`, `StructTreeWalk`, and
-`BinaryTrees` moved because their fixtures were corrected to declare concrete
-slot types instead of `any`, which is what lets a container reach the fused
-`array.get` / `array.set` / `struct.get` paths. The two tree kernels also
-dropped a `ref.cast` that existed only to work around the `any` declaration.
-The interpreter did not change; the kernels simply started exercising a path a
-well-typed program always reaches.
-
-Allocation behavior is a first-class result. `IterativeFib`, `TypedArraySum`,
-`BranchTree`, `Mandelbrot`, `RecursiveFib`, and `IndirectRecursiveFib` hold 0 B/op and
-0 allocs/op. CPython's `B/op` and `allocs/op` measure only the Go side of the
-comparison harness, not CPython's own allocator, so compare CPython on `ns/op` alone.
-
-For optimization work, reproduce the row, inspect the owning hot path, make the
-smallest change, rerun the same command, and compare medians for all three metrics
-before making a performance claim.
-
-## 3. Canonical VM operations
+## Canonical VM Operations
 
 ### Control
 
@@ -134,8 +109,6 @@ The only kernels whose bytecode holds a `RETURN_CALL`. Measured on Apple M4 Pro,
 |  | minivm `default` | 138.6 µs | 0 | 0 |
 |  | minivm `jit` | 139.0 µs | 0 | 0 |
 
-A tail call is the one shape where native execution is a clear loss: 15-28x slower than threaded, and fixed per run rather than per tail call - the same figure at n=100 as at n=1000. The tail lowering is not what costs. A self tail call compiles once through the static frontend into a 260-byte entry and yields once per run; the caller's trace side-exits at the tail call every run and is recompiled 250 times over 2000 runs, emitting 7.09 MB, with resident size bounded by retirement at ~195 MB. The recompilation storm in the caller, not the tail lowering, is the open issue.
-
 #### `ClosureCounter(128)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -149,10 +122,6 @@ A tail call is the one shape where native execution is a clear loss: 15-28x slow
 | Native | minivm `default` | 3.34 µs | 64 | 2 |
 |  | minivm `jit` | 3.33 µs | 64 | 2 |
 | Reference | Native Go | 34.9 ns | 0 | 0 |
-
-`#223` retest (2026-08-31, Apple M4 Pro, Go 1.26.2, `-benchtime=300ms -count=6`) measured `ClosureCounter(128)` at medians of `threaded` 2.60 µs, `default` 3.66 µs, and `jit` 3.66 µs, all at 64 B/op and 2 allocs/op. The adaptive throughput probe uses 32-reach warmup, 32-to-256 adaptive windows, a conservative 95% normal-approximation confidence bound after a discarded warm pair, and a bounded seven-pair maximum including that warm pair; the synthetic slower-entry fixture retires within the bounded budget, while the actual ClosureCounter still does not separate as a clear native loss. The probe therefore does not recover ClosureCounter to the threaded baseline, and no kernel-specific heuristic was added.
-
-`#222` retest (2026-09-01, Apple M4 Pro, Go 1.26.2, `-benchtime=300ms -count=6`) verified the static-entry handoff on a long-running loop fixture. The changed build kept `Control_Sieve/jit` and `Numeric_SpectralNorm/jit` within the baseline measurement envelope, with allocations unchanged. The acceptance test also observes a trace-frontend loop compile after the static entry yields, proving the specialized loop root is reachable rather than relying on the whole-function static plan alone. No standalone speedup claim is made because host drift is larger than the observed delta.
 
 #### `NQueens(7)`
 
@@ -316,7 +285,7 @@ A tail call is the one shape where native execution is a clear loss: 15-28x slow
 |  | minivm `jit` | 16.58 µs | 6,216 | 6 |
 | Reference | Native Go | 2.66 µs | 6,144 | 3 |
 
-## 4. Direct interpreter operations
+## Direct Interpreter Operations
 
 These measure the cost of a public operation itself. Unlike the workload tables there is no `default`/`threaded`/`jit` axis for an API that has none, so each operation lists its own contrast cases instead.
 
@@ -345,7 +314,7 @@ These measure the cost of a public operation itself. Unlike the workload tables 
 | `ArrayGetContainerFusion` | global | 3.619 ms | 16 | 2 |
 | `ArrayGetContainerFusion` | upvalue | 3.719 ms | 72 | 4 |
 
-## 5. Reference traversal operations
+## Reference Traversal Operations
 
 The `Traceable.Refs` benchmarks append into a caller-owned destination slice. Every traversal case is allocation-free in the current measurement.
 
@@ -359,7 +328,7 @@ The `Traceable.Refs` benchmarks append into a caller-owned destination slice. Ev
 | `Struct.Refs` | no refs | 2.149 | 0 | 0 |
 | `Struct.Refs` | child refs | 2.231 | 0 | 0 |
 
-## 6. Interpreter execution primitives
+## Interpreter Execution Primitives
 
 Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode program, not the latency of a single opcode. Setup, reset, and result validation stay outside the timer.
 
@@ -382,24 +351,11 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 | `const.get_call_coro.value_i32.const_yield_return_returns_i32` | 64.21 ns | 64.79 ns | — | 112 | 1 |
 | `i32.const_global.set_global.get_returns_i32` | 21.08 ns | — | — | 0 | 0 |
 
-## 7. Benchmark interpretation
+## Interpretation
 
-The main result is the gap between minivm's interpreter and native tiers on
-compute-heavy kernels. `IterativeFib`, `Sieve`, `BranchTree`, and similar tight
-loops benefit most from native execution.
+Native execution primarily benefits tight arithmetic, loops, and indexed access. Call-heavy and allocation-heavy workloads retain more threaded work. Read results by row and tier; do not aggregate unlike tiers.
 
-The interpreter tier remains competitive with other interpreters, while the
-native tier still trails Wazero on most shared kernels. Allocation-heavy and
-call-heavy workloads remain less favorable because more execution stays in
-threaded code.
-
-The tables use a fixed environment and protocol.
-
-Allocation-heavy results are reported with `B/op` and `allocs/op` because memory
-behavior is often more informative than execution time alone. CPython allocation
-figures reflect only the Go benchmark harness and should not be compared directly.
-
-## 8. Benchmark fixture inventory
+## Benchmark Fixture Inventory
 
 | Benchmark | Fixture | Main signal |
 |---|---|---|
@@ -425,7 +381,7 @@ figures reflect only the Go benchmark harness and should not be compared directl
 | `Mandelbrot` | 16x16 | tight f64 loop |
 | `MatMul` | n=16 | f64 multiply-accumulate |
 
-## 9. Methodology
+## Methodology
 
 - Inputs and correctness checks are deterministic.
 - Setup, verification, warmup, reset, cleanup, and result calculation stay outside the timed operation.
@@ -433,7 +389,7 @@ figures reflect only the Go benchmark harness and should not be compared directl
 - Use interleaved A/B runs with `benchstat` when comparing variants.
 - Compare CPython on `ns/op` only; `B/op` and `allocs/op` measure the Go harness.
 
-## 10. Reproduction
+## Reproduction
 
 ```bash
 cd benchmarks
@@ -443,12 +399,18 @@ go test -run='^$' -bench='^(BenchmarkControl|BenchmarkMemory|BenchmarkNumeric|Be
 # External runtimes
 go test -tags=compare -run='^$' -bench='^(BenchmarkControl|BenchmarkMemory|BenchmarkNumeric|BenchmarkCall)' \
   -benchmem -benchtime=300ms -count=3 .
-```
+```bash
 
-## 11. Ownership
+## Ownership
 
 | Location | Responsibility |
 |---|---|
 | `interp/*_test.go` | interpreter and JIT benchmarks |
 | `types/*_test.go` | reference traversal benchmarks |
 | `benchmarks/` | runtime-neutral workloads and external comparisons |
+
+## Related
+
+- `profile.md`
+- `testing.md`
+- `roadmap.md`

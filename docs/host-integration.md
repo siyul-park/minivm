@@ -1,107 +1,43 @@
 # Host Integration
 
-Passing values and calls between Go host code and the VM.
+Go host ↔ VM calls, values, heap refs, and reflection.
 
-## When to Read
+Heap ownership is defined in `memory-model.md`; boxed layout in `value-representation.md`.
 
-Use this document when embedding minivm in Go code, exposing host functions, moving heap references across the host boundary, or using `Marshal` and `Unmarshal`.
+## Layers
 
-For heap ownership, see `docs/memory-model.md`. For boxed value layout, see `docs/value-representation.md`.
-
-## Overview
-
-The Go host and the VM run in the same process, but they use different value representations.
-
-| Layer | Main APIs | Best for |
+| Layer | APIs | Use |
 |---|---|---|
-| Direct | `types.Boxed`, `types.Value`, `HostFunction`, `Alloc`, `Load`, `Retain`, `Release` | hot paths and explicit heap control |
-| Reflection | `Marshal`, `Unmarshal`, `Registry`, `WithCodec`, `WithMarshaler`, `WithUnmarshaler` | setup data, tests, structs, maps, slices, and functions |
+| Direct | `Boxed`, `Value`, `HostFunction`, `Alloc`, `Load`, `Retain`, `Release` | hot paths / explicit ownership |
+| Reflection | `Marshal`, `Unmarshal`, `Registry`, codecs | setup, tests, structs, maps, slices, functions |
 
-Both layers can be used with the same interpreter.
+## Host Functions
 
-## Direct Layer
-
-### Host Functions
-
-`HostFunction` is the direct call bridge from bytecode to Go.
-
-Its `Typ` and `Fn` fields are public. A struct literal and `NewHostFunction`
-establish the same value; the constructor is the concise common path.
+`HostFunction` bridges `CALL` to Go:
 
 ```go
 func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error)
-```
-
-Example:
-
 ```go
-fn := interp.NewHostFunction(
-    &types.FunctionType{
-        Params:  []types.Type{types.TypeI32, types.TypeI32},
-        Returns: []types.Type{types.TypeI32},
-    },
-    func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-        a := params[0].I32()
-        b := params[1].I32()
-        return []types.Boxed{types.BoxI32(a + b)}, nil
-    },
-)
 
-prog := program.New(instrs, program.WithConstants(fn))
-```
-
-Bytecode calls the function with `CONST_GET` and `CALL`.
+`NewHostFunction` is the normal constructor; `Typ` and `Fn` remain public.
 
 Rules:
 
-- `params` is valid only during the call
-- returning a non-nil error stops the current `Run`
-- do not call `vm.Run` recursively from a host function
+- `params` is valid only during the call;
+- non-nil errors stop the current `Run`;
+- host functions must not call `vm.Run` recursively.
 
-### Boxed Values
+## Boxed Values
 
-`types.Boxed` is the VM stack word. Check `Kind()` before unboxing unless the bytecode contract already proves the kind.
+`types.Boxed` is the VM stack word. Check `Kind()` before unboxing unless the bytecode contract proves the kind.
 
-```go
-switch v.Kind() {
-case types.KindI32:
-    n := v.I32()
-case types.KindI64:
-    n := v.I64()
-case types.KindF32:
-    f := v.F32()
-case types.KindF64:
-    f := v.F64()
-case types.KindRef:
-    obj, err := vm.Load(v.Ref())
-    _ = obj
-    _ = err
-}
-```
+Wrong-kind unboxing is invalid.
 
-Wrong-kind unboxing is invalid and may return garbage.
+`PopBoxed` returns the raw stack word. For `KindRef`, it transfers stack ownership to the caller; `Load` does not change ownership, and the caller releases the transferred ref when finished. Retain first when another ownership is required.
 
-### Reading Results
+`Pop` returns `types.Value`; for refs it detaches the heap value and releases the stack ref.
 
-Use `PopBoxed` when the caller wants the raw stack word.
-
-```go
-v, err := vm.PopBoxed()
-if err != nil {
-    return err
-}
-score := v.F64()
-```
-
-For scalar values, `PopBoxed` is allocation-free.
-
-For `KindRef`, `PopBoxed` transfers the stack reference to the caller. Resolve it with `Load`, then `Release` it when done. Use `Retain` first if the host needs another independent reference.
-
-Use `Pop` when the caller wants a `types.Value`. For heap values, `Pop` detaches the heap value and releases the stack reference.
-
-### Heap Access
-
-Host code can allocate, load, replace, retain, and release VM heap values.
+## Heap API
 
 ```go
 addr, err := vm.Alloc(types.String("hello"))
@@ -109,79 +45,51 @@ obj, err := vm.Load(addr)
 err = vm.Store(addr, types.String("world"))
 obj, err = vm.Retain(addr)
 err = vm.Release(addr)
-```
+```go
 
-Ownership rules:
+| API | Contract |
+|---|---|
+| `Alloc` | creates one owned ref |
+| `Load` | reads without ownership change |
+| `Store` | replaces value; releases refs owned by old value |
+| `Retain` | creates one host-owned ref |
+| `Release` | drops one host-owned ref |
 
-- `Alloc` creates an owned heap reference
-- `Alloc` of an existing `types.Ref` or `KindRef` creates another ownership of the same address
-- `Load` reads without changing ownership
-- `Store` replaces the value at an address, releases refs owned by the old value, and finalizes its external resources
-- function, closure, and coroutine slots are immutable because runtime frames
-  borrow their code, captures, and suspension state
-- storing the same concrete pointer or the destination's own `types.Ref` /
-  `KindRef` is a no-op
-- storing a different heap address returns `ErrTypeMismatch`; use
-  `Alloc(existingRef)` to create another ownership of one object
-- concrete pointer values passed to `Alloc`, `Store`, or `Push` transfer unique
-  ownership and must not already be owned by the interpreter; use an existing
-  ref when sharing one object. The interpreter answers this from an index of the
-  pointers that have crossed `Alloc`, `Store`, `Push`, `Load`, `Retain`, or
-  `Pop`, so the check costs one lookup no matter how large the heap is
-- `Retain` creates another host-owned reference
-- `Release` drops a host-owned reference
-- every owned reference from `Alloc` or `Retain` must eventually be transferred or released
+Additional rules:
 
-Leaked host references keep heap objects alive. Releasing an address does not
-invalidate another ownership created by `Alloc` or `Retain`.
+- allocating an existing ref creates another ownership;
+- storing the same concrete pointer or destination ref is a no-op;
+- storing a different heap address returns `ErrTypeMismatch`; use `Alloc(ref)` to share;
+- concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and must not already be VM-owned;
+- owned refs must eventually transfer or release;
+- leaked host ownership keeps objects alive.
 
-### Globals and Locals
+`Store`/`Alloc` dynamically track crossed pointers to reject double ownership. Dynamic functions stored in the heap receive callable dispatch slots and follow normal heap lifetime.
 
-`SetGlobal(idx, val)` and `SetLocal(idx, val)` overwrite VM slots.
+External dynamic functions must be verified before storage.
 
-If `val` is a different valid `KindRef`, ownership transfers into the slot. The
-caller must not release that same ownership afterward. Invalid heap addresses
-return `ErrSegmentationFault` without changing the slot. Assigning the slot's
-current boxed value is a no-op; in that case no ownership transfers, and the
-caller remains responsible for any ownership it already holds.
+## Globals and Locals
 
-To keep another reference after a different-value assignment, retain first.
+`SetGlobal` and `SetLocal` transfer a new valid ref and release the replaced ref.
+
+Invalid heap addresses return `ErrSegmentationFault` and leave the slot unchanged. Assigning the current boxed value is a no-op and transfers no ownership.
+
+Retain before assignment when the caller must keep its ownership:
 
 ```go
-_, err := vm.Retain(addr)
-if err != nil {
-    return err
-}
-err = vm.SetGlobal(0, types.BoxRef(addr))
-```
+if _, err := vm.Retain(addr); err != nil { return err }
+if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { return err }
+```go
 
-This mirrors `GLOBAL_SET` and `LOCAL_SET`, which consume stack references into slots.
+## Limits
 
-### Dynamic Functions
+`WithHeap` sets initial capacity. `WithHeapLimit(n)` sets a hard entry limit; `n <= 0` means unlimited. `Alloc`, `Push`, and `Marshal` return `ErrHeapExhausted`; guest execution wraps it in `RuntimeError`.
 
-`Alloc` and `Store` can accept `*types.Function`.
+## Reflection
 
-When a function is stored in the heap, the interpreter keeps a callable dispatch slot for that heap address. Bytecode can call the reference with `CALL` or `RETURN_CALL`.
+`Marshal` and `Unmarshal` use cached per-type codecs. `Unmarshal` writes a VM value into a Go destination. Heap ownership is unchanged by conversion semantics.
 
-Dynamic functions follow normal heap ownership rules. When no stack, global, closure, object, or host reference keeps the function alive, the heap slot is reclaimed and the callable dispatch slot is removed.
-
-`Alloc` and `Store` do not verify function bytecode. If a dynamic function comes from outside the trusted program builder, verify the bytecode before storing it.
-
-### Resource Limits
-
-`WithHeap(n)` sets the initial heap capacity.
-
-`WithHeapLimit(n)` sets a hard heap-entry limit. Values `n <= 0` mean unlimited.
-
-Allocation order is described in `docs/memory-model.md`; this document only covers host-facing API behavior.
-
-`Alloc`, `Push`, and `Marshal` return heap exhaustion as normal errors. Guest execution wraps heap exhaustion in `RuntimeError`, which unwraps to `ErrHeapExhausted`.
-
-## Reflection Layer
-
-`Marshal` and `Unmarshal` convert ordinary Go values through cached per-type codecs. Use them for setup data, tests, structs, maps, slices, and functions; use direct APIs for hot paths.
-
-| Go value | VM representation |
+| Go | VM |
 |---|---|
 | `bool` | `I1` |
 | `int8` | `I8` |
@@ -198,13 +106,7 @@ Allocation order is described in `docs/memory-model.md`; this document only cove
 | `types.Value` | passthrough |
 | `types.Boxed` | unboxed value |
 
-`Unmarshal` writes a VM value into a Go destination using the same codec cache. `Marshal` and `Unmarshal` preserve the declared conversion contract; they do not change heap ownership rules.
-
-## Limits
-
-`WithHeap` sets initial capacity. `WithHeapLimit` sets a hard entry limit; `<= 0` means unlimited. Allocation errors are returned as `ErrHeapExhausted`. Guest execution wraps the same cause in `RuntimeError`.
-
-## Related Docs
+## Related
 
 - `memory-model.md`
 - `value-representation.md`
