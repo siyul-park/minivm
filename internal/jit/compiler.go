@@ -127,7 +127,7 @@ func (c *Compiler) native(input *Input, root Anchor) (Result, bool) {
 		return Result{}, false
 	}
 	code := &Code{Entries: map[Anchor]Entry{}}
-	reason, err := c.publish(code, root, a, c.arch, entry)
+	reason, err := c.publish(code, root, a, entry)
 	if err != nil {
 		return Result{Anchor: root, Frontend: entry.Frontend, Outcome: prof.CompileOutcomeError, Reason: prof.CompileReasonError, Err: err}, true
 	}
@@ -183,10 +183,10 @@ func (c *Compiler) emit(input *Input, plan Plan, code *Code, frontend prof.Front
 			resumable = append(resumable, block.Anchor.IP)
 		}
 	}
-	return c.publish(code, plan.Anchor, asmb, c.arch, Entry{Kind: plan.Kind, Frontend: frontend, Exits: exits, Resumable: resumable})
+	return c.publish(code, plan.Anchor, asmb, Entry{Kind: plan.Kind, Frontend: frontend, Exits: exits, Resumable: resumable})
 }
 
-func (c *Compiler) publish(code *Code, a Anchor, asmb *asm.Assembler, arch asm.Arch, entry Entry) (prof.CompileReason, error) {
+func (c *Compiler) publish(code *Code, a Anchor, asmb *asm.Assembler, entry Entry) (prof.CompileReason, error) {
 	built, err := asmb.Build()
 	if err != nil {
 		if errors.Is(err, asm.ErrNoRegistersAvailable) {
@@ -197,7 +197,7 @@ func (c *Compiler) publish(code *Code, a Anchor, asmb *asm.Assembler, arch asm.A
 		}
 		return prof.CompileReasonError, err
 	}
-	callable, err := asm.Link(c.buffer, arch.ABI(), built)
+	callable, err := asm.Link(c.buffer, c.arch.ABI(), built)
 	if err != nil {
 		return prof.CompileReasonError, err
 	}

@@ -203,7 +203,18 @@ func TestCompiler_Compile(t *testing.T) {
 			var attempts []attempt
 			c := newTestCompiler(t, pressureMachine{relent: tt.relent, attempts: &attempts})
 
-			c.Compile(input, header.Anchor)
+			result := c.Compile(input, header.Anchor)
+			require.NoError(t, result.Err)
+			require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
+			require.Equal(t, prof.CompileReasonNone, result.Reason)
+			require.NotNil(t, result.Code)
+			require.Len(t, result.Code.Entries, 1)
+			published, ok := result.Code.Entries[header.Anchor]
+			require.True(t, ok)
+			require.Equal(t, jit.EntryLoop, published.Kind)
+			require.NotNil(t, published.Callable)
+			require.Positive(t, published.Bytes)
+			require.Equal(t, published.Bytes, result.Code.Bytes)
 			require.Equal(t, tt.want, attempts)
 		})
 	}
