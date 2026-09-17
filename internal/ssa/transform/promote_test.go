@@ -109,123 +109,141 @@ func TestPromotePass_Run(t *testing.T) {
 		require.Zero(t, count(fn, ssa.OpStore))
 	})
 
-	t.Run("leaves a slot alone", func(t *testing.T) {
-		for name, build := range map[string]func(*ssa.Builder, int) ssa.Value{
-			// A slot nothing stores has one definition already - the slot
-			// itself - so promoting it only makes it live across blocks.
-			"nothing stores": func(b *ssa.Builder, block int) ssa.Value {
-				held := b.Value(ssa.TypeI32)
-				b.Add(block, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-				return held
-			},
-			// One value has one type, so a slot written as i32 and read back
-			// as f64 has no single value to stand for it.
-			"its accesses disagree on a type": func(b *ssa.Builder, block int) ssa.Value {
-				stored := b.Value(ssa.TypeI32)
-				b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
-				store(b, block, ssa.Slot{Index: 0}, stored)
-				held := b.Value(ssa.TypeF64)
-				b.Add(block, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-				return held
-			},
-			// A ref slot holds the reference count of what is in it, and a
-			// promoted local has nowhere to say where that count went.
-			"it holds a reference": func(b *ssa.Builder, block int) ssa.Value {
-				stored := b.Value(ssa.TypeRef)
-				b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxedNull, Results: []ssa.Value{stored}})
-				store(b, block, ssa.Slot{Index: 0}, stored)
-				held := b.Value(ssa.TypeRef)
-				b.Add(block, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-				return held
-			},
-			// A local of a frame a frontend inlined counts from that frame's
-			// own floor, which no promoted local names.
-			"it belongs to an inlined frame": func(b *ssa.Builder, block int) ssa.Value {
-				stored := b.Value(ssa.TypeI32)
-				b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
-				store(b, block, ssa.Slot{Index: 0, Base: 4}, stored)
-				held := b.Value(ssa.TypeI32)
-				b.Add(block, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0, Base: 4}, Results: []ssa.Value{held}})
-				return held
-			},
-			// A global is visible to every callee, so a call may have written
-			// it since; only a local is private to the frame.
-			"it is not a local": func(b *ssa.Builder, block int) ssa.Value {
-				stored := b.Value(ssa.TypeI32)
-				b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
-				store(b, block, ssa.Slot{Space: ssa.SpaceGlobal}, stored)
-				held := b.Value(ssa.TypeI32)
-				b.Add(block, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{held}})
-				return held
-			},
-		} {
-			t.Run(name, func(t *testing.T) {
-				b := ssa.New("f")
-				entry := b.Block()
-				held := build(b, entry)
-				b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
-				fn := b.Build()
-				require.NoError(t, ssa.Verify(fn))
-				before := ssa.Format(fn)
+	t.Run("leaves a slot alone when nothing stores it", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		held := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
 
-				preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
-				require.NoError(t, err)
-				require.Equal(t, pass.PreserveAll(), preserved)
-				require.Equal(t, before, ssa.Format(fn))
-			})
-		}
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
 	})
 
-	t.Run("declines a function", func(t *testing.T) {
-		t.Run("that hands a local opcode to the interpreter", func(t *testing.T) {
-			// A bridged opcode runs in the interpreter, which reads the frame
-			// a promotion would have emptied, so no slot of this function is
-			// promotable however it is accessed.
-			b := ssa.New("f")
-			entry := b.Block()
-			stored := b.Value(ssa.TypeI32)
-			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
-			store(b, entry, ssa.Slot{Index: 0}, stored)
-			state := b.Value(ssa.TypeState)
-			b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 3}}, Results: []ssa.Value{state}})
-			b.Add(entry, ssa.Operation{Op: ssa.OpBridge, Code: instr.LOCAL_GET, State: state})
-			held := b.Value(ssa.TypeI32)
-			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
-			fn := b.Build()
-			require.NoError(t, ssa.Verify(fn))
-			before := ssa.Format(fn)
+	t.Run("leaves a slot alone when its accesses disagree on a type", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		stored := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
+		store(b, entry, ssa.Slot{Index: 0}, stored)
+		held := b.Value(ssa.TypeF64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
 
-			preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
-			require.NoError(t, err)
-			require.Equal(t, pass.PreserveAll(), preserved)
-			require.Equal(t, before, ssa.Format(fn))
-		})
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
+	})
 
-		t.Run("whose entry both takes operands and is a loop header", func(t *testing.T) {
-			// The entry's parameters are the operands a native entry is handed,
-			// and a block put in front of it has none of them to pass on.
-			b := ssa.New("f")
-			header, exit := b.Block(), b.Block()
-			seed := b.Param(header, ssa.TypeI32)
-			state := b.Value(ssa.TypeState)
-			b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 1}}, Results: []ssa.Value{state}})
-			b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{seed}, State: state})
-			held := b.Value(ssa.TypeI32)
-			b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-			cond := b.Value(ssa.TypeI1)
-			b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_EQZ, Args: []ssa.Value{held}, Results: []ssa.Value{cond}})
-			b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: exit}, {Block: header, Args: []ssa.Value{held}}}})
-			b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
-			fn := b.Build()
-			require.NoError(t, ssa.Verify(fn))
-			before := ssa.Format(fn)
+	t.Run("leaves a slot alone when it holds a reference", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		stored := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxedNull, Results: []ssa.Value{stored}})
+		store(b, entry, ssa.Slot{Index: 0}, stored)
+		held := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
 
-			preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
-			require.NoError(t, err)
-			require.Equal(t, pass.PreserveAll(), preserved)
-			require.Equal(t, before, ssa.Format(fn))
-		})
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
+	})
+
+	t.Run("leaves a slot alone when it belongs to an inlined frame", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		stored := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
+		store(b, entry, ssa.Slot{Index: 0, Base: 4}, stored)
+		held := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0, Base: 4}, Results: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
+
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
+	})
+
+	t.Run("leaves a slot alone when it is not a local", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		stored := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
+		store(b, entry, ssa.Slot{Space: ssa.SpaceGlobal}, stored)
+		held := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
+
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
+	})
+
+	t.Run("declines a function that hands a local opcode to the interpreter", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		stored := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
+		store(b, entry, ssa.Slot{Index: 0}, stored)
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 3}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpBridge, Code: instr.LOCAL_GET, State: state})
+		held := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
+
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
+	})
+
+	t.Run("declines a function whose entry both takes operands and is a loop header", func(t *testing.T) {
+		b := ssa.New("f")
+		header, exit := b.Block(), b.Block()
+		seed := b.Param(header, ssa.TypeI32)
+		state := b.Value(ssa.TypeState)
+		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 1}}, Results: []ssa.Value{state}})
+		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{seed}, State: state})
+		held := b.Value(ssa.TypeI32)
+		b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+		cond := b.Value(ssa.TypeI1)
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_EQZ, Args: []ssa.Value{held}, Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: exit}, {Block: header, Args: []ssa.Value{held}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+		before := ssa.Format(fn)
+
+		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.Equal(t, before, ssa.Format(fn))
 	})
 }
 
