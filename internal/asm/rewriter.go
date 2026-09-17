@@ -8,9 +8,11 @@ import (
 // rewriter transforms an instruction list whose operands reference virtual
 // registers into one whose operands reference physical registers. It owns
 // both the physical-register pool and the register-allocation policy: bind
-// each vreg as it is used or defined, release it at its last reference
-// (read or write), and — when the bank is exhausted — spill the value whose
-// final use is farthest away to a stack slot, reloading it on demand.
+// each vreg as it is used or defined, release it at its last reference (read
+// or write), and spill to a stack slot on demand — either the value whose
+// final use is farthest away, when the bank is exhausted, or every value
+// still live, at a native call about to clobber the whole bank (see
+// spillLive).
 //
 // Virtual registers are dense, so every per-vreg fact lives in one indexed
 // table rather than a map, and owners is its inverse: a bank slot maps to
@@ -212,6 +214,11 @@ func (r *rewriter) step(i int, inst Instruction) error {
 			return err
 		}
 	}
+	if r.frame != nil && r.frame.Calls(inst.Op) {
+		if err := r.spillLive(i); err != nil {
+			return err
+		}
+	}
 	dst, defines := inst.def()
 	if defines {
 		if _, err := r.bind(dst, i); err != nil {
@@ -351,6 +358,33 @@ func (r *rewriter) victim(at int) (int32, bool) {
 		best = id
 	}
 	return best, best >= 0
+}
+
+// spillLive forces every vreg still bound past the call at at to its spill
+// slot, since the callee may clobber any allocatable physical register. The
+// call's own operands are guarded at at by the use loop above and so are
+// skipped. A vreg crosses declares unsound to spill fails the build instead
+// of letting it survive the clobber; the float bank has no spill support at
+// all, so anything of that type still live past the call fails the same way
+// unconditionally.
+func (r *rewriter) spillLive(at int) error {
+	for _, id := range r.owners[RegTypeFloat] {
+		if id >= 0 && r.regs[id].guard != at {
+			return ErrNoRegistersAvailable
+		}
+	}
+	for _, id := range r.owners[RegTypeInt] {
+		if id < 0 || r.regs[id].guard == at {
+			continue
+		}
+		if r.crosses(at, id) {
+			return ErrNoRegistersAvailable
+		}
+		if err := r.spill(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // spill writes id's live value to its stack slot and returns the register it

@@ -55,10 +55,13 @@ func (r *rewriter) crosses(at int, id int32) bool {
 	return false
 }
 
-// crossesBarrier reports whether a barrier lies strictly between at and
-// last, ascending barriers making a binary search sufficient.
+// crossesBarrier reports whether a barrier lies at or after at and strictly
+// before last, ascending barriers making a binary search sufficient. at
+// itself counts: a spill's store is emitted immediately before the
+// instruction at at, so a call sitting there still separates that store from
+// a reload placed anywhere after it.
 func crossesBarrier(barriers []int, at, last int) bool {
-	n := sort.SearchInts(barriers, at+1)
+	n := sort.SearchInts(barriers, at)
 	return n < len(barriers) && barriers[n] < last
 }
 

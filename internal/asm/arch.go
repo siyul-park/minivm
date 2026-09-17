@@ -73,9 +73,11 @@ type Frame interface {
 	// Returns reports whether op transfers control out of the callable, so
 	// the allocator must restore the stack with Leave before it.
 	Returns(op uint16) bool
-	// Calls reports whether op calls a label rather than an absolute
-	// address, so a target bound in the same code returns through the
-	// shared epilogue.
+	// Calls reports whether op is a native call, direct or register-
+	// indirect: a point where the allocator must spill every value still
+	// live afterward, since the callee may clobber any allocatable physical
+	// register. A call to a label bound in the same code additionally
+	// returns through the shared epilogue; see Resume.
 	Calls(op uint16) bool
 	// Jumps reports whether op is an unconditional branch to its label
 	// operand that never falls through, so the allocator's control-flow

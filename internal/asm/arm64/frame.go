@@ -84,9 +84,12 @@ func (frame) Returns(op uint16) bool {
 	return Op(op) == OpRET
 }
 
-// Calls reports whether op is an ARM64 branch with link.
+// Calls reports whether op is an ARM64 branch with link, direct (OpBL, to a
+// label) or register-indirect (OpBLR, to a computed native entry): either
+// form clobbers every allocatable physical register, so the shared allocator
+// must spill anything still live across it.
 func (frame) Calls(op uint16) bool {
-	return Op(op) == OpBL
+	return Op(op) == OpBL || Op(op) == OpBLR
 }
 
 // Jumps reports whether op is ARM64's unconditional branch: the only label

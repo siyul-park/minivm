@@ -26,11 +26,12 @@ type cfg struct {
 //
 // A call (frame.Calls) is deliberately not treated as a branch here: it
 // always falls through to its own resume point once the callee returns, and
-// its label operand names a routine entry rather than a point in this
-// block's own control flow. inject applies the same view when it decides
-// where to emit Resume. Whether a call's target is bound at or before the
-// call site — a self-recursive call sharing the caller's spill frame — is a
-// question for barriers, not this graph; see docs/jit-internals.md.
+// a label operand on it — when present — names a routine entry rather than a
+// point in this block's own control flow. inject applies the same view when
+// it decides where to emit Resume. Whether a call's target is bound at or
+// before the call site — a self-recursive call sharing the caller's spill
+// frame — is a question for barriers, not this graph; see
+// docs/jit-internals.md.
 func buildCFG(insts []Instruction, labels map[Label]int, frame Frame) *cfg {
 	n := len(insts)
 	if n == 0 {

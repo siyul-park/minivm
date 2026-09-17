@@ -30,4 +30,12 @@ func TestArch_Frame(t *testing.T) {
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 		}, frame.Leave(512))
 	})
+
+	t.Run("recognizes both call forms", func(t *testing.T) {
+		frame := arm64.New().Frame()
+
+		require.True(t, frame.Calls(uint16(arm64.OpBL)))
+		require.True(t, frame.Calls(uint16(arm64.OpBLR)))
+		require.False(t, frame.Calls(uint16(arm64.OpADD)))
+	})
 }

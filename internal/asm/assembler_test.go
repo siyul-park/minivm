@@ -217,6 +217,51 @@ func TestAssembler_Alloc(t *testing.T) {
 		_, err := assembler.Alloc()
 		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
 	})
+
+	t.Run("spills a value live across a call and reloads it after", func(t *testing.T) {
+		// v is the only value the call's own operand does not need, and
+		// register pressure never exhausts the bank here — the allocator
+		// must still evict v, since the callee may clobber every
+		// allocatable register regardless of how many are free.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+
+		const magic = 0x1234
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, magic)...)
+		callee := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(callee, 0)...)
+		assembler.Emit(arm64.BLR(callee))
+		assembler.Emit(arm64.STR(v, ctx, 0))
+		assembler.Emit(arm64.RET())
+
+		insts, err := assembler.Alloc()
+		require.NoError(t, err)
+		require.Len(t, insts, 10)
+
+		call := -1
+		for i, inst := range insts {
+			if inst.Op == uint16(arm64.OpBLR) {
+				call = i
+			}
+		}
+		require.Greater(t, call, 0)
+
+		store := insts[call-1]
+		require.Equal(t, uint16(arm64.OpSTR), store.Op)
+		vAtStore := store.Src1.(asm.PRegOperand).Reg
+		require.Equal(t, arm64.STR(vAtStore, arm64.X26, 0), store)
+
+		reload := insts[call+1]
+		require.Equal(t, uint16(arm64.OpLDR), reload.Op)
+		vAtReload := reload.Dst.(asm.PRegOperand).Reg
+		require.Equal(t, arm64.LDR(vAtReload, arm64.X26, 0), reload)
+
+		use := insts[call+2]
+		require.Equal(t, arm64.STR(vAtReload, arm64.X0, 0), use)
+	})
 }
 
 func TestAssembler_Build(t *testing.T) {
@@ -557,6 +602,54 @@ func TestAssembler_Build(t *testing.T) {
 		// values, exhausting the register bank rejects the build instead of
 		// silently sharing one spill area between activations.
 		// interp/jit.go's publish turns this into "keep threaded dispatch".
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
+	})
+
+	t.Run("declines a value live across a self-recursive call under no register pressure", func(t *testing.T) {
+		// Only one value is live here, nowhere near exhausting the bank, so
+		// nothing but the call itself can be the reason to reject this
+		// build: barriers must bar the call position exactly, not only
+		// positions strictly before it, or the caller's own spill slot for
+		// v collides with the recursive activation's.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, assembler.Pin(ctx, arm64.X0))
+
+		head := assembler.Label()
+		assembler.Bind(head)
+
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, 0x1234)...)
+		assembler.Emit(arm64.BLLabel(head))
+		assembler.Emit(arm64.STR(v, ctx, 0))
+		assembler.Emit(arm64.RET())
+
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
+	})
+
+	t.Run("declines a float value live across a call", func(t *testing.T) {
+		// The float bank has no spill support at all (obtain rejects it the
+		// same way under register-bank exhaustion), so a float value still
+		// needed after a call has no sound path forward and must reject the
+		// build rather than let it survive the clobber unspilled.
+		arch := arm64.New()
+		assembler := asm.New(arch)
+
+		src := assembler.Reg(asm.RegTypeFloat, asm.Width64)
+		v := assembler.Reg(asm.RegTypeFloat, asm.Width64)
+		assembler.Emit(arm64.FMOV(v, src))
+
+		callee := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(callee, 0)...)
+		assembler.Emit(arm64.BLR(callee))
+
+		out := assembler.Reg(asm.RegTypeFloat, asm.Width64)
+		assembler.Emit(arm64.FMOV(out, v))
+		assembler.Emit(arm64.RET())
+
 		_, err := assembler.Build()
 		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
 	})

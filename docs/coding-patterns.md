@@ -222,7 +222,9 @@ Write the test before implementation and observe the expected failure. That obse
 
 A passing test proves nothing about code it never reached. Confirm reachability with a coverage profile over the package the test drives, not by breaking the code to see what notices.
 
-Mutation is the substitute when the failure was never observed: for a test retrofitted onto existing code, mutate one load-bearing line and confirm that test fails. Stage the work first, revert with a targeted edit, and confirm the tree is clean before continuing.
+Never mutate, break, or inject a panic into production code to find out whether a test notices. A probe left live is a silent semantic change indistinguishable from a bug, and the restore step has already been mishandled here at real cost. Retrofitting a test onto existing code is not an exception; it is the case the rule exists for.
+
+When behavior already exists and no red is available, say so plainly rather than manufacturing one, and prove the test reaches what it names with a coverage profile. A test that neither observed a failure nor demonstrated reachability is not evidence: make it observable, or drop it and record the claim it was meant to hold.
 
 ### JIT and backend tests
 
@@ -280,7 +282,7 @@ A change is complete only when:
 - top-down and bottom-up reviews are complete;
 - another simplification pass found no safe improvement;
 - no behavior has a second implementation;
-- tests constrain the intended contract and mutation evidence exists when required;
+- tests constrain the intended contract, with the expected failure observed before the implementation or reachability proven by a coverage profile;
 - comments carry only non-obvious facts;
 - generated and architecture-specific output is synchronized;
 - docs describe the final state without duplicates or history;

@@ -11,7 +11,7 @@
 3. Inspect the current implementation before designing a change. Do not infer behavior from names alone.
 4. Obey the repository instructions that cover every touched path. A more-specific nested `AGENTS.md` overrides this file; direct user/system/developer instructions override repository instructions.
 5. Prefer the smallest clear change that preserves ownership, semantics, and compatibility. Do not add speculative abstractions, wrappers, aliases, or compatibility shims.
-6. Work test-first. For native code, write the intended instruction stream before implementing the lowering. Tests written after implementation require mutation validation.
+6. Work test-first. For native code, write the intended instruction stream before implementing the lowering. Never mutate, break, or inject a panic into production code to validate a test; when no red is available, say so and prove reachability with a coverage profile.
 7. Review every non-trivial change top-down and bottom-up, then run another simplification pass. A removable symbol, duplicated rule, unnecessary abstraction, or avoidable comment is a defect.
 8. Comments are exceptional. Keep only facts the code cannot express: non-obvious invariants, external constraints, rejected alternatives with evidence, or external contracts. Tests must read as specifications without explanatory comments.
 9. One behavior has one implementation. Keep architecture-neutral policy in `internal/jit` and architecture mechanics in `internal/jit/<arch>`.
@@ -76,7 +76,7 @@ Do not report completion until:
 - ownership and boundaries are clear;
 - every touched symbol still has a reason to exist;
 - a further safe simplification pass finds nothing to remove, merge, inline, narrow, privatize, or rename;
-- tests constrain the intended behavior, with mutation evidence when written after implementation;
+- tests constrain the intended behavior, with the expected failure observed before the implementation or reachability proven by a coverage profile;
 - every test reaches the code it names, confirmed by a coverage profile rather than assumed from a pass;
 - comments contain only non-obvious facts;
 - no behavior has a second implementation;
