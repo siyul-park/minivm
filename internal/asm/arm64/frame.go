@@ -5,7 +5,7 @@ import "github.com/siyul-park/minivm/internal/asm"
 // frame implements asm.Frame so the shared register allocator can spill to a
 // native stack frame. X26 holds its stable base because native self-calls move
 // SP while saving their LR and VM frame state. The invoke trampoline preserves
-// X26, and arch excludes it from automatic allocation.
+// X26, and arch reserves it so neither auto-allocation nor Pin can claim it.
 //
 // The load/store and add/subtract-immediate forms used here read register
 // field 31 as SP, so they emit against the SP alias rather than SP (same

@@ -361,12 +361,13 @@ func (r *rewriter) victim(at int) (int32, bool) {
 }
 
 // spillLive forces every vreg still bound past the call at at to its spill
-// slot, since the callee may clobber any allocatable physical register. The
-// call's own operands are guarded at at by the use loop above and so are
-// skipped. A vreg crosses declares unsound to spill fails the build instead
-// of letting it survive the clobber; the float bank has no spill support at
-// all, so anything of that type still live past the call fails the same way
-// unconditionally.
+// slot, since the callee may clobber any allocatable physical register —
+// including a pinned one, unlike victim: eviction is a choice victim can
+// decline for a pin, but a callee's clobber is not. The call's own operands
+// are guarded at at by the use loop above and so are skipped. A vreg crosses
+// declares unsound to spill fails the build instead of letting it survive
+// the clobber; the float bank has no spill support at all, so anything of
+// that type still live past the call fails the same way unconditionally.
 func (r *rewriter) spillLive(at int) error {
 	for _, id := range r.owners[RegTypeFloat] {
 		if id >= 0 && r.regs[id].guard != at {

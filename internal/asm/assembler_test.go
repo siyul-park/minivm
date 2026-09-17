@@ -87,6 +87,15 @@ func TestAssembler_Pin(t *testing.T) {
 		require.ErrorIs(t, err, asm.ErrInvalidOperand)
 	})
 
+	t.Run("rejects pinning the spill frame's own base register", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+
+		require.ErrorIs(t, assembler.Pin(v, arm64.X26), asm.ErrInvalidOperand)
+		_, err := assembler.Build()
+		require.ErrorIs(t, err, asm.ErrInvalidOperand)
+	})
+
 	t.Run("allows an architecture scratch register", func(t *testing.T) {
 		assembler := asm.New(arm64.New())
 		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -219,10 +228,6 @@ func TestAssembler_Alloc(t *testing.T) {
 	})
 
 	t.Run("spills a value live across a call and reloads it after", func(t *testing.T) {
-		// v is the only value the call's own operand does not need, and
-		// register pressure never exhausts the bank here — the allocator
-		// must still evict v, since the callee may clobber every
-		// allocatable register regardless of how many are free.
 		arch := arm64.New()
 		assembler := asm.New(arch)
 		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -607,11 +612,6 @@ func TestAssembler_Build(t *testing.T) {
 	})
 
 	t.Run("declines a value live across a self-recursive call under no register pressure", func(t *testing.T) {
-		// Only one value is live here, nowhere near exhausting the bank, so
-		// nothing but the call itself can be the reason to reject this
-		// build: barriers must bar the call position exactly, not only
-		// positions strictly before it, or the caller's own spill slot for
-		// v collides with the recursive activation's.
 		arch := arm64.New()
 		assembler := asm.New(arch)
 		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -631,10 +631,6 @@ func TestAssembler_Build(t *testing.T) {
 	})
 
 	t.Run("declines a float value live across a call", func(t *testing.T) {
-		// The float bank has no spill support at all (obtain rejects it the
-		// same way under register-bank exhaustion), so a float value still
-		// needed after a call has no sound path forward and must reject the
-		// build rather than let it survive the clobber unspilled.
 		arch := arm64.New()
 		assembler := asm.New(arch)
 
