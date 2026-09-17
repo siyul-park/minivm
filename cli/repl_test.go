@@ -360,6 +360,24 @@ func TestREPL_Run(t *testing.T) {
 			excludes: []string{"error:"},
 		},
 		{
+			name:     "debug clear disarms the active breakpoint",
+			input:    "i32.const 42\ni32.const 8\n.break 5\n.debug\nclear 1\ncontinue\n.quit\n",
+			contains: []string{"breakpoint 1 cleared", "debug> 42 8\n", "bye"},
+			excludes: []string{"breakpoint 1 at", "unknown debug command", "error:"},
+		},
+		{
+			name:     "debug preserves breakpoint ids after deletion and disabling",
+			input:    "i32.const 42\ni32.const 8\n.break 0\n.break 0\n.break 5\n.clear 1\n.disable 2\n.debug\ncontinue\nquit\n.quit\n",
+			contains: []string{"breakpoint 3 at func=0 ip=0005"},
+			excludes: []string{"breakpoint 1 at", "breakpoint 2 at", "error:"},
+		},
+		{
+			name:     "debug sessions restart at the first instruction",
+			input:    "i32.const 42\ni32.const 8\n.debug\nquit\n.debug\nstack\ncontinue\n.quit\n",
+			contains: []string{"debug session ended\n> stopped at func=0 ip=0000", "debug> debug> 42 8\n", "bye"},
+			excludes: []string{"error:", "unknown debug command"},
+		},
+		{
 			name: "debug stack command shows values",
 			// stack command in debug sub-loop shows values
 			input:    "i32.const 42\ni32.const 8\n.debug\nstep\nstack\nquit\n.quit\n",

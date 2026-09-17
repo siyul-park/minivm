@@ -28,7 +28,7 @@ type REPL struct {
 	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
 	constants []types.Value
 	types     []types.Type
-	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
+	debugger  *debug.Debugger
 }
 
 const prompt = "> "
@@ -507,14 +507,9 @@ func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
 		return nil
 	}
 
-	dbg := debug.NewDebugger()
-	if r.debugger != nil {
-		for _, bp := range r.debugger.Breakpoints() {
-			if bp.Enabled {
-				dbg.Break(bp.Func, bp.IP)
-			}
-		}
-	}
+	r.ensureDebugger()
+	dbg := r.debugger
+	dbg.Reset()
 	dbg.Step()
 
 	vm := interp.New(r.build(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
@@ -524,7 +519,7 @@ func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
 		err := vm.Run(ctx)
 		if errors.Is(err, debug.ErrStopped) {
 			r.showStop(dbg.Stop(), vm)
-			done, loopErr := r.debugLoop(ctx, scanner, vm, dbg)
+			done, loopErr := r.debugLoop(scanner, vm, dbg)
 			if loopErr != nil {
 				return loopErr
 			}
@@ -543,7 +538,7 @@ func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
 	return nil
 }
 
-func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp.Interpreter, dbg *debug.Debugger) (done bool, err error) {
+func (r *REPL) debugLoop(scanner *bufio.Scanner, vm *interp.Interpreter, dbg *debug.Debugger) (done bool, err error) {
 	for {
 		fmt.Fprint(r.out, debugPrompt)
 		if !scanner.Scan() {
@@ -582,31 +577,17 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 				r.printErr(fmt.Errorf("usage: break <ip> or break <fn>:<ip>"))
 				continue
 			}
-			fn, ip, perr := parseBreakSpec(arg)
-			if perr != nil {
-				r.printErr(perr)
-				continue
+			if err := r.breakpoint(arg); err != nil {
+				r.printErr(err)
 			}
-			r.ensureDebugger()
-			rid := r.debugger.Break(fn, ip)
-			dbg.Break(fn, ip)
-			fmt.Fprintf(r.out, "breakpoint %d set at func=%d ip=%d\n", rid, fn, ip)
 		case "clear":
 			if arg == "" {
 				r.printErr(fmt.Errorf("usage: clear <id>"))
 				continue
 			}
-			id, perr := parseInt(arg)
-			if perr != nil {
-				r.printErr(fmt.Errorf("invalid breakpoint id %q: %w", arg, perr))
-				continue
+			if err := r.clearBreakpoint(arg); err != nil {
+				r.printErr(err)
 			}
-			r.ensureDebugger()
-			if !r.debugger.Clear(id) {
-				r.printErr(fmt.Errorf("breakpoint %d not found", id))
-				continue
-			}
-			fmt.Fprintf(r.out, "breakpoint %d cleared\n", id)
 		case "quit", "exit", "q":
 			return true, nil
 		case "":
