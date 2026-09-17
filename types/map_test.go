@@ -162,15 +162,33 @@ func TestTypedMap_Delete(t *testing.T) {
 	require.False(t, ok)
 }
 func TestTypedMap_Clear(t *testing.T) {
-	m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
-	m.Set(1, types.BoxI32(2))
+	t.Run("integer keys", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
+		m.Set(1, types.BoxI32(2))
 
-	var values []types.Boxed
-	m.Clear(func(value types.Boxed) {
-		values = append(values, value)
+		var values []types.Boxed
+		m.Clear(func(value types.Boxed) {
+			values = append(values, value)
+		})
+		require.Equal(t, []types.Boxed{types.BoxI32(2)}, values)
+		require.Zero(t, m.Len())
 	})
-	require.Equal(t, []types.Boxed{types.BoxI32(2)}, values)
-	require.Equal(t, 0, m.Len())
+
+	t.Run("NaN keys release each value once", func(t *testing.T) {
+		m := types.NewTypedMap[float64](types.NewMapType(types.TypeF64, types.TypeAny), 0)
+		m.Set(math.NaN(), types.BoxRef(2))
+		m.Set(math.NaN(), types.BoxRef(3))
+		m.Set(1, types.BoxRef(4))
+
+		var values []types.Boxed
+		m.Clear(func(value types.Boxed) {
+			values = append(values, value)
+		})
+		require.ElementsMatch(t, []types.Boxed{types.BoxRef(2), types.BoxRef(3), types.BoxRef(4)}, values)
+		require.Zero(t, m.Len())
+		require.Empty(t, m.Refs(nil))
+		m.Clear(func(types.Boxed) { t.Fatal("value released twice") })
+	})
 }
 func TestTypedMap_String(t *testing.T) {
 	t.Run("i32", func(t *testing.T) {
@@ -386,6 +404,21 @@ func TestMapIterator_String(t *testing.T) {
 	require.Equal(t, "map.iterator", types.NewMapIterator(1, types.NewMap(types.NewMapType(types.TypeAny, types.TypeI32))).String())
 }
 func TestMapIterator_Next(t *testing.T) {
+	t.Run("exhausted iterator after clear", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32, types.TypeI32), 0)
+		m.Set(1, types.BoxI32(2))
+		it := types.NewMapIterator(7, m)
+		require.True(t, it.Next())
+		require.False(t, it.Next())
+		m.Clear(func(types.Boxed) {})
+		require.Zero(t, m.Len())
+		require.False(t, it.Next())
+		require.True(t, it.Done())
+		require.Equal(t, types.BoxedNull, it.Current())
+		require.Equal(t, []types.Ref{7}, it.Refs(nil))
+		require.False(t, it.Next())
+	})
+
 	t.Run("typed key", func(t *testing.T) {
 		m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64, types.TypeI32), 0)
 		m.Set(1<<50, types.BoxI32(2))

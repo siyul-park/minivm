@@ -55,15 +55,16 @@ type MapIterator struct {
 	typ     Type
 	ref     Ref
 	kind    mapIteratorKind
+	started bool
 	done    bool
 }
+
+type mapIteratorKind byte
 
 // KindText marks a MapKey indexed by string content rather than by heap
 // reference. It discriminates map keys only and is never an operand kind, so
 // an empty string key stays distinct from a null reference key.
 const KindText Kind = 0xFE
-
-type mapIteratorKind byte
 
 const (
 	mapIteratorInvalid mapIteratorKind = iota
@@ -205,10 +206,10 @@ func (m *TypedMap[K]) Delete(key K) (Boxed, bool) {
 }
 
 func (m *TypedMap[K]) Clear(fn func(Boxed)) {
-	for key, value := range m.entries {
+	for _, value := range m.entries {
 		fn(value)
-		delete(m.entries, key)
 	}
+	m.entries = make(map[K]Boxed)
 }
 
 func (m *TypedMap[K]) String() string {
@@ -264,10 +265,10 @@ func (m *Map) Delete(key MapKey) (MapEntry, bool) {
 }
 
 func (m *Map) Clear(fn func(MapEntry)) {
-	for key, entry := range m.entries {
+	for _, entry := range m.entries {
 		fn(entry)
-		delete(m.entries, key)
 	}
+	m.entries = make(map[MapKey]MapEntry)
 }
 
 func (m *Map) String() string {
@@ -311,6 +312,11 @@ func (it *MapIterator) Type() Type { return it.typ }
 func (it *MapIterator) String() string { return "map.iterator" }
 
 func (it *MapIterator) Next() bool {
+	if it.started && it.done {
+		it.current = BoxedNull
+		return false
+	}
+	it.started = true
 	if it.iter == nil || !it.iter.Next() {
 		it.current = BoxedNull
 		it.done = true
