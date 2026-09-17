@@ -1524,7 +1524,7 @@ func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 		// imms = NOT(esize) within 6 bits, then ones-1 in the low bits:
 		// esize=2 → imms[5:1]=11111 ... esize=64 → imms[5:1]=11110
 		immrVal := uint32(ro) & 0x3F
-		immsVal := ((^uint32(esize-1) & 0x3F) << 1) & 0x3E | uint32(ones-1)
+		immsVal := ((^uint32(esize-1)&0x3F)<<1)&0x3E | uint32(ones-1)
 		return immrVal, immsVal, true
 	}
 	return 0, 0, false
