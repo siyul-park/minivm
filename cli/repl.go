@@ -111,11 +111,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, ".") {
-			done, err := r.command(ctx, scanner, line)
-			if err != nil {
-				return err
-			}
-			if done {
+			if r.command(ctx, scanner, line) {
 				return nil
 			}
 			continue
@@ -138,14 +134,14 @@ func (r *REPL) Run(ctx context.Context) error {
 	}
 }
 
-func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string) (bool, error) {
+func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string) bool {
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	arg = strings.TrimSpace(arg)
 
 	switch strings.ToLower(cmd) {
 	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
-		return true, nil
+		return true
 	case ".reset":
 		r.clear()
 		fmt.Fprintln(r.out, "reset.")
@@ -198,7 +194,7 @@ func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string)
 	default:
 		fmt.Fprintf(r.out, "unknown command: %s (type '.help' for help)\n", line)
 	}
-	return false, nil
+	return false
 }
 
 func (r *REPL) exec(ctx context.Context, inst instr.Instruction) error {

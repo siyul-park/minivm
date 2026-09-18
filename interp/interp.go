@@ -95,22 +95,6 @@ type Interpreter struct {
 	limit     int
 }
 
-type frame struct {
-	addr    int
-	returns int
-
-	code   []func(*Interpreter)
-	upvals []types.Boxed
-
-	ref     int
-	release bool
-
-	coro int
-
-	ip int
-	bp int
-}
-
 // Option configures an Interpreter or Pool at construction. Only the With
 // constructors produce one, so callers can name and collect options without
 // reaching the unexported state they configure.
@@ -131,6 +115,22 @@ type option struct {
 	maxHeap int
 	tick    int
 	fuel    uint64
+}
+
+type frame struct {
+	addr    int
+	returns int
+
+	code   []func(*Interpreter)
+	upvals []types.Boxed
+
+	ref     int
+	release bool
+
+	coro int
+
+	ip int
+	bp int
 }
 
 const heapRunway = 64
@@ -507,8 +507,7 @@ func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.globals) {
 		return 0, ErrSegmentationFault
 	}
-	val := i.globals[idx]
-	return val, nil
+	return i.globals[idx], nil
 }
 
 // SetGlobal writes val into global slot idx, releasing the reference the slot
@@ -1998,16 +1997,16 @@ func (i *Interpreter) release(addr int) {
 	base := len(i.work)
 	i.work = append(i.work, addr)
 	for len(i.work) > base {
-		addr := i.work[len(i.work)-1]
+		next := i.work[len(i.work)-1]
 		i.work = i.work[:len(i.work)-1]
 
-		i.rc[addr]--
-		if i.rc[addr] == 0 {
-			v := i.heap[addr]
+		i.rc[next]--
+		if i.rc[next] == 0 {
+			v := i.heap[next]
 			for _, r := range i.refs(v) {
 				i.work = append(i.work, int(r))
 			}
-			i.reclaim(addr, v)
+			i.reclaim(next, v)
 		}
 	}
 }
