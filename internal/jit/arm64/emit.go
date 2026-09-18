@@ -257,7 +257,7 @@ func (e *emitter) Term(block int, t ssa.Terminator) bool {
 func (e *emitter) Leave() bool {
 	for _, s := range e.stubs {
 		e.a.Bind(s.label)
-		if !e.unwind(s.deopt) {
+		if !e.unwind(s.deopt, journal.TrapFallback) {
 			return false
 		}
 	}

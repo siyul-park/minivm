@@ -209,7 +209,7 @@ func (e *emitter) opcode(state ssa.Value) int {
 // unwind emits one cold stub. The interpreter reads its whole resume state
 // out of the VM stack and the journal, so every value the hot path kept in a
 // register is written back boxed here, the stack pointer and the frame chain
-// are published, and the trap names where threaded dispatch picks up.
+// are published, and trap names where threaded dispatch picks up.
 //
 // A flushed reference the interpreter does not already own is retained here
 // as well. The interpreter adopts every stack entry it resumes with and
@@ -217,7 +217,7 @@ func (e *emitter) opcode(state ssa.Value) int {
 // to leave behind would be released once more than it was retained; Owned is
 // the IR's own answer to which entries those are (see
 // docs/jit-internals.md, Reference Ownership).
-func (e *emitter) unwind(d backend.Deopt) bool {
+func (e *emitter) unwind(d backend.Deopt, trap journal.Trap) bool {
 	ctrl := e.pin(scratchCtrl)
 	for _, flush := range d.Slots {
 		boxed, ok := e.box(flush.Value)
@@ -236,21 +236,31 @@ func (e *emitter) unwind(d backend.Deopt) bool {
 		arm64.ADDI(sp, bp, uint16(d.SP)),
 		arm64.STR(sp, ctrl, int16(journal.CellSP*8)),
 	)
-	for n, frame := range d.Frames {
-		e.record(n, frame, ctrl, bp)
+	for _, frame := range d.Frames {
+		e.record(frame, ctrl, bp)
 	}
-	e.publish(ctrl, journal.CellDepth, uint64(len(d.Frames)))
 	e.publish(ctrl, journal.CellExitID, uint64(d.ID+1))
-	e.publish(ctrl, journal.CellTrap, uint64(journal.TrapFallback))
+	e.publish(ctrl, journal.CellTrap, uint64(trap))
 	e.publish(ctrl, journal.CellNextIP, uint64(d.Resume))
 	e.a.Emit(arm64.RET())
 	return true
 }
 
-// record writes one journal frame record. The interpreter rebuilds the chain
-// innermost first, which is the order Deopt.Frames already holds it in, and
-// every base is a delta from the entry frame's own.
-func (e *emitter) record(n int, r backend.Record, ctrl, bp asm.VReg) {
+// record appends one journal frame record at the depth CellDepth names and
+// advances it. The index cannot be fixed at compile time: the interpreter
+// zeroes CellDepth once per native entry, and a callee that trapped and
+// returned has already appended its own records, so a caller unwinding after
+// it must build on the depth it finds. The interpreter rebuilds the chain
+// innermost first, which is the order this is called in, and every base is a
+// delta from the entry frame's own.
+func (e *emitter) record(r backend.Record, ctrl, bp asm.VReg) {
+	depth := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LDR(depth, ctrl, int16(journal.CellDepth*8)))
+	off := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LSLI(off, depth, journal.Shift))
+	base := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.ADD(base, ctrl, off))
+
 	addr := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDI(addr, uint64(r.Addr))...)
 	if r.BP != 0 {
@@ -258,13 +268,16 @@ func (e *emitter) record(n int, r backend.Record, ctrl, bp asm.VReg) {
 		e.a.Emit(arm64.ADDI(shifted, bp, uint16(r.BP)))
 		bp = shifted
 	}
-	e.a.Emit(arm64.STP(addr, bp, ctrl, int16(journal.At(n, journal.RecordAddr)*8)))
+	e.a.Emit(arm64.STP(addr, bp, base, int16(journal.At(0, journal.RecordAddr)*8)))
 
 	ip := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDI(ip, uint64(r.IP))...)
 	returns := e.a.Reg(asm.RegTypeInt, asm.Width64)
 	e.a.Emit(arm64.LDI(returns, uint64(r.Returns))...)
-	e.a.Emit(arm64.STP(ip, returns, ctrl, int16(journal.At(n, journal.RecordIP)*8)))
+	e.a.Emit(arm64.STP(ip, returns, base, int16(journal.At(0, journal.RecordIP)*8)))
+
+	e.a.Emit(arm64.ADDI(depth, depth, 1))
+	e.a.Emit(arm64.STR(depth, ctrl, int16(journal.CellDepth*8)))
 }
 
 func (e *emitter) publish(ctrl asm.VReg, at journal.Cell, word uint64) {
