@@ -122,7 +122,12 @@ func ParseU32(code []byte, offset int) int {
 // with the line number for context.
 func ParseAll(r io.Reader) ([]Instruction, error) {
 	b := NewBuilder()
-	lt := newLabelTable(b)
+	lt := &labelTable{
+		b:       b,
+		byName:  map[string]Label{},
+		defLine: map[string]int{},
+		refLine: map[string]int{},
+	}
 	var lines []int
 
 	scanner := bufio.NewScanner(r)
@@ -264,15 +269,6 @@ func isLabelIdent(s string) bool {
 	return true
 }
 
-func newLabelTable(b *Builder) *labelTable {
-	return &labelTable{
-		b:       b,
-		byName:  map[string]Label{},
-		defLine: map[string]int{},
-		refLine: map[string]int{},
-	}
-}
-
 // define binds name to the next instruction Builder emits, failing if an
 // earlier line already defined it.
 func (lt *labelTable) define(name string, line int) error {
@@ -366,16 +362,10 @@ func parseBranch(op Opcode, mnemonic string, fields []string, lt *labelTable, li
 	}
 }
 
-// isNumericToken reports whether tok looks like the start of a numeric
-// literal (as parseOperand accepts) rather than a label identifier.
-func isNumericToken(tok string) bool {
-	return tok != "" && (tok[0] == '-' || (tok[0] >= '0' && tok[0] <= '9'))
-}
-
 // parseBranchOperand parses one branch operand token, returning either its
 // resolved numeric value or a pending label reference.
 func parseBranchOperand(tok string, lt *labelTable, line int) (uint64, *Label, error) {
-	if isNumericToken(tok) {
+	if tok != "" && (tok[0] == '-' || (tok[0] >= '0' && tok[0] <= '9')) {
 		v, err := parseOperand(tok, 2)
 		if err != nil {
 			return 0, nil, err

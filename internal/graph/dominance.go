@@ -6,6 +6,39 @@ type Dominance struct {
 	idom []int
 }
 
+// Frontier returns the dominance frontier of every node: frontier[a] holds
+// each node b that a dominates a predecessor of without strictly dominating b
+// itself, which is exactly where a definition in a stops being the only one
+// reaching. It is the Cooper, Harvey, and Kennedy formulation - from every
+// predecessor of a join, walk the dominator tree up to that join's immediate
+// dominator, adding the join on the way - so it costs one walk per edge into a
+// join and nothing at all for the rest of the graph.
+//
+// Only a predecessor the entry reaches contributes: a node the entry does not
+// reach has no immediate dominator to walk toward and no definition that ever
+// reaches the join, exactly as Dominates leaves it out.
+func Frontier(g Graph, d *Dominance) [][]int {
+	frontier := make([][]int, g.Len())
+	for b := range g.Len() {
+		idom := d.IDom(b)
+		preds := g.Pred(b)
+		if b != 0 && (idom < 0 || len(preds) < 2) {
+			continue
+		}
+		for _, p := range preds {
+			if !d.Dominates(0, p) {
+				continue
+			}
+			for at := p; at != idom && at >= 0; at = d.IDom(at) {
+				if len(frontier[at]) == 0 || frontier[at][len(frontier[at])-1] != b {
+					frontier[at] = append(frontier[at], b)
+				}
+			}
+		}
+	}
+	return frontier
+}
+
 // NewDominance computes the immediate dominator of every node reachable
 // from node 0 using the iterative algorithm of Cooper, Harvey, and Kennedy
 // (2001). A node unreachable from the entry keeps idom -1 and Dominates
@@ -67,39 +100,6 @@ func (d *Dominance) IDom(node int) int {
 		return -1
 	}
 	return d.idom[node]
-}
-
-// Frontier returns the dominance frontier of every node: frontier[a] holds
-// each node b that a dominates a predecessor of without strictly dominating b
-// itself, which is exactly where a definition in a stops being the only one
-// reaching. It is the Cooper, Harvey, and Kennedy formulation - from every
-// predecessor of a join, walk the dominator tree up to that join's immediate
-// dominator, adding the join on the way - so it costs one walk per edge into a
-// join and nothing at all for the rest of the graph.
-//
-// Only a predecessor the entry reaches contributes: a node the entry does not
-// reach has no immediate dominator to walk toward and no definition that ever
-// reaches the join, exactly as Dominates leaves it out.
-func Frontier(g Graph, d *Dominance) [][]int {
-	frontier := make([][]int, g.Len())
-	for b := range g.Len() {
-		idom := d.IDom(b)
-		preds := g.Pred(b)
-		if b != 0 && (idom < 0 || len(preds) < 2) {
-			continue
-		}
-		for _, p := range preds {
-			if !d.Dominates(0, p) {
-				continue
-			}
-			for at := p; at != idom && at >= 0; at = d.IDom(at) {
-				if len(frontier[at]) == 0 || frontier[at][len(frontier[at])-1] != b {
-					frontier[at] = append(frontier[at], b)
-				}
-			}
-		}
-	}
-	return frontier
 }
 
 // intersect finds the nearest common ancestor of a and b in the dominator

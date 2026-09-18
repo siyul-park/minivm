@@ -388,27 +388,6 @@ func (k MapKey) String() string {
 	}
 }
 
-func (t *MapType) Kind() Kind { return KindRef }
-
-func (t *MapType) String() string {
-	return "map[" + t.Key.String() + "]" + t.Elem.String()
-}
-
-func (t *MapType) Cast(other Type) bool {
-	return t.Equals(other)
-}
-
-func (t *MapType) Equals(other Type) bool {
-	if t == other {
-		return true
-	}
-	o, ok := other.(*MapType)
-	if !ok {
-		return false
-	}
-	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
-}
-
 // Value reports the key this entry is indexed by, from the entry's own key
 // when it holds one and from the index otherwise.
 func (k MapKey) Value(entry MapEntry) Value {
@@ -431,6 +410,27 @@ func (k MapKey) Value(entry MapEntry) Value {
 	default:
 		return BoxedNull
 	}
+}
+
+func (t *MapType) Kind() Kind { return KindRef }
+
+func (t *MapType) String() string {
+	return "map[" + t.Key.String() + "]" + t.Elem.String()
+}
+
+func (t *MapType) Cast(other Type) bool {
+	return t.Equals(other)
+}
+
+func (t *MapType) Equals(other Type) bool {
+	if t == other {
+		return true
+	}
+	o, ok := other.(*MapType)
+	if !ok {
+		return false
+	}
+	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
 }
 
 // formatKey renders a native map key through its boxed value's String form.
