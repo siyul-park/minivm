@@ -2,8 +2,6 @@
 
 Heap storage, reference ownership, RC, cycle collection.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Ownership
 
 | Concern | Owner |

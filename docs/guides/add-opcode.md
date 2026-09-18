@@ -2,7 +2,7 @@
 
 End-to-end checklist.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `instruction-set.md` owns semantics; this guide owns change order.
+`instruction-set.md` owns semantics; this guide owns change order.
 
 ## Ownership
 

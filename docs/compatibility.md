@@ -2,8 +2,6 @@
 
 Supported platforms and native backend availability.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Matrix
 
 | Platform | Threaded | AOT | ARM64 JIT |

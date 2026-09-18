@@ -2,7 +2,7 @@
 
 Comparisons here are tier-matched.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. This document owns performance evidence; `testing.md` owns test contracts.
+This document owns performance evidence; `testing.md` owns test contracts.
 
 minivm `threaded` is a bytecode interpreter and is compared against interpreters, while `default` and `jit` promote hot code to native and are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
 

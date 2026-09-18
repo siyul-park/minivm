@@ -2,7 +2,7 @@
 
 Owns test contracts, structure, methodology, reachability, completeness, and validation.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
+`coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
 
 ## Contract
 

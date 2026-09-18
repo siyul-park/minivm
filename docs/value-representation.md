@@ -2,8 +2,6 @@
 
 Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may use static-type representations internally.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Ownership
 
 | Concern | Owner |

@@ -2,7 +2,7 @@
 
 Bytecode-level debugger for `interp.Run`.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `guides/repl.md` owns REPL commands.
+`guides/repl.md` owns REPL commands.
 
 ## API
 

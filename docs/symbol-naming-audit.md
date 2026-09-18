@@ -2,7 +2,7 @@
 
 Applied naming/vocabulary reference.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `coding-patterns.md` is normative; this document records domain vocabulary that `SHOULD` remain consistent across JIT packages.
+`coding-patterns.md` is normative; this document records domain vocabulary that `SHOULD` remain consistent across JIT packages.
 
 ## JIT Vocabulary
 

@@ -2,7 +2,7 @@
 
 Interactive assembly REPL for bytecode programs.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. Debugger API: `debugging.md`; opcode syntax: `instruction-set.md`.
+Debugger API: `debugging.md`; opcode syntax: `instruction-set.md`.
 
 ## Running
 

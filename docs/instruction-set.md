@@ -2,8 +2,6 @@
 
 Opcode reference for minivm bytecode.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Source of Truth
 
 | Concern | File |

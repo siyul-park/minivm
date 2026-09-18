@@ -2,7 +2,7 @@
 
 ARM64 JIT contracts at the interpreter boundary.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `architecture.md` owns package/runtime boundaries; `instruction-set.md` owns opcode status; `value-representation.md` owns value representation; `testing.md` owns tests.
+`architecture.md` owns package/runtime boundaries; `instruction-set.md` owns opcode status; `value-representation.md` owns value representation; `testing.md` owns tests.
 
 ## Ownership
 
@@ -131,7 +131,7 @@ A bridge executes one unsupported operation in threaded code, then resumes nativ
 
 ## Calls, Loops, Suspension
 
-Native calls `MUST` use interpreter-owned native-entry slots and `MUST` fall back when the target is absent. Loop back-edges `MUST` commit deopt state and use a safepoint budget.
+Native calls `MUST` use interpreter-owned native-entry slots and `MUST` fall back when the target is absent. A constant, non-self-recursive, non-captured callee with an all-scalar signature lowers to a direct BLR through its natives slot; the frontend's speculative callee retain is dropped before the BLR, since threaded constant-callee dispatch takes no matching retain. Every other callee stays on the plan pipeline. Loop back-edges `MUST` commit deopt state and use a safepoint budget.
 
 Suspension is terminal fallback; native code `MUST NOT` resume inside a suspended native frame.
 

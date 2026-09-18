@@ -2,7 +2,7 @@
 
 Checklist for a new native backend.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `jit-internals.md` owns runtime contracts; this guide owns integration order.
+`jit-internals.md` owns runtime contracts; this guide owns integration order.
 
 ## Ownership
 

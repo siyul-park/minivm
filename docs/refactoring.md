@@ -2,7 +2,7 @@
 
 Owns structural review for non-trivial changes.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `coding-patterns.md` defines the design target; `testing.md` defines test evidence; `benchmarks.md` defines performance evidence.
+`coding-patterns.md` defines the design target; `testing.md` defines test evidence; `benchmarks.md` defines performance evidence.
 
 ## Scope
 

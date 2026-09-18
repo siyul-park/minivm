@@ -2,7 +2,7 @@
 
 Runtime sampling and JIT hotness control.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `jit-internals.md` owns JIT implementation details.
+`jit-internals.md` owns JIT implementation details.
 
 ## Signals
 

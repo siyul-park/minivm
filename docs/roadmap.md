@@ -2,7 +2,7 @@
 
 Planning document for project priorities.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. Topic docs own current contracts; this document `MUST NOT` override them.
+Topic docs own current contracts; this document `MUST NOT` override them.
 
 ## Direction
 

@@ -2,8 +2,6 @@
 
 Package ownership, dependencies, execution flow, and runtime/JIT boundaries.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Instruction Levels
 
 | Level | Owner |

@@ -2,8 +2,6 @@
 
 Generated producer-consumer fusion for threaded execution.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Ownership
 
 | Concern | Owner |

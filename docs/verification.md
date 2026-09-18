@@ -2,8 +2,6 @@
 
 Static validation of untrusted bytecode.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Ownership
 
 | Concern | Owner |

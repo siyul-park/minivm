@@ -2,8 +2,6 @@
 
 Analysis caching, bytecode transforms, SSA transforms, optimization composition.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
-
 ## Model
 
 ```text

@@ -2,7 +2,7 @@
 
 Go host ↔ VM calls, values, heap refs, and reflection.
 
-Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. Heap ownership is defined in `memory-model.md`; boxed layout in `value-representation.md`.
+Heap ownership is defined in `memory-model.md`; boxed layout in `value-representation.md`.
 
 ## Layers
 
