@@ -206,28 +206,14 @@ func (e *emitter) opcode(state ssa.Value) int {
 	return int(fn.Code[frame.IP])
 }
 
-// unwind emits one cold stub. The interpreter reads its whole resume state
-// out of the VM stack and the journal, so every value the hot path kept in a
-// register is written back boxed here, the stack pointer and the frame chain
-// are published, and trap names where threaded dispatch picks up.
-//
-// A flushed reference the interpreter does not already own is retained here
-// as well. The interpreter adopts every stack entry it resumes with and
-// releases it, so an entry deriving its count from storage this path is about
-// to leave behind would be released once more than it was retained; Owned is
-// the IR's own answer to which entries those are (see
-// docs/jit-internals.md, Reference Ownership).
+// unwind emits one cold stub. materialize hands the interpreter its whole
+// resume state out of the VM stack; unwind publishes the stack pointer and
+// the frame chain the journal carries alongside it, and trap names where
+// threaded dispatch picks up.
 func (e *emitter) unwind(d backend.Deopt, trap journal.Trap) bool {
 	ctrl := e.pin(scratchCtrl)
-	for _, flush := range d.Slots {
-		boxed, ok := e.box(flush.Value)
-		if !ok {
-			return false
-		}
-		e.a.Emit(arm64.STR(boxed, e.base, int16(flush.Slot*8)))
-		if !flush.Owned && e.c.Func().Type(flush.Value) == ssa.TypeRef {
-			e.count(boxed, ctrl)
-		}
+	if !e.materialize(d.Slots, ctrl) {
+		return false
 	}
 
 	bp := e.pin(scratchBP)
@@ -243,6 +229,32 @@ func (e *emitter) unwind(d backend.Deopt, trap journal.Trap) bool {
 	e.publish(ctrl, journal.CellTrap, uint64(trap))
 	e.publish(ctrl, journal.CellNextIP, uint64(d.Resume))
 	e.a.Emit(arm64.RET())
+	return true
+}
+
+// materialize writes every value slots names back to its VM stack slot,
+// boxed, so the interpreter can read it off the VM stack rather than out of a
+// register the cold path does not preserve. A flushed reference the
+// interpreter does not already own is retained here as well: the interpreter
+// adopts every stack entry it resumes with and releases it, so an entry
+// deriving its count from storage this path is about to leave behind would be
+// released once more than it was retained; Owned is the IR's own answer to
+// which entries those are (see docs/jit-internals.md, Reference Ownership).
+//
+// It takes the slots rather than a backend.Deopt because Compiler.Exit
+// registers a fallback descriptor for every reason but prof.ExitNone, and a
+// hot-path caller needs the stores without that side effect.
+func (e *emitter) materialize(slots []backend.Flush, ctrl asm.VReg) bool {
+	for _, flush := range slots {
+		boxed, ok := e.box(flush.Value)
+		if !ok {
+			return false
+		}
+		e.a.Emit(arm64.STR(boxed, e.base, int16(flush.Slot*8)))
+		if !flush.Owned && e.c.Func().Type(flush.Value) == ssa.TypeRef {
+			e.count(boxed, ctrl)
+		}
+	}
 	return true
 }
 
