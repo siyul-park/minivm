@@ -244,28 +244,48 @@ func TestCompile(t *testing.T) {
 }
 
 func TestCompiler_Root(t *testing.T) {
-	t.Run("hands the machine the anchor and the entry kind it names", func(t *testing.T) {
-		for _, test := range []struct {
-			name string
-			root jit.Anchor
-			kind jit.EntryKind
-		}{
-			{"module body", jit.Anchor{}, jit.EntryModule},
-			{"function entry", jit.Anchor{Addr: 3}, jit.EntryFunction},
-			{"loop header", jit.Anchor{Addr: 3, IP: 12}, jit.EntryLoop},
-			{"module loop header", jit.Anchor{IP: 12}, jit.EntryLoop},
-		} {
-			t.Run(test.name, func(t *testing.T) {
-				b := ssa.New("f")
-				b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+	t.Run("hands the machine the anchor and the entry kind it names/module body", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
 
-				m := &machine{}
-				_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, test.root, b.Build())
-				require.True(t, ok)
-				require.Equal(t, test.root, m.compiler.Root())
-				require.Equal(t, test.kind, m.kind)
-			})
-		}
+		m := &machine{}
+		_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{}, b.Build())
+		require.True(t, ok)
+		require.Equal(t, jit.Anchor{}, m.compiler.Root())
+		require.Equal(t, jit.EntryModule, m.kind)
+	})
+
+	t.Run("hands the machine the anchor and the entry kind it names/function entry", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+
+		m := &machine{}
+		_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{Addr: 3}, b.Build())
+		require.True(t, ok)
+		require.Equal(t, jit.Anchor{Addr: 3}, m.compiler.Root())
+		require.Equal(t, jit.EntryFunction, m.kind)
+	})
+
+	t.Run("hands the machine the anchor and the entry kind it names/loop header", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+
+		m := &machine{}
+		_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{Addr: 3, IP: 12}, b.Build())
+		require.True(t, ok)
+		require.Equal(t, jit.Anchor{Addr: 3, IP: 12}, m.compiler.Root())
+		require.Equal(t, jit.EntryLoop, m.kind)
+	})
+
+	t.Run("hands the machine the anchor and the entry kind it names/module loop header", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+
+		m := &machine{}
+		_, ok := backend.Compile(m, asm.New(arm64.New()), &jit.Input{}, jit.Anchor{IP: 12}, b.Build())
+		require.True(t, ok)
+		require.Equal(t, jit.Anchor{IP: 12}, m.compiler.Root())
+		require.Equal(t, jit.EntryLoop, m.kind)
 	})
 
 	t.Run("lets a machine give up on an anchor that names no entry", func(t *testing.T) {

@@ -190,25 +190,32 @@ func TestBody(t *testing.T) {
 		require.NoError(t, ssa.Verify(out))
 	})
 
-	t.Run("declines what bytecode alone cannot resolve", func(t *testing.T) {
-		for name, fn := range map[string]*types.Function{
-			"no code": {Typ: &types.FunctionType{}},
-			"a protected region": {
-				Typ:      &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-				Handlers: []instr.Handler{{Start: 0, End: 5, Catch: 5}},
-				Code:     assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
-			},
-			"an unresolved callee": {
-				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) }),
-			},
-		} {
-			t.Run(name, func(t *testing.T) {
-				out, err := frontend.Body(frontend.Module{}, 1, fn)
-				require.NoError(t, err)
-				require.Nil(t, out)
-			})
+	t.Run("declines what bytecode alone cannot resolve/no code", func(t *testing.T) {
+		fn := &types.Function{Typ: &types.FunctionType{}}
+		out, err := frontend.Body(frontend.Module{}, 1, fn)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
+	t.Run("declines what bytecode alone cannot resolve/a protected region", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:      &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Handlers: []instr.Handler{{Start: 0, End: 5, Catch: 5}},
+			Code:     assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
 		}
+		out, err := frontend.Body(frontend.Module{}, 1, fn)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
+	t.Run("declines what bytecode alone cannot resolve/an unresolved callee", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) }),
+		}
+		out, err := frontend.Body(frontend.Module{}, 1, fn)
+		require.NoError(t, err)
+		require.Nil(t, out)
 	})
 
 	// LOCAL_TEE and GLOBAL_TEE of a reference used to be refused whole: the
