@@ -29,10 +29,13 @@ func TestStaticPlan(t *testing.T) {
 	plans, err := jit.StaticPlan(input)
 	require.NoError(t, err)
 	require.Len(t, plans, 1)
-	require.True(t, plans[0].Valid())
-	require.Equal(t, jit.EntryFunction, plans[0].Kind)
-	require.Equal(t, jit.TerminateBranchIf, plans[0].Blocks[0].Term.Kind)
-	require.Len(t, plans[0].Blocks[0].Term.Edges, 2)
+
+	t.Run("plans a branching function", func(t *testing.T) {
+		require.True(t, plans[0].Valid())
+		require.Equal(t, jit.EntryFunction, plans[0].Kind)
+		require.Equal(t, jit.TerminateBranchIf, plans[0].Blocks[0].Term.Kind)
+		require.Len(t, plans[0].Blocks[0].Term.Edges, 2)
+	})
 
 	t.Run("direct call facts", func(t *testing.T) {
 		callee := &types.Function{Typ: &types.FunctionType{}}

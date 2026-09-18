@@ -15,10 +15,8 @@ func TestNewClosure(t *testing.T) {
 	require.Equal(t, types.Ref(5), cl.Fn)
 	require.Equal(t, ups, cl.Upvals)
 
-	t.Run("nil type defaults to empty", func(t *testing.T) {
-		cl := types.NewClosure(nil, 1, nil)
-		require.Equal(t, &types.FunctionType{}, cl.Typ)
-	})
+	cl = types.NewClosure(nil, 1, nil)
+	require.Equal(t, &types.FunctionType{}, cl.Typ)
 }
 
 func TestClosure_Kind(t *testing.T) {
@@ -31,12 +29,10 @@ func TestClosure_Type(t *testing.T) {
 	cl := types.NewClosure(typ, 1, nil)
 	require.Equal(t, typ, cl.Type())
 
-	t.Run("shares function type, captures excluded from equality", func(t *testing.T) {
-		a := types.NewClosure(typ, 1, []types.Boxed{types.BoxI32(1)})
-		b := types.NewClosure(typ, 2, []types.Boxed{types.BoxI32(2), types.BoxRef(3)})
-		require.True(t, a.Type().Equals(b.Type()))
-		require.True(t, a.Type().Equals(typ))
-	})
+	a := types.NewClosure(typ, 1, []types.Boxed{types.BoxI32(1)})
+	b := types.NewClosure(typ, 2, []types.Boxed{types.BoxI32(2), types.BoxRef(3)})
+	require.True(t, a.Type().Equals(b.Type()))
+	require.True(t, a.Type().Equals(typ))
 }
 
 func TestClosure_String(t *testing.T) {
