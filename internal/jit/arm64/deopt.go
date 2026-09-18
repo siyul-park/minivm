@@ -191,6 +191,16 @@ func (l lowerer) exit(ctx *lowering, resume int, reason prof.ExitReason, opcode 
 	return l.trap(ctx, journal.TrapFallback, resume, reason, opcode)
 }
 
+// bridge deopts one opcode the backend cannot lower: the Go wrapper runs that
+// opcode's own threaded closure once and re-enters this callable at the
+// closure's new IP (see Interpreter.bridge, dispatch). Unlike exit, it
+// carries no exit descriptor — a bridge is productive continuation, not a
+// trace-cut (see tier.Watchdog) — and the block that follows it in the plan needs
+// no branch here: it is reached only through a fresh external entry.
+func (l lowerer) bridge(ctx *lowering, ip int) bool {
+	return l.trap(ctx, journal.TrapBridge, ip, prof.ExitNone, prof.OpcodeNone)
+}
+
 // trap unwinds the inlined native state into the journal and returns to the Go
 // wrapper: every live value is flushed boxed, sp is published, the frame chain
 // is recorded resuming at resume, and the trap kind is reported. journal.TrapFallback
@@ -220,16 +230,6 @@ func (l lowerer) trap(ctx *lowering, kind journal.Trap, resume int, reason prof.
 	}
 	l.trapFlushed(ctx, kind, resume, id)
 	return true
-}
-
-// bridge deopts one opcode the backend cannot lower: the Go wrapper runs that
-// opcode's own threaded closure once and re-enters this callable at the
-// closure's new IP (see Interpreter.bridge, dispatch). Unlike exit, it
-// carries no exit descriptor — a bridge is productive continuation, not a
-// trace-cut (see tier.Watchdog) — and the block that follows it in the plan needs
-// no branch here: it is reached only through a fresh external entry.
-func (l lowerer) bridge(ctx *lowering, ip int) bool {
-	return l.trap(ctx, journal.TrapBridge, ip, prof.ExitNone, prof.OpcodeNone)
 }
 
 func (l lowerer) trapFlushed(ctx *lowering, kind journal.Trap, resume, exitID int) {

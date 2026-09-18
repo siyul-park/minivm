@@ -431,6 +431,16 @@ func (r *rewriter) release(id int32) {
 	}
 }
 
+// own records that id holds preg's bank slot.
+func (r *rewriter) own(id int32, preg PReg) {
+	r.free(id)
+	s := &r.regs[id]
+	s.reg = preg
+	s.mapped = true
+	s.bound = true
+	r.owners[preg.Type()][preg.ID()] = id
+}
+
 // free returns id's bank slot to the available pool, leaving the recorded
 // assignment intact for resolve.
 func (r *rewriter) free(id int32) {
@@ -442,16 +452,6 @@ func (r *rewriter) free(id int32) {
 	r.owners[typ][s.reg.ID()] = -1
 	r.avail[typ] = r.avail[typ].Set(s.reg.ID())
 	s.bound = false
-}
-
-// own records that id holds preg's bank slot.
-func (r *rewriter) own(id int32, preg PReg) {
-	r.free(id)
-	s := &r.regs[id]
-	s.reg = preg
-	s.mapped = true
-	s.bound = true
-	r.owners[preg.Type()][preg.ID()] = id
 }
 
 // substitute returns a copy of inst with every VReg — including a

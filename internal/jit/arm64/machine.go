@@ -22,15 +22,6 @@ type lowerer struct {
 	scratch []asm.PReg
 }
 
-// New returns the ARM64 JIT backend, a jit.Machine that lowers a compiler
-// plan into native ARM64 code. It is this package's only exported symbol;
-// the arch selector one level above (interp) picks it when the running
-// process is arm64 and hands it to jit.New alongside internal/asm/arm64's
-// own Arch.
-func New() jit.Machine {
-	return lowerer{scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14}}
-}
-
 // lowering carries symbolic values, inlined activations, deferred blocks, and
 // cold exits while one plan is emitted. It contains no planner source objects.
 type lowering struct {
@@ -95,6 +86,49 @@ type value struct {
 	imm     int64
 	fn      int
 	ref     int
+}
+
+// Boxing masks used by scalar lowering. The i64 payload width is the boxed
+// value field's own width, derived rather than restated: a change to the kind
+// tag's width moves it, and a literal here would desync silently.
+const (
+	maskI32 = uint64(0xFFFFFFFF)
+	maskI64 = uint64(types.VMask)
+
+	boxableWidth = uint8(types.VBits)
+)
+
+// scratchStack..scratchCtrl index the physical registers a lowering context
+// pins the frame journal header into on external entry (see
+// lowerer.enter); scratchCount is their count.
+const (
+	scratchStack = iota
+	scratchGlobals
+	scratchBP
+	scratchSP
+	scratchCtrl
+	scratchCount
+)
+
+// Boxing tags used by scalar lowering, derived from the Kind
+// tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
+// representation and box through tagI32.
+var (
+	tagI1  = types.Tag(types.KindI1)
+	tagI8  = types.Tag(types.KindI8)
+	tagI32 = types.Tag(types.KindI32)
+	tagI64 = types.Tag(types.KindI64)
+	tagF32 = types.Tag(types.KindF32)
+	tagRef = types.Tag(types.KindRef)
+)
+
+// New returns the ARM64 JIT backend, a jit.Machine that lowers a compiler
+// plan into native ARM64 code. It is this package's only exported symbol;
+// the arch selector one level above (interp) picks it when the running
+// process is arm64 and hands it to jit.New alongside internal/asm/arm64's
+// own Arch.
+func New() jit.Machine {
+	return lowerer{scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14}}
 }
 
 // push appends one operand to the symbolic stack.
@@ -214,40 +248,6 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	_ = ctx.assembler.Pin(v, pr)
 	return v
 }
-
-// Boxing masks used by scalar lowering. The i64 payload width is the boxed
-// value field's own width, derived rather than restated: a change to the kind
-// tag's width moves it, and a literal here would desync silently.
-const (
-	maskI32 = uint64(0xFFFFFFFF)
-	maskI64 = uint64(types.VMask)
-
-	boxableWidth = uint8(types.VBits)
-)
-
-// scratchStack..scratchCtrl index the physical registers a lowering context
-// pins the frame journal header into on external entry (see
-// lowerer.enter); scratchCount is their count.
-const (
-	scratchStack = iota
-	scratchGlobals
-	scratchBP
-	scratchSP
-	scratchCtrl
-	scratchCount
-)
-
-// Boxing tags used by scalar lowering, derived from the Kind
-// tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
-// representation and box through tagI32.
-var (
-	tagI1  = types.Tag(types.KindI1)
-	tagI8  = types.Tag(types.KindI8)
-	tagI32 = types.Tag(types.KindI32)
-	tagI64 = types.Tag(types.KindI64)
-	tagF32 = types.Tag(types.KindF32)
-	tagRef = types.Tag(types.KindRef)
-)
 
 // enter opens the framed callable: the entry at offset zero mirrors the
 // journal header into the pinned scratch registers, dispatches an external

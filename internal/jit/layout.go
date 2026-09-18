@@ -35,14 +35,6 @@ type Layout struct {
 	CoroutineItab  uintptr
 }
 
-const (
-	BackingStack  Backing = iota // retain lives on the operand stack copy
-	BackingConst                 // compile-time constant, never retained
-	BackingLocal                 // deferred to a VM stack local slot
-	BackingGlobal                // deferred to a global slot
-	BackingUpval                 // deferred to a closure upval slot
-)
-
 // ElemShape is how one array element kind is stored: the element kind itself,
 // the concrete container itab, the byte offset its data begins at, the shift
 // from index to byte, and whether the element is raw rather than boxed. Kind
@@ -55,6 +47,33 @@ type ElemShape struct {
 	Scale uint8
 	Raw   bool
 }
+
+// HostShape is how one Go field kind sits in memory. Kind is the VM kind its
+// conversion produces, Size is the width of the Go field, and signed is the
+// extension a field narrower than its slot widens with; a float row is signed
+// because the VM holds a float's bit pattern sign-extended, as it holds an
+// i32.
+type HostShape struct {
+	Kind   types.Kind
+	Size   uintptr
+	signed bool
+}
+
+// iface mirrors the two-word shape of a non-empty Go interface value: the
+// itab pointer identifying its concrete type, and the data pointer Itab does
+// not need.
+type iface struct {
+	itab uintptr
+	_    uintptr
+}
+
+const (
+	BackingStack  Backing = iota // retain lives on the operand stack copy
+	BackingConst                 // compile-time constant, never retained
+	BackingLocal                 // deferred to a VM stack local slot
+	BackingGlobal                // deferred to a global slot
+	BackingUpval                 // deferred to a closure upval slot
+)
 
 // arrayElems is where a ref array's elements begin. It sits here with the
 // shape table rather than with the lowering offsets because the portable
@@ -98,37 +117,6 @@ var elemShapes = []ElemShape{
 	{Kind: types.KindRef, Itab: heapArrayRef, Base: int16(arrayElems)},
 }
 
-// ElemShapeByKind resolves the storage shape of an element kind.
-func ElemShapeByKind(kind types.Kind) (ElemShape, bool) {
-	for _, row := range elemShapes {
-		if row.Kind == kind {
-			return row, true
-		}
-	}
-	return ElemShape{}, false
-}
-
-// ElemShapeByItab resolves the storage shape of a container's concrete itab.
-func ElemShapeByItab(want uintptr) (ElemShape, bool) {
-	for _, row := range elemShapes {
-		if row.Itab == want {
-			return row, true
-		}
-	}
-	return ElemShape{}, false
-}
-
-// HostShape is how one Go field kind sits in memory. Kind is the VM kind its
-// conversion produces, Size is the width of the Go field, and signed is the
-// extension a field narrower than its slot widens with; a float row is signed
-// because the VM holds a float's bit pattern sign-extended, as it holds an
-// i32.
-type HostShape struct {
-	Kind   types.Kind
-	Size   uintptr
-	signed bool
-}
-
 // hostShapes is the one place the memory layout of a hosted Go field is
 // written down, indexed by the reflect.Kind the codec compiled the field
 // through. It mirrors the leaves table the codec picks a conversion from, and
@@ -167,6 +155,26 @@ var slotShapes = [...]struct {
 	types.KindF64: {size: 8, signed: true},
 }
 
+// ElemShapeByKind resolves the storage shape of an element kind.
+func ElemShapeByKind(kind types.Kind) (ElemShape, bool) {
+	for _, row := range elemShapes {
+		if row.Kind == kind {
+			return row, true
+		}
+	}
+	return ElemShape{}, false
+}
+
+// ElemShapeByItab resolves the storage shape of a container's concrete itab.
+func ElemShapeByItab(want uintptr) (ElemShape, bool) {
+	for _, row := range elemShapes {
+		if row.Itab == want {
+			return row, true
+		}
+	}
+	return ElemShape{}, false
+}
+
 // HostShapeByKind resolves the layout of a Go field kind, and reports false where
 // the kind has no row.
 func HostShapeByKind(kind reflect.Kind) (HostShape, bool) {
@@ -197,14 +205,6 @@ func (s HostShape) Read() (uintptr, bool) {
 		return s.Size, slotShapes[s.Kind].signed
 	}
 	return s.Size, s.signed
-}
-
-// iface mirrors the two-word shape of a non-empty Go interface value: the
-// itab pointer identifying its concrete type, and the data pointer Itab does
-// not need.
-type iface struct {
-	itab uintptr
-	_    uintptr
 }
 
 // Itab returns the itab pointer of v's concrete type: the runtime type

@@ -19,8 +19,8 @@ type Result struct {
 // frontend. Compile calls it to keep the most informative outcome across
 // frontends that both failed to emit anything.
 func (current Result) prefer(candidate Result) Result {
-	if reasonPriority(candidate.Reason) > reasonPriority(current.Reason) ||
-		reasonPriority(candidate.Reason) == reasonPriority(current.Reason) && candidate.Frontend > current.Frontend {
+	cand, curr := reasonPriority(candidate.Reason), reasonPriority(current.Reason)
+	if cand > curr || cand == curr && candidate.Frontend > current.Frontend {
 		return candidate
 	}
 	return current

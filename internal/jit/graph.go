@@ -5,12 +5,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// jump builds an edge naming the anchor at addr:ip, unresolved until wire or
-// store binds it to a block index.
-func jump(addr, ip int) Edge {
-	return Edge{Anchor: Anchor{Addr: addr, IP: ip}, Index: NoBlock}
-}
-
 // jumps builds one unresolved edge per target IP, all within addr.
 func jumps(addr int, ips []int) []Edge {
 	edges := make([]Edge, len(ips))
@@ -18,6 +12,12 @@ func jumps(addr int, ips []int) []Edge {
 		edges[i] = jump(addr, ip)
 	}
 	return edges
+}
+
+// jump builds an edge naming the anchor at addr:ip, unresolved until wire or
+// store binds it to a block index.
+func jump(addr, ip int) Edge {
+	return Edge{Anchor: Anchor{Addr: addr, IP: ip}, Index: NoBlock}
 }
 
 // wire resolves every edge still pointing at NoBlock to the block roots names
