@@ -75,7 +75,7 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV,
 		instr.F64_ABS, instr.F64_NEG, instr.F64_SQRT,
 		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE,
-		instr.ARRAY_GET, instr.STRUCT_GET:
+		instr.ARRAY_GET, instr.STRUCT_GET, instr.CALL:
 		return true
 	default:
 		return false
@@ -527,6 +527,9 @@ func (e *emitter) exec(op ssa.Operation) bool {
 		return e.compare(op, ssa.TypeF64, arm64.CondGT)
 	case instr.F64_GE:
 		return e.compare(op, ssa.TypeF64, arm64.CondGE)
+
+	case instr.CALL:
+		return e.call(op)
 	default:
 		// A heap read is not here: it lowers only as the second half of the
 		// guarded pair Lower fuses, never on its own.

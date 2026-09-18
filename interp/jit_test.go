@@ -1473,6 +1473,121 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 	})
 }
 
+// TestARM64_DirectCallScalarParity proves threaded/native parity for a
+// direct call: a constant, non-self-recursive, non-captured callee with an
+// all-scalar signature. The caller keeps a value live across the CALL, so a
+// wrong spill around the BLR shows up as a wrong sum. Which pipeline
+// compiled it is pinned by the backend golden (see machine_test.go); this
+// proves the public contract.
+func TestARM64_DirectCallScalarParity(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	callee := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).
+		MustBuild()
+	caller := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).
+		MustBuild()
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		},
+		program.WithConstants(callee, caller),
+	)
+
+	profile := prof.New()
+	native := New(prog, WithProfiler(profile))
+	threaded := New(prog, WithThreshold(-1))
+	for n := 0; n < 64; n++ {
+		require.NoError(t, native.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := native.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		native.Reset()
+		threaded.Reset()
+	}
+	require.NoError(t, native.Close())
+	require.NoError(t, threaded.Close())
+
+	var entries float64
+	for _, metric := range profile.Metrics() {
+		if metric.Name == "vm_jit_native_entries_total" {
+			entries += metric.Value
+		}
+	}
+	require.Greater(t, entries, float64(0), "the native entry must actually have been installed and run")
+}
+
+// TestARM64_DirectCallFloatReturnParity proves threaded/native parity for
+// an f64-returning direct call, whose result binding unboxes through FMOV
+// rather than MOV (see TestARM64_CallResultKinds).
+func TestARM64_DirectCallFloatReturnParity(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	callee := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeF64}, Returns: []types.Type{types.TypeF64}}).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_ADD), instr.New(instr.RETURN)).
+		MustBuild()
+	caller := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeF64}, Returns: []types.Type{types.TypeF64}}).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.F64_ADD),
+			instr.New(instr.RETURN),
+		).
+		MustBuild()
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(2.25)),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		},
+		program.WithConstants(callee, caller),
+	)
+
+	profile := prof.New()
+	native := New(prog, WithProfiler(profile))
+	threaded := New(prog, WithThreshold(-1))
+	for n := 0; n < 64; n++ {
+		require.NoError(t, native.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := native.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		native.Reset()
+		threaded.Reset()
+	}
+	require.NoError(t, native.Close())
+	require.NoError(t, threaded.Close())
+
+	var entries float64
+	for _, metric := range profile.Metrics() {
+		if metric.Name == "vm_jit_native_entries_total" {
+			entries += metric.Value
+		}
+	}
+	require.Greater(t, entries, float64(0), "the native entry must actually have been installed and run")
+}
+
 func refCounts(i *Interpreter) map[int]int {
 	out := map[int]int{}
 	for addr := 1; addr < i.HeapLen(); addr++ {

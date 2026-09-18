@@ -1,6 +1,7 @@
 package arm64_test
 
 import (
+	"math"
 	"reflect"
 	"slices"
 	"testing"
@@ -1216,6 +1217,121 @@ func TestNew(t *testing.T) {
 				)
 			}(),
 		},
+		{
+			// The absent-entry fallback is inline at its own branch, not
+			// deferred through Leave's stub table like every other guard
+			// here: a deferred stub needs e.base past the BLR while its
+			// branch reaches it without running one, which the allocator's
+			// crosses check refuses to spill (see
+			// internal/asm/eligibility.go). Inline keeps every reference
+			// to e.base on the side of the call it runs on.
+			name: "calls a constant scalar callee through its natives slot",
+			addr: 1,
+			in: func() *jit.Input {
+				callee := &types.Function{
+					Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+					}),
+				}
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Fn: callee}
+				return in
+			}(),
+			want: slices.Concat(
+				prologue(3, 4, 5),
+				[]asm.Instruction{asmarm64.LDR(narrow(0), vreg(3), 0)},
+				asmarm64.LDI(vreg(1), uint64(types.BoxRef(2))),
+				count(6, 1),
+				[]asm.Instruction{
+					asmarm64.LDR(vreg(11), vreg(10), int16(journal.CellNatives*8)),
+					asmarm64.LDR(vreg(12), vreg(11), int16(callRef*8)),
+					asmarm64.CBNZLabel(vreg(12), callReady),
+				},
+				callFallback(13, 1, journal.TrapFallback),
+				// The frontend's speculative callee retain drops back out here,
+				// guarded like own.go's release: a freeing count redoes the CALL
+				// (exit descriptor 2) instead.
+				[]asm.Instruction{
+					asmarm64.ANDI(vreg(26), vreg(1), 0xFFFFFFFF),
+					asmarm64.CMPI(vreg(26), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, dropDone),
+					asmarm64.LDR(vreg(27), vreg(10), int16(journal.CellRC*8)),
+					asmarm64.LDRR(vreg(28), vreg(27), vreg(26)),
+					asmarm64.CMPI(vreg(28), 1),
+					asmarm64.BCondLabel(asmarm64.OpBLE, callRelFail),
+					asmarm64.SUBI(vreg(28), vreg(28), 1),
+					asmarm64.STRR(vreg(28), vreg(27), vreg(26)),
+					asmarm64.BLabel(callRelDone),
+				},
+				callFallback(29, 2, journal.TrapFallback),
+				// X15's first load in this compile: Enter never mirrors it in.
+				[]asm.Instruction{
+					asmarm64.LDR(vreg(42), vreg(10), int16(journal.CellActive*8)),
+					asmarm64.LDR(vreg(43), vreg(10), int16(journal.CellCap*8)),
+					asmarm64.CMP(vreg(42), vreg(43)),
+					asmarm64.BCondLabel(asmarm64.OpBCC, callHasFrame),
+				},
+				callFallback(44, 0, journal.TrapOverflow),
+				[]asm.Instruction{
+					asmarm64.ADDI(vreg(42), vreg(42), 1),
+					asmarm64.STR(vreg(42), vreg(10), int16(journal.CellActive*8)),
+					asmarm64.MOV(vreg(57), vreg(0)),
+					asmarm64.MOVK(vreg(57), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(57), vreg(3), 8),
+					asmarm64.STR(vreg(1), vreg(3), 16),
+					asmarm64.ADDI(vreg(59), vreg(58), 2),
+					asmarm64.SUBI(asmarm64.SP, asmarm64.SP, 32),
+					asmarm64.STP(asmarm64.X12, asmarm64.X13, asmarm64.SP, 0),
+					asmarm64.STR(asmarm64.LR, asmarm64.SP, 16),
+					asmarm64.STR(asmarm64.X26, asmarm64.SP, 24),
+					asmarm64.SUBI(vreg(60), vreg(59), 1),
+					asmarm64.MOV(vreg(61), vreg(60)),
+					asmarm64.ADDI(vreg(62), vreg(60), 1),
+					asmarm64.MOV(vreg(63), vreg(62)),
+					asmarm64.STR(vreg(60), vreg(10), int16(journal.CellBP*8)),
+					asmarm64.STR(vreg(62), vreg(10), int16(journal.CellSP*8)),
+					asmarm64.MOV(asmarm64.X0, vreg(10)),
+					asmarm64.BLR(vreg(12)),
+					asmarm64.LDR(asmarm64.X26, asmarm64.SP, 24),
+					asmarm64.LDR(vreg(65), vreg(64), int16(journal.CellTrap*8)),
+					asmarm64.CBZLabel(vreg(65), callNormal),
+					asmarm64.LDR(asmarm64.X12, asmarm64.SP, 0),
+					asmarm64.LDR(vreg(67), vreg(64), int16(journal.CellDepth*8)),
+					asmarm64.LSLI(vreg(68), vreg(67), journal.Shift),
+					asmarm64.ADD(vreg(69), vreg(64), vreg(68)),
+					asmarm64.MOVZ(vreg(70), 1, 0),
+					asmarm64.STP(vreg(70), vreg(66), vreg(69), int16(journal.At(0, journal.RecordAddr)*8)),
+					asmarm64.MOVZ(vreg(71), uint16(callIP+1), 0),
+					asmarm64.MOVZ(vreg(72), 1, 0),
+					asmarm64.STP(vreg(71), vreg(72), vreg(69), int16(journal.At(0, journal.RecordIP)*8)),
+					asmarm64.ADDI(vreg(67), vreg(67), 1),
+					asmarm64.STR(vreg(67), vreg(64), int16(journal.CellDepth*8)),
+					asmarm64.LDR(asmarm64.LR, asmarm64.SP, 16),
+					asmarm64.ADDI(asmarm64.SP, asmarm64.SP, 32),
+					asmarm64.RET(),
+					asmarm64.SUBI(vreg(73), vreg(73), 1),
+					asmarm64.STR(vreg(73), vreg(64), int16(journal.CellActive*8)),
+					asmarm64.LDP(asmarm64.X12, asmarm64.X13, asmarm64.SP, 0),
+					asmarm64.STR(asmarm64.X12, vreg(64), int16(journal.CellBP*8)),
+					asmarm64.STR(asmarm64.X13, vreg(64), int16(journal.CellSP*8)),
+					asmarm64.LDR(asmarm64.LR, asmarm64.SP, 16),
+					asmarm64.ADDI(asmarm64.SP, asmarm64.SP, 32),
+					asmarm64.MOV(narrow(2), narrow(74)),
+					asmarm64.MOV(vreg(75), vreg(2)),
+					asmarm64.MOVK(vreg(75), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(75), vreg(3), 0),
+					asmarm64.MOV(vreg(76), vreg(75)),
+					asmarm64.RET(),
+				},
+			),
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			assembler := asm.New(asmarm64.New())
@@ -1423,9 +1539,21 @@ func TestNew(t *testing.T) {
 	// Declining is the correct answer for everything the SSA machine has not
 	// learned yet, and it must cost no coverage: the same root still compiles
 	// through the plan pipeline this machine is being ported off.
-	callee := &types.Function{
-		Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
+	// captured exercises call's captures exclusion: CellUpvals is mirrored
+	// once per dispatch from the outermost frame (see interp/jit.go's
+	// journalPtr), so a captured callee would read its caller's upvalues.
+	captured := &types.Function{
+		Typ:      &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Captures: []types.Type{types.TypeI32},
+		Code:     assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
+	}
+	refReturn := &types.Function{
+		Typ:  &types.FunctionType{Returns: []types.Type{types.NewArrayType(types.TypeI32)}},
+		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.RETURN) }),
+	}
+	refParam := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}},
+		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.DROP).Emit(instr.RETURN) }),
 	}
 	for _, tt := range []struct {
 		name  string
@@ -1499,7 +1627,7 @@ func TestNew(t *testing.T) {
 			}),
 		},
 		{
-			name: "a call, whose frame it does not open",
+			name: "a call to a captured callee",
 			input: func() *jit.Input {
 				in := input(1, &types.Function{
 					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
@@ -1508,7 +1636,53 @@ func TestNew(t *testing.T) {
 					}),
 				})
 				in.Constants = []types.Boxed{types.BoxRef(2)}
-				in.Objects[2] = jit.Object{Fn: callee}
+				in.Objects[2] = jit.Object{Fn: captured}
+				return in
+			}(),
+		},
+		{
+			name: "a self-recursive call",
+			input: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(1)}
+				return in
+			}(),
+		},
+		{
+			name: "a call returning a reference",
+			input: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Objects[2] = jit.Object{Fn: refReturn}
+				return in
+			}(),
+		},
+		{
+			// The argument comes from a global: a constant-backed reference
+			// is refused by the plan pipeline's own checkArgs, which would
+			// fail this row's "plan still compiles it" requirement for an
+			// unrelated reason.
+			name: "a call whose parameter carries a reference",
+			input: func() *jit.Input {
+				in := input(1, &types.Function{
+					Typ: &types.FunctionType{},
+					Code: assemble(t, func(b *instr.Builder) {
+						b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+					}),
+				})
+				in.Constants = []types.Boxed{types.BoxRef(2)}
+				in.Globals = []types.Kind{types.KindRef}
+				in.Objects[2] = jit.Object{Fn: refParam}
 				return in
 			}(),
 		},
@@ -1556,6 +1730,33 @@ func TestNew(t *testing.T) {
 
 		_, ok = arm64.New().Compile(asm.New(asmarm64.New()), store(types.KindRef), jit.Anchor{Addr: 1})
 		require.False(t, ok, "a global declared to hold references refuses a scalar value")
+	})
+
+	// Three returns exceed arm64.IntRets, the two ABI registers a native
+	// call's own results come back in. This also stands outside the
+	// "declines" table above: the plan pipeline's own directCall refuses the
+	// identical count for the identical reason, so the table's own
+	// requirement - that the plan still lowers what this machine declines -
+	// cannot hold for this shape.
+	t.Run("declines a call returning more values than the ABI has registers for", func(t *testing.T) {
+		triple := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32, types.TypeI32, types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_CONST, 3).Emit(instr.RETURN)
+			}),
+		}
+		in := input(1, &types.Function{
+			Typ: &types.FunctionType{},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).
+					Emit(instr.DROP).Emit(instr.DROP).Emit(instr.DROP).Emit(instr.RETURN)
+			}),
+		})
+		in.Constants = []types.Boxed{types.BoxRef(2)}
+		in.Objects[2] = jit.Object{Fn: triple}
+
+		_, ok := arm64.New().Compile(asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1})
+		require.False(t, ok)
 	})
 }
 
@@ -1714,7 +1915,83 @@ const (
 	// with exactly two 9-byte I64_CONST instructions (opcode plus 8-byte
 	// immediate), so the offset is the same 18 for all of them.
 	guardedI64IP = 18
+	// callRef is the constant callee address the "calls a constant scalar
+	// callee" golden resolves, and callIP is where CALL's own opcode sits in
+	// that golden's bytecode below - both the frame record's IP and the IP
+	// its two fallback stubs resume at.
+	callRef = 2
+	callIP  = 5
 )
+
+// callReady and friends are the labels a direct call's branches take, in
+// reservation order. Label 1 belongs to the frontend's OpRetain ahead of
+// the call (see count), so these start at 2; dropDone numbers before
+// callRelDone because own.go's drop reserves its label before the guard
+// that branches to it.
+const (
+	callReady asm.Label = iota + 2
+	callRelFail
+	dropDone
+	callRelDone
+	callHasFrame
+	callNormal
+)
+
+// count is the retain sequence the frontend's OpRetain ahead of CALL
+// lowers to (see own.go's count). first names the first virtual register
+// it allocates; boxed is the retained value's own.
+func count(first, boxed int32) []asm.Instruction {
+	ctrl, addr := vreg(first), vreg(first+1)
+	rcBase, rc := vreg(first+2), vreg(first+3)
+	return []asm.Instruction{
+		asmarm64.ANDI(addr, vreg(boxed), 0xFFFFFFFF),
+		asmarm64.CMPI(addr, 0),
+		asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+		asmarm64.LDR(rcBase, ctrl, int16(journal.CellRC*8)),
+		asmarm64.LDRR(rc, rcBase, addr),
+		asmarm64.ADDI(rc, rc, 1),
+		asmarm64.STRR(rc, rcBase, addr),
+	}
+}
+
+// callFallback is the inline unwind the direct call's three failure exits
+// share, each at its own branch point (see the golden's note on why it is
+// not deferred): the pre-call state materialized, sp published, one frame
+// record resuming callIP appended, and exitID/trap reported. first names
+// the exit's first virtual register.
+func callFallback(first int32, exitID uint16, trap journal.Trap) []asm.Instruction {
+	ctrl, box := vreg(first), vreg(first+1)
+	bp, sp := vreg(first+2), vreg(first+3)
+	depth, off := vreg(first+4), vreg(first+5)
+	base := vreg(first + 6)
+	addr, ipReg, rets := vreg(first+7), vreg(first+8), vreg(first+9)
+	exitReg, trapReg, nextReg := vreg(first+10), vreg(first+11), vreg(first+12)
+	return []asm.Instruction{
+		asmarm64.MOV(box, vreg(0)),
+		asmarm64.MOVK(box, tag(types.KindI32), 48),
+		asmarm64.STR(box, vreg(3), 8),
+		asmarm64.STR(vreg(1), vreg(3), 16),
+		asmarm64.ADDI(sp, bp, 3),
+		asmarm64.STR(sp, ctrl, int16(journal.CellSP*8)),
+		asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
+		asmarm64.LSLI(off, depth, journal.Shift),
+		asmarm64.ADD(base, ctrl, off),
+		asmarm64.MOVZ(addr, 1, 0), // the caller's own function address
+		asmarm64.STP(addr, bp, base, int16(journal.At(0, journal.RecordAddr)*8)),
+		asmarm64.MOVZ(ipReg, uint16(callIP), 0),
+		asmarm64.MOVZ(rets, 1, 0),
+		asmarm64.STP(ipReg, rets, base, int16(journal.At(0, journal.RecordIP)*8)),
+		asmarm64.ADDI(depth, depth, 1),
+		asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
+		asmarm64.MOVZ(exitReg, exitID, 0),
+		asmarm64.STR(exitReg, ctrl, int16(journal.CellExitID*8)),
+		asmarm64.MOVZ(trapReg, uint16(trap), 0),
+		asmarm64.STR(trapReg, ctrl, int16(journal.CellTrap*8)),
+		asmarm64.MOVZ(nextReg, uint16(callIP), 0),
+		asmarm64.STR(nextReg, ctrl, int16(journal.CellNextIP*8)),
+		asmarm64.RET(),
+	}
+}
 
 // overflowStub is the cold stub behind an I64_ADD/SUB/MUL/SHL/SHR_U
 // boxability guard: both operands flush boxed to their VM stack slots at
@@ -1802,6 +2079,154 @@ func TestARM64_PlanUpvalSetNeverGatesReleaseOnAliasing(t *testing.T) {
 	c2, c5 := cmpBranches(t, 2), cmpBranches(t, 5)
 	require.Equal(t, 1, c2)
 	require.Equal(t, c2, c5)
+}
+
+// TestARM64_CallSpillsAcrossBLR proves a value live across a direct call's
+// BLR is spilled before it and reloaded after, through the shared
+// allocator's own Calls-triggered spillLive (see internal/asm/rewriter.go):
+// the BLR must be a frame.Calls point the allocator reaches.
+func TestARM64_CallSpillsAcrossBLR(t *testing.T) {
+	callee := &types.Function{
+		Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
+	}
+	in := input(1, &types.Function{
+		Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.I32_ADD).Emit(instr.RETURN)
+		}),
+	})
+	in.Constants = []types.Boxed{types.BoxRef(2)}
+	in.Objects[2] = jit.Object{Fn: callee}
+
+	assembler := asm.New(asmarm64.New())
+	_, ok := arm64.New().Compile(assembler, in, jit.Anchor{Addr: 1})
+	require.True(t, ok)
+
+	// Instructions returns the pre-allocation stream, every value still a
+	// VReg; Alloc runs the same rewrite Build does and hands back the one
+	// with spills and reloads inserted, which is what this asks about.
+	insts, err := assembler.Alloc()
+	require.NoError(t, err)
+	blr := -1
+	for i, ins := range insts {
+		if ins.Op == uint16(asmarm64.OpBLR) {
+			blr = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, blr, 0, "the golden stream must contain the direct call's own BLR")
+
+	spilled, reloaded := false, false
+	for i, ins := range insts {
+		if ins.Op == uint16(asmarm64.OpSTR) && i < blr && spillsTo(ins.Dst) {
+			spilled = true
+		}
+		if ins.Op == uint16(asmarm64.OpLDR) && i > blr && spillsTo(ins.Src1) {
+			reloaded = true
+		}
+	}
+	require.True(t, spilled, "a local live across the call must be spilled before its BLR")
+	require.True(t, reloaded, "a local live across the call must be reloaded after its BLR")
+
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+}
+
+// TestARM64_CallResultKinds proves call's own result-binding switch reaches
+// every kind it names beyond the plain i32 the golden table above already
+// pins: i64 unboxes its ABI register through SBFX, the same sign-extract a
+// slot load's own guard uses for one (see emit.go's guardI64), because every
+// i64 this machine computes with is raw; f32 and f64 each unbox theirs
+// through FMOV, narrowed for f32 exactly as a slot load's own unboxing
+// narrows it (see emit.go's load).
+func TestARM64_CallResultKinds(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		kind types.Type
+		fmov bool
+		sbfx bool
+	}{
+		{"i64", types.TypeI64, false, true},
+		{"f32", types.TypeF32, true, false},
+		{"f64", types.TypeF64, true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			callee := &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{tt.kind}},
+				Code: assemble(t, func(b *instr.Builder) {
+					switch tt.kind {
+					case types.TypeI64:
+						b.Emit(instr.I64_CONST, 1)
+					case types.TypeF32:
+						b.Emit(instr.F32_CONST, uint64(math.Float32bits(1)))
+					default:
+						b.Emit(instr.F64_CONST, math.Float64bits(1))
+					}
+					b.Emit(instr.RETURN)
+				}),
+			}
+			in := input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{tt.kind}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+				}),
+			})
+			in.Constants = []types.Boxed{types.BoxRef(2)}
+			in.Objects[2] = jit.Object{Fn: callee}
+
+			assembler := asm.New(asmarm64.New())
+			_, ok := arm64.New().Compile(assembler, in, jit.Anchor{Addr: 1})
+			require.True(t, ok)
+
+			insts, err := assembler.Alloc()
+			require.NoError(t, err)
+			blr := -1
+			for i, ins := range insts {
+				if ins.Op == uint16(asmarm64.OpBLR) {
+					blr = i
+					break
+				}
+			}
+			require.GreaterOrEqual(t, blr, 0)
+
+			found := false
+			for _, ins := range insts[blr:] {
+				if ins.Op == uint16(asmarm64.OpFMOV) {
+					found = true
+					break
+				}
+			}
+			require.Equal(t, tt.fmov, found, "an FMOV must bind the result only for a float kind")
+
+			unboxed := false
+			for _, ins := range insts[blr:] {
+				if ins.Op == uint16(asmarm64.OpSBFX) {
+					unboxed = true
+					break
+				}
+			}
+			require.Equal(t, tt.sbfx, unboxed, "an SBFX must bind the result only for i64")
+
+			code, err := assembler.Build()
+			require.NoError(t, err)
+			require.NotEmpty(t, code)
+		})
+	}
+}
+
+// spillsTo reports whether o is a memory operand addressed off X26, the
+// native stack frame's own spill base (see internal/asm/arm64's frame.go) -
+// distinct from this machine's own STR/LDR of X26 itself around a BLR, which
+// address off SP instead.
+func spillsTo(o asm.Operand) bool {
+	mem, ok := o.(asm.MemOperand)
+	if !ok {
+		return false
+	}
+	preg, ok := mem.Base.(asm.PRegOperand)
+	return ok && preg.Reg == asmarm64.X26
 }
 
 // vreg, freg, freg32, and narrow name one virtual register of the stream a

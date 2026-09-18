@@ -174,17 +174,31 @@ func (e *emitter) exit(state ssa.Value, reason prof.ExitReason) (asm.Label, bool
 		return 0, false
 	}
 	d := e.c.Exit(state, reason, e.opcode(state))
-	if len(d.Frames) != 1 || !addressable(d.SP) || !addressable(d.Frames[0].BP) {
+	if !fits(d) {
 		return 0, false
-	}
-	for _, flush := range d.Slots {
-		if !addressable(flush.Slot) {
-			return 0, false
-		}
 	}
 	label := e.a.Label()
 	e.stubs = append(e.stubs, stub{label: label, deopt: d})
 	return label, true
+}
+
+// fits reports whether every VM coordinate d carries is within the
+// immediates a cold path writes it through: exactly one frame, because a
+// deeper chain is a callee a frontend inlined, which this machine declines
+// with the call that opened it, and every coordinate within addressable's
+// range. A direct call's own overflow and trap-return paths share this test:
+// they unwind through a Deopt built outside exit's deferred stub table, so
+// they cannot lean on exit's own check.
+func fits(d backend.Deopt) bool {
+	if len(d.Frames) != 1 || !addressable(d.SP) || !addressable(d.Frames[0].BP) {
+		return false
+	}
+	for _, flush := range d.Slots {
+		if !addressable(flush.Slot) {
+			return false
+		}
+	}
+	return true
 }
 
 // addressable reports whether a VM stack coordinate fits the immediates a
