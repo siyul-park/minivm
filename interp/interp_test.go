@@ -3333,7 +3333,7 @@ func(struct {value: i64; left: any; right: any}) i32
 		}
 	})
 
-	t.Run("parity/host container writes reach the Go value", func(t *testing.T) {
+	t.Run("parity/host container writes reach the Go value/array element", func(t *testing.T) {
 		runHost := func(value any, code []instr.Instruction, opts ...interp.Option) types.Value {
 			setup := interp.New(program.New(nil))
 			defer setup.Close()
@@ -3348,57 +3348,70 @@ func(struct {value: i64; left: any; right: any}) i32
 			return out
 		}
 
-		for _, tt := range []struct {
-			name string
-			run  func(opts ...interp.Option) (types.Value, any)
-			want any
-		}{
-			{
-				name: "array element",
-				run: func(opts ...interp.Option) (types.Value, any) {
-					src := []int32{7}
-					out := runHost(src, []instr.Instruction{
-						instr.New(instr.CONST_GET, 0),
-						instr.New(instr.DUP),
-						instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.ARRAY_SET),
-						instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
-					}, opts...)
-					return out, src
-				},
-				want: []int32{99},
-			},
-			{
-				name: "map entry",
-				run: func(opts ...interp.Option) (types.Value, any) {
-					src := map[int32]int32{}
-					out := runHost(src, []instr.Instruction{
-						instr.New(instr.CONST_GET, 0),
-						instr.New(instr.DUP),
-						instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 99), instr.New(instr.MAP_SET),
-						instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
-					}, opts...)
-					return out, src
-				},
-				want: map[int32]int32{1: 99},
-			},
-		} {
-			t.Run(tt.name, func(t *testing.T) {
-				// The guest wrote into Go memory, so every mode leaves the
-				// write in the Go value rather than in a VM copy of it.
-				value, src := tt.run(interp.WithTick(1), interp.WithThreshold(-1))
-				require.Equal(t, types.I32(99), value)
-				require.Equal(t, tt.want, src)
+		run := func(opts ...interp.Option) (types.Value, any) {
+			src := []int32{7}
+			out := runHost(src, []instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.ARRAY_SET),
+				instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			}, opts...)
+			return out, src
+		}
+		want := []int32{99}
+		value, src := run(interp.WithTick(1), interp.WithThreshold(-1))
+		require.Equal(t, types.I32(99), value)
+		require.Equal(t, want, src)
 
-				value, src = tt.run(interp.WithThreshold(-1))
-				require.Equal(t, types.I32(99), value)
-				require.Equal(t, tt.want, src)
+		value, src = run(interp.WithThreshold(-1))
+		require.Equal(t, types.I32(99), value)
+		require.Equal(t, want, src)
 
-				if runtime.GOARCH == "arm64" {
-					value, src = tt.run(interp.WithThreshold(0))
-					require.Equal(t, types.I32(99), value)
-					require.Equal(t, tt.want, src)
-				}
-			})
+		if runtime.GOARCH == "arm64" {
+			value, src = run(interp.WithThreshold(0))
+			require.Equal(t, types.I32(99), value)
+			require.Equal(t, want, src)
+		}
+	})
+
+	t.Run("parity/host container writes reach the Go value/map entry", func(t *testing.T) {
+		runHost := func(value any, code []instr.Instruction, opts ...interp.Option) types.Value {
+			setup := interp.New(program.New(nil))
+			defer setup.Close()
+			host, err := interp.NewRegistry().Marshal(setup, value)
+			require.NoError(t, err)
+
+			i := interp.New(program.New(code, program.WithConstants(host)), opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			out, err := i.Pop()
+			require.NoError(t, err)
+			return out
+		}
+
+		run := func(opts ...interp.Option) (types.Value, any) {
+			src := map[int32]int32{}
+			out := runHost(src, []instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 99), instr.New(instr.MAP_SET),
+				instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
+			}, opts...)
+			return out, src
+		}
+		want := map[int32]int32{1: 99}
+		value, src := run(interp.WithTick(1), interp.WithThreshold(-1))
+		require.Equal(t, types.I32(99), value)
+		require.Equal(t, want, src)
+
+		value, src = run(interp.WithThreshold(-1))
+		require.Equal(t, types.I32(99), value)
+		require.Equal(t, want, src)
+
+		if runtime.GOARCH == "arm64" {
+			value, src = run(interp.WithThreshold(0))
+			require.Equal(t, types.I32(99), value)
+			require.Equal(t, want, src)
 		}
 	})
 
@@ -8087,158 +8100,152 @@ func TestARM64_HostStructLoop(t *testing.T) {
 		return got, src, entries
 	}
 
-	t.Run("a read of every lowered field kind stays native and agrees with threaded", func(t *testing.T) {
-		for _, tt := range []struct {
-			name string
-			at   uint64
-			typ  types.Type
-			want types.Value
-		}{
-			{name: "bool", at: 0, typ: types.TypeI1, want: types.I1(true)},
-			{name: "int8", at: 1, typ: types.TypeI8, want: types.I8(-8)},
-			{name: "int16", at: 2, typ: types.TypeI32, want: types.I32(-300)},
-			{name: "int32", at: 3, typ: types.TypeI32, want: types.I32(-70000)},
-			{name: "int", at: 4, typ: types.TypeI64, want: types.I64(-1 << 40)},
-			{name: "int64", at: 5, typ: types.TypeI64, want: types.I64(-1 << 40)},
-			{name: "uint8", at: 6, typ: types.TypeI32, want: types.I32(200)},
-			{name: "uint16", at: 7, typ: types.TypeI32, want: types.I32(60000)},
-			// A uint32 field reaches the guest as the signed i32 its
-			// conversion casts to, so the load sign-extends the same four
-			// bytes rather than widening them.
-			{name: "uint32", at: 8, typ: types.TypeI32, want: types.I32(-1)},
-			{name: "uint64", at: 9, typ: types.TypeI64, want: types.I64(1 << 40)},
-			{name: "float32", at: 10, typ: types.TypeF32, want: types.F32(1.5)},
-			{name: "float64", at: 11, typ: types.TypeF64, want: types.F64(-2.5)},
-		} {
-			t.Run(tt.name, func(t *testing.T) {
-				locals := []types.Type{tt.typ}
-				body := []instr.Instruction{
-					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at),
-					instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1),
-				}
-				tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
+	for _, tt := range []struct {
+		name string
+		at   uint64
+		typ  types.Type
+		want types.Value
+	}{
+		{name: "bool", at: 0, typ: types.TypeI1, want: types.I1(true)},
+		{name: "int8", at: 1, typ: types.TypeI8, want: types.I8(-8)},
+		{name: "int16", at: 2, typ: types.TypeI32, want: types.I32(-300)},
+		{name: "int32", at: 3, typ: types.TypeI32, want: types.I32(-70000)},
+		{name: "int", at: 4, typ: types.TypeI64, want: types.I64(-1 << 40)},
+		{name: "int64", at: 5, typ: types.TypeI64, want: types.I64(-1 << 40)},
+		{name: "uint8", at: 6, typ: types.TypeI32, want: types.I32(200)},
+		{name: "uint16", at: 7, typ: types.TypeI32, want: types.I32(60000)},
+		// A uint32 field reaches the guest as the signed i32 its
+		// conversion casts to, so the load sign-extends the same four
+		// bytes rather than widening them.
+		{name: "uint32", at: 8, typ: types.TypeI32, want: types.I32(-1)},
+		{name: "uint64", at: 9, typ: types.TypeI64, want: types.I64(1 << 40)},
+		{name: "float32", at: 10, typ: types.TypeF32, want: types.F32(1.5)},
+		{name: "float64", at: 11, typ: types.TypeF64, want: types.F64(-2.5)},
+	} {
+		t.Run("a read of every lowered field kind stays native and agrees with threaded/"+tt.name, func(t *testing.T) {
+			locals := []types.Type{tt.typ}
+			body := []instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at),
+				instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1),
+			}
+			tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
 
-				want, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
-				require.Equal(t, tt.want, want)
+			want, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
+			require.Equal(t, tt.want, want)
 
-				got, _, entries := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
-				require.Equal(t, want, got)
-				require.Greater(t, entries, float64(0))
-				require.Less(t, entries, float64(size))
-			})
-		}
-	})
+			got, _, entries := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
+			require.Equal(t, want, got)
+			require.Greater(t, entries, float64(0))
+			require.Less(t, entries, float64(size))
+		})
+	}
 
-	t.Run("a read the interpreter still owns agrees with threaded", func(t *testing.T) {
-		for _, tt := range []struct {
-			name string
-			at   uint64
-			typ  types.Type
-			want types.Value
-		}{
-			// A string field publishes a heap reference rather than loading
-			// a word, so it has no row at all.
-			{name: "no row for the field kind", at: 12, typ: types.TypeString, want: types.String("text")},
-			// An i64 past the box payload cannot stay raw, so the read
-			// leaves the loop where the interpreter spills it to the heap.
-			{name: "a value past the box payload", at: 13, typ: types.TypeI64, want: types.I64(1 << 60)},
-		} {
-			t.Run(tt.name, func(t *testing.T) {
-				locals := []types.Type{tt.typ}
-				body := []instr.Instruction{
-					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at),
-					instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1),
-				}
-				tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
+	for _, tt := range []struct {
+		name string
+		at   uint64
+		typ  types.Type
+		want types.Value
+	}{
+		// A string field publishes a heap reference rather than loading
+		// a word, so it has no row at all.
+		{name: "no row for the field kind", at: 12, typ: types.TypeString, want: types.String("text")},
+		// An i64 past the box payload cannot stay raw, so the read
+		// leaves the loop where the interpreter spills it to the heap.
+		{name: "a value past the box payload", at: 13, typ: types.TypeI64, want: types.I64(1 << 60)},
+	} {
+		t.Run("a read the interpreter still owns agrees with threaded/"+tt.name, func(t *testing.T) {
+			locals := []types.Type{tt.typ}
+			body := []instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at),
+				instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1),
+			}
+			tail := []instr.Instruction{instr.New(instr.LOCAL_GET, 1)}
 
-				want, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
-				require.Equal(t, tt.want, want)
-				got, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
-				require.Equal(t, want, got)
-			})
-		}
-	})
+			want, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
+			require.Equal(t, tt.want, want)
+			got, _, _ := run(t, locals, body, tail, interp.WithTick(1), interp.WithThreshold(0))
+			require.Equal(t, want, got)
+		})
+	}
 
-	t.Run("a write of every exactly imaged field kind reaches the Go value", func(t *testing.T) {
-		for _, tt := range []struct {
-			name  string
-			at    uint64
-			store []instr.Instruction
-			want  types.Value
-			check func(*testing.T, hostLoopFields)
-		}{
-			{
-				name: "bool", at: 0,
-				store: []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_EQZ)},
-				want:  types.I1(false),
-				check: func(t *testing.T, got hostLoopFields) { require.False(t, got.Flag) },
-			},
-			{
-				// No opcode makes an i8 constant, so the value written is the
-				// one a read of the same field produced.
-				name: "int8", at: 1,
-				store: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET)},
-				want:  types.I8(-8),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, int8(-8), got.I8) },
-			},
-			{
-				name: "int32", at: 3,
-				store: []instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(negI32)))},
-				want:  types.I32(negI32),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, negI32, got.I32) },
-			},
-			{
-				name: "int64", at: 5,
-				store: []instr.Instruction{instr.New(instr.I64_CONST, uint64(negI64))},
-				want:  types.I64(negI64),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, negI64, got.I64) },
-			},
-			{
-				// A uint32 field is as wide as its slot, so the store writes
-				// the same four bytes the conversion would reinterpret.
-				name: "uint32", at: 8,
-				store: []instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(negI32)))},
-				want:  types.I32(negI32),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, uint32(0xFFFF_FF9D), got.U32) },
-			},
-			{
-				name: "uint64", at: 9,
-				store: []instr.Instruction{instr.New(instr.I64_CONST, uint64(negI64))},
-				want:  types.I64(negI64),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, uint64(0xFFFF_FE00_0000_0000), got.U64) },
-			},
-			{
-				name: "float32", at: 10,
-				store: []instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5)))},
-				want:  types.F32(-3.5),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, float32(-3.5), got.F32) },
-			},
-			{
-				name: "float64", at: 11,
-				store: []instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(4.25))},
-				want:  types.F64(4.25),
-				check: func(t *testing.T, got hostLoopFields) { require.Equal(t, float64(4.25), got.F64) },
-			},
-		} {
-			t.Run(tt.name, func(t *testing.T) {
-				body := append([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at)}, tt.store...)
-				body = append(body, instr.New(instr.STRUCT_SET))
-				tail := []instr.Instruction{
-					instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at), instr.New(instr.STRUCT_GET),
-				}
+	for _, tt := range []struct {
+		name  string
+		at    uint64
+		store []instr.Instruction
+		want  types.Value
+		check func(*testing.T, hostLoopFields)
+	}{
+		{
+			name: "bool", at: 0,
+			store: []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_EQZ)},
+			want:  types.I1(false),
+			check: func(t *testing.T, got hostLoopFields) { require.False(t, got.Flag) },
+		},
+		{
+			// No opcode makes an i8 constant, so the value written is the
+			// one a read of the same field produced.
+			name: "int8", at: 1,
+			store: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET)},
+			want:  types.I8(-8),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, int8(-8), got.I8) },
+		},
+		{
+			name: "int32", at: 3,
+			store: []instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(negI32)))},
+			want:  types.I32(negI32),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, negI32, got.I32) },
+		},
+		{
+			name: "int64", at: 5,
+			store: []instr.Instruction{instr.New(instr.I64_CONST, uint64(negI64))},
+			want:  types.I64(negI64),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, negI64, got.I64) },
+		},
+		{
+			// A uint32 field is as wide as its slot, so the store writes
+			// the same four bytes the conversion would reinterpret.
+			name: "uint32", at: 8,
+			store: []instr.Instruction{instr.New(instr.I32_CONST, uint64(uint32(negI32)))},
+			want:  types.I32(negI32),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, uint32(0xFFFF_FF9D), got.U32) },
+		},
+		{
+			name: "uint64", at: 9,
+			store: []instr.Instruction{instr.New(instr.I64_CONST, uint64(negI64))},
+			want:  types.I64(negI64),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, uint64(0xFFFF_FE00_0000_0000), got.U64) },
+		},
+		{
+			name: "float32", at: 10,
+			store: []instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5)))},
+			want:  types.F32(-3.5),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, float32(-3.5), got.F32) },
+		},
+		{
+			name: "float64", at: 11,
+			store: []instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(4.25))},
+			want:  types.F64(4.25),
+			check: func(t *testing.T, got hostLoopFields) { require.Equal(t, float64(4.25), got.F64) },
+		},
+	} {
+		t.Run("a write of every exactly imaged field kind reaches the Go value/"+tt.name, func(t *testing.T) {
+			body := append([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at)}, tt.store...)
+			body = append(body, instr.New(instr.STRUCT_SET))
+			tail := []instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, tt.at), instr.New(instr.STRUCT_GET),
+			}
 
-				want, threaded, _ := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
-				require.Equal(t, tt.want, want)
-				tt.check(t, threaded)
+			want, threaded, _ := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(-1))
+			require.Equal(t, tt.want, want)
+			tt.check(t, threaded)
 
-				got, jit, entries := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(0))
-				require.Equal(t, want, got)
-				require.Equal(t, threaded, jit)
-				require.Greater(t, entries, float64(0))
-				require.Less(t, entries, float64(size))
-			})
-		}
-	})
+			got, jit, entries := run(t, nil, body, tail, interp.WithTick(1), interp.WithThreshold(0))
+			require.Equal(t, want, got)
+			require.Equal(t, threaded, jit)
+			require.Greater(t, entries, float64(0))
+			require.Less(t, entries, float64(size))
+		})
+	}
 
 	t.Run("a write a range check governs agrees with threaded", func(t *testing.T) {
 		// An int16 field is narrower than the i32 slot the guest writes, so

@@ -881,53 +881,58 @@ func TestCompiler_Compile(t *testing.T) {
 	// enters the comparison, and balancing the reference PopBoxed hands over
 	// with Release once RefCount has confirmed the resumed read left it
 	// owned exactly once.
-	t.Run("i64 array element matches threaded execution", func(t *testing.T) {
+	resolve := func(t *testing.T, i *Interpreter) types.Value {
+		t.Helper()
+		boxed, err := i.PopBoxed()
+		require.NoError(t, err)
+		if boxed.Kind() != types.KindRef {
+			return types.Unbox(boxed)
+		}
+		count, err := i.RefCount(boxed.Ref())
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+		val, err := i.Load(boxed.Ref())
+		require.NoError(t, err)
+		require.NoError(t, i.Release(boxed.Ref()))
+		return val
+	}
+	check := func(t *testing.T, elem int64) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		}, program.WithConstants(types.TypedArray[int64]{elem}))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want := resolve(t, threaded)
+
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+		input, ok := native.compileSnapshot(0)
+		require.True(t, ok)
+		result := c.Compile(input, jit.Anchor{})
+		require.NoError(t, result.Err)
+		require.NotEmpty(t, result.Code.Entries)
+		native.install(result.Code)
+		require.NoError(t, native.Run(context.Background()))
+		got := resolve(t, native)
+
+		require.Equal(t, want, got)
+	}
+	t.Run("i64 array element matches threaded execution/in range", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		resolve := func(t *testing.T, i *Interpreter) types.Value {
-			t.Helper()
-			boxed, err := i.PopBoxed()
-			require.NoError(t, err)
-			if boxed.Kind() != types.KindRef {
-				return types.Unbox(boxed)
-			}
-			count, err := i.RefCount(boxed.Ref())
-			require.NoError(t, err)
-			require.Equal(t, 1, count)
-			val, err := i.Load(boxed.Ref())
-			require.NoError(t, err)
-			require.NoError(t, i.Release(boxed.Ref()))
-			return val
+		check(t, 42)
+	})
+	t.Run("i64 array element matches threaded execution/heap-promoted", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
 		}
-		check := func(t *testing.T, elem int64) {
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int64]{elem}))
-
-			threaded := New(prog, WithThreshold(-1))
-			defer threaded.Close()
-			require.NoError(t, threaded.Run(context.Background()))
-			want := resolve(t, threaded)
-
-			native := New(prog, WithThreshold(-1))
-			defer native.Close()
-			c, err := newCompiler()
-			require.NoError(t, err)
-			defer c.Close()
-			input, ok := native.compileSnapshot(0)
-			require.True(t, ok)
-			result := c.Compile(input, jit.Anchor{})
-			require.NoError(t, result.Err)
-			require.NotEmpty(t, result.Code.Entries)
-			native.install(result.Code)
-			require.NoError(t, native.Run(context.Background()))
-			got := resolve(t, native)
-
-			require.Equal(t, want, got)
-		}
-		t.Run("in range", func(t *testing.T) { check(t, 42) })
-		t.Run("heap-promoted", func(t *testing.T) { check(t, math.MaxInt64) })
+		check(t, math.MaxInt64)
 	})
 
 	// A reference-typed global store is now something this SSA machine
@@ -953,145 +958,153 @@ func TestCompiler_Compile(t *testing.T) {
 	// cannot reach this machine either - Term declines any back edge - so a
 	// slot overwritten many times is a straight-line repetition here rather
 	// than a loop.
-	t.Run("a ref global store matches threaded reference counts", func(t *testing.T) {
+	compile := func(t *testing.T, i *Interpreter) {
+		t.Helper()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, c.Close()) })
+		input, ok := i.compileSnapshot(0)
+		require.True(t, ok)
+		result := c.Compile(input, jit.Anchor{})
+		require.NoError(t, result.Err)
+		require.NotEmpty(t, result.Code.Entries)
+		i.install(result.Code)
+	}
+
+	// Each store's overwritten value is a distinct constant one count
+	// short of freeing (each holds only its own pool retain once the
+	// global no longer does): a leaked count would leave a stale
+	// retain on a constant behind it, and a double drop would take an
+	// earlier constant's own pool retain below what it started with.
+	// Comparing every constant's count, not just the survivor's, is
+	// what catches either.
+	t.Run("a ref global store matches threaded reference counts/distinct values leave none leaked and none double-dropped", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		compile := func(t *testing.T, i *Interpreter) {
-			t.Helper()
-			c, err := newCompiler()
+		elems := []types.Value{
+			types.TypedArray[int32]{1}, types.TypedArray[int32]{2}, types.TypedArray[int32]{3},
+			types.TypedArray[int32]{4}, types.TypedArray[int32]{5},
+		}
+		var ins []instr.Instruction
+		for idx := range elems {
+			ins = append(ins, instr.New(instr.CONST_GET, uint64(idx)), instr.New(instr.GLOBAL_SET, 0))
+		}
+		prog := program.New(ins, program.WithConstants(elems...), program.WithGlobals(types.TypeAny))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		var want []int
+		for idx := range elems {
+			rc, err := threaded.RefCount(threaded.constants[idx].Ref())
 			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, c.Close()) })
-			input, ok := i.compileSnapshot(0)
-			require.True(t, ok)
-			result := c.Compile(input, jit.Anchor{})
-			require.NoError(t, result.Err)
-			require.NotEmpty(t, result.Code.Entries)
-			i.install(result.Code)
+			want = append(want, rc)
 		}
 
-		// Each store's overwritten value is a distinct constant one count
-		// short of freeing (each holds only its own pool retain once the
-		// global no longer does): a leaked count would leave a stale
-		// retain on a constant behind it, and a double drop would take an
-		// earlier constant's own pool retain below what it started with.
-		// Comparing every constant's count, not just the survivor's, is
-		// what catches either.
-		t.Run("distinct values leave none leaked and none double-dropped", func(t *testing.T) {
-			elems := []types.Value{
-				types.TypedArray[int32]{1}, types.TypedArray[int32]{2}, types.TypedArray[int32]{3},
-				types.TypedArray[int32]{4}, types.TypedArray[int32]{5},
-			}
-			var ins []instr.Instruction
-			for idx := range elems {
-				ins = append(ins, instr.New(instr.CONST_GET, uint64(idx)), instr.New(instr.GLOBAL_SET, 0))
-			}
-			prog := program.New(ins, program.WithConstants(elems...), program.WithGlobals(types.TypeAny))
-
-			threaded := New(prog, WithThreshold(-1))
-			defer threaded.Close()
-			require.NoError(t, threaded.Run(context.Background()))
-			var want []int
-			for idx := range elems {
-				rc, err := threaded.RefCount(threaded.constants[idx].Ref())
-				require.NoError(t, err)
-				want = append(want, rc)
-			}
-
-			native := New(prog, WithThreshold(-1))
-			defer native.Close()
-			compile(t, native)
-			require.NoError(t, native.Run(context.Background()))
-			for idx := range elems {
-				got, err := native.RefCount(native.constants[idx].Ref())
-				require.NoError(t, err)
-				require.Equal(t, want[idx], got)
-			}
-		})
-
-		t.Run("storing a value back over itself matches the threaded count exactly", func(t *testing.T) {
-			ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
-			for range 5 {
-				ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_SET, 0))
-			}
-			prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
-
-			threaded := New(prog, WithThreshold(-1))
-			defer threaded.Close()
-			require.NoError(t, threaded.Run(context.Background()))
-			want, err := threaded.RefCount(threaded.constants[0].Ref())
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		compile(t, native)
+		require.NoError(t, native.Run(context.Background()))
+		for idx := range elems {
+			got, err := native.RefCount(native.constants[idx].Ref())
 			require.NoError(t, err)
-
-			native := New(prog, WithThreshold(-1))
-			defer native.Close()
-			compile(t, native)
-			require.NoError(t, native.Run(context.Background()))
-			got, err := native.RefCount(native.constants[0].Ref())
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-		})
-
-		t.Run("teeing a value back over itself matches the threaded count exactly", func(t *testing.T) {
-			ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
-			for range 5 {
-				ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_TEE, 0), instr.New(instr.DROP))
-			}
-			prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
-
-			threaded := New(prog, WithThreshold(-1))
-			defer threaded.Close()
-			require.NoError(t, threaded.Run(context.Background()))
-			want, err := threaded.RefCount(threaded.constants[0].Ref())
-			require.NoError(t, err)
-
-			native := New(prog, WithThreshold(-1))
-			defer native.Close()
-			compile(t, native)
-			require.NoError(t, native.Run(context.Background()))
-			got, err := native.RefCount(native.constants[0].Ref())
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-		})
-
-		// seed gives a fresh interpreter a reference with exactly the count
-		// Alloc documents - one, owned by nothing else - already sitting in
-		// global 0 before its own compiled code runs, so the constant this
-		// program then overwrites it with is the one and only count the
-		// store's own release can drop to zero.
-		seed := func(t *testing.T, i *Interpreter) int {
-			t.Helper()
-			addr, err := i.Alloc(types.TypedArray[int32]{9})
-			require.NoError(t, err)
-			require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
-			return addr
+			require.Equal(t, want[idx], got)
 		}
-		t.Run("a store dropping the slot's last count exits to the interpreter and frees exactly once", func(t *testing.T) {
-			prog := program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
-			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+	})
 
-			threaded := New(prog, WithThreshold(-1))
-			defer threaded.Close()
-			seeded := seed(t, threaded)
-			require.NoError(t, threaded.Run(context.Background()))
-			_, err := threaded.RefCount(seeded)
-			require.ErrorIs(t, err, ErrSegmentationFault)
-			wantLen := threaded.HeapLen()
-			want, err := threaded.RefCount(threaded.constants[0].Ref())
-			require.NoError(t, err)
+	t.Run("a ref global store matches threaded reference counts/storing a value back over itself matches the threaded count exactly", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
+		for range 5 {
+			ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_SET, 0))
+		}
+		prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
 
-			native := New(prog, WithThreshold(-1))
-			defer native.Close()
-			compile(t, native)
-			nativeSeeded := seed(t, native)
-			require.NoError(t, native.Run(context.Background()))
-			_, err = native.RefCount(nativeSeeded)
-			require.ErrorIs(t, err, ErrSegmentationFault)
-			require.Equal(t, wantLen, native.HeapLen())
-			got, err := native.RefCount(native.constants[0].Ref())
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-		})
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.RefCount(threaded.constants[0].Ref())
+		require.NoError(t, err)
+
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		compile(t, native)
+		require.NoError(t, native.Run(context.Background()))
+		got, err := native.RefCount(native.constants[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a ref global store matches threaded reference counts/teeing a value back over itself matches the threaded count exactly", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		ins := []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0)}
+		for range 5 {
+			ins = append(ins, instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_TEE, 0), instr.New(instr.DROP))
+		}
+		prog := program.New(ins, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.RefCount(threaded.constants[0].Ref())
+		require.NoError(t, err)
+
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		compile(t, native)
+		require.NoError(t, native.Run(context.Background()))
+		got, err := native.RefCount(native.constants[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	// seed gives a fresh interpreter a reference with exactly the count
+	// Alloc documents - one, owned by nothing else - already sitting in
+	// global 0 before its own compiled code runs, so the constant this
+	// program then overwrites it with is the one and only count the
+	// store's own release can drop to zero.
+	seed := func(t *testing.T, i *Interpreter) int {
+		t.Helper()
+		addr, err := i.Alloc(types.TypedArray[int32]{9})
+		require.NoError(t, err)
+		require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+		return addr
+	}
+
+	t.Run("a ref global store matches threaded reference counts/a store dropping the slot's last count exits to the interpreter and frees exactly once", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
+		}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeAny))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		seeded := seed(t, threaded)
+		require.NoError(t, threaded.Run(context.Background()))
+		_, err := threaded.RefCount(seeded)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+		wantLen := threaded.HeapLen()
+		want, err := threaded.RefCount(threaded.constants[0].Ref())
+		require.NoError(t, err)
+
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		compile(t, native)
+		nativeSeeded := seed(t, native)
+		require.NoError(t, native.Run(context.Background()))
+		_, err = native.RefCount(nativeSeeded)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+		require.Equal(t, wantLen, native.HeapLen())
+		got, err := native.RefCount(native.constants[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 	})
 }
 
@@ -1217,7 +1230,7 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 		require.Equal(t, want, refCounts(native))
 	}
 
-	t.Run("local self-store releases the overwritten reference", func(t *testing.T) {
+	t.Run("local self-store releases the overwritten reference/2 repetitions", func(t *testing.T) {
 		build := func(t *testing.T, reps int) *program.Program {
 			t.Helper()
 			b := program.NewBuilder()
@@ -1230,11 +1243,25 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 			require.NoError(t, err)
 			return prog
 		}
-		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
-		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+		check(t, build(t, 2))
+	})
+	t.Run("local self-store releases the overwritten reference/5 repetitions", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			b.Locals(types.TypeAny)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.REF_NEW).Emit(instr.DUP).Emit(instr.LOCAL_SET, 0)
+			for range reps {
+				b.Emit(instr.DUP).Emit(instr.LOCAL_SET, 0)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		check(t, build(t, 5))
 	})
 
-	t.Run("global self-store releases the overwritten reference", func(t *testing.T) {
+	t.Run("global self-store releases the overwritten reference/2 repetitions", func(t *testing.T) {
 		build := func(t *testing.T, reps int) *program.Program {
 			t.Helper()
 			b := program.NewBuilder()
@@ -1247,11 +1274,25 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 			require.NoError(t, err)
 			return prog
 		}
-		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
-		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+		check(t, build(t, 2))
+	})
+	t.Run("global self-store releases the overwritten reference/5 repetitions", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			b.Globals(types.TypeAny)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.REF_NEW).Emit(instr.DUP).Emit(instr.GLOBAL_SET, 0)
+			for range reps {
+				b.Emit(instr.DUP).Emit(instr.GLOBAL_SET, 0)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		check(t, build(t, 5))
 	})
 
-	t.Run("array self-store releases the overwritten reference", func(t *testing.T) {
+	t.Run("array self-store releases the overwritten reference/2 repetitions", func(t *testing.T) {
 		build := func(t *testing.T, reps int) *program.Program {
 			t.Helper()
 			b := program.NewBuilder()
@@ -1274,11 +1315,35 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 			require.NoError(t, err)
 			return prog
 		}
-		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
-		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+		check(t, build(t, 2))
+	})
+	t.Run("array self-store releases the overwritten reference/5 repetitions", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			arrayType := b.Type(types.NewArrayType(types.TypeAny))
+			b.Locals(types.NewArrayType(types.TypeAny))
+			b.Emit(instr.I32_CONST, 1).
+				Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).
+				Emit(instr.LOCAL_SET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.REF_NEW)
+			for range reps + 1 {
+				b.Emit(instr.DUP).
+					Emit(instr.LOCAL_GET, 0).
+					Emit(instr.SWAP).
+					Emit(instr.I32_CONST, 0).
+					Emit(instr.SWAP).
+					Emit(instr.ARRAY_SET)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		check(t, build(t, 5))
 	})
 
-	t.Run("struct self-store releases the overwritten reference", func(t *testing.T) {
+	t.Run("struct self-store releases the overwritten reference/2 repetitions", func(t *testing.T) {
 		build := func(t *testing.T, reps int) *program.Program {
 			t.Helper()
 			b := program.NewBuilder()
@@ -1300,11 +1365,57 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 			require.NoError(t, err)
 			return prog
 		}
-		t.Run("2 repetitions", func(t *testing.T) { check(t, build(t, 2)) })
-		t.Run("5 repetitions", func(t *testing.T) { check(t, build(t, 5)) })
+		check(t, build(t, 2))
+	})
+	t.Run("struct self-store releases the overwritten reference/5 repetitions", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
+			t.Helper()
+			b := program.NewBuilder()
+			structType := b.Type(types.NewStructType(types.NewStructField(types.TypeAny)))
+			b.Locals(types.NewStructType(types.NewStructField(types.TypeAny)))
+			b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(structType)).
+				Emit(instr.LOCAL_SET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.REF_NEW)
+			for range reps + 1 {
+				b.Emit(instr.DUP).
+					Emit(instr.LOCAL_GET, 0).
+					Emit(instr.SWAP).
+					Emit(instr.I32_CONST, 0).
+					Emit(instr.SWAP).
+					Emit(instr.STRUCT_SET)
+			}
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		check(t, build(t, 5))
 	})
 
-	t.Run("upval self-store releases the overwritten reference", func(t *testing.T) {
+	checkFn := func(t *testing.T, prog *program.Program) {
+		t.Helper()
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want := refCounts(threaded)
+
+		native := New(prog, WithThreshold(-1))
+		defer native.Close()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, c.Close()) })
+		addr := int(native.constants[0].Ref())
+		input, ok := native.compileSnapshot(addr)
+		require.True(t, ok)
+		result := c.Compile(input, jit.Anchor{Addr: addr})
+		require.NoError(t, result.Err)
+		require.NotEmpty(t, result.Code.Entries)
+		native.install(result.Code)
+		require.NoError(t, native.Run(context.Background()))
+		require.Equal(t, want, refCounts(native))
+	}
+
+	t.Run("upval self-store releases the overwritten reference/2 repetitions", func(t *testing.T) {
 		build := func(t *testing.T, reps int) *program.Program {
 			t.Helper()
 			body := []instr.Instruction{
@@ -1330,31 +1441,35 @@ func TestARM64_PlanReferenceStoresMatchThreadedOwnership(t *testing.T) {
 				instr.New(instr.CALL),
 			}, program.WithConstants(fn), program.WithGlobals(types.TypeAny, types.TypeAny))
 		}
-
-		checkFn := func(t *testing.T, prog *program.Program) {
+		checkFn(t, build(t, 2))
+	})
+	t.Run("upval self-store releases the overwritten reference/5 repetitions", func(t *testing.T) {
+		build := func(t *testing.T, reps int) *program.Program {
 			t.Helper()
-			threaded := New(prog, WithThreshold(-1))
-			defer threaded.Close()
-			require.NoError(t, threaded.Run(context.Background()))
-			want := refCounts(threaded)
-
-			native := New(prog, WithThreshold(-1))
-			defer native.Close()
-			c, err := newCompiler()
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, c.Close()) })
-			addr := int(native.constants[0].Ref())
-			input, ok := native.compileSnapshot(addr)
-			require.True(t, ok)
-			result := c.Compile(input, jit.Anchor{Addr: addr})
-			require.NoError(t, result.Err)
-			require.NotEmpty(t, result.Code.Entries)
-			native.install(result.Code)
-			require.NoError(t, native.Run(context.Background()))
-			require.Equal(t, want, refCounts(native))
+			body := []instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+				instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0),
+			}
+			for range reps {
+				body = append(body, instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0))
+			}
+			body = append(body, instr.New(instr.DROP), instr.New(instr.RETURN))
+			fn := types.NewFunctionBuilder(&types.FunctionType{}).
+				Captures(types.TypeAny).
+				Emit(body...).
+				MustBuild()
+			return program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.GLOBAL_SET, 1),
+				instr.New(instr.CALL),
+			}, program.WithConstants(fn), program.WithGlobals(types.TypeAny, types.TypeAny))
 		}
-		t.Run("2 repetitions", func(t *testing.T) { checkFn(t, build(t, 2)) })
-		t.Run("5 repetitions", func(t *testing.T) { checkFn(t, build(t, 5)) })
+		checkFn(t, build(t, 5))
 	})
 }
 
