@@ -46,6 +46,14 @@ type ForwardPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*ForwardPass)(nil)
 
+// spaces is the storage each Space names in instr's effect vocabulary, so what
+// an opcode writes decides which slots it invalidates.
+var spaces = [...]instr.Effect{
+	ssa.SpaceLocal:  instr.Local,
+	ssa.SpaceGlobal: instr.Global,
+	ssa.SpaceUpval:  instr.Upval,
+}
+
 func NewForwardPass() *ForwardPass {
 	return &ForwardPass{}
 }
@@ -110,12 +118,4 @@ func invalidate(held map[ssa.Slot]ssa.Value, code instr.Opcode) {
 			delete(held, slot)
 		}
 	}
-}
-
-// spaces is the storage each Space names in instr's effect vocabulary, so what
-// an opcode writes decides which slots it invalidates.
-var spaces = [...]instr.Effect{
-	ssa.SpaceLocal:  instr.Local,
-	ssa.SpaceGlobal: instr.Global,
-	ssa.SpaceUpval:  instr.Upval,
 }

@@ -32,6 +32,13 @@ import (
 // edge, a second cascading rewrite this pass does not attempt.
 type DCEPass struct{}
 
+// site names one operation: the block holding it and its index within that
+// block's Ops.
+type site struct {
+	block int
+	index int
+}
+
 var _ pass.Pass[*ssa.Function] = (*DCEPass)(nil)
 
 func NewDCEPass() *DCEPass {
@@ -66,13 +73,6 @@ func (p *DCEPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error)
 	next := rb.b.Build()
 	*fn = *next
 	return pass.PreserveNone(), nil
-}
-
-// site names one operation: the block holding it and its index within that
-// block's Ops.
-type site struct {
-	block int
-	index int
 }
 
 // liveOps runs the mark phase of mark-sweep DCE over fn's reachable blocks:

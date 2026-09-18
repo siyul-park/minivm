@@ -170,24 +170,20 @@ func (c *Collector) merge(o *Collector) {
 // length to exactly what's needed, so callers never scan padded trailing
 // zeros the way a length-doubling grow would leave behind.
 func (c *Collector) grow(fn, ip int) {
-	if need := fn + 1; len(c.funcs) < need {
-		if cap(c.funcs) >= need {
-			c.funcs = c.funcs[:need]
-		} else {
-			funcs := make([]samples, need, max(need, 2*cap(c.funcs)))
-			copy(funcs, c.funcs)
-			c.funcs = funcs
-		}
+	c.funcs = extend(c.funcs, fn+1)
+	c.funcs[fn].ips = extend(c.funcs[fn].ips, ip+1)
+}
+
+func extend[S ~[]E, E any](s S, need int) S {
+	if len(s) >= need {
+		return s
 	}
-	if need := ip + 1; len(c.funcs[fn].ips) < need {
-		if cap(c.funcs[fn].ips) >= need {
-			c.funcs[fn].ips = c.funcs[fn].ips[:need]
-		} else {
-			ips := make([]uint64, need, max(need, 2*cap(c.funcs[fn].ips)))
-			copy(ips, c.funcs[fn].ips)
-			c.funcs[fn].ips = ips
-		}
+	if cap(s) >= need {
+		return s[:need]
 	}
+	grown := make(S, need, max(need, 2*cap(s)))
+	copy(grown, s)
+	return grown
 }
 
 // reset clears every recorded sample while keeping the backing arrays c.funcs

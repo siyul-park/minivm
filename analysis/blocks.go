@@ -23,10 +23,6 @@ var ErrInvalidJump = errors.New("invalid jump")
 
 var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BlocksAnalysis)(nil)
 
-func NewBlocksAnalysis() *BlocksAnalysis {
-	return &BlocksAnalysis{}
-}
-
 // Blocks builds the control-flow blocks for fn.
 func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
@@ -82,15 +78,15 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	}
 
 	indexByStart := make(map[int]int, len(blocks))
-	for idx, block := range blocks {
-		indexByStart[block.Start] = idx
+	for j, block := range blocks {
+		indexByStart[block.Start] = j
 	}
 
-	for j, blk := range blocks {
-		ip := blk.Start
-		for ip < blk.End {
+	for j, block := range blocks {
+		ip := block.Start
+		for ip < block.End {
 			inst := instr.Instruction(fn.Code[ip:])
-			if ip+inst.Width() >= blk.End {
+			if ip+inst.Width() >= block.End {
 				break
 			}
 			ip += inst.Width()
@@ -117,13 +113,17 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 			}
 		}
 	}
-	for _, b := range blocks {
-		slices.Sort(b.Succs)
-		b.Succs = slices.Compact(b.Succs)
-		slices.Sort(b.Preds)
-		b.Preds = slices.Compact(b.Preds)
+	for _, block := range blocks {
+		slices.Sort(block.Succs)
+		block.Succs = slices.Compact(block.Succs)
+		slices.Sort(block.Preds)
+		block.Preds = slices.Compact(block.Preds)
 	}
 	return blocks, nil
+}
+
+func NewBlocksAnalysis() *BlocksAnalysis {
+	return &BlocksAnalysis{}
 }
 
 func (p *BlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {

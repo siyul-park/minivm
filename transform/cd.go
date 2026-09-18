@@ -17,7 +17,7 @@ func NewDedupPass() *DedupPass {
 	return &DedupPass{}
 }
 
-func (p *DedupPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+func (p *DedupPass) Run(_ *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	// Every function whose code names a constant or a type: the top-level
 	// body, then each function the pool holds.
 	codes := [][]byte{prog.Code}
