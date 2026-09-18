@@ -458,14 +458,10 @@ func (r *REPL) breakpoint(spec string) error {
 }
 
 func (r *REPL) clearBreakpoint(arg string) error {
-	if arg == "" {
-		return fmt.Errorf("usage: .clear <id>")
-	}
-	id, err := parseInt(arg)
+	id, err := r.breakpointID(arg, "usage: .clear <id>")
 	if err != nil {
-		return fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+		return err
 	}
-	r.ensureDebugger()
 	if !r.debugger.Clear(id) {
 		return fmt.Errorf("breakpoint %d not found", id)
 	}
@@ -474,18 +470,14 @@ func (r *REPL) clearBreakpoint(arg string) error {
 }
 
 func (r *REPL) enableBreakpoint(arg string, on bool) error {
-	if arg == "" {
-		verb := "enable"
-		if !on {
-			verb = "disable"
-		}
-		return fmt.Errorf("usage: .%s <id>", verb)
+	verb := "enable"
+	if !on {
+		verb = "disable"
 	}
-	id, err := parseInt(arg)
+	id, err := r.breakpointID(arg, "usage: ."+verb+" <id>")
 	if err != nil {
-		return fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+		return err
 	}
-	r.ensureDebugger()
 	if !r.debugger.Enable(id, on) {
 		return fmt.Errorf("breakpoint %d not found", id)
 	}
@@ -495,6 +487,20 @@ func (r *REPL) enableBreakpoint(arg string, on bool) error {
 	}
 	fmt.Fprintf(r.out, "breakpoint %d %s\n", id, state)
 	return nil
+}
+
+// breakpointID resolves a breakpoint id argument, ensuring the debugger
+// exists for the lookup the caller performs next.
+func (r *REPL) breakpointID(arg, usage string) (int, error) {
+	if arg == "" {
+		return 0, errors.New(usage)
+	}
+	id, err := parseInt(arg)
+	if err != nil {
+		return 0, fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+	}
+	r.ensureDebugger()
+	return id, nil
 }
 
 func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
@@ -596,11 +602,10 @@ func (r *REPL) debugLoop(scanner *bufio.Scanner, vm *interp.Interpreter, dbg *de
 }
 
 func (r *REPL) showBreakpoints() {
-	if r.debugger == nil {
-		fmt.Fprintln(r.out, "no breakpoints")
-		return
+	var bps []debug.Breakpoint
+	if r.debugger != nil {
+		bps = r.debugger.Breakpoints()
 	}
-	bps := r.debugger.Breakpoints()
 	if len(bps) == 0 {
 		fmt.Fprintln(r.out, "no breakpoints")
 		return
