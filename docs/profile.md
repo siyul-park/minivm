@@ -1,6 +1,8 @@
 # Profile
 
-Runtime sampling and JIT hotness control. `jit-internals.md` owns JIT implementation details.
+Runtime sampling and JIT hotness control.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `jit-internals.md` owns JIT implementation details.
 
 ## Signals
 
@@ -24,7 +26,7 @@ vm := interp.New(prog, interp.WithProfiler(p))
 if err := vm.Run(ctx); err != nil { return err }
 if err := vm.Close(); err != nil { return err }
 metrics := p.Metrics()
-```go
+```
 
 `WithProfiler` attaches a profiler to an interpreter or pool. Pool members flush local samples on return/close.
 
@@ -42,7 +44,7 @@ Hot events are function entries and backward-branch reports. Default threshold: 
 | `WithThreshold(n > 0)` | compile after `n` events |
 | `WithThreshold(n < 0)` | disable JIT |
 
-`WithThreshold` is independent of `WithTick`. `RESUME` and host callbacks count as entries. Backward `BR`, `BR_IF`, and `BR_TABLE` report loop hotness; forward branches do not.
+`WithThreshold` is independent of `WithTick`. `RESUME` and host callbacks count as entries. Backward `BR`, `BR_IF`, and `BR_TABLE` report loop hotness; forward branches `MUST NOT` report hotness.
 
 Back-edge reports occur every eight iterations with rotating phase. Pool compile admission is shared: one build per function, executed by the claiming worker/member and adopted by other members later.
 
@@ -56,7 +58,7 @@ After all entry/loop roots for a function have been attempted, cooling removes f
 
 ## Maintenance
 
-Keep sampling, hotness, pool state, and exact-debug sampling independent.
+The agent `MUST` keep sampling, hotness, pool state, and exact-debug sampling independent.
 
 ## Related
 

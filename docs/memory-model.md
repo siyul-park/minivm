@@ -2,6 +2,8 @@
 
 Heap storage, reference ownership, RC, cycle collection.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Ownership
 
 | Concern | Owner |
@@ -17,7 +19,7 @@ Heap storage, reference ownership, RC, cycle collection.
 - Heap refs are stable indexes.
 - Index `0` is permanent null.
 - Only `KindRef` is reference-counted.
-- Ref-containing heap values implement `types.Traceable`.
+- Ref-containing heap values `MUST` implement `types.Traceable`.
 - `release` is iterative.
 
 ```text
@@ -26,9 +28,9 @@ rc    []int
 free  []int
 trial []int
 work  []int
-```text
+```
 
-Native/JIT paths preserve threaded ownership totals.
+Native/JIT paths `MUST` preserve threaded ownership totals.
 
 ## Ownership
 
@@ -44,7 +46,7 @@ Native/JIT paths preserve threaded ownership totals.
 | `CLOSURE_NEW` | transfers function/capture ownership |
 | `RETURN` | releases retiring frame ownership |
 
-Deferred native refs may borrow backing ownership only until an interpreter-visible transfer; deopt and bridges must restore interpreter ownership.
+Each transfer above `MUST` be implemented exactly as stated. Deferred native refs `MAY` borrow backing ownership only until an interpreter-visible transfer; deopt and bridges `MUST` restore interpreter ownership.
 
 ## Reference Counting
 
@@ -56,9 +58,9 @@ The count includes heap objects, frames, globals, stack values, temporaries, cor
 
 ```go
 Refs(dst []types.Ref) []types.Ref
-```go
+```
 
-Implementations append child refs without mutating existing entries and allocate nothing for no-child traversal.
+Implementations `MUST` append child refs without mutating existing entries and `MUST` allocate nothing for no-child traversal.
 
 ## Cycle Collection
 
@@ -75,15 +77,15 @@ Heap indexes never move. Collection runs adaptively and before enforcing the har
 
 ## Strings
 
-Published strings are immutable. Concatenation may reuse interpreter-local append storage; writes occur beyond published lengths, and reallocation preserves old storage.
+Published strings are immutable. Concatenation `MAY` reuse interpreter-local append storage; writes `MUST` occur beyond published lengths, and reallocation `MUST` preserve old storage.
 
 ## Reset
 
-`Reset` invalidates runtime objects, recomputes collection goals, and may reuse cleared generic-array headers/storage. Reused headers carry no prior type or contents.
+`Reset` invalidates runtime objects, recomputes collection goals, and `MAY` reuse cleared generic-array headers/storage. Reused headers `MUST` carry no prior type or contents.
 
 ## Host
 
-Host refs use the same retain/release model. Host values do not implicitly own VM refs.
+Host refs use the same retain/release model. Host values `MUST NOT` implicitly own VM refs.
 
 See `host-integration.md` for host API behavior.
 

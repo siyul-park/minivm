@@ -1,6 +1,10 @@
 # Documentation Index
 
-Each topic has one canonical owner. Other documents link to the owner instead of copying its contract.
+Each topic has one canonical owner. This document owns the topic-to-document map.
+
+## Terminology
+
+The keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` are normative as defined in `AGENTS.md`. Every doc in this directory `MUST` use them for agent requirements and `MUST NOT` use bare imperatives (`keep`, `do not`, `prefer`, `skip`) where a keyword applies. Sentences without a keyword are informative and `MUST NOT` be treated as requirements.
 
 | Topic | Document |
 |---|---|
@@ -31,17 +35,26 @@ Guides define procedures over topic contracts:
 - `guides/add-architecture.md`
 - `guides/repl.md`
 
+A guide `MUST` describe change order and validation only. The contract it operates on `MUST` stay in its owner topic doc; a guide `MUST NOT` duplicate that contract and `MUST` link to the owner instead.
+
 ## Style
 
-- H1 names the document subject; H2 uses unnumbered headings.
-- Put one scope sentence directly below H1.
-- Use `Ownership` for canonical owner maps.
-- End topic and guide documents with `Related`.
-- Label every fenced code block with its language.
-- Keep one blank line between prose, lists, tables, and code blocks.
+Every topic and guide document `MUST`:
 
-## Historical Records
+- use H1 for the document subject and unnumbered H2 headings;
+- place one scope sentence directly below H1;
+- use an `Ownership` section for canonical owner maps where ownership applies;
+- end with a `Related` section;
+- label every fenced code block with its language;
+- keep one blank line between prose, lists, tables, and code blocks.
 
-`plans/` and `superpowers/` contain dated plans, audits, and design records. They preserve history and do not own current behavior.
+## Document Roles
 
-`AGENTS.md` owns repository workflow. Topic docs own current behavior and contracts; roadmap owns priorities.
+- A canonical topic doc `MUST` describe supported/current behavior. It `MUST NOT` describe removed behavior as current and `MUST NOT` duplicate a contract owned elsewhere.
+- `roadmap.md` `MUST` own priorities only; it `MUST NOT` override topic contracts.
+- `plans/` and `superpowers/` contain dated plans, audits, and design records. They `MAY` preserve history and future work, but they `MUST NOT` own current behavior.
+- `AGENTS.md` owns repository workflow. Topic docs own current behavior and contracts; roadmap owns priorities.
+
+## Related
+
+- `AGENTS.md` — terminology, precedence, workflow

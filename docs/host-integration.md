@@ -2,7 +2,7 @@
 
 Go host ↔ VM calls, values, heap refs, and reflection.
 
-Heap ownership is defined in `memory-model.md`; boxed layout in `value-representation.md`.
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. Heap ownership is defined in `memory-model.md`; boxed layout in `value-representation.md`.
 
 ## Layers
 
@@ -17,7 +17,7 @@ Heap ownership is defined in `memory-model.md`; boxed layout in `value-represent
 
 ```go
 func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error)
-```go
+```
 
 `NewHostFunction` is the normal constructor; `Typ` and `Fn` remain public.
 
@@ -25,15 +25,15 @@ Rules:
 
 - `params` is valid only during the call;
 - non-nil errors stop the current `Run`;
-- host functions must not call `vm.Run` recursively.
+- host functions `MUST NOT` call `vm.Run` recursively.
 
 ## Boxed Values
 
-`types.Boxed` is the VM stack word. Check `Kind()` before unboxing unless the bytecode contract proves the kind.
+`types.Boxed` is the VM stack word. The agent `MUST` check `Kind()` before unboxing unless the bytecode contract proves the kind.
 
 Wrong-kind unboxing is invalid.
 
-`PopBoxed` returns the raw stack word. For `KindRef`, it transfers stack ownership to the caller; `Load` does not change ownership, and the caller releases the transferred ref when finished. Retain first when another ownership is required.
+`PopBoxed` returns the raw stack word. For `KindRef`, it transfers stack ownership to the caller; `Load` does not change ownership, and the caller `MUST` release the transferred ref when finished. The caller `MUST` retain first when another ownership is required.
 
 `Pop` returns `types.Value`; for refs it detaches the heap value and releases the stack ref.
 
@@ -45,7 +45,7 @@ obj, err := vm.Load(addr)
 err = vm.Store(addr, types.String("world"))
 obj, err = vm.Retain(addr)
 err = vm.Release(addr)
-```go
+```
 
 | API | Contract |
 |---|---|
@@ -57,16 +57,16 @@ err = vm.Release(addr)
 
 Additional rules:
 
-- allocating an existing ref creates another ownership;
+- Allocating an existing ref creates another ownership;
 - storing the same concrete pointer or destination ref is a no-op;
-- storing a different heap address returns `ErrTypeMismatch`; use `Alloc(ref)` to share;
-- concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and must not already be VM-owned;
-- owned refs must eventually transfer or release;
+- storing a different heap address returns `ErrTypeMismatch`; the agent `MUST` use `Alloc(ref)` to share;
+- concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned;
+- owned refs `MUST` eventually transfer or release;
 - leaked host ownership keeps objects alive.
 
 `Store`/`Alloc` dynamically track crossed pointers to reject double ownership. Dynamic functions stored in the heap receive callable dispatch slots and follow normal heap lifetime.
 
-External dynamic functions must be verified before storage.
+External dynamic functions `MUST` be verified before storage.
 
 ## Globals and Locals
 
@@ -74,12 +74,12 @@ External dynamic functions must be verified before storage.
 
 Invalid heap addresses return `ErrSegmentationFault` and leave the slot unchanged. Assigning the current boxed value is a no-op and transfers no ownership.
 
-Retain before assignment when the caller must keep its ownership:
+The caller `MUST` retain before assignment when it must keep its ownership:
 
 ```go
 if _, err := vm.Retain(addr); err != nil { return err }
 if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { return err }
-```go
+```
 
 ## Limits
 

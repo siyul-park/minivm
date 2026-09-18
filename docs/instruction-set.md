@@ -2,6 +2,8 @@
 
 Opcode reference for minivm bytecode.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Source of Truth
 
 | Concern | File |
@@ -16,9 +18,11 @@ Opcode reference for minivm bytecode.
 
 ## Core Rules
 
-- one-byte opcodes;
-- fixed-width or length-prefixed operands;
-- little-endian operands unless specified otherwise;
+The following rules `MUST` hold for every opcode:
+
+- opcodes are one byte;
+- operands are fixed-width or length-prefixed;
+- operands are little-endian unless specified otherwise;
 - stack operands pop right-to-left;
 - boolean results use `i1`;
 - `i1`/`i8`/`i32` share one computational representation;
@@ -37,7 +41,7 @@ JIT status is per opcode and per backend. It describes whether a recorded trace 
 
 AMD64 currently has no active JIT backend. `internal/asm/amd64` is a placeholder and `interp/jit_stub.go` disables compiler construction on non-ARM64 platforms, so every AMD64 entry is `🔲`.
 
-ARM64 branches are range-checked before encoding. A conditional branch outside signed imm19 range is relaxed to an inverted conditional skip plus an imm26 branch when reachable. Otherwise JIT compilation falls back to threaded execution.
+ARM64 branches `MUST` be range-checked before encoding. A conditional branch outside signed imm19 range `MUST` be relaxed to an inverted conditional skip plus an imm26 branch when reachable. Otherwise JIT compilation `MUST` fall back to threaded execution.
 
 ## Operand Widths
 
@@ -45,13 +49,13 @@ Declared in `instr/type.go`. `{}` has no operands; `{n}` has one fixed-width ope
 
 ```text
 target = instruction_start + instruction_width + operand
-```text
+```
 
 ## Operand Kinds
 
-`i1`, `i8`, and `i32` share one computational class. An opcode accepting `i32` may accept `i1`/`i8` when the verifier proves compatibility.
+`i1`, `i8`, and `i32` share one computational class. An opcode accepting `i32` `MAY` accept `i1`/`i8` when the verifier proves compatibility.
 
-Comparisons, `eqz`, and ref tests produce `i1`. `i32.and/or/xor` preserve the narrow kind; other integer arithmetic widens to `i32`.
+Comparisons, `eqz`, and ref tests `MUST` produce `i1`. `i32.and/or/xor` `MUST` preserve the narrow kind; other integer arithmetic `MUST` widen to `i32`.
 
 ## Machine Effects
 
@@ -68,11 +72,11 @@ Comparisons, `eqz`, and ref tests produce `i1`. `i32.and/or/xor` preserve the na
 
 Query them with `op.Reads(effect)` and `op.Writes(effect)`. Rules:
 
-- allocating a container writes `Heap`; overwriting the contents of one both reads and writes it, which is where a replaced reference is released
-- only `call` and `return_call` write `Frame`; resuming a coroutine pushes no frame
-- `op.IsPure()` is derived, not declared: an opcode that reads nothing, writes nothing, and pushes at least one value computes from its operands alone, so a consumer may number, fold, or reorder it
+- allocating a container writes `Heap`; overwriting the contents of one both reads and writes it, which is where a replaced reference is released;
+- only `call` and `return_call` write `Frame`; resuming a coroutine pushes no frame;
+- `op.IsPure()` is derived, not declared: an opcode that reads nothing, writes nothing, and pushes at least one value computes from its operands alone, so a consumer `MAY` number, fold, or reorder it.
 
-A new opcode declares its effects in the same table entry as its stack effect. Consumers ask `instr`; they must not re-derive an effect from an opcode list.
+A new opcode `MUST` declare its effects in the same table entry as its stack effect. Consumers `MUST` ask `instr`; they `MUST NOT` re-derive an effect from an opcode list.
 
 ## Opcode Reference
 
@@ -295,7 +299,7 @@ One opcode per row, in opcode-value order.
 
 ### Control
 
-Branch offsets are relative to instruction end. Function bodies terminate with `RETURN`, `RETURN_CALL`, or `UNREACHABLE`; top-level code may fall through.
+Branch offsets are relative to instruction end. Function bodies `MUST` terminate with `RETURN`, `RETURN_CALL`, or `UNREACHABLE`; top-level code `MAY` fall through.
 
 `RETURN_CALL` transfers ownership to the new activation and releases the retiring activation exactly once.
 
@@ -305,13 +309,13 @@ Branch offsets are relative to instruction end. Function bodies terminate with `
 
 ### Arrays
 
-`ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET`/`ARRAY_SLICE` retain copied refs. `ARRAY_SLICE` consumes the source ref; use `DUP` to preserve it.
+`ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET`/`ARRAY_SLICE` `MUST` retain copied refs. `ARRAY_SLICE` consumes the source ref; the agent `MUST` use `DUP` to preserve it.
 
 ### Strings
 
-All string comparisons are by content and require string operands. Mismatches trap `ErrTypeMismatch`; `REF_EQ`/`REF_NE` test identity.
+All string comparisons are by content and require string operands. Mismatches `MUST` trap `ErrTypeMismatch`; `REF_EQ`/`REF_NE` test identity.
 
-`string.concat` allocates a fresh ref and may reuse append-only storage without mutating published strings.
+`string.concat` allocates a fresh ref and `MAY` reuse append-only storage without mutating published strings.
 
 ### Maps
 
@@ -329,7 +333,7 @@ Threaded fusion rules are owned by `fusion.md`.
 
 ## Maintenance Notes
 
-When changing the instruction set:
+When changing the instruction set, the agent `MUST`:
 
 - append opcodes only;
 - keep names short and standard;

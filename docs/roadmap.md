@@ -1,6 +1,8 @@
 # Roadmap
 
-Planning document for project priorities. Topic docs own current contracts; this document does not override them.
+Planning document for project priorities.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. Topic docs own current contracts; this document `MUST NOT` override them.
 
 ## Direction
 
@@ -24,7 +26,7 @@ Planning document for project priorities. Topic docs own current contracts; this
 
 ## JIT Expansion
 
-Every native path requires:
+Every native path `MUST` have:
 
 1. threaded semantics and verifier coverage;
 2. explicit fallback;
@@ -32,7 +34,7 @@ Every native path requires:
 4. success, guard-failure, and fallback tests;
 5. reproducible benchmark evidence.
 
-Prefer one guarded native path over duplicated interpreter semantics. Fall back before unsupported behavior executes.
+The agent `SHOULD` prefer one guarded native path over duplicated interpreter semantics. It `MUST` fall back before unsupported behavior executes.
 
 ## Docs
 

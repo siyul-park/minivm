@@ -2,15 +2,17 @@
 
 Analysis caching, bytecode transforms, SSA transforms, optimization composition.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Model
 
 ```text
 analysis  IR → cached facts
 transform IR → mutation
 pipeline   ordered transforms + invalidation
-```text
+```
 
-`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses do not mutate IR. Transforms report preserved analyses through `pass.Preserved`.
+`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses `MUST NOT` mutate IR. Transforms `MUST` report preserved analyses through `pass.Preserved`.
 
 ## Layers
 
@@ -26,13 +28,13 @@ pipeline   ordered transforms + invalidation
 
 Each pass owns one policy. Current passes include constant folding, algebraic simplification, local promotion, load forwarding, CSE, guard elimination, LICM, and DCE.
 
-SSA transforms are target-independent and accept any valid `ssa.Function`.
+SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`.
 
 ## Bytecode
 
-A size-changing transform repairs all position-sensitive metadata or leaves the function unchanged. `transform.SSAPass` re-emits from SSA and declines when the encoding is invalid.
+A size-changing transform `MUST` repair all position-sensitive metadata or leave the function unchanged. `transform.SSAPass` re-emits from SSA and `MUST` decline when the encoding is invalid.
 
-Prefer local passes. Reuse existing analyses. Keep target-specific policy out of target-independent passes.
+The agent `SHOULD` prefer local passes, `SHOULD` reuse existing analyses, and `MUST` keep target-specific policy out of target-independent passes.
 
 ## Related
 

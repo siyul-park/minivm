@@ -1,6 +1,8 @@
 # Debugging
 
-Bytecode-level debugger for `interp.Run`. `guides/repl.md` owns REPL commands.
+Bytecode-level debugger for `interp.Run`.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `guides/repl.md` owns REPL commands.
 
 ## API
 
@@ -33,7 +35,7 @@ for {
     if err != nil { return err }
     break
 }
-```go
+```
 
 ## Controls
 
@@ -56,7 +58,7 @@ dbg.Enable(id, false)
 dbg.Enable(id, true)
 dbg.Clear(id)
 dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
-```go
+```
 
 `Breakpoints()` returns a breakpoint-ID-sorted snapshot with hit counts. `Stop()` returns function, IP, and breakpoint ID; step stops use ID `0`.
 
@@ -82,7 +84,7 @@ Debugger execution is exact bytecode execution. Optimization paths that hide ins
 
 ## Maintenance
 
-Keep stop state explicit, bytecode locations stable, mutable interpreter state unexposed, and debugger semantics independent of optimization details.
+The agent `MUST` keep stop state explicit, bytecode locations stable, mutable interpreter state unexposed, and debugger semantics independent of optimization details.
 
 ## Related
 

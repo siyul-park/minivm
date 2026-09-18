@@ -2,6 +2,8 @@
 
 Static validation of untrusted bytecode.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Ownership
 
 | Concern | Owner |
@@ -11,20 +13,22 @@ Static validation of untrusted bytecode.
 | opcode semantics | `instruction-set.md` |
 | runtime checks | `interp/threaded.go` |
 
-`program.New` and `interp.New` trust input. Verify external bytecode first.
+`program.New` and `interp.New` trust input. The agent `MUST` verify external bytecode before execution.
 
 ## Rules
 
-- Reject malformed bytecode before execution.
-- Keep verification independent of interpretation.
-- Validate instruction boundaries and operand widths.
-- Validate control-flow targets and handler ranges.
-- Track stack height and statically known kinds conservatively.
-- Resolve dynamic stack effects only when required inputs are known.
-- Reject statically definite mismatches; defer runtime-dependent cases to runtime guards.
-- Keep `program/verify.go` independent of `analysis` and `pass`.
+- The verifier `MUST` reject malformed bytecode before execution.
+- Verification `MUST` stay independent of interpretation.
+- The verifier `MUST` validate instruction boundaries and operand widths.
+- The verifier `MUST` validate control-flow targets and handler ranges.
+- The verifier `MUST` track stack height and statically known kinds conservatively.
+- The verifier `MUST` resolve dynamic stack effects only when required inputs are known.
+- The verifier `MUST` reject statically definite mismatches and `MUST` defer runtime-dependent cases to runtime guards.
+- `program/verify.go` `MUST NOT` depend on `analysis` or `pass`.
 
 ## Checks
+
+The verifier `MUST` perform these checks in order:
 
 1. **Structure** — decoding, operands, bounds, constants, types.
 2. **Control flow** — branch targets, reachable blocks, handler ranges.
@@ -32,9 +36,9 @@ Static validation of untrusted bytecode.
 4. **Stack** — height, fixed/dynamic effects, operand kinds.
 5. **Calls** — callable shape, arity, return compatibility.
 
-Dynamic arity instructions use only statically known counts/metadata. Otherwise verification rejects the program rather than guessing.
+Dynamic arity instructions `MUST` use only statically known counts/metadata. Otherwise verification `MUST` reject the program rather than guessing.
 
-Verification errors identify the program location and violated rule. Runtime handles current heap values, dynamic references, and host state.
+Verification errors `MUST` identify the program location and violated rule. The agent `MUST` leave current heap values, dynamic references, and host state to runtime handling.
 
 ## Related
 

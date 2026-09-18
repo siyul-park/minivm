@@ -1,6 +1,8 @@
 # Add a JIT Architecture
 
-Checklist for a new native backend. `jit-internals.md` owns runtime contracts; this guide owns integration order.
+Checklist for a new native backend.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `jit-internals.md` owns runtime contracts; this guide owns integration order.
 
 ## Ownership
 
@@ -14,35 +16,35 @@ Checklist for a new native backend. `jit-internals.md` owns runtime contracts; t
 | trace recording | `interp/trace.go` |
 | platform support | `compatibility.md` |
 
-`internal/jit` must not import an architecture package.
+`internal/jit` `MUST NOT` import an architecture package.
 
 ## Machine Layer
 
-Create `internal/asm/<arch>/` for register IDs, encoder, ABI bridge, callable adapter, and optional spill frame.
+The agent `MUST` create `internal/asm/<arch>/` for register IDs, encoder, ABI bridge, callable adapter, and optional spill frame.
 
-Callable adapter:
+Callable adapter `MUST`:
 
-1. receives `&i.journal[0]` as `ctx`;
-2. passes `ctx` in the first integer argument register;
-3. preserves allocator-selected callee-saved registers;
-4. calls native code and returns to Go.
+1. receive `&i.journal[0]` as `ctx`;
+2. pass `ctx` in the first integer argument register;
+3. preserve allocator-selected callee-saved registers;
+4. call native code and return to Go.
 
-Native traces use the journal, not a VM argument/return ABI. `Arch.Frame()` returns `nil` without spill support; otherwise keep spill state private.
+Native traces use the journal, not a VM argument/return ABI. `Arch.Frame()` returns `nil` without spill support; otherwise the agent `MUST` keep spill state private.
 
 ## JIT Layer
 
-Create `internal/jit/<arch>/` with target lowering. Keep one exported constructor:
+The agent `MUST` create `internal/jit/<arch>/` with target lowering and `MUST` keep one exported constructor:
 
 ```go
 type lowerer struct{}
 func New() jit.Machine { return lowerer{} }
 ```
 
-Return `false` before mutating state on unsupported opcode, kind, or heap shape. Materialize live symbolic state on guards.
+Lowering `MUST` return `false` before mutating state on unsupported opcode, kind, or heap shape. Guards `MUST` materialize live symbolic state.
 
-Before returning to Go, commit `journal.CellSP`, `journal.CellNextIP`, and frame records. Preserve return, call, frame, stack, ref, host, and write-barrier contracts.
+Before returning to Go, lowering `MUST` commit `journal.CellSP`, `journal.CellNextIP`, and frame records. It `MUST` preserve return, call, frame, stack, ref, host, and write-barrier contracts.
 
-Use the ARM64 scratch layout:
+The agent `MUST` use the ARM64 scratch layout:
 
 | Slot | Value |
 |---|---|
@@ -52,15 +54,15 @@ Use the ARM64 scratch layout:
 | `scratchSP` | interpreter SP |
 | `scratchCtrl` | `&i.journal[0]` |
 
-Add `interp/jit_<arch>.go` for selection. Extend `jit_stub.go` only when another real backend needs to carve out its architecture.
+The agent `MUST` add `interp/jit_<arch>.go` for selection. It `MUST` extend `jit_stub.go` only when another real backend needs to carve out its architecture.
 
 ## Platform
 
-Update `compatibility.md` with GOOS/GOARCH, CGO, executable-memory, instruction-cache, and build-tag requirements. Normal builds should need no manual tags.
+The agent `MUST` update `compatibility.md` with GOOS/GOARCH, CGO, executable-memory, instruction-cache, and build-tag requirements. Normal builds `MUST NOT` need manual tags.
 
 ## Coverage
 
-Start with low-risk paths:
+The agent `MUST` start with low-risk paths in this order:
 
 1. `NOP`, `DROP`, `DUP`, `SWAP`
 2. constants and `CONST_GET`
@@ -71,16 +73,18 @@ Start with low-risk paths:
 7. entry `RETURN`
 8. RC-neutral refs
 
-Add calls, ref-counted stores, heap access, loops, and suspension after core lowering is stable.
+The agent `MUST` add calls, ref-counted stores, heap access, loops, and suspension only after core lowering is stable.
 
 ## Validation
+
+The agent `MUST` run:
 
 ```bash
 go test ./internal/asm/<arch>/... ./internal/jit/<arch>/... ./interp/...
 GOOS=linux GOARCH=<arch> go build ./...
 ```
 
-A hot arithmetic workload must emit native code; verify with the existing JIT emission metric.
+A hot arithmetic workload `MUST` emit native code; the agent `MUST` verify with the existing JIT emission metric.
 
 ## Related
 

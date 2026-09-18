@@ -2,6 +2,8 @@
 
 Supported platforms and native backend availability.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Matrix
 
 | Platform | Threaded | AOT | ARM64 JIT |
@@ -18,7 +20,7 @@ The minimum Go version is the version declared in `go.mod`.
 
 ## Build
 
-Architecture selection is in `interp/jit_arm64.go` and `interp/jit_stub.go`; normal builds need no manual tags.
+Architecture selection is in `interp/jit_arm64.go` and `interp/jit_stub.go`; normal builds `MUST NOT` need manual tags.
 
 Darwin/ARM64 JIT requires CGO for instruction-cache synchronization. Linux/ARM64 does not.
 

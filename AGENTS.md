@@ -2,6 +2,22 @@
 
 `minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; ARM64 JIT is an optimization with threaded fallback.
 
+## Terminology
+
+The keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` are normative and interpreted as in RFC 2119:
+
+- `MUST` / `MUST NOT` state an absolute requirement or prohibition. An agent `MUST` satisfy it and `MUST NOT` report completion while it is violated.
+- `SHOULD` / `SHOULD NOT` state the default choice. An agent `SHOULD` follow it; when it does not, it `MUST` state the reason, the alternative taken, and the risk in its output.
+- `MAY` states a permitted option with no requirement to use it.
+
+Informative sentences (facts, background, examples) carry no keyword and `MUST NOT` be treated as requirements.
+
+## Precedence
+
+- Direct user, system, or developer instructions `MUST` override repository rules on conflict. The agent `MUST` follow the higher instruction and `SHOULD` note the conflict in its output.
+- A more-specific `AGENTS.md` `MUST` be treated as narrowing this file. On conflict, the more-specific file wins.
+- `AGENTS.md` owns workflow. Topic docs own architecture facts. On a workflow-versus-fact question, the agent `MUST` follow `AGENTS.md` for process and the topic owner doc for behavior.
+
 | Owner | Scope |
 |---|---|
 | `docs/coding-patterns.md` | Go design, naming, API patterns |
@@ -9,29 +25,27 @@
 | `docs/refactoring.md` | structural review and simplification |
 | topic docs | architecture facts |
 
-More-specific `AGENTS.md` narrows this file. Direct user/system/developer instructions override repository rules.
-
 ## Rules
 
-1. Inspect current code, tests, owner docs, and nested instructions before designing.
-2. Run `git status --short`; preserve unrelated changes; do not stage or commit unless requested.
-3. Make the smallest complete change. Reject speculative abstractions, wrappers, aliases, shims, duplicate policy, and future-only extension points.
-4. Every changed symbol needs a clear owner, boundary, purpose, and name.
-5. One behavior has one implementation. Keep JIT policy in `internal/jit`; target mechanics in target packages.
-6. Change generated files only through their generator; run `make generate` and `make check-generated`.
-7. Canonical topic docs describe supported/current state; guides describe procedures; plans and audits preserve history or future work. Keep one canonical owner per topic.
-8. Non-trivial structural changes require `docs/refactoring.md` to reach simplification fixed point.
+1. The agent `MUST` inspect current code, tests, owner docs, and nested instructions before designing a change.
+2. The agent `MUST` run `git status --short` before editing; it `MUST NOT` modify files unrelated to the task, and it `MUST NOT` stage, commit, amend, push, or create a PR unless the user explicitly requested it.
+3. The agent `MUST` implement the smallest complete change that satisfies the contract. It `MUST NOT` add speculative abstractions, wrappers, aliases, shims, duplicate policy, or future-only extension points.
+4. Every changed symbol `MUST` have one clear owner, one boundary, one purpose, and one name that expresses its role or contract.
+5. One behavior `MUST` have one implementation. JIT policy `MUST` stay in `internal/jit`; target mechanics `MUST` stay in target packages (`internal/asm/<arch>`, `internal/jit/<arch>`).
+6. Generated files `MUST NOT` be edited directly; the agent `MUST` change them only through their generator and `MUST` run `make generate` and `make check-generated`.
+7. The agent `MUST` keep one canonical owner per topic. Canonical topic docs `MUST` describe supported/current state; guides `MUST` describe procedures; plans and audits `MAY` preserve history or future work. The agent `MUST NOT` duplicate a contract owned elsewhere; it `MUST` link to the owner instead.
+8. A non-trivial structural change (package/type boundary, ownership, lifecycle, control flow, abstraction, public contract, or performance-sensitive structure) `MUST` apply `docs/refactoring.md` until the simplification fixed point is reached.
 
 ## Delegation
 
-Split work into independently verifiable units. Every handoff states:
+The agent `MUST` split delegated work into independently verifiable units. Every handoff `MUST` state:
 
 - **Scope** — paths, symbols, behavior, exclusions.
 - **Contract** — required result and invariants.
 - **Proof** — narrowest falsifying check plus broader checks.
 - **Output** — changes, decisions, evidence, risks.
 
-Do not delegate vague objectives. Parallel work requires disjoint write ownership or an explicit integration boundary. Delegated output is evidence; verify it against the tree and owner docs.
+The agent `MUST NOT` delegate a vague objective. Parallel work `MUST` have disjoint write ownership or an explicit integration boundary. Delegated output `MUST` be treated as evidence only; the agent `MUST` verify it against the tree and owner docs before accepting it.
 
 | Work | Model | Use |
 |---|---|---|
@@ -41,16 +55,20 @@ Do not delegate vague objectives. Parallel work requires disjoint write ownershi
 
 ## Workflow
 
+The agent `MUST` perform the following steps in order and `MUST NOT` report completion while any applicable step is skipped without a recorded reason:
+
 1. Check status and repository instructions.
 2. Read affected code, tests, and owner docs; define contract and proof.
 3. Follow `docs/testing.md` for test design and TDD.
 4. Implement the smallest owning change.
 5. Review ownership, boundaries, naming, declaration order, and semantic parity.
-6. Run `docs/refactoring.md` for structural changes.
+6. Apply `docs/refactoring.md` for structural changes.
 7. Run focused checks, then repository gates.
 8. Re-read every changed file against repository rules.
 
 ## Task Router
+
+For each task type, the agent `MUST` read the listed owners before implementing and `MUST` run the listed focused check. Additional checks `MAY` be added when the change touches further packages.
 
 | Task | Read | Owners | Focused check |
 |---|---|---|---|
@@ -63,7 +81,15 @@ Do not delegate vague objectives. Parallel work requires disjoint write ownershi
 
 ## Completion
 
-Completion requires: clear ownership; necessary symbols only; contract-constraining tests; applicable structural review at fixed point; current generated output; canonical docs without stale duplicates; and applicable checks. Report skipped validation.
+The agent `MUST` satisfy all of the following before reporting completion; any inapplicable item `MUST` be reported as skipped with a reason:
+
+- clear ownership for every changed symbol;
+- necessary symbols only;
+- contract-constraining tests;
+- applicable structural review at fixed point;
+- current generated output;
+- canonical docs without stale duplicates;
+- applicable checks passed.
 
 Repository baseline:
 
@@ -74,4 +100,4 @@ go test -race ./...
 GOOS=linux GOARCH=arm64 go build ./...
 GOOS=linux GOARCH=arm64 go test -exec=true ./...
 git diff --check
-```bash
+```

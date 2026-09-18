@@ -1,46 +1,54 @@
 # Testing
 
-Owns test contracts, structure, methodology, reachability, completeness, and validation. `coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
+Owns test contracts, structure, methodology, reachability, completeness, and validation.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
 
 ## Contract
 
-Tests are the executable specification of a feature. A test must show how the feature is used and what behavior it promises; test structure exists to preserve that specification, not to mirror implementation or maximize coverage.
+Tests are the executable specification of a feature. A test `MUST` show how the feature is used and what behavior it promises; test structure exists to preserve that specification, not to mirror implementation or maximize coverage.
 
 ### Public Boundary
 
-Feature contract tests use only target-package public symbols and live in an external test package (`package <target>_test`). This makes the user-visible boundary explicit and prevents unexported implementation dependencies.
+Feature contract tests `MUST` use only target-package public symbols and `MUST` live in an external test package (`package <target>_test`). This makes the user-visible boundary explicit and prevents unexported implementation dependencies.
 
-Do not wrap or re-abstract the target package merely to remove duplication. A wrapper that hides target API usage cannot serve as the feature specification. Setup helpers are allowed only when they do not hide the specified behavior.
+The agent `MUST NOT` wrap or re-abstract the target package merely to remove duplication. A wrapper that hides target API usage cannot serve as the feature specification. Setup helpers `MAY` be used only when they do not hide the specified behavior.
 
 ### Readability
 
-Keep tests clear, concise, and directly understandable. Each case shows one meaningful, representative usage of the symbol under test, with input, operation, and expected result visible. A case represents behavior, not a branch or implementation path.
+Tests `MUST` stay clear, concise, and directly understandable. Each case `MUST` show one meaningful, representative usage of the symbol under test, with input, operation, and expected result visible. A case represents behavior, not a branch or implementation path.
 
 ### Organization
 
-Each public symbol under test has one top-level test function as its test owner. Its detailed cases belong directly under that function; test hierarchy is limited to one level and nested cases are prohibited.
+Each public symbol under test `MUST` have one top-level test function as its test owner. Its detailed cases `MUST` belong directly under that function; test hierarchy `MUST` be limited to one level and nested cases `MUST NOT` be used.
 
-Use one case representation per test function: direct cases or table-driven cases, never both. Do not mix cases with different abstraction levels or depths.
+The agent `MUST` use one case representation per test function: direct cases or table-driven cases, never both. It `MUST NOT` mix cases with different abstraction levels or depths.
 
-When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice is allowed. The data and generation code must remain simple enough to read as specification.
+When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice `MAY` be used. The data and generation code `MUST` remain simple enough to read as specification.
 
 ### F.I.R.S.T.
 
-Tests must be **Fast, Independent, Repeatable, Self-validating, and Timely**. Do not depend on other tests, uncontrolled mutable state, manual inspection, or unnecessary setup.
+Tests `MUST` be **Fast, Independent, Repeatable, Self-validating, and Timely**. They `MUST NOT` depend on other tests, uncontrolled mutable state, manual inspection, or unnecessary setup.
 
 ## Internal Contracts
 
-Internal tests are allowed only when an internal boundary is itself a contract, such as verifier policy, frontend acceptance or SSA shape, backend lowering, or native instruction output. Use the smallest owning boundary and apply the same clarity, organization, and F.I.R.S.T. rules.
+Internal tests `MUST` be used only when an internal boundary is itself a contract, such as verifier policy, frontend acceptance or SSA shape, backend lowering, or native instruction output. The agent `MUST` use the smallest owning boundary and `MUST` apply the same clarity, organization, and F.I.R.S.T. rules.
 
 ## TDD
 
-For each behavior change: state the contract and invariants; write the narrowest falsifying test; observe the expected failure when practical; implement the smallest owning change; run focused checks, then applicable structural and repository gates.
+For each behavior change, the agent `MUST`:
 
-Cover applicable success, failure, boundaries, ownership/lifecycle, compatibility, parity, and architecture contracts. Use the lowest test layer that proves the contract.
+1. state the contract and invariants;
+2. write the narrowest falsifying test;
+3. observe the expected failure when practical;
+4. implement the smallest owning change;
+5. run focused checks, then applicable structural and repository gates.
+
+Tests `MUST` cover applicable success, failure, boundaries, ownership/lifecycle, compatibility, parity, and architecture contracts. The agent `MUST` use the lowest test layer that proves the contract.
 
 ## Evidence
 
-Coverage measures reachability, not quality. When behavior already exists and no red phase is available, use coverage to prove reachability without changing production behavior to manufacture a failure.
+Coverage measures reachability, not quality. When behavior already exists and no red phase is available, the agent `MUST` use coverage to prove reachability and `MUST NOT` change production behavior to manufacture a failure.
 
 | Layer | Proves |
 |---|---|
@@ -56,13 +64,13 @@ Coverage measures reachability, not quality. When behavior already exists and no
 
 ## Native / JIT
 
-Frontend tests prove frontend contracts. Backend tests prove machine layout, bindings, moves, metadata, and bridge/deopt points. Interpreter tests prove threaded/native parity through public results, errors, ownership, and execution.
+Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points. Interpreter tests `MUST` prove threaded/native parity through public results, errors, ownership, and execution.
 
-ARM64 goldens are the native instruction specification: define expected instructions independently of the emitter, build the input shape explicitly, fix the expected stream first, then build the assembler, and assert the complete stream and relevant metadata.
+ARM64 goldens are the native instruction specification: the agent `MUST` define expected instructions independently of the emitter, `MUST` build the input shape explicitly, `MUST` fix the expected stream first and then build the assembler, and `MUST` assert the complete stream and relevant metadata.
 
 ## Validation
 
-Run the smallest falsifying command first, then applicable package, race, coverage, architecture, and repository checks. Skip only inapplicable checks and report the skip.
+The agent `MUST` run the smallest falsifying command first, then applicable package, race, coverage, architecture, and repository checks. It `MUST` skip only inapplicable checks and `MUST` report each skip.
 
 Typical package checks:
 
@@ -74,11 +82,13 @@ go test -coverprofile=coverage.out ./<affected-package>
 
 ## Completeness
 
-- every opcode has metadata and runtime coverage;
-- verifier policy covers every opcode;
-- backend status matches `instruction-set.md`;
-- exported contracts have owner tests;
-- architecture-specific contracts have architecture-specific evidence.
+A complete change `MUST` provide:
+
+- metadata and runtime coverage for every opcode;
+- verifier policy coverage for every opcode;
+- backend status matching `instruction-set.md`;
+- owner tests for exported contracts;
+- architecture-specific evidence for architecture-specific contracts.
 
 Generated output and documentation index freshness are repository gates, not test-completeness rules.
 

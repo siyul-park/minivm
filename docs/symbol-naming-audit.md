@@ -1,6 +1,8 @@
 # Symbol Naming Audit
 
-Applied naming/vocabulary reference. `coding-patterns.md` is normative; this document records domain vocabulary that should remain consistent across JIT packages.
+Applied naming/vocabulary reference.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. `coding-patterns.md` is normative; this document records domain vocabulary that `SHOULD` remain consistent across JIT packages.
 
 ## JIT Vocabulary
 
@@ -35,7 +37,7 @@ Applied naming/vocabulary reference. `coding-patterns.md` is normative; this doc
 
 Naming rules, symbol-removal review, ownership checks, and simplification checks are owned by `coding-patterns.md` and `refactoring.md`.
 
-Do not record rename history here. Historical decisions belong in dated plans/audits.
+The agent `MUST NOT` record rename history here. Historical decisions belong in dated plans/audits.
 
 ## Related
 

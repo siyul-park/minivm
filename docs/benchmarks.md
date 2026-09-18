@@ -1,9 +1,10 @@
 # Benchmarks
 
-Comparisons here are tier-matched: minivm `threaded` is a bytecode interpreter and is
-compared against interpreters, while `default` and `jit` promote hot code to native
-and are compared against Wazero's compiler backend. Native Go is a reference bound,
-not a peer.
+Comparisons here are tier-matched.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. This document owns performance evidence; `testing.md` owns test contracts.
+
+minivm `threaded` is a bytecode interpreter and is compared against interpreters, while `default` and `jit` promote hot code to native and are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
 
 | Kernel | `default` | `threaded` | Wazero |
 |---|---:|---:|---:|
@@ -29,9 +30,9 @@ fastest runtime **within its own tier**.
 
 ## Reading Results
 
-Compare within the same tier.
+The agent `MUST` compare within the same tier.
 
-For external runtimes, `B/op` and `allocs/op` describe the Go harness; use `ns/op` for CPython. Performance changes reproduce the same row and protocol.
+For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent `MUST` use `ns/op` for CPython. Performance changes `MUST` reproduce the same row and protocol.
 
 ## Canonical VM Operations
 
@@ -353,7 +354,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-Native execution primarily benefits tight arithmetic, loops, and indexed access. Call-heavy and allocation-heavy workloads retain more threaded work. Read results by row and tier; do not aggregate unlike tiers.
+Native execution primarily benefits tight arithmetic, loops, and indexed access. Call-heavy and allocation-heavy workloads retain more threaded work. The agent `MUST` read results by row and tier and `MUST NOT` aggregate unlike tiers.
 
 ## Benchmark Fixture Inventory
 
@@ -383,11 +384,13 @@ Native execution primarily benefits tight arithmetic, loops, and indexed access.
 
 ## Methodology
 
-- Inputs and correctness checks are deterministic.
-- Setup, verification, warmup, reset, cleanup, and result calculation stay outside the timed operation.
-- Canonical comparison tables use `-benchtime=300ms -count=3` and report the median.
-- Use interleaved A/B runs with `benchstat` when comparing variants.
-- Compare CPython on `ns/op` only; `B/op` and `allocs/op` measure the Go harness.
+The agent `MUST`:
+
+- keep inputs and correctness checks deterministic;
+- keep setup, verification, warmup, reset, cleanup, and result calculation outside the timed operation;
+- use `-benchtime=300ms -count=3` and report the median for canonical comparison tables;
+- use interleaved A/B runs with `benchstat` when comparing variants;
+- compare CPython on `ns/op` only; `B/op` and `allocs/op` measure the Go harness.
 
 ## Reproduction
 
@@ -399,7 +402,7 @@ go test -run='^$' -bench='^(BenchmarkControl|BenchmarkMemory|BenchmarkNumeric|Be
 # External runtimes
 go test -tags=compare -run='^$' -bench='^(BenchmarkControl|BenchmarkMemory|BenchmarkNumeric|BenchmarkCall)' \
   -benchmem -benchtime=300ms -count=3 .
-```bash
+```
 
 ## Ownership
 

@@ -2,6 +2,8 @@
 
 Package ownership, dependencies, execution flow, and runtime/JIT boundaries.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Instruction Levels
 
 | Level | Owner |
@@ -40,17 +42,17 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `debug` | debugging policy |
 | `cli` | command parsing and presentation |
 
-Place behavior by dominant ownership, not import convenience. Extend an owner before adding a coordinator.
+The agent `MUST` place behavior by dominant ownership, not import convenience. It `MUST` extend an owner before adding a coordinator.
 
 ## Dependencies
 
-- `instr` and `internal/graph` remain leaf-like.
-- `internal/ssa` and `internal/ssa/transform` do not depend on runtime, JIT, or target packages.
-- `internal/jit/frontend` does not depend on `interp`, `asm`, or backend packages.
-- `internal/jit/backend` does not depend on target packages.
-- Target code stays under `internal/asm/<arch>` and `internal/jit/<arch>`.
-- `internal/jit` imports no target package; arch selection belongs in `interp`.
-- `program.Verify` is independent of runtime and optimization policy.
+- `instr` and `internal/graph` `MUST` remain leaf-like.
+- `internal/ssa` and `internal/ssa/transform` `MUST NOT` depend on runtime, JIT, or target packages.
+- `internal/jit/frontend` `MUST NOT` depend on `interp`, `asm`, or backend packages.
+- `internal/jit/backend` `MUST NOT` depend on target packages.
+- Target code `MUST` stay under `internal/asm/<arch>` and `internal/jit/<arch>`.
+- `internal/jit` `MUST NOT` import any target package; arch selection belongs in `interp`.
+- `program.Verify` `MUST` stay independent of runtime and optimization policy.
 
 ## Execution
 
@@ -60,17 +62,19 @@ program → Verify → optimize? → interp → threaded
                                       JIT compile
                                          ↓
                               native ↔ threaded fallback
-```text
+```
 
-Threaded execution is the semantic baseline. Native execution must preserve observable behavior.
+Threaded execution is the semantic baseline. Native execution `MUST` preserve observable behavior.
 
 ## Runtime
 
 `interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. A shared `Pool` owns compile coordination; an interpreter owns its execution state and dispatch table.
 
-Execution is single-goroutine-owned. Background compilation consumes immutable input and does not mutate live interpreter state.
+Execution is single-goroutine-owned. Background compilation consumes immutable input and `MUST NOT` mutate live interpreter state.
 
 ## Invariants
+
+The following invariants `MUST` hold, and the agent `MUST` preserve them:
 
 - Heap index `0` is permanent null.
 - Only `KindRef` participates in reference counting.
@@ -82,16 +86,16 @@ Execution is single-goroutine-owned. Background compilation consumes immutable i
 
 ## JIT Boundary
 
-- Architecture-neutral policy stays in `internal/jit`.
-- Target mechanics stay in `internal/jit/<arch>` and `internal/asm/<arch>`.
-- Unsupported lowering declines without partial IR/state mutation.
-- Guards deopt before native code executes unsupported behavior.
+- Architecture-neutral policy `MUST` stay in `internal/jit`.
+- Target mechanics `MUST` stay in `internal/jit/<arch>` and `internal/asm/<arch>`.
+- Unsupported lowering `MUST` decline without partial IR/state mutation.
+- Guards `MUST` deopt before native code executes unsupported behavior.
 - Published code is immutable and interpreter dispatch remains interpreter-owned.
 - `internal/asm` owns allocation, linking, and executable memory.
 
 ## Optimization
 
-Bytecode transforms repair position-sensitive metadata or leave the function unchanged. SSA transforms re-emit from SSA and decline when the result cannot be encoded safely.
+A size-changing bytecode transform `MUST` repair all position-sensitive metadata or leave the function unchanged. An SSA transform `MUST` re-emit from SSA and `MUST` decline when the result cannot be encoded safely.
 
 ## Related
 

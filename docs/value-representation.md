@@ -2,6 +2,8 @@
 
 Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may use static-type representations internally.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Ownership
 
 | Concern | Owner |
@@ -22,9 +24,9 @@ minivm uses NaN boxing.
 │  0x7FF  │  Kind │            payload              │
 └─────────┴───────┴────────────────────────────────┘
            3 bits              49 bits
-```text
+```
 
-- non-NaN values are `f64`;
+- Non-NaN values are `f64`;
 - non-`f64` values use quiet-NaN tags;
 - `KindRef` stores a heap index;
 - tag `111` is reserved;
@@ -49,9 +51,9 @@ i8 & i8 → i8
 i1 ^ i1 → i1
 i8 + i8 → i32
 comparison / eqz → i1
-```text
+```
 
-Constant folding preserves result kinds.
+Constant folding `MUST` preserve result kinds.
 
 ## I64
 
@@ -59,11 +61,11 @@ Constant folding preserves result kinds.
 
 ```text
 -2^48 <= v <= 2^48 - 1
-```text
+```
 
-Larger signed values use heap-backed `types.I64` objects and `KindRef`.
+Larger signed values `MUST` use heap-backed `types.I64` objects and `KindRef`.
 
-`BoxI64` accepts only inline values. The interpreter performs heap promotion; native ARM64 may compute raw `i64` values until a boxing boundary.
+`BoxI64` accepts only inline values. The interpreter performs heap promotion; native ARM64 `MAY` compute raw `i64` values until a boxing boundary.
 
 ## Boxing API
 
@@ -77,7 +79,7 @@ Larger signed values use heap-backed `types.I64` objects and `KindRef`.
 | `BoxF64` | `KindF64` |
 | `BoxRef` | `KindRef` |
 
-Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Check `Kind()` unless the contract proves the kind.
+Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MUST` check `Kind()` unless the contract proves the kind.
 
 ## Native Representation
 
@@ -89,7 +91,7 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Check `Kind()
 | `f64` | 64-bit float lane |
 | `ref` | boxed 64-bit value |
 
-Every interpreter, container, storage, or host boundary restores the exact boxed representation and ownership.
+Every interpreter, container, storage, or host boundary `MUST` restore the exact boxed representation and ownership.
 
 ## Related
 

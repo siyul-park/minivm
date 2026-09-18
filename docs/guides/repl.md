@@ -1,6 +1,8 @@
 # REPL
 
-Interactive assembly REPL for bytecode programs. Debugger API: `debugging.md`; opcode syntax: `instruction-set.md`.
+Interactive assembly REPL for bytecode programs.
+
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`. Debugger API: `debugging.md`; opcode syntax: `instruction-set.md`.
 
 ## Running
 
@@ -13,7 +15,7 @@ Interactive assembly REPL for bytecode programs. Debugger API: `debugging.md`; o
 
 ## Input
 
-One instruction per line; the accumulated program runs and prints the current stack.
+The REPL `MUST` accept one instruction per line; the accumulated program runs and prints the current stack.
 
 ```text
 > i32.const 42
@@ -38,9 +40,9 @@ One instruction per line; the accumulated program runs and prints the current st
 | `.help` | help |
 | `.quit` / `.exit` | exit |
 
-`.load` replaces rather than merges state because merge would require renumbering embedded constant/type indexes.
+`.load` `MUST` replace rather than merge state because merge would require renumbering embedded constant/type indexes.
 
-`.save` rejects host-value constants such as `*interp.HostFunction` and live views such as `*interp.HostStruct` because they have no textual representation.
+`.save` `MUST` reject host-value constants such as `*interp.HostFunction` and live views such as `*interp.HostStruct` because they have no textual representation.
 
 ## Debugging
 
@@ -61,7 +63,7 @@ Offsets are byte offsets. Function `0` is top-level.
 
 ### Debug Session
 
-`.debug` starts in step mode and stops before the first instruction, regardless of breakpoints.
+`.debug` `MUST` start in step mode and stop before the first instruction, regardless of breakpoints.
 
 ```text
 > .break 5
@@ -105,7 +107,7 @@ br 10
 br @0x0010
 ```
 
-`.show` prints absolute offsets; the REPL normalizes `@` targets to relative encoding.
+`.show` prints absolute offsets; the REPL `MUST` normalize `@` targets to relative encoding.
 
 Whole-program text (`.load`, `run`, `.code`) also accepts labels:
 
@@ -118,9 +120,9 @@ done:
 return
 ```
 
-`br_table` labels follow `count, cases, default`. Numeric and symbolic targets may be mixed.
+`br_table` labels follow `count, cases, default`. Numeric and symbolic targets `MAY` be mixed.
 
-`.show`/`.save` emit `L%04d:` labels for instruction-boundary targets. The result round-trips through `.load`. Interactive `>` input has no labels because forward references require the complete input.
+`.show`/`.save` `MUST` emit `L%04d:` labels for instruction-boundary targets. The result `MUST` round-trip through `.load`. Interactive `>` input `MUST NOT` accept labels because forward references require the complete input.
 
 ## Related
 

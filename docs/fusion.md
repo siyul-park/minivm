@@ -2,6 +2,8 @@
 
 Generated producer-consumer fusion for threaded execution.
 
+Keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` follow `AGENTS.md`.
+
 ## Ownership
 
 | Concern | Owner |
@@ -16,13 +18,13 @@ Generated producer-consumer fusion for threaded execution.
 
 ## Model
 
-`catalog` orders patterns. `resolve` derives source kinds from opcode metadata. `compose` and standalone `lower` use the same `lowerers` table. Patterns select sequences and compile-time guards; they do not define opcode semantics.
+`catalog` orders patterns. `resolve` derives source kinds from opcode metadata. `compose` and standalone `lower` use the same `lowerers` table. Patterns select sequences and compile-time guards; they `MUST NOT` define opcode semantics.
 
-Each opcode has one `lowerers` entry and one semantic emitter.
+Each opcode `MUST` have one `lowerers` entry and one semantic emitter.
 
 Fusion state records stack checks, evaluation, ownership, materialization, and the first absorbed opcode.
 
-Standalone execution materializes the same values that fusion passes directly. Resident stack refs are consumed; local/global/upvalue/constant refs are borrowed until materialization.
+Standalone execution `MUST` materialize the same values that fusion passes directly. Resident stack refs are consumed; local/global/upvalue/constant refs are borrowed until materialization.
 
 The absorbed head advances threaded compilation by its width. Runtime results, stack/frame state, IPs, traps, control flow, and ownership therefore match unfused execution. NOP run compaction is separate dispatch compaction.
 
@@ -43,29 +45,29 @@ Typed-array stores cover `bool`, `int8`, `int32`, `int64`, `float32`, `float64`;
 
 `struct.get` specializes the declared field kind at threading time. Runtime checks still validate ref kind, concrete type, bounds, and field kind.
 
-Specialized-type misses use the same interpreter methods as standalone handlers.
+Specialized-type misses `MUST` use the same interpreter methods as standalone handlers.
 
 ## Compilation
 
-Threading checks the opcode-indexed table with a local cursor. A miss mutates nothing. A match installs one direct handler and advances compile-time IP by the first opcode width; absorbed offsets remain separately threaded.
+Threading checks the opcode-indexed table with a local cursor. A miss `MUST` mutate nothing. A match installs one direct handler and advances compile-time IP by the first opcode width; absorbed offsets remain separately threaded.
 
-Exact mode disables fusion. Runtime guards retain bounds, segmentation, type, and underflow checks. Trapping numeric operations materialize completed sources before the trap.
+Exact mode disables fusion. Runtime guards retain bounds, segmentation, type, and underflow checks. Trapping numeric operations `MUST` materialize completed sources before the trap.
 
 ## JIT
 
-Threaded fusion is not a cross-backend registry. ARM64 fusion stays in `internal/jit/arm64` beside the lowering it composes.
+Threaded fusion is not a cross-backend registry. ARM64 fusion `MUST` stay in `internal/jit/arm64` beside the lowering it composes.
 
 ## Ownership
 
-A fused source may borrow a ref only while the sequence fully consumes it.
+A fused source `MAY` borrow a ref only while the sequence fully consumes it.
 
-Borrowed refs never cross stack, frame, global/upvalue, call, yield, or control-flow boundaries. `REF_NULL` may omit balanced ownership work. `DUP` may avoid temporary ownership when locally consumed.
+Borrowed refs `MUST NOT` cross stack, frame, global/upvalue, call, yield, or control-flow boundaries. `REF_NULL` `MAY` omit balanced ownership work. `DUP` `MAY` avoid temporary ownership when locally consumed.
 
 ## Generation
 
 `make generate` updates `interp/threaded.go`; `make check-generated` detects stale output. Generated code contains no timestamps or absolute paths.
 
-Change an opcode through one `lowerers` entry. Patterns may select sequences and compile-time guards but must not add runtime pattern objects, callbacks, synthetic opcodes, code strings, or target-specific logic.
+The agent `MUST` change an opcode through one `lowerers` entry. Patterns `MAY` select sequences and compile-time guards but `MUST NOT` add runtime pattern objects, callbacks, synthetic opcodes, code strings, or target-specific logic.
 
 ## Related
 
