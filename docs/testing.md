@@ -26,7 +26,7 @@ The agent `MUST` use one case representation per test function: direct cases or 
 
 When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice `MAY` be used. The data and generation code `MUST` remain simple enough to read as specification.
 
-Tests `MUST` use only the public interface of the code under test. If testing a behavior requires direct reference to a private symbol, the implementation `MUST` be refactored to provide an appropriate public abstraction instead.
+Tests `MUST` use only the public interface of the code under test. Direct reference to a private symbol indicates a design problem and `MUST` be resolved by changing the design so the behavior is testable through its appropriate public boundary.
 
 ### F.I.R.S.T.
 
