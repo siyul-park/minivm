@@ -19,20 +19,23 @@ type stub struct {
 	deopt backend.Deopt
 }
 
-// fused reports whether get is the array or struct field read guard admits:
-// get pops exactly the container guard produced and an i32 index, and pushes
-// one result. read, structRead, and hostRead each check this before their own
-// container-specific shape, because a guard whose next operation is not one
-// of these would otherwise satisfy every check the rest of them make (see
+// fused reports whether op is the array or struct field access guard admits:
+// op's first argument is the container guard produced and its second an i32
+// index, with args and results the total arity a read or a write itself adds
+// on top of that shared shape - a read pushes the value it loads, a write
+// takes it as a third argument and pushes nothing. read, structRead,
+// hostRead, write, structWrite, and hostWrite each check this before their
+// own container-specific shape, because a guard whose next operation is not
+// one of these would otherwise satisfy every check the rest of them make (see
 // emit.go's Lower).
-func (e *emitter) fused(guard, get ssa.Operation) bool {
-	if len(get.Args) != 2 || len(get.Results) != 1 {
+func (e *emitter) fused(guard, op ssa.Operation, args, results int) bool {
+	if len(op.Args) != args || len(op.Results) != results {
 		return false
 	}
-	if len(guard.Results) != 1 || guard.Results[0] != get.Args[0] {
+	if len(guard.Results) != 1 || guard.Results[0] != op.Args[0] {
 		return false
 	}
-	return e.lanes(ssa.TypeI32, get.Args[1])
+	return e.lanes(ssa.TypeI32, op.Args[1])
 }
 
 // guardI64 admits only a slot-loaded i64 word whose runtime tag is still

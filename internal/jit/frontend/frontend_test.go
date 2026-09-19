@@ -85,6 +85,68 @@ blk3: () <-- (blk1)
 `, shape.Itab), ssa.Format(out))
 	})
 
+	t.Run("guards an array store through the shape the stored value's own kind names", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		shape, ok := jit.ElemShapeByKind(types.KindI32)
+		require.True(t, ok)
+		require.Equal(t, fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:ref = load local[0]
+	v2:i32 = const 0
+	v3:i32 = const 5
+	v5:state = state {addr=1 base=0 ip=12 returns=0 stack=[v1, v2, v3]}
+	v4:ref = guard.shape v1 itab 0x%x state v5
+	array.set v4, v2, v3 state v5
+	return
+`, shape.Itab), ssa.Format(out))
+	})
+
+	// STRUCT_NEW is a bridge: allocation stays interpreter-owned, so the
+	// value it produces arrives on a resume block's own parameter rather
+	// than from an exec result, and the container STRUCT_SET consumes is an
+	// owned stack value with nothing left to hold it afterward, so exec's
+	// own release runs on it once the store completes.
+	t.Run("guards a struct store through a generic struct shape", func(t *testing.T) {
+		record := types.NewStructType(types.NewStructField(types.TypeI32))
+		fn := &types.Function{
+			Typ: &types.FunctionType{},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_NEW, 0).
+					Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.STRUCT_SET).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{Address: 1, Function: fn, Decl: []types.Type{record}}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		require.Equal(t, fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = const 0
+	v3:state = state {addr=1 base=0 ip=5 returns=0 stack=[v1]}
+	v2:ref = bridge struct.new v1 state v3
+	jump blk1(v2)
+blk1: (v4:ref) <-- (blk0)
+	v5:i32 = const 0
+	v6:i32 = const 5
+	v8:state = state {addr=1 base=0 ip=18 returns=0 stack=[v4 owned, v5, v6]}
+	v7:ref = guard.shape v4 itab 0x%x state v8
+	struct.set v7, v5, v6 state v8
+	release v7 state v8
+	return
+`, jit.HeapStruct), ssa.Format(out))
+	})
+
 	t.Run("ends a tail call by leaving native execution", func(t *testing.T) {
 		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}}
 		fn := &types.Function{

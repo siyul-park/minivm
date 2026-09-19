@@ -253,6 +253,20 @@ func (w *walk) perform(inst instr.Instruction) bool {
 			w.guard(len(w.stack)-2, ssa.Shape{Itab: shape.Itab})
 		}
 		return w.exec(op, 2, []fact{{kind: shape.Kind}})
+	case instr.ARRAY_SET:
+		// The element shape comes from the value's own kind rather than from
+		// the container, unlike ARRAY_GET: a write has no result to type, so
+		// what it needs from the guard is only that the container's runtime
+		// shape agrees with what the value being stored already is.
+		if len(w.stack) < 3 {
+			return false
+		}
+		shape, ok := jit.ElemShapeByKind(w.stack[len(w.stack)-1].kind)
+		if !ok || (w.seen.Shape.Itab != 0 && w.seen.Shape.Itab != shape.Itab) {
+			return false
+		}
+		w.guard(len(w.stack)-3, ssa.Shape{Itab: shape.Itab})
+		return w.exec(op, 3, nil)
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
 			return false
@@ -263,6 +277,20 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		}
 		w.guard(len(w.stack)-2, shape)
 		return w.exec(op, 2, []fact{{kind: kind}})
+	case instr.STRUCT_SET:
+		// Unlike STRUCT_GET, a write needs no field kind resolved ahead of
+		// time: the store's runtime kind check is against the value's own
+		// already-known SSA kind, so the guard only needs a struct shape to
+		// admit - the specific type, when one is known, narrows it further.
+		if len(w.stack) < 3 {
+			return false
+		}
+		shape := ssa.Shape{Itab: jit.HeapStruct}
+		if w.seen.Shape.Itab != 0 {
+			shape = ssa.Shape{Itab: w.seen.Shape.Itab, Typ: w.seen.Shape.Typ, Host: w.seen.Shape.Field}
+		}
+		w.guard(len(w.stack)-3, shape)
+		return w.exec(op, 3, nil)
 	case instr.REF_CAST:
 		// A successful cast validates the operand's declared type in place and
 		// leaves the same value; only what is known about it narrows.

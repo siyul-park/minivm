@@ -88,7 +88,7 @@ func (m machine) Lowers(code instr.Opcode) bool {
 		instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV,
 		instr.F64_ABS, instr.F64_NEG, instr.F64_SQRT,
 		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE,
-		instr.ARRAY_GET, instr.STRUCT_GET, instr.CALL:
+		instr.ARRAY_GET, instr.ARRAY_SET, instr.STRUCT_GET, instr.STRUCT_SET, instr.CALL:
 		return true
 	default:
 		return false
@@ -221,28 +221,37 @@ func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 		return 1, e.guardI64(op)
 	case ssa.OpGuardShape:
 		// The opcode test is load-bearing, not defence in depth. Each of
-		// read, structRead, and hostRead re-derives everything else it needs
-		// from the pair, but nothing in any of them re-derives which read it
-		// is: an opcode admitted through a bare-itab shape, popping two and
-		// pushing one, would satisfy every other check. Three separate facts
-		// keep that from happening today - frontend/walk.go guards no read
-		// but ARRAY_GET and STRUCT_GET, transform/dce.go keeps a
-		// heap-reading exec alive so a guard is never stranded, and Lowers
-		// admits no other guard producer - so an edit to any of them belongs
-		// here too. Shape.Host is what then tells STRUCT_GET's two
-		// containers apart: a *types.Struct guard never sets it, and a
-		// *HostStruct guard always does (see ssa.Shape).
+		// read, structRead, hostRead, write, structWrite, and hostWrite
+		// re-derives everything else it needs from the pair, but nothing in
+		// any of them re-derives which access it is: an opcode admitted
+		// through a bare-itab shape, popping two and pushing one (or three
+		// and pushing none), would satisfy every other check. Three separate
+		// facts keep that from happening today - frontend/walk.go guards no
+		// access but these six opcodes, transform/dce.go keeps a
+		// heap-reading or heap-writing exec alive so a guard is never
+		// stranded, and Lowers admits no other guard producer - so an edit to
+		// any of them belongs here too. Shape.Host is what then tells
+		// STRUCT_GET's and STRUCT_SET's two containers apart: a
+		// *types.Struct guard never sets it, and a *HostStruct guard always
+		// does (see ssa.Shape).
 		if len(ops) < 2 || ops[1].Op != ssa.OpExec {
 			return 1, false
 		}
 		switch ops[1].Code {
 		case instr.ARRAY_GET:
 			return 2, e.read(op, ops[1])
+		case instr.ARRAY_SET:
+			return 2, e.write(op, ops[1])
 		case instr.STRUCT_GET:
 			if op.Shape.Host != 0 {
 				return 2, e.hostRead(op, ops[1])
 			}
 			return 2, e.structRead(op, ops[1])
+		case instr.STRUCT_SET:
+			if op.Shape.Host != 0 {
+				return 2, e.hostWrite(op, ops[1])
+			}
+			return 2, e.structWrite(op, ops[1])
 		default:
 			return 1, false
 		}
@@ -950,6 +959,29 @@ func (e *emitter) box(v ssa.Value) (asm.VReg, bool) {
 		return asm.VReg{}, false
 	}
 	return out, true
+}
+
+// raw produces v's untagged bit pattern in a fresh 64-bit register: the form
+// a typed array element or a struct field stores, as opposed to box's tagged
+// VM slot word. An i1, i8, or i32 widens its already-clean 32-bit view (see
+// widen64) rather than allocating, since every producer in this machine
+// already leaves its upper 32 bits zero; an i64 is already this form; a
+// float's bits leave the float bank through the same zero-extending FMOV box
+// uses, for the identical architectural reason.
+func (e *emitter) raw(v ssa.Value) (asm.VReg, bool) {
+	src := e.c.Reg(v)
+	switch e.c.Func().Type(v) {
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+		return widen64(src), true
+	case ssa.TypeI64:
+		return src, true
+	case ssa.TypeF32, ssa.TypeF64:
+		out := e.a.Reg(asm.RegTypeInt, asm.Width64)
+		e.a.Emit(arm64.FMOV(out, src))
+		return out, true
+	default:
+		return asm.VReg{}, false
+	}
 }
 
 // rawTag is the boxed kind tag for one of box's raw W-lane types. The caller

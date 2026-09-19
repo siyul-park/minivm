@@ -26,7 +26,7 @@ import (
 // because a false anywhere in lowering abandons the whole Compile and its
 // assembler unpublished.
 func (e *emitter) read(guard, get ssa.Operation) bool {
-	if !e.fused(guard, get) {
+	if !e.fused(guard, get, 2, 1) {
 		return false
 	}
 	shape, ok := jit.ElemShapeByItab(guard.Shape.Itab)
@@ -91,6 +91,74 @@ func (e *emitter) read(guard, get ssa.Operation) bool {
 	case types.KindF64:
 		bits := e.a.Reg(asm.RegTypeInt, asm.Width64)
 		e.a.Emit(arm64.LDR(bits, addr, 0), arm64.FMOV(dst, bits))
+	default:
+		return false
+	}
+	return true
+}
+
+// write lowers a guard and the array store it admits as one shape, mirroring
+// read: the bounds test leaves through the state the guard carries, and
+// leaves before the store, since a store that already ran cannot be undone
+// by a later deopt the way a read's own boxability guard can still discard
+// its result. The element kind is the value's own SSA type, so ElemShapeByItab
+// recovers the same row frontend/walk.go resolved it from - the write knows
+// no more about the container than the guard already proved.
+//
+// The element is written raw, at the same address arithmetic read computes;
+// element stride lives in the shape table, not here. A reference element is
+// owned by whoever the array's overwritten slot released it to, which this
+// machine has not learned to account for, so the switch below still declines
+// it by naming no case for KindRef.
+func (e *emitter) write(guard, set ssa.Operation) bool {
+	if !e.fused(guard, set, 3, 0) {
+		return false
+	}
+	val := set.Args[2]
+	typ := e.c.Func().Type(val)
+	shape, ok := jit.ElemShapeByItab(guard.Shape.Itab)
+	if !ok || typ != ssa.TypeOf(shape.Kind) || lane(typ) == 0 {
+		return false
+	}
+	raw, ok := e.raw(val)
+	if !ok {
+		return false
+	}
+	data, _, ok := e.guard(guard)
+	if !ok {
+		return false
+	}
+	fail, ok := e.exit(guard.State, prof.ExitGuardBounds)
+	if !ok {
+		return false
+	}
+
+	ptr := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	length := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(ptr, data, shape.Base+sliceData),
+		arm64.LDR(length, data, shape.Base+sliceLen),
+	)
+	idx := e.sign32(e.c.Reg(set.Args[1]))
+	e.a.Emit(arm64.CMP(idx, length), arm64.BCondLabel(arm64.OpBCS, fail))
+
+	addr := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	if shape.Scale == 0 {
+		e.a.Emit(arm64.ADD(addr, ptr, idx))
+	} else {
+		off := e.a.Reg(asm.RegTypeInt, asm.Width64)
+		e.a.Emit(arm64.LSLI(off, idx, shape.Scale), arm64.ADD(addr, ptr, off))
+	}
+	// Unreachable while the shape table, ssa.TypeOf, and lane agree on these
+	// six kinds; a kind that stops agreeing declines instead of storing at
+	// the wrong width.
+	switch shape.Kind {
+	case types.KindI1, types.KindI8:
+		e.a.Emit(arm64.STRB(raw, addr, 0))
+	case types.KindI32, types.KindF32:
+		e.a.Emit(arm64.STRW(raw, addr, 0))
+	case types.KindI64, types.KindF64:
+		e.a.Emit(arm64.STR(raw, addr, 0))
 	default:
 		return false
 	}

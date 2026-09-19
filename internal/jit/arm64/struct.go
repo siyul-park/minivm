@@ -31,7 +31,7 @@ import (
 // because a false anywhere in lowering abandons the whole Compile and its
 // assembler unpublished.
 func (e *emitter) structRead(guard, get ssa.Operation) bool {
-	if !e.fused(guard, get) {
+	if !e.fused(guard, get, 2, 1) {
 		return false
 	}
 	if guard.Shape.Itab != jit.HeapStruct || guard.Shape.Typ == 0 || guard.Shape.Host != 0 {
@@ -88,6 +88,71 @@ func (e *emitter) structRead(guard, get ssa.Operation) bool {
 	return true
 }
 
+// structWrite lowers a guard and the field store it admits as one shape,
+// mirroring structRead: the field at the runtime index is proven against the
+// value's own SSA kind before the store, the same per-field check structRead
+// runs before its load. Unlike structRead, no concrete struct type need be
+// known at compile time: the fields table is read out of the runtime type
+// pointer the guard's own cell carries, so any struct type takes the same
+// path, and guard.Shape.Typ narrows to the one specific type
+// frontend/walk.go resolved only when it could.
+//
+// A struct field's storage slot is a full 8-byte word regardless of kind
+// (types.Struct.SetField), unlike a typed array element's own natural width,
+// so raw's zero-extended view is what the store writes whole rather than at
+// the value's own narrower width.
+func (e *emitter) structWrite(guard, set ssa.Operation) bool {
+	if !e.fused(guard, set, 3, 0) {
+		return false
+	}
+	if guard.Shape.Itab != jit.HeapStruct || guard.Shape.Host != 0 {
+		return false
+	}
+	val := set.Args[2]
+	kind, ok := resultKind(e.c.Func().Type(val))
+	if !ok {
+		return false
+	}
+	raw, ok := e.raw(val)
+	if !ok {
+		return false
+	}
+	data, fail, ok := e.guard(guard)
+	if !ok {
+		return false
+	}
+	bounds, ok := e.exit(guard.State, prof.ExitGuardBounds)
+	if !ok {
+		return false
+	}
+	kindFail, ok := e.exit(guard.State, prof.ExitGuardKind)
+	if !ok {
+		return false
+	}
+
+	typ := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LDR(typ, data, int16(structTyp)))
+	if guard.Shape.Typ != 0 {
+		e.admit(typ, uint64(guard.Shape.Typ), fail)
+	}
+	fields := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	n := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(fields, typ, int16(fieldsSlice+sliceData)),
+		arm64.LDR(n, typ, int16(fieldsSlice+sliceLen)),
+	)
+	idx := e.sign32(e.c.Reg(set.Args[1]))
+	field := e.fieldEntry(idx, n, fields, fieldSize, bounds)
+	got := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LDRB(got, field, int16(fieldKind)))
+	e.a.Emit(arm64.CMPI(got, uint16(kind)), arm64.BCondLabel(arm64.OpBNE, kindFail))
+
+	dataPtr := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(arm64.LDR(dataPtr, data, int16(structData+sliceData)))
+	e.a.Emit(arm64.STRR(raw, dataPtr, idx))
+	return true
+}
+
 // hostRead lowers a guard and the *HostStruct field read it admits as one
 // shape. A host field holds Go memory reached through jit.Layout offsets
 // rather than a VM word, and its width, signedness, and Go kind are not
@@ -95,7 +160,7 @@ func (e *emitter) structRead(guard, get ssa.Operation) bool {
 // guest as i32 - so the per-field checks below are what a plain shape guard
 // cannot express (see ssa.Shape.Host).
 func (e *emitter) hostRead(guard, get ssa.Operation) bool {
-	if !e.fused(guard, get) {
+	if !e.fused(guard, get, 2, 1) {
 		return false
 	}
 	layout := e.c.Input().Layout
@@ -189,12 +254,90 @@ func (e *emitter) hostRead(guard, get ssa.Operation) bool {
 	return true
 }
 
-// resultKind resolves the types.Kind a STRUCT_GET's SSA result type names, or
-// false for one this machine cannot receive: a ref result is owned by
-// whoever receives it, which structRead and hostRead have not learned to
-// account for. An i64 field is admitted - structRead and hostRead each prove
-// it boxable with guardBoxable after loading it, since neither field storage
-// carries a tag the way a slot's own boxed word does.
+// hostWrite lowers a guard and the *HostStruct field store it admits as one
+// shape. It lowers only a field that is the exact image of its VM slot,
+// because every other field encodes through the range check a threaded store
+// performs, and a check that can fail belongs with the interpreter that
+// reports it (see jit.HostShape.Exact).
+func (e *emitter) hostWrite(guard, set ssa.Operation) bool {
+	if !e.fused(guard, set, 3, 0) {
+		return false
+	}
+	layout := e.c.Input().Layout
+	if guard.Shape.Itab != layout.HostStructItab || guard.Shape.Typ != 0 || guard.Shape.Host == 0 {
+		return false
+	}
+	shape, ok := jit.HostShapeByKind(guard.Shape.Host)
+	if !ok || !shape.Exact() {
+		return false
+	}
+	val := set.Args[2]
+	kind, ok := resultKind(e.c.Func().Type(val))
+	if !ok || kind != shape.Kind {
+		return false
+	}
+	raw, ok := e.raw(val)
+	if !ok {
+		return false
+	}
+	data, _, ok := e.guard(guard)
+	if !ok {
+		return false
+	}
+	bounds, ok := e.exit(guard.State, prof.ExitGuardBounds)
+	if !ok {
+		return false
+	}
+	kindFail, ok := e.exit(guard.State, prof.ExitGuardKind)
+	if !ok {
+		return false
+	}
+
+	fields := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	n := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(fields, data, int16(layout.HostFields+sliceData)),
+		arm64.LDR(n, data, int16(layout.HostFields+sliceLen)),
+	)
+	idx := e.sign32(e.c.Reg(set.Args[1]))
+	entry := e.fieldEntry(idx, n, fields, layout.HostFieldSize, bounds)
+
+	conv := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	got := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(conv, entry, int16(layout.HostFieldConv)),
+		arm64.LDRB(got, conv, int16(layout.HostConvKind)),
+	)
+	e.a.Emit(arm64.CMPI(got, uint16(guard.Shape.Host)), arm64.BCondLabel(arm64.OpBNE, kindFail))
+
+	offset := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	base := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	target := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(offset, entry, int16(layout.HostFieldOffset)),
+		arm64.LDR(base, data, int16(layout.HostPtr)),
+		arm64.ADD(target, base, offset),
+	)
+
+	// Exact leaves three widths, so the store is total over them.
+	switch shape.Size {
+	case 1:
+		e.a.Emit(arm64.STRB(raw, target, 0))
+	case 4:
+		e.a.Emit(arm64.STRW(raw, target, 0))
+	default:
+		e.a.Emit(arm64.STR(raw, target, 0))
+	}
+	return true
+}
+
+// resultKind resolves the types.Kind an SSA value of type t stores as: a
+// STRUCT_GET result, or a value STRUCT_SET or a *HostStruct field store
+// writes. It reports false for a type this machine cannot receive: a ref is
+// owned by whoever receives it, which none of the six functions above have
+// learned to account for. An i64 is admitted - each of them proves it
+// boxable, on the read side with guardBoxable after loading it, since
+// neither field storage carries a tag the way a slot's own boxed word does.
 func resultKind(t ssa.Type) (types.Kind, bool) {
 	switch t {
 	case ssa.TypeI1:

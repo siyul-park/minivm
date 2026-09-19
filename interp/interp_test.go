@@ -7035,6 +7035,171 @@ func TestARM64_StructSetLoop(t *testing.T) {
 	})
 }
 
+// TestARM64_SSAScalarHeapWriteParity proves the SSA-backend lowering of
+// ARRAY_SET and STRUCT_SET against a container reached only through
+// CONST_GET: unlike TestARM64_StructSetLoop's own declared-local containers,
+// which carry a reference the SSA backend's entry has not learned to own and
+// so always fall back to the plan pipeline, a CONST_GET'd container never
+// becomes a declared local, so this is the shape that actually reaches
+// emit.go's write, structWrite, and hostWrite instead of heap.go's older
+// arraySet/structSet. The write sits inside a loop, re-fetching the
+// container fresh from the constant pool every iteration rather than
+// carrying it in a local, because only a loop's back-edges give the tier
+// system enough samples to compile from within one Run() - the loop
+// counter is the only declared local, and it is i32. result.Frontend cannot
+// tell the two pipelines apart (both report prof.FrontendStatic), so the
+// arm64 package's own goldens - not this test - are what prove the SSA
+// emitter is what ran; this test proves only that its result equals the
+// threaded interpreter's.
+func TestARM64_SSAScalarHeapWriteParity(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		native := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(profile))
+		threaded := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, native.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 32; n++ {
+			require.NoError(t, native.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := native.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got)
+			require.Equal(t, want, got)
+			native.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, native.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0), "the native entry must actually have been installed and run")
+	}
+
+	// Each store writes the loop counter itself, not a value derived from
+	// what the container already holds: the pooled constant a builder
+	// registers is one shared Go object every interp.New(prog, ...) and
+	// Reset() reuses verbatim rather than a fresh copy, so a store that
+	// accumulated from the prior content would keep climbing across this
+	// helper's own Reset loop instead of landing on size-1 every time.
+	t.Run("stores a scalar array element", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arr := b.Const(make(types.TypedArray[int32], size))
+		b.Locals(types.TypeI32)
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, uint64(arr)).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.CONST_GET, uint64(arr)).Emit(instr.I32_CONST, uint64(uint32(size-1))).Emit(instr.ARRAY_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size-1))
+	})
+
+	t.Run("stores a scalar struct field", func(t *testing.T) {
+		const size = int32(24)
+		typ := types.NewStructType(types.NewStructField(types.TypeI32))
+		b := program.NewBuilder()
+		s := b.Const(types.NewStruct(typ, types.BoxI32(0)))
+		b.Locals(types.TypeI32)
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, uint64(s)).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.CONST_GET, uint64(s)).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size-1))
+	})
+
+	// call builds a module that CALLs callee once, with rest registered in
+	// the same program-wide constant pool callee's own CONST_GET reads from
+	// - constants have no per-function table, only this shared one.
+	call := func(callee *types.Function, rest ...types.Value) *program.Program {
+		return program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(append([]types.Value{callee}, rest...)...),
+		)
+	}
+
+	runFault := func(t *testing.T, prog *program.Program) (nativeErr, threadedErr error) {
+		t.Helper()
+		native := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
+		defer func() {
+			require.NoError(t, native.Close())
+			require.NoError(t, threaded.Close())
+		}()
+		for n := 0; n < 64; n++ {
+			nativeErr = native.Run(context.Background())
+			threadedErr = threaded.Run(context.Background())
+			native.Reset()
+			threaded.Reset()
+		}
+		return nativeErr, threadedErr
+	}
+
+	t.Run("an out-of-bounds array index faults the same way native and threaded", func(t *testing.T) {
+		callee := types.NewFunctionBuilder(&types.FunctionType{}).
+			Emit(instr.New(instr.CONST_GET, 1), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET)).
+			Emit(instr.New(instr.RETURN)).
+			MustBuild()
+
+		nativeErr, threadedErr := runFault(t, call(callee, types.TypedArray[int32]{1, 2, 3}))
+		require.ErrorIs(t, nativeErr, interp.ErrIndexOutOfRange)
+		require.ErrorIs(t, threadedErr, interp.ErrIndexOutOfRange)
+	})
+
+	t.Run("a null array container faults the same way native and threaded", func(t *testing.T) {
+		callee := types.NewFunctionBuilder(&types.FunctionType{}).
+			Emit(instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET)).
+			Emit(instr.New(instr.RETURN)).
+			MustBuild()
+
+		nativeErr, threadedErr := runFault(t, call(callee))
+		require.Error(t, nativeErr)
+		require.Error(t, threadedErr)
+		require.EqualError(t, nativeErr, threadedErr.Error())
+	})
+
+	t.Run("a null struct container faults the same way native and threaded", func(t *testing.T) {
+		callee := types.NewFunctionBuilder(&types.FunctionType{}).
+			Emit(instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 42), instr.New(instr.STRUCT_SET)).
+			Emit(instr.New(instr.RETURN)).
+			MustBuild()
+
+		nativeErr, threadedErr := runFault(t, call(callee))
+		require.Error(t, nativeErr)
+		require.Error(t, threadedErr)
+		require.EqualError(t, nativeErr, threadedErr.Error())
+	})
+}
+
 // RefEqLoop protects the native boxed-word equality for REF_EQ/REF_NE.
 // Every sub-case diffs results and exact refcounts against a threaded twin.
 func TestARM64_RefEqLoop(t *testing.T) {
