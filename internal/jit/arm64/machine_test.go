@@ -1946,19 +1946,6 @@ func TestNew(t *testing.T) {
 			}(),
 		},
 		{
-			name: "a self-recursive call",
-			input: func() *jit.Input {
-				in := input(1, &types.Function{
-					Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-					Code: assemble(t, func(b *instr.Builder) {
-						b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
-					}),
-				})
-				in.Constants = []types.Boxed{types.BoxRef(1)}
-				return in
-			}(),
-		},
-		{
 			name: "a call returning a reference",
 			input: func() *jit.Input {
 				in := input(1, &types.Function{
@@ -2709,6 +2696,213 @@ func TestARM64_CallResultKinds(t *testing.T) {
 			require.NotEmpty(t, code)
 		})
 	}
+}
+
+// TestARM64_SelfCall pins the complete native stream for a self-recursive EntryFunction.
+func TestARM64_SelfCall(t *testing.T) {
+	fn := &types.Function{
+		Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) {
+			base := b.Label()
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_LT_S).BrIf(base)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).
+				Emit(instr.CONST_GET, 0).Emit(instr.CALL).
+				Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
+			b.Bind(base)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}),
+	}
+	in := input(1, fn)
+	in.Constants = []types.Boxed{types.BoxRef(1)}
+
+	want := slices.Concat(
+		prologue(),
+		frameBase(11, 12, 13),
+		[]asm.Instruction{
+			asmarm64.LDR(narrow(0), vreg(11), 0),
+			asmarm64.MOVZ(narrow(1), 1, 0),
+			asmarm64.CMP(narrow(0), narrow(1)),
+			asmarm64.CSET(narrow(2), asmarm64.CondLT),
+			asmarm64.CBZLabel(narrow(2), 2),
+			asmarm64.MOVZ(narrow(3), 0, 0),
+			asmarm64.MOV(vreg(14), vreg(3)),
+			asmarm64.MOVK(vreg(14), tag(types.KindI32), 48),
+			asmarm64.LSLI(vreg(15), vreg(16), 3),
+			asmarm64.ADD(vreg(15), vreg(17), vreg(15)),
+			asmarm64.STR(vreg(14), vreg(15), 0),
+			asmarm64.MOV(vreg(18), vreg(14)),
+			asmarm64.RET(),
+		},
+		frameBase(19, 20, 21),
+		[]asm.Instruction{
+			asmarm64.LDR(narrow(4), vreg(19), 0),
+			asmarm64.MOVZ(narrow(5), 1, 0),
+			asmarm64.SUB(narrow(6), narrow(4), narrow(5)),
+			asmarm64.MOVZ(vreg(7), 1, 0),
+			asmarm64.MOVK(vreg(7), tag(types.KindRef), 48),
+			asmarm64.ANDI(vreg(23), vreg(7), 0xFFFFFFFF),
+			asmarm64.CMPI(vreg(23), 0),
+			asmarm64.BCondLabel(asmarm64.OpBEQ, 3),
+			asmarm64.LDR(vreg(24), vreg(22), int16(journal.CellRC*8)),
+			asmarm64.LDRR(vreg(25), vreg(24), vreg(23)),
+			asmarm64.ADDI(vreg(25), vreg(25), 1),
+			asmarm64.STRR(vreg(25), vreg(24), vreg(23)),
+			asmarm64.ANDI(vreg(27), vreg(7), 0xFFFFFFFF),
+			asmarm64.CMPI(vreg(27), 0),
+			asmarm64.BCondLabel(asmarm64.OpBEQ, 5),
+			asmarm64.LDR(vreg(28), vreg(26), int16(journal.CellRC*8)),
+			asmarm64.LDRR(vreg(29), vreg(28), vreg(27)),
+			asmarm64.CMPI(vreg(29), 1),
+			asmarm64.BCondLabel(asmarm64.OpBLE, 4),
+			asmarm64.SUBI(vreg(29), vreg(29), 1),
+			asmarm64.STRR(vreg(29), vreg(28), vreg(27)),
+			asmarm64.BLabel(6),
+		},
+		slices.Concat(
+			[]asm.Instruction{
+				asmarm64.MOV(vreg(31), vreg(6)),
+				asmarm64.MOVK(vreg(31), tag(types.KindI32), 48),
+			},
+			frameBase(32, 33, 34),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(31), vreg(32), 8),
+			},
+			frameBase(35, 36, 37),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(7), vreg(35), 16),
+				asmarm64.ADDI(vreg(39), vreg(38), 3),
+				asmarm64.STR(vreg(39), vreg(30), int16(journal.CellSP*8)),
+				asmarm64.LDR(vreg(40), vreg(30), int16(journal.CellDepth*8)),
+				asmarm64.LSLI(vreg(41), vreg(40), journal.Shift),
+				asmarm64.ADD(vreg(42), vreg(30), vreg(41)),
+				asmarm64.MOVZ(vreg(43), 1, 0),
+				asmarm64.STP(vreg(43), vreg(38), vreg(42), int16(journal.At(0, journal.RecordAddr)*8)),
+				asmarm64.MOVZ(vreg(44), 22, 0),
+				asmarm64.MOVZ(vreg(45), 1, 0),
+				asmarm64.STP(vreg(44), vreg(45), vreg(42), int16(journal.At(0, journal.RecordIP)*8)),
+				asmarm64.ADDI(vreg(40), vreg(40), 1),
+				asmarm64.STR(vreg(40), vreg(30), int16(journal.CellDepth*8)),
+				asmarm64.MOVZ(vreg(46), 1, 0),
+				asmarm64.STR(vreg(46), vreg(30), int16(journal.CellExitID*8)),
+				asmarm64.MOVZ(vreg(47), uint16(journal.TrapFallback), 0),
+				asmarm64.STR(vreg(47), vreg(30), int16(journal.CellTrap*8)),
+				asmarm64.MOVZ(vreg(48), 22, 0),
+				asmarm64.STR(vreg(48), vreg(30), int16(journal.CellNextIP*8)),
+				asmarm64.RET(),
+			},
+		),
+		[]asm.Instruction{
+			asmarm64.LDR(vreg(49), vreg(26), int16(journal.CellActive*8)),
+			asmarm64.LDR(vreg(50), vreg(26), int16(journal.CellCap*8)),
+			asmarm64.CMP(vreg(49), vreg(50)),
+			asmarm64.BCondLabel(asmarm64.OpBCC, 7),
+		},
+		slices.Concat(
+			[]asm.Instruction{
+				asmarm64.MOV(vreg(52), vreg(6)),
+				asmarm64.MOVK(vreg(52), tag(types.KindI32), 48),
+			},
+			frameBase(53, 54, 55),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(52), vreg(53), 8),
+			},
+			frameBase(56, 57, 58),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(7), vreg(56), 16),
+				asmarm64.ADDI(vreg(60), vreg(59), 3),
+				asmarm64.STR(vreg(60), vreg(51), int16(journal.CellSP*8)),
+				asmarm64.LDR(vreg(61), vreg(51), int16(journal.CellDepth*8)),
+				asmarm64.LSLI(vreg(62), vreg(61), journal.Shift),
+				asmarm64.ADD(vreg(63), vreg(51), vreg(62)),
+				asmarm64.MOVZ(vreg(64), 1, 0),
+				asmarm64.STP(vreg(64), vreg(59), vreg(63), int16(journal.At(0, journal.RecordAddr)*8)),
+				asmarm64.MOVZ(vreg(65), 22, 0),
+				asmarm64.MOVZ(vreg(66), 1, 0),
+				asmarm64.STP(vreg(65), vreg(66), vreg(63), int16(journal.At(0, journal.RecordIP)*8)),
+				asmarm64.ADDI(vreg(61), vreg(61), 1),
+				asmarm64.STR(vreg(61), vreg(51), int16(journal.CellDepth*8)),
+				asmarm64.MOVZ(vreg(67), 0, 0),
+				asmarm64.STR(vreg(67), vreg(51), int16(journal.CellExitID*8)),
+				asmarm64.MOVZ(vreg(68), uint16(journal.TrapOverflow), 0),
+				asmarm64.STR(vreg(68), vreg(51), int16(journal.CellTrap*8)),
+				asmarm64.MOVZ(vreg(69), 22, 0),
+				asmarm64.STR(vreg(69), vreg(51), int16(journal.CellNextIP*8)),
+				asmarm64.RET(),
+			},
+		),
+		slices.Concat(
+			[]asm.Instruction{
+				asmarm64.ADDI(vreg(49), vreg(49), 1),
+				asmarm64.STR(vreg(49), vreg(26), int16(journal.CellActive*8)),
+				asmarm64.MOV(vreg(70), vreg(6)),
+				asmarm64.MOVK(vreg(70), tag(types.KindI32), 48),
+			},
+			frameBase(71, 72, 73),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(70), vreg(71), 8),
+			},
+			frameBase(74, 75, 76),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(7), vreg(74), 16),
+				asmarm64.ADDI(vreg(78), vreg(77), 1),
+				asmarm64.LSLI(vreg(79), vreg(78), 3),
+				asmarm64.ADD(vreg(79), vreg(80), vreg(79)),
+				asmarm64.SUBI(asmarm64.SP, asmarm64.SP, 16),
+				asmarm64.STR(vreg(77), asmarm64.SP, 0),
+				asmarm64.STR(asmarm64.LR, asmarm64.SP, 8),
+				asmarm64.MOV(vreg(81), vreg(78)),
+				asmarm64.BLLabel(0),
+			},
+		),
+		[]asm.Instruction{
+			asmarm64.LDR(vreg(83), vreg(82), int16(journal.CellTrap*8)),
+			asmarm64.CBZLabel(vreg(83), 8),
+			asmarm64.LDR(vreg(84), asmarm64.SP, 0),
+			asmarm64.LDR(vreg(85), vreg(82), int16(journal.CellDepth*8)),
+			asmarm64.LSLI(vreg(86), vreg(85), journal.Shift),
+			asmarm64.ADD(vreg(87), vreg(82), vreg(86)),
+			asmarm64.MOVZ(vreg(88), 1, 0),
+			asmarm64.STP(vreg(88), vreg(84), vreg(87), int16(journal.At(0, journal.RecordAddr)*8)),
+			asmarm64.MOVZ(vreg(89), 23, 0),
+			asmarm64.MOVZ(vreg(90), 1, 0),
+			asmarm64.STP(vreg(89), vreg(90), vreg(87), int16(journal.At(0, journal.RecordIP)*8)),
+			asmarm64.ADDI(vreg(85), vreg(85), 1),
+			asmarm64.STR(vreg(85), vreg(82), int16(journal.CellDepth*8)),
+			asmarm64.LDR(asmarm64.LR, asmarm64.SP, 8),
+			asmarm64.ADDI(asmarm64.SP, asmarm64.SP, 16),
+			asmarm64.RET(),
+		},
+		slices.Concat(
+			[]asm.Instruction{
+				asmarm64.SUBI(vreg(91), vreg(91), 1),
+				asmarm64.STR(vreg(91), vreg(82), int16(journal.CellActive*8)),
+				asmarm64.LDR(vreg(92), asmarm64.SP, 0),
+				asmarm64.LDR(asmarm64.LR, asmarm64.SP, 8),
+				asmarm64.ADDI(asmarm64.SP, asmarm64.SP, 16),
+				asmarm64.MOV(narrow(8), narrow(93)),
+				asmarm64.MOVZ(narrow(9), 1, 0),
+				asmarm64.ADD(narrow(10), narrow(8), narrow(9)),
+				asmarm64.MOV(vreg(94), vreg(10)),
+				asmarm64.MOVK(vreg(94), tag(types.KindI32), 48),
+			},
+			frameBase(95, 96, 97),
+			[]asm.Instruction{
+				asmarm64.STR(vreg(94), vreg(95), 0),
+				asmarm64.MOV(vreg(98), vreg(94)),
+				asmarm64.RET(),
+			},
+		),
+	)
+	assembler := asm.New(asmarm64.New())
+	entry, ok := arm64.New().Compile(assembler, in, jit.Anchor{Addr: 1})
+	require.True(t, ok)
+	require.Equal(t, jit.EntryFunction, entry.Kind)
+	require.Equal(t, prof.FrontendStatic, entry.Frontend)
+	require.Equal(t, []jit.Exit{{Reason: prof.ExitGuardValue, Opcode: int(instr.CALL)}}, entry.Exits)
+	require.Equal(t, want, assembler.Instructions())
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
 }
 
 // spillsTo reports whether o is a memory operand addressed off X26, the

@@ -274,7 +274,7 @@ func (e *emitter) materialize(slots []backend.Flush, ctrl asm.VReg) bool {
 		if !ok {
 			return false
 		}
-		e.a.Emit(arm64.STR(boxed, e.base, int16(flush.Slot*8)))
+		e.a.Emit(arm64.STR(boxed, e.addr(), int16(flush.Slot*8)))
 		if !flush.Owned && e.c.Func().Type(flush.Value) == ssa.TypeRef {
 			e.count(boxed, ctrl)
 		}

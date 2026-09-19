@@ -36,6 +36,11 @@ type emitter struct {
 	locals  int
 	returns int
 
+	// recursive marks a function selfCall reaches through its own BL, which
+	// switches addr from base's single cached derivation to a fresh one on
+	// every read (see addr). Set once, from Enter, before any block lowers.
+	recursive bool
+
 	// base is the frame base every slot is addressed through for the whole
 	// compile: the VM stack plus the frame pointer scaled to bytes. It is
 	// derived once, at block zero's own position (see baseFor) rather than in
@@ -46,7 +51,7 @@ type emitter struct {
 	// allocator frees a register at its value's last textual reference,
 	// without regard for a later back edge - see internal/asm/rewriter.go).
 	// Every other block, and a cold stub materialize emits after every block
-	// is laid out, reuses the same register untouched.
+	// is laid out, reuses the same register untouched. Unused when recursive.
 	base  asm.VReg
 	seen  []bool
 	stubs []stub
@@ -171,6 +176,7 @@ func (e *emitter) Enter() bool {
 	if e.kind != jit.EntryFunction {
 		return true
 	}
+	e.recursive = e.selfRecursive()
 	zeros := map[types.Boxed]asm.VReg{}
 	var base asm.VReg
 	for idx := params; idx < len(declared); idx++ {
@@ -877,7 +883,7 @@ func (e *emitter) ret(t ssa.Terminator) bool {
 		if !ok {
 			return false
 		}
-		e.a.Emit(arm64.STR(boxed, e.base, int16(idx*8)))
+		e.a.Emit(arm64.STR(boxed, e.addr(), int16(idx*8)))
 		if idx < len(arm64.IntRets) {
 			e.a.Emit(arm64.MOV(e.pinTo(arm64.IntRets[idx]), boxed))
 		}
@@ -1003,9 +1009,10 @@ func rawTag(typ ssa.Type) uint64 {
 // on every block, but it acts only for block zero and only the first time -
 // every other block, and every later call for block zero itself, reuses the
 // register already derived there, which is what a back edge to block zero
-// reads fresh on every iteration (see emitter.base).
+// reads fresh on every iteration (see emitter.base). It caches nothing for a
+// recursive function; addr re-derives instead (see addr).
 func (e *emitter) baseFor(block int) {
-	if block != 0 || e.base.Width() != asm.WidthUndefined {
+	if block != 0 || e.recursive || e.base.Width() != asm.WidthUndefined {
 		return
 	}
 	e.base = e.frameBase()
@@ -1024,6 +1031,20 @@ func (e *emitter) frameBase() asm.VReg {
 	return base
 }
 
+// addr returns the current activation's frame base: base's single cached
+// derivation, or - once selfCall overwrites bp around its own BL (see
+// selfcall.go) - a fresh derivation off the pinned bp register every read.
+// base's one long-lived vreg would need two values live across that BL,
+// which the allocator's self-recursive-call barrier refuses to carry (see
+// internal/asm/eligibility.go's barriers); a fresh vreg per site never spans
+// the call.
+func (e *emitter) addr() asm.VReg {
+	if e.recursive {
+		return e.frameBase()
+	}
+	return e.base
+}
+
 // slot resolves the base register and word offset one interpreter slot lives
 // at. A frame base other than the entry frame's names an inlined callee's
 // storage and an upvalue's base is the closure's: this machine reaches
@@ -1034,7 +1055,7 @@ func (e *emitter) slot(s ssa.Slot) (asm.VReg, int, bool) {
 		if s.Base != 0 || s.Index < 0 || s.Index >= e.locals {
 			return asm.VReg{}, 0, false
 		}
-		return e.base, s.Index, true
+		return e.addr(), s.Index, true
 	case ssa.SpaceGlobal:
 		if s.Index < 0 || s.Index >= len(e.c.Input().Globals) || s.Index > maxSlot {
 			return asm.VReg{}, 0, false

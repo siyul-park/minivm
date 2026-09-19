@@ -5519,6 +5519,70 @@ func TestARM64_SelfCallFrameLocals(t *testing.T) {
 	require.Greater(t, entries, float64(0))
 }
 
+// TestARM64_SelfCallDepth proves a self-recursive function's native result
+// matches its threaded one up to and at nativeFrameLimit, where selfCall's
+// own frame-budget check (see direct.go's reserve) starts declining further
+// native recursion.
+func TestARM64_SelfCallDepth(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Params(types.TypeI32)
+	base := b.Label()
+	fn := b.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S)).
+		BrIf(base).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).
+		Bind(base).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	for _, depth := range []int32{1, nativeFrameLimit - 1, nativeFrameLimit} {
+		t.Run(strconv.Itoa(int(depth)), func(t *testing.T) {
+			prog := program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, uint64(uint32(depth))),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			)
+
+			profile := prof.New()
+			jit := interp.New(prog, interp.WithFrame(nativeFrameLimit+16), interp.WithProfiler(profile), interp.WithTick(1), interp.WithThreshold(0))
+			threaded := interp.New(prog, interp.WithFrame(nativeFrameLimit+16), interp.WithThreshold(-1))
+			for range 8 {
+				require.NoError(t, jit.Run(context.Background()))
+				require.NoError(t, threaded.Run(context.Background()))
+				got, err := jit.PopBoxed()
+				require.NoError(t, err)
+				want, err := threaded.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, want, got)
+				require.Equal(t, types.BoxI32(depth), got)
+				require.Equal(t, refCounts(threaded), refCounts(jit))
+				jit.Reset()
+				threaded.Reset()
+			}
+			require.NoError(t, threaded.Close())
+			require.NoError(t, jit.Close())
+
+			var entries float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_native_entries_total" {
+					entries += metric.Value
+				}
+			}
+			require.Greater(t, entries, float64(0))
+		})
+	}
+}
+
 // TestARM64_MutualEntries protects nested native entry frames.
 func TestARM64_MutualEntries(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
