@@ -160,7 +160,9 @@ func TestHoistPass_Run(t *testing.T) {
 		divisor := l.b.Value(ssa.TypeI32)
 		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{divisor}})
 		quot := l.b.Value(ssa.TypeI32)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{l.bound, divisor}, Results: []ssa.Value{quot}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{l.bound, divisor}, State: state, Results: []ssa.Value{quot}})
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 

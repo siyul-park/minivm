@@ -69,12 +69,14 @@ const maxSlot = 4095
 func (m machine) Lowers(code instr.Opcode) bool {
 	switch code {
 	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL,
+		instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
 		instr.I32_AND, instr.I32_OR, instr.I32_XOR,
 		instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
 		instr.I32_EQZ, instr.I32_EQ, instr.I32_NE,
 		instr.I32_LT_S, instr.I32_LE_S, instr.I32_GT_S, instr.I32_GE_S,
 		instr.I32_LT_U, instr.I32_LE_U, instr.I32_GT_U, instr.I32_GE_U,
 		instr.I64_ADD, instr.I64_SUB, instr.I64_MUL,
+		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U,
 		instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQZ,
 		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LE_S,
 		instr.I64_GT_S, instr.I64_GE_S, instr.I64_LT_U, instr.I64_LE_U,
@@ -442,6 +444,14 @@ func (e *emitter) exec(op ssa.Operation) bool {
 		return e.binary(op, ssa.TypeI32, arm64.SUB)
 	case instr.I32_MUL:
 		return e.binary(op, ssa.TypeI32, arm64.MUL)
+	case instr.I32_DIV_S:
+		return e.divide(op, ssa.TypeI32, arm64.SDIV, false)
+	case instr.I32_DIV_U:
+		return e.divide(op, ssa.TypeI32, arm64.UDIV, false)
+	case instr.I32_REM_S:
+		return e.divide(op, ssa.TypeI32, arm64.SDIV, true)
+	case instr.I32_REM_U:
+		return e.divide(op, ssa.TypeI32, arm64.UDIV, true)
 	case instr.I32_AND:
 		return e.binary(op, ssa.TypeI32, arm64.AND)
 	case instr.I32_OR:
@@ -483,6 +493,14 @@ func (e *emitter) exec(op ssa.Operation) bool {
 		return e.binary(op, ssa.TypeI64, arm64.SUB)
 	case instr.I64_MUL:
 		return e.binary(op, ssa.TypeI64, arm64.MUL)
+	case instr.I64_DIV_S:
+		return e.divide(op, ssa.TypeI64, arm64.SDIV, false)
+	case instr.I64_DIV_U:
+		return e.divide(op, ssa.TypeI64, arm64.UDIV, false)
+	case instr.I64_REM_S:
+		return e.divide(op, ssa.TypeI64, arm64.SDIV, true)
+	case instr.I64_REM_U:
+		return e.divide(op, ssa.TypeI64, arm64.UDIV, true)
 	case instr.I64_AND:
 		return e.binary(op, ssa.TypeI64, arm64.AND)
 	case instr.I64_OR:
@@ -604,6 +622,61 @@ func (e *emitter) binary(op ssa.Operation, want ssa.Type, emit func(dst, src1, s
 	if op.State != ssa.NoValue {
 		return e.guardBoxable(op.State, dst)
 	}
+	return true
+}
+
+// divide lowers a division or remainder over want's own lane: emit computes
+// the quotient, and rem recovers the remainder from it with one MSUB, since
+// ARM64 has no remainder instruction - a % b is a - (a/b)*b for whichever
+// rounding SDIV or UDIV already used, so the quotient this always computes
+// first is exactly the one that subtraction needs.
+//
+// The divisor is guarded against zero before either divides: ARM64's SDIV
+// and UDIV return zero for a zero divisor rather than trapping, but the
+// threaded interpreter panics ErrDivideByZero (see interp/threaded.go's
+// I32_DIV_S and I64_DIV_S handlers), so native code raises that fault
+// itself by deopting through the op's own pre-op state - both operands
+// still on the stack, as store's replaced-ref guard resumes into - rather
+// than computing a wrong answer.
+//
+// A signed divide needs no further guard against INT_MIN/-1: Go's own
+// division wraps on that overflow exactly as ARM64's SDIV does, so the two
+// already agree without one. An i64 divide's quotient still needs the same
+// boxable-range guard I64_ADD/SUB/MUL/SHL/SHR_U already run after computing
+// (see guardBoxable and ssa.OverflowsI64), because dividing two in-range
+// operands can still leave the payload - the boxed range is asymmetric, so
+// its own minimum divided by -1 is one past the maximum. A remainder never
+// needs it: its magnitude is bounded by its divisor's, itself already
+// inside the boxed range.
+func (e *emitter) divide(op ssa.Operation, want ssa.Type, emit func(dst, src1, src2 asm.Reg) asm.Instruction, rem bool) bool {
+	if len(op.Args) != 2 || len(op.Results) != 1 {
+		return false
+	}
+	if !e.lanes(want, op.Args[0], op.Args[1], op.Results[0]) {
+		return false
+	}
+	a, b := e.c.Reg(op.Args[0]), e.c.Reg(op.Args[1])
+	fail, ok := e.exit(op.State, prof.ExitGuardValue)
+	if !ok {
+		return false
+	}
+	e.a.Emit(arm64.CMPI(b, 0), arm64.BCondLabel(arm64.OpBEQ, fail))
+
+	dst := e.c.Reg(op.Results[0])
+	if !rem {
+		e.a.Emit(emit(dst, a, b))
+		if want == ssa.TypeI64 {
+			return e.guardBoxable(op.State, dst)
+		}
+		return true
+	}
+	width := asm.Width32
+	if want == ssa.TypeI64 {
+		width = asm.Width64
+	}
+	quotient := e.a.Reg(asm.RegTypeInt, width)
+	e.a.Emit(emit(quotient, a, b))
+	e.a.Emit(arm64.MSUB(dst, quotient, b, a))
 	return true
 }
 

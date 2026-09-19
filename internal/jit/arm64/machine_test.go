@@ -192,7 +192,7 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(9), vreg(7)),
 					asmarm64.RET(),
 				},
-				overflowStub(10, guardedI64IP),
+				overflowStub(10, 1, guardedI64IP),
 			),
 		},
 		{
@@ -221,7 +221,7 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(9), vreg(7)),
 					asmarm64.RET(),
 				},
-				overflowStub(10, guardedI64IP),
+				overflowStub(10, 1, guardedI64IP),
 			),
 		},
 		{
@@ -251,7 +251,7 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(9), vreg(7)),
 					asmarm64.RET(),
 				},
-				overflowStub(10, guardedI64IP),
+				overflowStub(10, 1, guardedI64IP),
 			),
 		},
 		{
@@ -382,7 +382,7 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(10), vreg(8)),
 					asmarm64.RET(),
 				},
-				overflowStub(11, guardedI64IP),
+				overflowStub(11, 1, guardedI64IP),
 			),
 		},
 		{
@@ -417,7 +417,264 @@ func TestNew(t *testing.T) {
 					asmarm64.MOV(vreg(10), vreg(8)),
 					asmarm64.RET(),
 				},
-				overflowStub(11, guardedI64IP),
+				overflowStub(11, 1, guardedI64IP),
+			),
+		},
+		{
+			// SDIV alone would compute the wrong "0" ARM64 defines for a
+			// zero divisor; the interpreter panics ErrDivideByZero instead
+			// (see interp/threaded.go's I32_DIV_S), so the guard runs before
+			// the divide, not after it the way the boxable-payload guards
+			// above do.
+			name: "divides inline i32 values signed, guarding the divisor",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 10).Emit(instr.I32_CONST, 3).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 10, 0),
+					asmarm64.MOVZ(narrow(1), 3, 0),
+					asmarm64.CMPI(narrow(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.SDIV(narrow(2), narrow(0), narrow(1)),
+					asmarm64.MOV(vreg(6), vreg(2)),
+					asmarm64.MOVK(vreg(6), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(6), vreg(3), 0),
+					asmarm64.MOV(vreg(7), vreg(6)),
+					asmarm64.RET(),
+				},
+				divStub(8, guardedI32IP),
+			),
+		},
+		{
+			name: "divides inline i32 values unsigned, guarding the divisor",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 10).Emit(instr.I32_CONST, 3).Emit(instr.I32_DIV_U).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 10, 0),
+					asmarm64.MOVZ(narrow(1), 3, 0),
+					asmarm64.CMPI(narrow(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.UDIV(narrow(2), narrow(0), narrow(1)),
+					asmarm64.MOV(vreg(6), vreg(2)),
+					asmarm64.MOVK(vreg(6), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(6), vreg(3), 0),
+					asmarm64.MOV(vreg(7), vreg(6)),
+					asmarm64.RET(),
+				},
+				divStub(8, guardedI32IP),
+			),
+		},
+		{
+			// ARM64 has no remainder instruction: SDIV's own quotient feeds
+			// one MSUB, a - (a/b)*b, which is exact for whichever rounding
+			// SDIV already used.
+			name: "computes the remainder of inline i32 values signed",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 10).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 10, 0),
+					asmarm64.MOVZ(narrow(1), 3, 0),
+					asmarm64.CMPI(narrow(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.SDIV(narrow(6), narrow(0), narrow(1)),
+					asmarm64.MSUB(narrow(2), narrow(6), narrow(1), narrow(0)),
+					asmarm64.MOV(vreg(7), vreg(2)),
+					asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(7)),
+					asmarm64.RET(),
+				},
+				divStub(9, guardedI32IP),
+			),
+		},
+		{
+			name: "computes the remainder of inline i32 values unsigned",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 10).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_U).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 10, 0),
+					asmarm64.MOVZ(narrow(1), 3, 0),
+					asmarm64.CMPI(narrow(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.UDIV(narrow(6), narrow(0), narrow(1)),
+					asmarm64.MSUB(narrow(2), narrow(6), narrow(1), narrow(0)),
+					asmarm64.MOV(vreg(7), vreg(2)),
+					asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(7)),
+					asmarm64.RET(),
+				},
+				divStub(9, guardedI32IP),
+			),
+		},
+		{
+			// Both the boxed payload's own minimum and -1 are individually
+			// in range, but the true quotient, 2^48, is one past the
+			// payload's positive maximum - the same asymmetry
+			// ssa.OverflowsI64 documents for DIV_S/DIV_U - so this reserves
+			// two exits: one for the divisor, reused unconditionally, and
+			// one for the boxable-range check every other overflowing i64
+			// arithmetic op already runs after computing (see
+			// "adds inline i64 values" above). ARM64's SDIV wraps the same
+			// way Go's own division does for a true int64 INT_MIN/-1, so
+			// neither the interpreter nor this lowering needs a hardware
+			// trap for it; the boxed payload's own, narrower asymmetry is
+			// the only overflow either has to guard.
+			name: "divides inline i64 values signed at the boxed range's own boundary",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(0xFFFF000000000000)).Emit(instr.I64_CONST, ^uint64(0)).
+						Emit(instr.I64_DIV_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				asmarm64.LDI(vreg(0), uint64(0xFFFF000000000000)),
+				asmarm64.LDI(vreg(1), ^uint64(0)),
+				[]asm.Instruction{
+					asmarm64.CMPI(vreg(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.SDIV(vreg(2), vreg(0), vreg(1)),
+					asmarm64.SBFX(vreg(6), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(6), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 2),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				overflowStub(10, 1, guardedI64IP),
+				overflowStub(26, 2, guardedI64IP),
+			),
+		},
+		{
+			name: "divides inline i64 values unsigned, guarding the divisor and the boxed payload",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(10)).Emit(instr.I64_CONST, uint64(3)).Emit(instr.I64_DIV_U).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 10, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.CMPI(vreg(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.UDIV(vreg(2), vreg(0), vreg(1)),
+					asmarm64.SBFX(vreg(6), vreg(2), 0, types.VBits),
+					asmarm64.CMP(vreg(6), vreg(2)),
+					asmarm64.BCondLabel(asmarm64.OpBNE, 2),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				overflowStub(10, 1, guardedI64IP),
+				overflowStub(26, 2, guardedI64IP),
+			),
+		},
+		{
+			// A remainder's magnitude is bounded by its divisor's, itself
+			// already inside the boxed range (see ssa.OverflowsI64), so an
+			// i64 remainder reserves only the divisor's own exit - unlike
+			// the i64 divide golden above, nothing follows the MSUB.
+			name: "computes the remainder of inline i64 values signed, guarding only the divisor",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(10)).Emit(instr.I64_CONST, uint64(3)).Emit(instr.I64_REM_S).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 10, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.CMPI(vreg(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.SDIV(vreg(6), vreg(0), vreg(1)),
+					asmarm64.MSUB(vreg(2), vreg(6), vreg(1), vreg(0)),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				overflowStub(10, 1, guardedI64IP),
+			),
+		},
+		{
+			name: "computes the remainder of inline i64 values unsigned, guarding only the divisor",
+			addr: 1,
+			in: input(1, &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I64_CONST, uint64(10)).Emit(instr.I64_CONST, uint64(3)).Emit(instr.I64_REM_U).Emit(instr.RETURN)
+				}),
+			}),
+			want: slices.Concat(
+				prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 10, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.CMPI(vreg(1), 0),
+					asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+					asmarm64.UDIV(vreg(6), vreg(0), vreg(1)),
+					asmarm64.MSUB(vreg(2), vreg(6), vreg(1), vreg(0)),
+				},
+				boxI64(vreg(7), vreg(2), vreg(8)),
+				[]asm.Instruction{
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(7)),
+					asmarm64.RET(),
+				},
+				overflowStub(10, 1, guardedI64IP),
 			),
 		},
 		{
@@ -1610,11 +1867,13 @@ func TestNew(t *testing.T) {
 		input *jit.Input
 	}{
 		{
+			// F64_REM has no arm64 lowering: unlike F64_DIV, it stays a
+			// terminal fallback to the threaded handler.
 			name: "an opcode it does not lower",
 			input: input(1, &types.Function{
-				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeF64, types.TypeF64}, Returns: []types.Type{types.TypeF64}},
 				Code: assemble(t, func(b *instr.Builder) {
-					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.F64_REM).Emit(instr.RETURN)
 				}),
 			}),
 		},
@@ -1657,15 +1916,6 @@ func TestNew(t *testing.T) {
 				Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
-				}),
-			}),
-		},
-		{
-			name: "an i64 divide",
-			input: input(1, &types.Function{
-				Typ: &types.FunctionType{Params: []types.Type{types.TypeI64, types.TypeI64}, Returns: []types.Type{types.TypeI64}},
-				Code: assemble(t, func(b *instr.Builder) {
-					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I64_DIV_S).Emit(instr.RETURN)
 				}),
 			}),
 		},
@@ -2105,6 +2355,10 @@ const (
 	// with exactly two 9-byte I64_CONST instructions (opcode plus 8-byte
 	// immediate), so the offset is the same 18 for all of them.
 	guardedI64IP = 18
+	// guardedI32IP is the same offset for an i32 divide/remainder golden's
+	// own bytecode below: every one of them precedes its op with exactly two
+	// 5-byte I32_CONST instructions (opcode plus 4-byte immediate).
+	guardedI32IP = 10
 	// callRef is the constant callee address the "calls a constant scalar
 	// callee" golden resolves, and callIP is where CALL's own opcode sits in
 	// that golden's bytecode below - both the frame record's IP and the IP
@@ -2183,14 +2437,17 @@ func callFallback(first int32, exitID uint16, trap journal.Trap) []asm.Instructi
 	}
 }
 
-// overflowStub is the cold stub behind an I64_ADD/SUB/MUL/SHL/SHR_U
-// boxability guard: both operands flush boxed to their VM stack slots at
-// base (see box's ordinary TypeI64 case - each is already proven in range by
-// its own producer, so neither truncates), unlike stub above there is no
-// retain to take because neither is a reference, the stack pointer advances
-// by the two words they occupied, one frame record resumes at ip, and the
-// trap reports fallback. first names the stub's own first virtual register.
-func overflowStub(first int32, ip int) []asm.Instruction {
+// overflowStub is the cold stub behind an I64_ADD/SUB/MUL/SHL/SHR_U/DIV_S/
+// DIV_U boxability guard: both operands flush boxed to their VM stack slots
+// at base (see box's ordinary TypeI64 case - each is already proven in
+// range by its own producer, so neither truncates), unlike stub above there
+// is no retain to take because neither is a reference, the stack pointer
+// advances by the two words they occupied, one frame record resumes at ip,
+// and the trap reports fallback. first names the stub's own first virtual
+// register and id the exit descriptor it reports - an i64 divide reserves
+// two exits sharing this same shape, one for its zero-divisor guard and one
+// for this boxability guard, so the two stubs differ only in id and first.
+func overflowStub(first int32, id uint16, ip int) []asm.Instruction {
 	ctrl, base := vreg(first), vreg(3)
 	depth := vreg(first + 7)
 	rbase := vreg(first + 9)
@@ -2215,13 +2472,61 @@ func overflowStub(first int32, ip int) []asm.Instruction {
 			asmarm64.ADDI(depth, depth, 1),
 			asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
 		},
-		asmarm64.LDI(vreg(first+13), 1),
+		asmarm64.LDI(vreg(first+13), uint64(id)),
 		[]asm.Instruction{asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellExitID*8))},
 		asmarm64.LDI(vreg(first+14), uint64(journal.TrapFallback)),
 		[]asm.Instruction{asmarm64.STR(vreg(first+14), ctrl, int16(journal.CellTrap*8))},
 		asmarm64.LDI(vreg(first+15), uint64(ip)),
 		[]asm.Instruction{
 			asmarm64.STR(vreg(first+15), ctrl, int16(journal.CellNextIP*8)),
+			asmarm64.RET(),
+		},
+	)
+}
+
+// divStub is the cold stub behind an I32_DIV_S/DIV_U/REM_S/REM_U
+// zero-divisor guard: both i32 operands flush boxed to their VM stack slots
+// at base (see box's ordinary TypeI32 case, which needs one fewer register
+// per operand than TypeI64's own - there is no separate tag register, since
+// MOVK writes the tag into the same one the value was moved into), there is
+// no retain to take because neither is a reference, the stack pointer
+// advances by the two words they occupied, one frame record resumes at ip,
+// and the trap reports fallback. first names the stub's own first virtual
+// register; the exit is always this function's only one, so id is always 1.
+func divStub(first int32, ip int) []asm.Instruction {
+	ctrl, base, bp := vreg(first), vreg(3), vreg(first+3)
+	depth := vreg(first + 5)
+	rbase := vreg(first + 7)
+	return slices.Concat(
+		[]asm.Instruction{
+			asmarm64.MOV(vreg(first+1), vreg(0)),
+			asmarm64.MOVK(vreg(first+1), tag(types.KindI32), 48),
+			asmarm64.STR(vreg(first+1), base, 0),
+			asmarm64.MOV(vreg(first+2), vreg(1)),
+			asmarm64.MOVK(vreg(first+2), tag(types.KindI32), 48),
+			asmarm64.STR(vreg(first+2), base, 8),
+			asmarm64.ADDI(vreg(first+4), bp, 2),
+			asmarm64.STR(vreg(first+4), ctrl, int16(journal.CellSP*8)),
+			asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
+			asmarm64.LSLI(vreg(first+6), depth, journal.Shift),
+			asmarm64.ADD(rbase, ctrl, vreg(first+6)),
+		},
+		asmarm64.LDI(vreg(first+8), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+8), bp, rbase, int16(journal.At(0, journal.RecordAddr)*8))},
+		asmarm64.LDI(vreg(first+9), uint64(ip)),
+		asmarm64.LDI(vreg(first+10), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+9), vreg(first+10), rbase, int16(journal.At(0, journal.RecordIP)*8))},
+		[]asm.Instruction{
+			asmarm64.ADDI(depth, depth, 1),
+			asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
+		},
+		asmarm64.LDI(vreg(first+11), 1),
+		[]asm.Instruction{asmarm64.STR(vreg(first+11), ctrl, int16(journal.CellExitID*8))},
+		asmarm64.LDI(vreg(first+12), uint64(journal.TrapFallback)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+12), ctrl, int16(journal.CellTrap*8))},
+		asmarm64.LDI(vreg(first+13), uint64(ip)),
+		[]asm.Instruction{
+			asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellNextIP*8)),
 			asmarm64.RET(),
 		},
 	)

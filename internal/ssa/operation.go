@@ -223,6 +223,24 @@ func OverflowsI64(code instr.Opcode) bool {
 	}
 }
 
+// Divides reports whether code can fault on a zero divisor, so its result
+// needs a guard before it runs even though nothing about the value it
+// produces can overflow the boxed payload the way OverflowsI64 names. It is
+// a fact about the opcode's own fallibility, not about the boxed
+// representation, which is why it names both widths and both div and rem:
+// every one of them shares the interpreter's own divide-by-zero panic (see
+// interp/threaded.go's I32_DIV_S and I64_DIV_S handlers), regardless of
+// whether OverflowsI64 also names it for a second reason.
+func Divides(code instr.Opcode) bool {
+	switch code {
+	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
+		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
+		return true
+	default:
+		return false
+	}
+}
+
 func (o Op) String() string {
 	switch o {
 	case OpConst:

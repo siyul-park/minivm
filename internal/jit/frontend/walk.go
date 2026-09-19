@@ -633,14 +633,14 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	}
 	operation := ssa.Operation{Op: kind, Code: op, Args: args, Results: out}
 	// ssa.OverflowsI64 names the opcodes that can carry a result past the
-	// boxed 49-bit payload (see its own doc comment for which and why). The
-	// five that lower today (ADD, SUB, MUL, SHL, SHR_U) guard it in their own
-	// arm64 lowering and exit through this state on overflow - which is
-	// w.pre as of this instruction's own start (see begin/deopt), so the
-	// flush is both operands, still unpopped, boxing normally on the cold
-	// path since each is already proven in range by its own producer. DIV_S
-	// and DIV_U are also named but have no arm64 lowering yet.
-	if bridged || op.Writes(instr.Frame) || (op.Reads(instr.Heap) && op.Writes(instr.Heap)) || ssa.OverflowsI64(op) {
+	// boxed 49-bit payload (see its own doc comment for which and why), and
+	// ssa.Divides names the ones that can fault on a zero divisor instead.
+	// Both guard through this same state - w.pre as of this instruction's own
+	// start (see begin/deopt) - so the flush is both operands, still
+	// unpopped, boxing normally on the cold path since each is already
+	// proven in range by its own producer.
+	if bridged || op.Writes(instr.Frame) || (op.Reads(instr.Heap) && op.Writes(instr.Heap)) ||
+		ssa.OverflowsI64(op) || ssa.Divides(op) {
 		operation.State = w.deopt()
 	}
 	w.b.Add(w.block, operation)

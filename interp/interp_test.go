@@ -12088,6 +12088,117 @@ func TestWithThreshold(t *testing.T) {
 		}
 	}
 
+	if runtime.GOARCH == "arm64" {
+		// A signed divide's own overflow - true int32/int64 MIN divided by
+		// -1 - wraps identically under Go's division and under ARM64's SDIV,
+		// so native code raises no guard for it and needs none: it is not
+		// the overflow this suite's boxed-range guard exists for. i32.div_s
+		// never boxes at all, so its own MIN/-1 has no boundary but that
+		// wraparound; i64's does, but one payload width narrower - the
+		// boxed range's own minimum, not int64's - so DIV_S's boxable guard
+		// still deopts there and the interpreter's own heap-promoting boxI64
+		// produces the one-past-max quotient a raw i64 register cannot hold
+		// inline. DIV_U's own boundary is different again: its dividend is
+		// the same sign-extended payload reinterpreted unsigned, so a small
+		// in-range negative value divides down to a quotient far outside the
+		// boxed range even though nothing about the divisor is unusual.
+		for _, tt := range []struct {
+			name   string
+			typ    types.Type
+			div    instr.Opcode
+			left   types.Value
+			right  types.Value
+			want   types.Value
+			bLeft  types.Value
+			bRight types.Value
+			bWant  types.Value
+		}{
+			{
+				name:   "i32",
+				typ:    types.TypeI32,
+				div:    instr.I32_DIV_S,
+				left:   types.I32(90),
+				right:  types.I32(3),
+				want:   types.I32(30),
+				bLeft:  types.I32(math.MinInt32),
+				bRight: types.I32(-1),
+				bWant:  types.I32(math.MinInt32),
+			},
+			{
+				name:   "i64 div_s",
+				typ:    types.TypeI64,
+				div:    instr.I64_DIV_S,
+				left:   types.I64(90),
+				right:  types.I64(3),
+				want:   types.I64(30),
+				bLeft:  types.I64(-1 << 48),
+				bRight: types.I64(-1),
+				bWant:  types.I64(1 << 48),
+			},
+			{
+				name:   "i64 div_u",
+				typ:    types.TypeI64,
+				div:    instr.I64_DIV_U,
+				left:   types.I64(90),
+				right:  types.I64(3),
+				want:   types.I64(30),
+				bLeft:  types.I64(-1),
+				bRight: types.I64(2),
+				bWant:  types.I64(math.MaxInt64),
+			},
+		} {
+			t.Run("matches threaded division at the boxed range's own boundary "+tt.name, func(t *testing.T) {
+				eval := types.NewFunctionBuilder(nil).
+					Params(tt.typ, tt.typ).
+					Returns(tt.typ)
+				fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+					Emit(instr.New(instr.LOCAL_GET, 1)).
+					Emit(instr.New(tt.div)).
+					Emit(instr.New(instr.RETURN)).
+					Build()
+				require.NoError(t, err)
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				}, program.WithConstants(fn))
+
+				p := prof.New()
+				native := interp.New(prog, interp.WithTick(1), interp.WithThreshold(0), interp.WithProfiler(p))
+				defer native.Close()
+				threaded := interp.New(prog, interp.WithThreshold(-1))
+				defer threaded.Close()
+				for range 8 {
+					native.Reset()
+					require.NoError(t, native.Push(tt.left))
+					require.NoError(t, native.Push(tt.right))
+					require.NoError(t, native.Run(context.Background()))
+					got, err := native.Pop()
+					require.NoError(t, err)
+					require.Equal(t, tt.want, got)
+				}
+				native.Flush()
+				emits, _ := p.Metric("vm_jit_emits_total")
+				require.GreaterOrEqual(t, emits, float64(1))
+
+				native.Reset()
+				require.NoError(t, native.Push(tt.bLeft))
+				require.NoError(t, native.Push(tt.bRight))
+				require.NoError(t, native.Run(context.Background()))
+				got, err := native.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.bWant, got)
+
+				threaded.Reset()
+				require.NoError(t, threaded.Push(tt.bLeft))
+				require.NoError(t, threaded.Push(tt.bRight))
+				require.NoError(t, threaded.Run(context.Background()))
+				want, err := threaded.Pop()
+				require.NoError(t, err)
+				require.Equal(t, want, got)
+			})
+		}
+	}
+
 	t.Run("deopts array len on shape mismatch", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
