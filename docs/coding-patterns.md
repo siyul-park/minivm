@@ -17,7 +17,25 @@ Symbols `MUST` have one coherent responsibility, a narrow contract, and a scope 
 3. **Split real boundaries.** The agent `MUST` separate symbols only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. It `MUST NOT` split to shorten code or create symmetry.
 4. **Reuse before extension.** The agent `SHOULD` prefer existing symbols and composition before adding layers, extension points, policy knobs, or parallel mechanisms.
 
-The agent `MUST` keep related state and behavior together, keep dependency direction explicit, and keep public contracts no larger than required.
+### Dependency Direction
+
+A symbol `MUST NOT` depend on a symbol that is more specific, more context-dependent, or less stable than itself. Dependencies `MUST` flow from specific, context-dependent, and less stable code toward more general, context-independent, and stable code.
+
+Lower-level or reusable symbols `MUST` be refined to the most general form that fully expresses their responsibility. They `MUST NOT` depend on caller-specific policy, types, lifecycle, or semantics.
+
+Higher-level symbols `MAY` depend on lower-level symbols when those symbols provide behavior in a more general and context-independent form. Lower-level symbols `MUST NOT` depend on the higher-level code that uses them.
+
+When extracting shared functionality, the agent `MUST NOT` merely move code into a lower layer. It `MUST` generalize the responsibility and its dependencies so that the resulting symbol can serve a broader context and has fewer reasons to change than its dependents.
+
+### Physical Cohesion
+
+Logical cohesion `MUST` be reflected in physical layout.
+
+Symbols owned by the same owner and forming one cohesive responsibility `MUST` reside in the same file. Symbols sharing an ownership boundary `MUST NOT` be scattered across files without a real responsibility or abstraction boundary.
+
+Strongly related symbols `MUST` be placed physically close together. Symbols that directly compose one behavior or have a direct caller-callee relationship `SHOULD` be adjacent.
+
+Files and declaration order `MUST` make ownership, responsibility, and relationships easy to read. Physical separation `MUST` represent a real responsibility, ownership, or abstraction boundary.
 
 ## Functions
 
