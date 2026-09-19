@@ -99,14 +99,18 @@ Struct fields `MUST` read from ownership/policy toward runtime state; synchroniz
 
 ## Comments
 
-Comments `MUST` state only facts the code cannot express:
+Comments SHOULD be omitted unless they express facts the code cannot express.
+
+Comments MAY be added only when they are clearly necessary to preserve:
 
 - invariants and consequences;
 - external or cross-package constraints;
 - rejected alternatives with evidence;
-- external contracts/specifications.
+- external contracts or specifications.
 
-The agent `MUST NOT` narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. It `MUST` improve names, types, or structure instead. Exported symbols `MUST` have normal Go doc comments.
+The agent MUST NOT use comments to narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. It MUST improve names, types, or structure instead.
+
+Exported symbols MUST have normal Go doc comments.
 
 ## Generated and Platform Code
 
