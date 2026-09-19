@@ -12,93 +12,38 @@ import (
 
 // PromotePass turns an entry-frame local slot into SSA values: every load of
 // it reads the value the last store left, and a merge point takes a block
-// parameter for it. It is textbook mem2reg - Cytron's iterated dominance
-// frontier decides where a parameter goes, and a dominator-tree walk renames
-// every access to the definition that reaches it - and it is what ForwardPass
-// deliberately cannot do. Forwarding drops every availability at a
-// multi-predecessor block, which is exactly what keeps it sound across a back
-// edge and exactly why a loop-carried local stays a load, a store, and the
-// boxing between them on every iteration. A parameter is the answer that
-// availability alone has no way to spell.
+// parameter for it - textbook mem2reg, using Cytron's iterated dominance
+// frontier to place parameters and a dominator-tree walk to rename accesses.
+// It is what ForwardPass deliberately cannot do: forwarding drops every
+// availability at a multi-predecessor block, which is what keeps it sound
+// across a back edge and why a loop-carried local stays a load, a store, and
+// the boxing between them on every iteration without this pass. A parameter
+// is the answer availability alone cannot spell.
 //
-// # What qualifies
+// A slot is promotable only when every access agrees on its type; the slot
+// holds no reference (promoting a ref slot would move its reference count
+// into a value with no ownership mark to carry it - see
+// docs/jit-internals.md, Reference Ownership); it belongs to the entry frame
+// (Slot.Base is zero - an inlined callee's local has no single deopt-stable
+// frame to write back into); the function bridges no local opcode to the
+// interpreter (a bridge reads the frame as a whole); and something stores
+// it (a never-stored slot already has one definition, itself, so promoting
+// it only adds a live range with nothing to save).
 //
-// The IR has no way to take a local's address, so aliasing is not the question
-// here that it is in a language with one: SpaceLocal storage is named by
-// nothing but OpLoad and OpStore, and instr's effect model gives LOCAL_GET,
-// LOCAL_SET, and LOCAL_TEE as the only opcodes that read or write it - a call
-// writes Global, Upval, Heap, and Frame, never the caller's own locals. A slot
-// is promotable unless one of four things says otherwise:
+// A promoted local is no longer where the interpreter looks for it, so every
+// OpState's entry frame gains an ssa.Local per promoted slot, holding the
+// value that slot must be written back with. Naming the value in the state
+// is cheaper than leaving a store in front of every deoptimizing operation,
+// which would put one back in front of every guard, store, and call; it is
+// what internal/jit/arm64's commitCarried already does for a carried
+// register on the paths that hand control back.
 //
-//   - It is not the entry frame's (Slot.Base is not zero). A local of a frame
-//     a frontend inlined is left alone: its writeback would name a frame the
-//     deopt state only sometimes carries, and a trace may enter two different
-//     callees at one depth, so one Base names one floor and not one variable.
-//     carry takes the same position, on root-frame locals only.
-//   - Its accesses disagree on a type. One value has one type, so a slot read
-//     back as something other than what was stored is a slot this pass has no
-//     single value to give.
-//   - It holds a reference. Promotion moves the slot's content into a value,
-//     and a ref slot's content includes the reference count the slot holds:
-//     removing the store removes the release of what it replaced and the
-//     retain of what it stored, and ssa.Local has no ownership mark to say
-//     where the count went (see docs/jit-internals.md, Reference Ownership).
-//     carry takes scalars only for the same reason; a ref local stays in its
-//     slot and keeps paying for its loads.
-//   - The function bridges a local opcode to the interpreter. An OpBridge runs
-//     its opcode in the interpreter, which reads the frame the promotion just
-//     emptied. No frontend emits one today - LOCAL_* is lowered everywhere -
-//     so this is the one "reads the frame as a whole" case there is, and the
-//     whole function declines rather than one slot.
-//   - Nothing stores it. A slot only ever read already has one definition
-//     everywhere, and it is the slot itself: a parameter, or a local the frame
-//     setup zeroed. Promoting it buys no definition that was not already
-//     there and costs the value a live range across every block that reads it,
-//     which a bytecode emitter has to home in a local and a register allocator
-//     has to keep. Reading it where it is read is cheaper, so this pass leaves
-//     a read-only slot in the frame and ForwardPass unifies its repeated reads
-//     within a dominator scope as it always did.
-//
-// # What a deopt sees
-//
-// A promoted local is no longer where the interpreter looks for it, so the
-// state a deopt resumes into has to name it: every OpState's entry frame gains
-// an ssa.Local per promoted slot, holding the value that slot must be written
-// back with. The alternative - leaving a store in front of every deoptimizing
-// operation - would put one back in front of every guard, every other store,
-// and every call, which is more stores than the loads this pass removes, on
-// the hot path rather than the cold one. Naming the value in the state instead
-// is what internal/jit/arm64's commitCarried already does for a carried
-// register: write the register to its VM slot on the paths that hand control
-// back, and nowhere else. A function with no OpState at all - which is every
-// function the ahead-of-time optimizer sees, since bytecode does not
-// deoptimize - simply has nothing to name.
-//
-// An OpState records the values current at its own position, which is where
-// its frames' operand stacks are already accurate as recorded, so promotion
-// adds no rule about where a state may be used that its stack did not already
-// carry.
-//
-// # Entry
-//
-// The value a promoted slot holds on entry is whatever the interpreter left
-// there, so the entry block loads each promoted slot once and every reaching
-// definition starts from that load. A function whose entry block is itself a
-// loop header - which is what a native loop entry compiles to - gets a fresh
-// entry block in front of it first, so that load runs once per entry rather
-// than once per iteration. That is the one place this pass grows the block
-// graph, and it grows it at the entry rather than by splitting an edge, so no
-// predecessor is rewired. An entry block that both has predecessors and takes
-// parameters is declined outright: its parameters are the operands a native
-// entry is handed, and a new block in front of it has none to pass on.
-//
-// # Ordering
-//
-// It runs before CSEPass for the reason ForwardPass does - a computation over
-// a slot read twice is two computations until both reads are one value - and
-// before ForwardPass itself, which then has only the globals and upvalues left
-// to forward. DCEPass afterwards is what removes an entry load nothing reads,
-// which is every promoted slot a function stores before it ever loads.
+// The entry block loads each promoted slot once, since that is what the
+// interpreter left there. A function whose entry block is itself a loop
+// header gets a fresh entry block in front of it first, so that load runs
+// once per entry rather than once per iteration. An entry block that both
+// has predecessors and takes parameters is declined outright: a new block in
+// front of it would have no arguments to pass those parameters.
 type PromotePass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*PromotePass)(nil)

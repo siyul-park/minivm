@@ -10,26 +10,9 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// FoldPass replaces a pure operation with the result its arguments already
-// decide: the constant its opcode computes when every argument is one, the
-// left argument itself when the right one makes the opcode an identity, and a
-// shift when it makes a multiply or a divide one. All three are the same
-// policy - an operation whose answer is known before it runs does not run -
-// which is why the algebraic identities live here rather than in a pass of
-// their own.
-//
-// It runs over any function this package's passes accept, one carrying JIT
-// guards and deopt state or one with neither, since the gate is instr's own
-// op.Code.IsPure(), which is already false for anything the JIT alone would
-// add (a guard, a bridge, a retain or release are none of them OpExec) and
-// for anything that touches Local, Global, Upval, Heap, Frame, or Branch.
-// That leaves exactly the closed family transform's bytecode passes folded by
-// hand - integer and float arithmetic, comparisons, eqz, and the narrowing
-// conversions - which this pass computes by decoding each argument's
-// types.Boxed into the typed value (I32, I64, F32, F64 are Go's own numeric
-// types under another name) and letting Go's native operators do the
-// arithmetic, rather than re-deriving it from raw bits the way a pass over
-// bytecode must.
+// FoldPass replaces a pure operation with the constant, argument, or shift
+// its arguments already decide, so an operation whose answer is known before
+// it runs does not run.
 //
 // A division or remainder whose divisor folds to zero is left as a runtime
 // operation: the interpreter's own trap for that case is not this pass's to
@@ -37,10 +20,10 @@ import (
 // types.BoxI64's NaN-boxed round trip is left unfolded too - every i64
 // OpConst the frontend builds is already round-trip-safe, so a result that is
 // not would silently corrupt the value if boxed anyway. Float identities are
-// left alone as well, because IEEE-754's NaN and signed zero make them
-// unsound, and so are annihilators such as x*0, whose result is known but
-// whose left argument would have to be dropped along with them - which is
-// DCEPass's judgement to make, not this pass's.
+// left alone because IEEE-754's NaN and signed zero make them unsound, and so
+// are annihilators such as x*0, whose result is known but whose left
+// argument would have to be dropped along with them - which is DCEPass's
+// judgement to make, not this pass's.
 type FoldPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*FoldPass)(nil)
@@ -66,9 +49,6 @@ func (p *FoldPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error
 			if op.Op == ssa.OpExec && op.Code.IsPure() {
 				if next, ok := p.fold(rb, id, fn, consts, computed, op); ok {
 					changed = true
-					// An operation reduced to one of its own arguments has
-					// had its result aliased onto it and leaves nothing to
-					// add.
 					if len(next.Results) == 0 {
 						continue
 					}
@@ -103,7 +83,7 @@ func (p *FoldPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error
 // fold returns what op becomes once its constant arguments are accounted for,
 // and false when it stays as it is. An operation that reduces to one of its
 // own arguments comes back with no results at all: fold has already aliased
-// the value it produced onto that argument, so nothing is left to add.
+// the value it produced onto that argument.
 func (p *FoldPass) fold(rb *rebuilder, id int, fn *ssa.Function, consts map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, op ssa.Operation) (ssa.Operation, bool) {
 	args := make([]types.Boxed, 0, len(op.Args))
 	for _, a := range op.Args {
@@ -127,13 +107,11 @@ func (p *FoldPass) fold(rb *rebuilder, id int, fn *ssa.Function, consts map[ssa.
 		return op, false
 	}
 	// An identity hands back its left argument, and with it that argument's
-	// own representation. Only a value an opcode computed carries the one its
-	// static type names: a slot is zero-filled rather than written with its
-	// declared type's zero, so an unwritten i32 local reads back as a raw
-	// Boxed(0), whose kind is f64 (docs/memory-model.md). The arithmetic this
-	// rewrite would remove is what re-tags it, and the type has to match for
-	// the same reason - i1 and i8 both reach an i32 opcode, and neither may be
-	// read back where the i32 result was.
+	// own representation, so the rewrite applies only when that argument's
+	// type already matches the result's: a slot is zero-filled rather than
+	// written with its declared type's zero, so an unwritten i32 local reads
+	// back as a raw Boxed(0), whose kind is f64 (docs/memory-model.md), and
+	// the arithmetic this rewrite removes is what re-tags it.
 	if identity(op.Code, right) && computed[op.Args[0]] && rb.b.Type(op.Args[0]) == fn.Type(op.Results[0]) {
 		rb.alias(op.Results[0], op.Args[0])
 		return ssa.Operation{Op: op.Op, Code: op.Code, Args: op.Args}, true

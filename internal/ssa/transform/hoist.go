@@ -10,118 +10,34 @@ import (
 )
 
 // HoistPass moves a side-effect-free, non-trapping operation out of a natural
-// loop and into its preheader when every argument it reads is itself defined
-// outside the loop (or was itself just hoisted), so the operation runs once
-// per loop entry instead of once per iteration: textbook loop-invariant code
-// motion. It is internal/jit's traceplan.go hoistable generalized the way
-// docs/jit-internals.md's "No hoist, no carry" paragraph always said a
-// dominance-based optimizer pass could: no one-container-per-loop limit, no
-// MaxHoistSlot, and it runs on any *ssa.Function, not only one a trace
-// produced.
+// loop and into its preheader when every argument it reads is defined
+// outside the loop (or was itself just hoisted): textbook loop-invariant
+// code motion, the dominance-based pass docs/jit-internals.md's "No hoist,
+// no carry" paragraph anticipates. It generalizes internal/jit's old
+// traceplan.go hoistable to any *ssa.Function: that mechanism's
+// one-container-per-loop and MaxHoistSlot limits were a trace-compiled
+// loop's register-budget and ARM64-encoding artifacts, not IR-level hazards
+// this pass has to honor, and its "no ref arrays" restriction does not carry
+// over either, since this pass never moves an OpLoad, an OpStore, or any
+// Heap-touching OpExec and so never bypasses the retain/release accounting
+// that restriction protected.
 //
-// hoistable's three restrictions turn out to divide two ways once reread
-// against what this pass actually needs to be sound:
+// Eligibility is OpConst or a pure OpExec (instr.Opcode.IsPure()) that is
+// also speculatable (see speculatable) and carries no deopt State (see
+// hoistable). Excluding every OpLoad, OpStore, and Heap-touching OpExec
+// refuses a heap read a loop's own write could invalidate with no alias
+// analysis at all - not because this pass proved the specific loop has no
+// such write, but because it never asks.
 //
-//   - "One container per loop" is a Plan.Hoist representation artifact
-//     (internal/jit/plan.go): the field is a single *Hoist, not a slice,
-//     because a trace-compiled loop caches its winning container's data
-//     pointer and length in fixed machine registers that stay live across
-//     the back-edge, and a backend has only so many to spend. This pass has
-//     no register budget to protect - it hoists every eligible operation.
-//   - MaxHoistSlot is an ARM64 load-immediate encoding bound
-//     (internal/jit/plan.go), not an IR-level hazard. Nothing here reasons
-//     about slots or immediates at all.
-//   - "No ref arrays" is real, but not a hazard this pass can trigger: it
-//     exists because internal/jit/arm64/control.go's hoist additionally
-//     caches a raw slice header - a data pointer and length read once and
-//     trusted for the rest of the native entry - so a ref element's
-//     retain/release accounting (normally paid on every ARRAY_GET/ARRAY_SET)
-//     never happens for a hoisted access. This pass hoists no such cache: it
-//     never moves an OpLoad, an OpStore, or any OpExec that reads or writes
-//     Heap (see below), so it never bypasses a retain or a release to begin
-//     with. The hazard is real, but it belongs to retain/release pairing,
-//     which docs/jit-internals.md already defers until the backend consumes
-//     SSA.
+// This pass never moves an OpRetain or an OpRelease, and the operations it
+// does move never carry one of their own: a pure operation, by instr's own
+// definition, touches nothing an ownership pair would track.
 //
-// Eligibility is deliberately narrow, for two hazards hoistable never had to
-// face because a trace only ever compiles a path it already ran at least
-// once:
-//
-//   - Effects. Eligibility is OpConst, or an OpExec whose instr.Opcode.IsPure()
-//     holds: instr's own Reads and Writes are both empty (see
-//     instr.Opcode.IsPure). That is a strictly stronger rule than "does not
-//     read what the loop writes" - it excludes OpLoad, OpStore, and every
-//     OpExec that touches Local, Global, Upval, Heap, Frame, or Branch
-//     outright, so a heap read a loop's own heap write could invalidate (an
-//     ARRAY_GET aliasing an ARRAY_SET elsewhere in the body, say) is refused
-//     with no alias analysis at all - not because this pass proved the
-//     specific loop has no such write, but because it never asks. Redundant
-//     mutable loads across a loop are a dataflow problem CSEPass's own
-//     documentation already leaves for "the eventual redundant-load pass";
-//     this one is smaller still.
-//   - Guards, traps, and deopt state. A loop's preheader runs exactly once
-//     per entry, even when the loop body itself runs zero times - a
-//     conditional loop tests before its first iteration, and this IR has no
-//     general way to prove a body always runs at least once. Hoisting an
-//     operation that can fail (a guard), fault (integer division or
-//     remainder by a divisor that might be zero), or exit to a boxability
-//     guard (ssa.OverflowsI64's five arithmetic opcodes, see
-//     internal/ssa/operation.go) into the preheader would make it run - and
-//     possibly fail, fault, or exit - on an execution the original program
-//     never reached with that operation at all. Every one of the four guards
-//     and every OverflowsI64 opcode carries deopt State (instr's own
-//     resume() rule, enforced by ssa.Verify), and OpState's Frame chain
-//     names the bytecode position and stack the operation's own site was
-//     speculated at - valid to resume into as recorded, not valid to resume
-//     into from a point before the loop ever ran. hoistable's explicit
-//     `op.State != ssa.NoValue` check is what excludes these: the
-//     OverflowsI64 opcodes are IsPure() (no Reads, no Writes) exactly like
-//     any other arithmetic op, so IsPure() alone would let one through, and
-//     only the State check catches it. It is not redundant with IsPure() -
-//     it is the sole gate on this hazard. Integer division and remainder are
-//     also IsPure() - yet a zero divisor faults the interpreter - so they
-//     are excluded by name too (see speculatable) the same way FoldPass
-//     declines to fold a literal-zero divisor at compile time rather than
-//     pre-empt that same trap.
-//
-// Retain/release pairing is out of scope, per docs/jit-internals.md and
-// docs/architecture.md: this pass never moves an OpRetain or an OpRelease,
-// and the operations it does move never carry one of their own to begin
-// with (a pure operation, by instr's own definition, touches nothing an
-// ownership pair would need to track).
-//
-// Preheader: this pass only ever hoists into a preheader that already
-// exists - a block that already is the loop header's one predecessor from
-// outside the loop - and never inserts one by splitting an edge. A header
-// with more than one outside predecessor (no preheader) or exactly zero (an
-// entry block that is itself a loop header) is left alone entirely: nothing
-// in its body ever hoists, however invariant, rather than growing the block
-// graph to make room for it. internal/graph gives dominance and loop headers
-// but no preheader-insertion helper, and edge-splitting correctly - rewiring
-// every predecessor's edge, not just one, and reordering the rebuilt block
-// list - is a second mechanism this phase does not need to build to hoist
-// the class of operations it targets. A future phase that wants to hoist a
-// speculatable guard past a proven-non-zero trip count, say, may need one;
-// this one does not.
-//
-// Nesting: loop headers are processed from the smallest natural loop body to
-// the largest, so an operation hoisted out of an inner loop into its
-// preheader - itself still inside the enclosing loop's body - is considered
-// again once the enclosing loop is processed, cascading a doubly
-// loop-invariant operation all the way out in one Run.
-//
-// Ordering against this package's other three passes: none of them is a
-// correctness precondition. HoistPass never unifies two values (only
-// CSEPass and GuardPass's shared dedup does that) and never touches a guard
-// or anything else that carries State (only GuardPass's target), so it is
-// sound run first, last, or anywhere between them. Running it after
-// FoldPass and CSEPass still reads better: a computation FoldPass has
-// already reduced to an OpConst is trivially invariant with no argument
-// analysis needed, and a computation CSEPass has already deduplicated into
-// one dominance-scoped instance is one operation for this pass to move
-// instead of several identical ones. Running it before DCEPass keeps the
-// existing convention that liveness-based sweeping runs last, over
-// whatever placement every earlier pass settled on.
+// It hoists only into a preheader that already exists (see preheader) and
+// never inserts one by splitting an edge. Loop headers are processed from
+// the smallest natural loop body to the largest, so an operation hoisted out
+// of an inner loop is reconsidered once its enclosing loop is processed,
+// cascading a doubly loop-invariant operation out in one Run.
 type HoistPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*HoistPass)(nil)
