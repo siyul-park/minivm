@@ -17,20 +17,6 @@ type fixture struct {
 	pred [][]int
 }
 
-func newFixture(n int, edges [][2]int) *fixture {
-	g := &fixture{succ: make([][]int, n), pred: make([][]int, n)}
-	for _, e := range edges {
-		from, to := e[0], e[1]
-		g.succ[from] = append(g.succ[from], to)
-		g.pred[to] = append(g.pred[to], from)
-	}
-	return g
-}
-
-func (g *fixture) Len() int         { return len(g.succ) }
-func (g *fixture) Succ(n int) []int { return g.succ[n] }
-func (g *fixture) Pred(n int) []int { return g.pred[n] }
-
 func TestNewDominance(t *testing.T) {
 	t.Run("computes dominance for an empty graph", func(t *testing.T) {
 		g := newFixture(0, nil)
@@ -200,4 +186,17 @@ func TestDominance_IDom(t *testing.T) {
 		require.Equal(t, 1, d.IDom(2))
 		require.Equal(t, 2, d.IDom(3))
 	})
+}
+func (g *fixture) Len() int         { return len(g.succ) }
+func (g *fixture) Succ(n int) []int { return g.succ[n] }
+func (g *fixture) Pred(n int) []int { return g.pred[n] }
+
+func newFixture(n int, edges [][2]int) *fixture {
+	g := &fixture{succ: make([][]int, n), pred: make([][]int, n)}
+	for _, e := range edges {
+		from, to := e[0], e[1]
+		g.succ[from] = append(g.succ[from], to)
+		g.pred[to] = append(g.pred[to], from)
+	}
+	return g
 }

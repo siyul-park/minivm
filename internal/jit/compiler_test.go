@@ -20,9 +20,7 @@ import (
 // shape internal/asm's own tests use to drive that path.
 type noFrameArch struct{ asm.Arch }
 
-func (noFrameArch) Frame() asm.Frame { return nil }
-
-// attempt records one call into the Machine: how many carried locals the plan
+// attempt records one call into the target: how many carried locals the plan
 // still pinned, and whether the back-edge was still to stay in native code.
 type attempt struct {
 	carried    int
@@ -34,109 +32,29 @@ type attempt struct {
 // stands in for a backend whose lowering only fits once the compiler has
 // relaxed what the plan pins.
 type pressureMachine struct {
+	noFrameArch
 	relent   int
 	attempts *[]attempt
-}
-
-// Compile declines every root: this machine stands in for a backend still on
-// the plan pipeline, which is what makes the fallback observable.
-func (m pressureMachine) Compile(*asm.Assembler, *jit.Input, jit.Anchor) (jit.Entry, bool) {
-	return jit.Entry{}, false
-}
-
-func (m pressureMachine) Lower(a *asm.Assembler, _ *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
-	*m.attempts = append(*m.attempts, attempt{carried: len(p.Carried), nativeLoop: nativeLoop})
-
-	live := 1
-	if len(*m.attempts) <= m.relent {
-		live = 64
-	}
-	regs := make([]asm.VReg, live)
-	for n := range regs {
-		regs[n] = a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(asmarm64.LDI(regs[n], uint64(n+1))...)
-	}
-	sum := regs[0]
-	for _, r := range regs[1:] {
-		a.Emit(asmarm64.ADD(sum, sum, r))
-	}
-	a.Emit(asmarm64.RET())
-	return nil, true
 }
 
 // nativeMachine takes every root through the Compile seam and emits a trivial
 // body for it. It stands in for a backend already ported off the plan
 // pipeline, so a Compile through it must never reach Lower.
-type nativeMachine struct{ lowered *int }
-
-func (m nativeMachine) Compile(a *asm.Assembler, _ *jit.Input, root jit.Anchor) (jit.Entry, bool) {
-	a.Emit(asmarm64.RET())
-	return jit.Entry{Kind: root.Kind(), Frontend: prof.FrontendStatic}, true
-}
-
-func (m nativeMachine) Lower(*asm.Assembler, *jit.Input, jit.Plan, bool) ([]jit.Exit, bool) {
-	*m.lowered++
-	return nil, false
-}
-
-func newTestCompiler(t *testing.T, machine jit.Machine) *jit.Compiler {
-	t.Helper()
-	c, err := jit.New(noFrameArch{asmarm64.New()}, machine)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, c.Close()) })
-	return c
-}
-
-// loopInput builds a counting loop, whose header plan pins one carried local -
-// the rung the compiler drops first under register pressure.
-func loopInput(t *testing.T) (*jit.Input, jit.Plan, jit.Plan) {
-	t.Helper()
-	b := instr.NewBuilder()
-	loop := b.Label()
-	done := b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
-		Bind(loop).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 64).Emit(instr.I32_GE_S).BrIf(done).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
-		Br(loop).
-		Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-	instructions, err := b.Assemble()
-	require.NoError(t, err)
-
-	input := &jit.Input{
-		Address: 1,
-		Function: &types.Function{
-			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeI32},
-			Code:   instr.Marshal(instructions),
-		},
-	}
-	plans, err := jit.StaticPlan(input)
-	require.NoError(t, err)
-	require.Len(t, plans, 2)
-	entry := plans[0]
-	header := plans[1]
-	require.Equal(t, jit.EntryFunction, entry.Kind)
-	require.Equal(t, jit.EntryLoop, header.Kind)
-	require.NotEmpty(t, header.Carried)
-	return input, entry, header
-}
-
-// newNativeCompiler builds a compiler over the real ARM64 arch and backend,
-// so a Compile through it exercises every lowering that reads an Input.
-func newNativeCompiler(t *testing.T) *jit.Compiler {
-	t.Helper()
-	c, err := jit.New(asmarm64.New(), arm64.New())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, c.Close()) })
-	return c
+type nativeMachine struct {
+	noFrameArch
+	arch    asm.Arch
+	lowered *int
 }
 
 func TestNew(t *testing.T) {
 	var attempts []attempt
-	c := newTestCompiler(t, pressureMachine{attempts: &attempts})
+	c := newTestCompiler(t, pressureMachine{noFrameArch: noFrameArch{asmarm64.New()}, attempts: &attempts})
 	require.NotNil(t, c)
 	require.NotNil(t, c.Buffer())
+
+	c, err := jit.New(nil)
+	require.ErrorIs(t, err, jit.ErrInvalidTarget)
+	require.Nil(t, c)
 }
 
 func TestCompiler_Compile(t *testing.T) {
@@ -144,7 +62,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 	t.Run("takes a root the machine compiles from the snapshot itself", func(t *testing.T) {
 		lowered := 0
-		c := newTestCompiler(t, nativeMachine{lowered: &lowered})
+		c := newTestCompiler(t, nativeMachine{noFrameArch: noFrameArch{asmarm64.New()}, arch: asmarm64.New(), lowered: &lowered})
 
 		result := c.Compile(input, entry.Anchor)
 		require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
@@ -154,7 +72,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 	t.Run("falls back to the plan when the machine declines the root", func(t *testing.T) {
 		var attempts []attempt
-		c := newTestCompiler(t, pressureMachine{attempts: &attempts})
+		c := newTestCompiler(t, pressureMachine{noFrameArch: noFrameArch{asmarm64.New()}, attempts: &attempts})
 
 		result := c.Compile(input, entry.Anchor)
 		require.Equal(t, prof.CompileOutcomeEmitted, result.Outcome)
@@ -165,7 +83,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 	t.Run("keeps a static entry's loop native", func(t *testing.T) {
 		var attempts []attempt
-		c := newTestCompiler(t, pressureMachine{attempts: &attempts})
+		c := newTestCompiler(t, pressureMachine{noFrameArch: noFrameArch{asmarm64.New()}, attempts: &attempts})
 
 		c.Compile(input, entry.Anchor)
 		require.Equal(t, []attempt{{carried: len(entry.Carried), nativeLoop: true}}, attempts)
@@ -201,7 +119,7 @@ func TestCompiler_Compile(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var attempts []attempt
-			c := newTestCompiler(t, pressureMachine{relent: tt.relent, attempts: &attempts})
+			c := newTestCompiler(t, pressureMachine{noFrameArch: noFrameArch{asmarm64.New()}, relent: tt.relent, attempts: &attempts})
 
 			result := c.Compile(input, header.Anchor)
 			require.NoError(t, result.Err)
@@ -295,4 +213,98 @@ func TestCompiler_CompileConcurrentHeap(t *testing.T) {
 		require.Equal(t, want.Frontend, got.Frontend)
 		require.Len(t, got.Code.Entries, len(want.Code.Entries))
 	}
+}
+func (noFrameArch) Frame() asm.Frame { return nil }
+
+func (m pressureMachine) Arch() asm.Arch { return m.noFrameArch }
+
+// Compile declines every root: this machine stands in for a backend still on
+// the plan pipeline, which is what makes the fallback observable.
+func (m pressureMachine) Compile(*asm.Assembler, *jit.Input, jit.Anchor) (jit.Entry, bool) {
+	return jit.Entry{}, false
+}
+
+func (m pressureMachine) Lower(a *asm.Assembler, _ *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
+	*m.attempts = append(*m.attempts, attempt{carried: len(p.Carried), nativeLoop: nativeLoop})
+
+	live := 1
+	if len(*m.attempts) <= m.relent {
+		live = 64
+	}
+	regs := make([]asm.VReg, live)
+	for n := range regs {
+		regs[n] = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(asmarm64.LDI(regs[n], uint64(n+1))...)
+	}
+	sum := regs[0]
+	for _, r := range regs[1:] {
+		a.Emit(asmarm64.ADD(sum, sum, r))
+	}
+	a.Emit(asmarm64.RET())
+	return nil, true
+}
+
+func (m nativeMachine) Arch() asm.Arch { return m.arch }
+
+func (m nativeMachine) Compile(a *asm.Assembler, _ *jit.Input, root jit.Anchor) (jit.Entry, bool) {
+	a.Emit(asmarm64.RET())
+	return jit.Entry{Kind: root.Kind(), Frontend: prof.FrontendStatic}, true
+}
+
+func (m nativeMachine) Lower(*asm.Assembler, *jit.Input, jit.Plan, bool) ([]jit.Exit, bool) {
+	*m.lowered++
+	return nil, false
+}
+
+func newTestCompiler(t *testing.T, target jit.Target) *jit.Compiler {
+	t.Helper()
+	c, err := jit.New(target)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
+	return c
+}
+
+// loopInput builds a counting loop, whose header plan pins one carried local -
+// the rung the compiler drops first under register pressure.
+func loopInput(t *testing.T) (*jit.Input, jit.Plan, jit.Plan) {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 64).Emit(instr.I32_GE_S).BrIf(done).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+		Br(loop).
+		Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	instructions, err := b.Assemble()
+	require.NoError(t, err)
+
+	input := &jit.Input{
+		Address: 1,
+		Function: &types.Function{
+			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+			Code:   instr.Marshal(instructions),
+		},
+	}
+	plans, err := jit.StaticPlan(input)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+	entry := plans[0]
+	header := plans[1]
+	require.Equal(t, jit.EntryFunction, entry.Kind)
+	require.Equal(t, jit.EntryLoop, header.Kind)
+	require.NotEmpty(t, header.Carried)
+	return input, entry, header
+}
+
+// newNativeCompiler builds a compiler over the real ARM64 arch and backend,
+// so a Compile through it exercises every lowering that reads an Input.
+func newNativeCompiler(t *testing.T) *jit.Compiler {
+	t.Helper()
+	c, err := jit.New(arm64.New())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
+	return c
 }

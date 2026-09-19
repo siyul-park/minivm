@@ -1603,17 +1603,6 @@ func TestARM64_DirectCallFloatReturnParity(t *testing.T) {
 	require.Greater(t, entries, float64(0), "the native entry must actually have been installed and run")
 }
 
-func refCounts(i *Interpreter) map[int]int {
-	out := map[int]int{}
-	for addr := 1; addr < i.HeapLen(); addr++ {
-		count, err := i.RefCount(addr)
-		if err == nil {
-			out[addr] = count
-		}
-	}
-	return out
-}
-
 // TestFrontend_Trace drives the SSA trace frontend against recordings the real
 // recorder produced, which no test outside interp can obtain: capture clones a
 // running interpreter and single-steps its threaded closures, and the snapshot
@@ -1716,6 +1705,17 @@ func TestFrontend_Trace(t *testing.T) {
 			require.Equal(t, len(roots), emitted, "every root the plan takes must still be planned")
 		})
 	}
+}
+
+func refCounts(i *Interpreter) map[int]int {
+	out := map[int]int{}
+	for addr := 1; addr < i.HeapLen(); addr++ {
+		count, err := i.RefCount(addr)
+		if err == nil {
+			out[addr] = count
+		}
+	}
+	return out
 }
 
 // blocks is a trace plan's block graph in breadth-first order from its root,

@@ -19,36 +19,11 @@ type blockingIterator struct {
 	once    sync.Once
 }
 
-func (i *blockingIterator) Kind() types.Kind { return types.KindRef }
-func (i *blockingIterator) Type() types.Type { return types.NewIteratorType(types.TypeI32) }
-func (i *blockingIterator) String() string   { return "blocking" }
-func (i *blockingIterator) Next() bool       { return false }
-func (i *blockingIterator) Done() bool       { return false }
-
-func (i *blockingIterator) Current() types.Value {
-	i.once.Do(func() { close(i.entered) })
-	<-i.release
-	return types.I32(0)
-}
-
 // trackedValue mirrors the copy in interp_test.go (package interp_test); this
 // package stays package interp and cannot import that one.
 type trackedValue struct {
 	refs   []types.Ref
 	closed int
-}
-
-func (v *trackedValue) Kind() types.Kind { return types.KindRef }
-func (v *trackedValue) Type() types.Type { return types.TypeAny }
-func (v *trackedValue) String() string   { return "tracked" }
-
-func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
-	return append(dst, v.refs...)
-}
-
-func (v *trackedValue) Close() error {
-	v.closed++
-	return nil
 }
 
 func TestTracer_Capture(t *testing.T) {
@@ -590,4 +565,28 @@ func TestTracer_Remove(t *testing.T) {
 	i.bind(1, second, true)
 	rebuilt := tracer.exactCodes(i)
 	require.NotSame(t, &exact[1][0], &rebuilt[1][0])
+}
+func (i *blockingIterator) Kind() types.Kind { return types.KindRef }
+func (i *blockingIterator) Type() types.Type { return types.NewIteratorType(types.TypeI32) }
+func (i *blockingIterator) String() string   { return "blocking" }
+func (i *blockingIterator) Next() bool       { return false }
+func (i *blockingIterator) Done() bool       { return false }
+
+func (i *blockingIterator) Current() types.Value {
+	i.once.Do(func() { close(i.entered) })
+	<-i.release
+	return types.I32(0)
+}
+
+func (v *trackedValue) Kind() types.Kind { return types.KindRef }
+func (v *trackedValue) Type() types.Type { return types.TypeAny }
+func (v *trackedValue) String() string   { return "tracked" }
+
+func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, v.refs...)
+}
+
+func (v *trackedValue) Close() error {
+	v.closed++
+	return nil
 }

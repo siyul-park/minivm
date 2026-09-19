@@ -15,69 +15,6 @@ import (
 // above any window size the probe reaches on its own (see probeWindowMax).
 const maxProbeIterations = 4000
 
-// functionEntry builds a minimal jit.Entry that runs the throughput probe,
-// with the given exit descriptors in order.
-func functionEntry(exits ...jit.Exit) jit.Entry {
-	return jit.Entry{Kind: jit.EntryFunction, Exits: exits}
-}
-
-// driveToShadow calls Enter, attempting Reach after each call, until the
-// probe reports it is in the shadow phase, and returns how many Enter calls
-// that took. The Reach call that detects the transition is itself a real
-// recorded reach - exactly what a caller does on its very next dispatch -
-// so the round it starts already has one reach spent by the time this
-// returns. A delay applied before Enter during the warmup portion of the
-// drive costs only wall-clock time: Enter only starts a timed window once
-// the probe actually transitions to native measurement, so sleeping
-// uniformly across the whole drive still produces a controlled
-// native-window duration.
-func driveToShadow(t *testing.T, w *tier.Watchdog, delay time.Duration) int {
-	t.Helper()
-	for i := 1; i <= maxProbeIterations; i++ {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		w.Enter()
-		if shadow, _ := w.Reach(); shadow {
-			return i
-		}
-	}
-	t.Fatal("watchdog never reached the shadow phase")
-	return 0
-}
-
-// driveShadowRound calls Reach until it reports the round complete, sleeping
-// delay before each call, and returns how many calls that took.
-func driveShadowRound(t *testing.T, w *tier.Watchdog, delay time.Duration) int {
-	t.Helper()
-	for i := 1; i <= maxProbeIterations; i++ {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		if _, done := w.Reach(); done {
-			return i
-		}
-	}
-	t.Fatal("shadow round never completed")
-	return 0
-}
-
-// driveToShadowMaybe is the non-fatal counterpart to driveToShadow, for a
-// watchdog that may already be decided: once decided, Enter never reaches
-// the shadow phase again, so this reports that instead of failing the test.
-func driveToShadowMaybe(w *tier.Watchdog, delay time.Duration) (calls int, reached bool) {
-	for i := 1; i <= maxProbeIterations; i++ {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		w.Enter()
-		if shadow, _ := w.Reach(); shadow {
-			return i, true
-		}
-	}
-	return maxProbeIterations, false
-}
-
 func TestNew(t *testing.T) {
 	t.Run("starts already decided for an entry kind that never probes", func(t *testing.T) {
 		w := tier.New(jit.Entry{Kind: jit.EntryLoop})
@@ -362,4 +299,67 @@ func TestWatchdog_Bridge(t *testing.T) {
 		}
 		require.True(t, w.Retire())
 	})
+}
+
+// functionEntry builds a minimal jit.Entry that runs the throughput probe,
+// with the given exit descriptors in order.
+func functionEntry(exits ...jit.Exit) jit.Entry {
+	return jit.Entry{Kind: jit.EntryFunction, Exits: exits}
+}
+
+// driveToShadow calls Enter, attempting Reach after each call, until the
+// probe reports it is in the shadow phase, and returns how many Enter calls
+// that took. The Reach call that detects the transition is itself a real
+// recorded reach - exactly what a caller does on its very next dispatch -
+// so the round it starts already has one reach spent by the time this
+// returns. A delay applied before Enter during the warmup portion of the
+// drive costs only wall-clock time: Enter only starts a timed window once
+// the probe actually transitions to native measurement, so sleeping
+// uniformly across the whole drive still produces a controlled
+// native-window duration.
+func driveToShadow(t *testing.T, w *tier.Watchdog, delay time.Duration) int {
+	t.Helper()
+	for i := 1; i <= maxProbeIterations; i++ {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		w.Enter()
+		if shadow, _ := w.Reach(); shadow {
+			return i
+		}
+	}
+	t.Fatal("watchdog never reached the shadow phase")
+	return 0
+}
+
+// driveShadowRound calls Reach until it reports the round complete, sleeping
+// delay before each call, and returns how many calls that took.
+func driveShadowRound(t *testing.T, w *tier.Watchdog, delay time.Duration) int {
+	t.Helper()
+	for i := 1; i <= maxProbeIterations; i++ {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		if _, done := w.Reach(); done {
+			return i
+		}
+	}
+	t.Fatal("shadow round never completed")
+	return 0
+}
+
+// driveToShadowMaybe is the non-fatal counterpart to driveToShadow, for a
+// watchdog that may already be decided: once decided, Enter never reaches
+// the shadow phase again, so this reports that instead of failing the test.
+func driveToShadowMaybe(w *tier.Watchdog, delay time.Duration) (calls int, reached bool) {
+	for i := 1; i <= maxProbeIterations; i++ {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		w.Enter()
+		if shadow, _ := w.Reach(); shadow {
+			return i, true
+		}
+	}
+	return maxProbeIterations, false
 }

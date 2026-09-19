@@ -16,11 +16,6 @@ type hostCounter struct {
 	offset int32
 }
 
-func (c *hostCounter) Bump(n int32) int32 {
-	c.Count += n + c.offset
-	return c.Count
-}
-
 func TestNewHostFunction(t *testing.T) {
 	t.Run("constructor", func(t *testing.T) {
 		typ := &types.FunctionType{
@@ -584,4 +579,8 @@ func TestHostMap_Map(t *testing.T) {
 
 	src[2] = 8
 	require.Equal(t, 1, out.(*types.TypedMap[int32]).Len())
+}
+func (c *hostCounter) Bump(n int32) int32 {
+	c.Count += n + c.offset
+	return c.Count
 }

@@ -10,22 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func hot(addr, ip int) compile.Job {
-	return compile.Job{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerHot}
-}
-
-func sideExit(addr, ip int) compile.Job {
-	return compile.Job{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerSideExit}
-}
-
-func code(roots ...jit.Anchor) *jit.Code {
-	c := &jit.Code{Entries: map[jit.Anchor]jit.Entry{}}
-	for _, root := range roots {
-		c.Entries[root] = jit.Entry{}
-	}
-	return c
-}
-
 func TestWithAsync(t *testing.T) {
 	q := compile.New(4, compile.WithAsync())
 	defer q.Close()
@@ -410,4 +394,19 @@ func TestQueue_Close(t *testing.T) {
 
 		require.True(t, ran)
 	})
+}
+func hot(addr, ip int) compile.Job {
+	return compile.Job{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerHot}
+}
+
+func sideExit(addr, ip int) compile.Job {
+	return compile.Job{Root: jit.Anchor{Addr: addr, IP: ip}, Trigger: prof.TriggerSideExit}
+}
+
+func code(roots ...jit.Anchor) *jit.Code {
+	c := &jit.Code{Entries: map[jit.Anchor]jit.Entry{}}
+	for _, root := range roots {
+		c.Entries[root] = jit.Entry{}
+	}
+	return c
 }

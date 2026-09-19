@@ -14,13 +14,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-func TestNewHoistPass(t *testing.T) {
-	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
-		var p pass.Pass[*ssa.Function] = transform.NewHoistPass()
-		require.NotNil(t, p)
-	})
-}
-
 // countedLoop builds the shared skeleton every case below hoists over: a
 // preheader materializing bound (10) and one (1), a header whose own i32
 // param counts up and branches on counter < bound, a body that always ends
@@ -35,64 +28,11 @@ type countedLoop struct {
 	bound, one, counter, cond ssa.Value
 }
 
-func newCountedLoop() *countedLoop {
-	b := ssa.New("f")
-	l := &countedLoop{b: b, pre: b.Block(), header: b.Block(), body: b.Block(), exit: b.Block()}
-
-	l.bound = b.Value(ssa.TypeI32)
-	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{l.bound}})
-	l.one = b.Value(ssa.TypeI32)
-	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{l.one}})
-	zero := b.Value(ssa.TypeI32)
-	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
-	b.Term(l.pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{zero}}}})
-
-	l.counter = b.Param(l.header, ssa.TypeI32)
-	l.cond = b.Value(ssa.TypeI1)
-	b.Add(l.header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{l.counter, l.bound}, Results: []ssa.Value{l.cond}})
-	b.Term(l.header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{l.cond}, Edges: []ssa.Edge{{Block: l.body}, {Block: l.exit}}})
-
-	b.Term(l.exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{l.counter}})
-	return l
-}
-
-// close advances the counter and jumps back to the header, then finalizes
-// the loop's own back edge. Call it after adding every other body operation.
-func (l *countedLoop) close() *ssa.Function {
-	next := l.b.Value(ssa.TypeI32)
-	l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.one}, Results: []ssa.Value{next}})
-	l.b.Term(l.body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{next}}}})
-	return l.b.Build()
-}
-
-func hasCode(ops []ssa.Operation, code instr.Opcode) bool {
-	for _, op := range ops {
-		if op.Op == ssa.OpExec && op.Code == code {
-			return true
-		}
-	}
-	return false
-}
-
-// blockChunk returns the text ssa.Format wrote for block id, up to (not
-// including) the next block's header line. A rebuild-based pass renumbers
-// blocks as it walks (see rebuilder.block), so a test that ran one may no
-// longer index the original *ssa.Function by the block ids it built with -
-// except block 0, the entry, which every rebuild in this package visits
-// first and therefore always re-assigns to id 0 again. Tests that need to
-// name a block after a hoisting pass ran name block 0 and read its text
-// here instead of trusting any other original id.
-func blockChunk(format string, id int) string {
-	marker := fmt.Sprintf("blk%d:", id)
-	idx := strings.Index(format, marker)
-	if idx < 0 {
-		return ""
-	}
-	rest := format[idx+len(marker):]
-	if next := strings.Index(rest, "\nblk"); next >= 0 {
-		rest = rest[:next]
-	}
-	return rest
+func TestNewHoistPass(t *testing.T) {
+	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
+		var p pass.Pass[*ssa.Function] = transform.NewHoistPass()
+		require.NotNil(t, p)
+	})
 }
 
 func TestHoistPass_Run(t *testing.T) {
@@ -340,4 +280,63 @@ func TestHoistPass_Run(t *testing.T) {
 		require.Equal(t, pass.PreserveAll(), preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
+}
+func newCountedLoop() *countedLoop {
+	b := ssa.New("f")
+	l := &countedLoop{b: b, pre: b.Block(), header: b.Block(), body: b.Block(), exit: b.Block()}
+
+	l.bound = b.Value(ssa.TypeI32)
+	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{l.bound}})
+	l.one = b.Value(ssa.TypeI32)
+	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{l.one}})
+	zero := b.Value(ssa.TypeI32)
+	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
+	b.Term(l.pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{zero}}}})
+
+	l.counter = b.Param(l.header, ssa.TypeI32)
+	l.cond = b.Value(ssa.TypeI1)
+	b.Add(l.header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{l.counter, l.bound}, Results: []ssa.Value{l.cond}})
+	b.Term(l.header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{l.cond}, Edges: []ssa.Edge{{Block: l.body}, {Block: l.exit}}})
+
+	b.Term(l.exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{l.counter}})
+	return l
+}
+
+// close advances the counter and jumps back to the header, then finalizes
+// the loop's own back edge. Call it after adding every other body operation.
+func (l *countedLoop) close() *ssa.Function {
+	next := l.b.Value(ssa.TypeI32)
+	l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.one}, Results: []ssa.Value{next}})
+	l.b.Term(l.body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{next}}}})
+	return l.b.Build()
+}
+
+func hasCode(ops []ssa.Operation, code instr.Opcode) bool {
+	for _, op := range ops {
+		if op.Op == ssa.OpExec && op.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// blockChunk returns the text ssa.Format wrote for block id, up to (not
+// including) the next block's header line. A rebuild-based pass renumbers
+// blocks as it walks (see rebuilder.block), so a test that ran one may no
+// longer index the original *ssa.Function by the block ids it built with -
+// except block 0, the entry, which every rebuild in this package visits
+// first and therefore always re-assigns to id 0 again. Tests that need to
+// name a block after a hoisting pass ran name block 0 and read its text
+// here instead of trusting any other original id.
+func blockChunk(format string, id int) string {
+	marker := fmt.Sprintf("blk%d:", id)
+	idx := strings.Index(format, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := format[idx+len(marker):]
+	if next := strings.Index(rest, "\nblk"); next >= 0 {
+		rest = rest[:next]
+	}
+	return rest
 }

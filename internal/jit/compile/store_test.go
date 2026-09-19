@@ -9,13 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func buffer(t *testing.T) *asm.Buffer {
-	t.Helper()
-	buf, err := asm.NewBuffer(4096)
-	require.NoError(t, err)
-	return buf
-}
-
 func TestNewStore(t *testing.T) {
 	s := compile.NewStore()
 
@@ -121,4 +114,10 @@ func TestStore_Code(t *testing.T) {
 	require.True(t, ok)
 	_, ok = s.Code(1)
 	require.False(t, ok)
+}
+func buffer(t *testing.T) *asm.Buffer {
+	t.Helper()
+	buf, err := asm.NewBuffer(4096)
+	require.NoError(t, err)
+	return buf
 }

@@ -13,8 +13,6 @@ import (
 // noFrameArch disables spilling so register exhaustion stays observable.
 type noFrameArch struct{ asm.Arch }
 
-func (noFrameArch) Frame() asm.Frame { return nil }
-
 func TestNew(t *testing.T) {
 	require.NotNil(t, asm.New(arm64.New()))
 }
@@ -828,6 +826,8 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, uint64(magic), run(0))
 	})
 }
+
+func (noFrameArch) Frame() asm.Frame { return nil }
 
 // emitWideSum loads n distinct values, keeps every one live, and folds them
 // into a single register, so the register bank is oversubscribed by n.

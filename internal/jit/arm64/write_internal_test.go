@@ -17,66 +17,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testInput(fn *types.Function) *jit.Input {
-	return &jit.Input{Address: 1, Function: fn, Objects: jit.Objects{1: {Fn: fn}}}
-}
+// shapeExitLabel, boundsExitLabel, retainLive1, and retainLive2 are the
+// labels TestEmitter_Write's own guard, bounds check, and two stubs' retain
+// skips reserve, in reservation order: block 0's own label (0) is bound by
+// newCompiler before Enter ever runs, so the guard's own exit is the first
+// this compile reserves.
+const (
+	shapeExitLabel asm.Label = iota + 1
+	boundsExitLabel
+	retainLive1
+	retainLive2
+)
 
-func vreg(id int32) asm.VReg     { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
-func narrow(id int32) asm.VReg   { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
-func tag(kind types.Kind) uint16 { return uint16(types.Tag(kind) >> 48) }
-
-// prologue is the entry every golden stream in this file opens with: the
-// journal header mirrored into the pinned context registers.
-func prologue() []asm.Instruction {
-	return []asm.Instruction{
-		asmarm64.MOV(asmarm64.X14, asmarm64.X0),
-		asmarm64.LDP(asmarm64.X10, asmarm64.X11, asmarm64.X14, int16(journal.CellStack*8)),
-		asmarm64.LDR(asmarm64.X12, asmarm64.X14, int16(journal.CellBP*8)),
-	}
-}
-
-// frameBase derives the frame base every slot is addressed from: the VM
-// stack plus the frame pointer scaled to bytes.
-func frameBase(base, bp, stack int32) []asm.Instruction {
-	return []asm.Instruction{
-		asmarm64.LSLI(vreg(base), vreg(bp), 3),
-		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
-	}
-}
-
-// heapSetFn builds the ssa.Function one ARRAY_SET or STRUCT_SET golden
-// compiles: a container, an index, and a value, each a compile-time
-// constant, guarded through shape and stored at the guarded cell. container
-// comes first so its own register (vreg(0)) matches the container operand
-// every stub below flushes at slot 0.
-func heapSetFn(code instr.Opcode, shape ssa.Shape, container, val types.Boxed, valTyp ssa.Type) *ssa.Function {
-	b := ssa.New("f")
-	block := b.Block()
-	containerV := b.Value(ssa.TypeRef)
-	idxV := b.Value(ssa.TypeI32)
-	valV := b.Value(valTyp)
-	guardedV := b.Value(ssa.TypeRef)
-	state := b.Value(ssa.TypeState)
-
-	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: container, Results: []ssa.Value{containerV}})
-	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{idxV}})
-	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: val, Results: []ssa.Value{valV}})
-	b.Add(block, ssa.Operation{
-		Op:      ssa.OpState,
-		Frames:  []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: containerV}, {Value: idxV}, {Value: valV}}}},
-		Results: []ssa.Value{state},
-	})
-	b.Add(block, ssa.Operation{
-		Op: ssa.OpGuardShape, Shape: shape,
-		Args: []ssa.Value{containerV}, State: state, Results: []ssa.Value{guardedV},
-	})
-	b.Add(block, ssa.Operation{
-		Op: ssa.OpExec, Code: code,
-		Args: []ssa.Value{guardedV, idxV, valV}, State: state,
-	})
-	b.Term(block, ssa.Terminator{Op: ssa.OpReturn})
-	return b.Build()
-}
+// structShapeExitLabel, structBoundsExitLabel, structKindExitLabel, and the
+// three struct retain-skip labels are TestEmitter_StructWrite's own labels,
+// in reservation order following the same rule as TestEmitter_Write's.
+const (
+	structShapeExitLabel asm.Label = iota + 1
+	structBoundsExitLabel
+	structKindExitLabel
+	structRetainLive1
+	structRetainLive2
+	structRetainLive3
+)
 
 // TestEmitter_Write proves the array-element store this machine fuses with
 // its own container guard: the shape check runs before the bounds check,
@@ -180,18 +143,6 @@ func TestEmitter_Write(t *testing.T) {
 	}
 }
 
-// shapeExitLabel, boundsExitLabel, retainLive1, and retainLive2 are the
-// labels TestEmitter_Write's own guard, bounds check, and two stubs' retain
-// skips reserve, in reservation order: block 0's own label (0) is bound by
-// newCompiler before Enter ever runs, so the guard's own exit is the first
-// this compile reserves.
-const (
-	shapeExitLabel asm.Label = iota + 1
-	boundsExitLabel
-	retainLive1
-	retainLive2
-)
-
 // TestEmitter_StructWrite proves the field store this machine fuses with its
 // own container guard: unlike structRead, the guard admits any struct itab
 // without narrowing to a specific *types.StructType, since the fields table
@@ -277,18 +228,6 @@ func TestEmitter_StructWrite(t *testing.T) {
 	})
 }
 
-// structShapeExitLabel, structBoundsExitLabel, structKindExitLabel, and the
-// three struct retain-skip labels are TestEmitter_StructWrite's own labels,
-// in reservation order following the same rule as TestEmitter_Write's.
-const (
-	structShapeExitLabel asm.Label = iota + 1
-	structBoundsExitLabel
-	structKindExitLabel
-	structRetainLive1
-	structRetainLive2
-	structRetainLive3
-)
-
 // TestEmitter_HostWrite proves hostWrite's own shape checks: an exact-width
 // field takes the store, and each of a narrower field, a value whose kind
 // disagrees with the field's Go kind, and a specific struct type pinned onto
@@ -341,6 +280,67 @@ func TestEmitter_HostWrite(t *testing.T) {
 		_, ok := backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
+}
+
+func testInput(fn *types.Function) *jit.Input {
+	return &jit.Input{Address: 1, Function: fn, Objects: jit.Objects{1: {Fn: fn}}}
+}
+
+func vreg(id int32) asm.VReg     { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
+func narrow(id int32) asm.VReg   { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
+func tag(kind types.Kind) uint16 { return uint16(types.Tag(kind) >> 48) }
+
+// prologue is the entry every golden stream in this file opens with: the
+// journal header mirrored into the pinned context registers.
+func prologue() []asm.Instruction {
+	return []asm.Instruction{
+		asmarm64.MOV(asmarm64.X14, asmarm64.X0),
+		asmarm64.LDP(asmarm64.X10, asmarm64.X11, asmarm64.X14, int16(journal.CellStack*8)),
+		asmarm64.LDR(asmarm64.X12, asmarm64.X14, int16(journal.CellBP*8)),
+	}
+}
+
+// frameBase derives the frame base every slot is addressed from: the VM
+// stack plus the frame pointer scaled to bytes.
+func frameBase(base, bp, stack int32) []asm.Instruction {
+	return []asm.Instruction{
+		asmarm64.LSLI(vreg(base), vreg(bp), 3),
+		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
+	}
+}
+
+// heapSetFn builds the ssa.Function one ARRAY_SET or STRUCT_SET golden
+// compiles: a container, an index, and a value, each a compile-time
+// constant, guarded through shape and stored at the guarded cell. container
+// comes first so its own register (vreg(0)) matches the container operand
+// every stub below flushes at slot 0.
+func heapSetFn(code instr.Opcode, shape ssa.Shape, container, val types.Boxed, valTyp ssa.Type) *ssa.Function {
+	b := ssa.New("f")
+	block := b.Block()
+	containerV := b.Value(ssa.TypeRef)
+	idxV := b.Value(ssa.TypeI32)
+	valV := b.Value(valTyp)
+	guardedV := b.Value(ssa.TypeRef)
+	state := b.Value(ssa.TypeState)
+
+	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: container, Results: []ssa.Value{containerV}})
+	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{idxV}})
+	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: val, Results: []ssa.Value{valV}})
+	b.Add(block, ssa.Operation{
+		Op:      ssa.OpState,
+		Frames:  []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: containerV}, {Value: idxV}, {Value: valV}}}},
+		Results: []ssa.Value{state},
+	})
+	b.Add(block, ssa.Operation{
+		Op: ssa.OpGuardShape, Shape: shape,
+		Args: []ssa.Value{containerV}, State: state, Results: []ssa.Value{guardedV},
+	})
+	b.Add(block, ssa.Operation{
+		Op: ssa.OpExec, Code: code,
+		Args: []ssa.Value{guardedV, idxV, valV}, State: state,
+	})
+	b.Term(block, ssa.Terminator{Op: ssa.OpReturn})
+	return b.Build()
 }
 
 // writeStub is the cold stub write's own guarded store lowers into: the

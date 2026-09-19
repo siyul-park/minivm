@@ -19,6 +19,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// tape records one jit.Trace by decoding each instruction's Step from fn's
+// own code, mirroring interp/trace.go's tracer.op; the caller sets whatever
+// fields the tracer would have observed at runtime (Arg, Shape, Seen) on the
+// *jit.Record it gets back.
+type tape struct {
+	ops []jit.Record
+}
+
+// fakeTraces is a jit.RecordedTraces client built from a fixed set of trees,
+// standing in for interp's recorder (mirrors frontend/trace_test.go's own).
+type fakeTraces map[jit.Anchor]*jit.Tree
+
+// shapeExit, boundsExit, kindExit, and valueExit are the labels the guarded
+// reads' cold stubs take, in the order a guard and its read reserve them;
+// each stub then takes one more, for the retain its null-reference test
+// skips. STRUCT_GET is the only read that ever reaches kindExit - see
+// structRead - and an ARRAY_GET read's own valueExit lands at kindExit's own
+// number instead of this one, since no kind check precedes it there.
+const (
+	shapeExit asm.Label = iota + 1
+	boundsExit
+	kindExit
+	valueExit
+)
+
+// arrayGetIP and structGetIP are where each guarded read's own opcode sits in
+// its golden stream's bytecode, which is both the IP its frame record
+// carries and the IP its stubs resume at.
+const (
+	arrayGetIP  = 5
+	structGetIP = 8
+	// guardedI64IP is where the guarded op sits in each boxability-guard
+	// golden stream's own bytecode below: every one of them precedes its op
+	// with exactly two 9-byte I64_CONST instructions (opcode plus 8-byte
+	// immediate), so the offset is the same 18 for all of them.
+	guardedI64IP = 18
+	// guardedI32IP is the same offset for an i32 divide/remainder golden's
+	// own bytecode below: every one of them precedes its op with exactly two
+	// 5-byte I32_CONST instructions (opcode plus 4-byte immediate).
+	guardedI32IP = 10
+	// callRef is the constant callee address the "calls a constant scalar
+	// callee" golden resolves, and callIP is where CALL's own opcode sits in
+	// that golden's bytecode below - both the frame record's IP and the IP
+	// its two fallback stubs resume at.
+	callRef = 2
+	callIP  = 5
+)
+
+// callReady and friends are the labels a direct call's branches take, in
+// reservation order. Label 1 belongs to the frontend's OpRetain ahead of
+// the call (see count), so these start at 2; dropDone numbers before
+// callRelDone because own.go's drop reserves its label before the guard
+// that branches to it.
+const (
+	callReady asm.Label = iota + 2
+	callRelFail
+	dropDone
+	callRelDone
+	callHasFrame
+	callNormal
+)
+
 func TestNew(t *testing.T) {
 	machine := arm64.New()
 	require.NotNil(t, machine)
@@ -2052,12 +2114,6 @@ func TestNew(t *testing.T) {
 	})
 }
 
-// input is the compile-time snapshot one function is compiled from, published
-// at the address its entry is anchored at.
-func input(addr int, fn *types.Function) *jit.Input {
-	return &jit.Input{Address: addr, Function: fn, Objects: jit.Objects{addr: {Fn: fn}}}
-}
-
 // TestARM64_SSALoopBackEdge proves a loop root compiles through the SSA
 // machine: the static loop frontend plans the header, and the emitter keeps
 // the loop inside native code behind a safepoint budget instead of paying a
@@ -2183,340 +2239,6 @@ func TestARM64_SSASuspend(t *testing.T) {
 	code, err := assembler.Build()
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
-}
-
-// assemble builds the code of one function.
-func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
-	t.Helper()
-	b := instr.NewBuilder()
-	emit(b)
-	instructions, err := b.Assemble()
-	require.NoError(t, err)
-	return instr.Marshal(instructions)
-}
-
-// tape records one jit.Trace by decoding each instruction's Step from fn's
-// own code, mirroring interp/trace.go's tracer.op; the caller sets whatever
-// fields the tracer would have observed at runtime (Arg, Shape, Seen) on the
-// *jit.Record it gets back.
-type tape struct {
-	ops []jit.Record
-}
-
-func (t *tape) at(fn *types.Function, addr, ip, depth int) *jit.Record {
-	inst := instr.Instruction(fn.Code[ip:])
-	t.ops = append(t.ops, jit.Record{Step: jit.Step{
-		Op: inst.Opcode(), Args: jit.Args(inst), Fn: addr, IP: ip, Depth: depth,
-	}})
-	return &t.ops[len(t.ops)-1]
-}
-
-// fakeTraces is a jit.RecordedTraces client built from a fixed set of trees,
-// standing in for interp's recorder (mirrors frontend/trace_test.go's own).
-type fakeTraces map[jit.Anchor]*jit.Tree
-
-func (f fakeTraces) Anchors(addr int) []int {
-	var out []int
-	for a, tree := range f {
-		if a.Addr == addr && tree.Root != nil {
-			out = append(out, a.IP)
-		}
-	}
-	return out
-}
-
-func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
-	return f[a]
-}
-
-// prologue is the entry every golden stream opens with: the journal header
-// mirrored into the pinned context registers. The frame base every slot is
-// addressed from follows next (see frameBase), derived once for the whole
-// compile.
-func prologue() []asm.Instruction {
-	return []asm.Instruction{
-		asmarm64.MOV(asmarm64.X14, asmarm64.X0),
-		asmarm64.LDP(asmarm64.X10, asmarm64.X11, asmarm64.X14, int16(journal.CellStack*8)),
-		asmarm64.LDR(asmarm64.X12, asmarm64.X14, int16(journal.CellBP*8)),
-	}
-}
-
-// frameBase derives the frame base every slot is addressed from: the VM
-// stack plus the frame pointer scaled to bytes.
-func frameBase(base, bp, stack int32) []asm.Instruction {
-	return []asm.Instruction{
-		asmarm64.LSLI(vreg(base), vreg(bp), 3),
-		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
-	}
-}
-
-// boxI64 is the instruction sequence box emits for a raw i64 value: mask to
-// the boxed payload width, then OR the kind tag in. It cannot be the MOVK
-// shape i1/i8/i32 use, because bit 48 of the 49-bit payload (types.VBits) is
-// that payload's own sign bit, not a bit box is free to overwrite - a MOVK
-// there would corrupt every negative value. Masking first and using ORR
-// (Tag's own bits never reach below bit 49, so the two halves never overlap)
-// keeps it exact for both signs. src is the raw i64 value being boxed, out
-// is box's own fresh result register, and tagReg is box's own fresh scratch
-// register for the loaded tag word.
-func boxI64(out, src, tagReg asm.VReg) []asm.Instruction {
-	return slices.Concat(
-		[]asm.Instruction{asmarm64.ANDI(out, src, types.VMask)},
-		asmarm64.LDI(tagReg, uint64(types.Tag(types.KindI64))),
-		[]asm.Instruction{asmarm64.ORR(out, out, tagReg)},
-	)
-}
-
-// shapeExit, boundsExit, kindExit, and valueExit are the labels the guarded
-// reads' cold stubs take, in the order a guard and its read reserve them;
-// each stub then takes one more, for the retain its null-reference test
-// skips. STRUCT_GET is the only read that ever reaches kindExit - see
-// structRead - and an ARRAY_GET read's own valueExit lands at kindExit's own
-// number instead of this one, since no kind check precedes it there.
-const (
-	shapeExit asm.Label = iota + 1
-	boundsExit
-	kindExit
-	valueExit
-)
-
-// stub is one cold stub of a guarded-read stream: the container and index
-// operands flushed to their VM stack slots (at slot and slot+8), the retain
-// the borrowed container owes the interpreter that adopts it, the published
-// stack pointer, the one frame record, and the trap. first names the stub's
-// own first virtual register and id the exit descriptor it reports; live is
-// the label its null-reference test skips the retain to; ip is both the
-// opcode's own IP (a guard exits before the operation it admits, never past
-// it) and the frame record's IP; sp is the operand-stack depth (in words)
-// the function had live at that opcode, which STRUCT_GET's one fewer
-// declared param than the ARRAY_GET golden stream's own does not share.
-func stub(first int32, id uint16, live asm.Label, ip int, slot int16, sp uint16) []asm.Instruction {
-	ctrl, bp := vreg(first), vreg(first+5)
-	depth := vreg(first + 7)
-	base := vreg(first + 9)
-	return []asm.Instruction{
-		// The container is held boxed already, so it flushes as it stands,
-		// and it borrows its count from the constant pool, so the stub takes
-		// the retain the resumed interpreter releases when it pops it.
-		asmarm64.STR(vreg(0), vreg(4), slot),
-		asmarm64.ANDI(vreg(first+1), vreg(0), 0xFFFFFFFF),
-		asmarm64.CMPI(vreg(first+1), 0),
-		asmarm64.BCondLabel(asmarm64.OpBEQ, live),
-		asmarm64.LDR(vreg(first+2), ctrl, int16(journal.CellRC*8)),
-		asmarm64.LDRR(vreg(first+3), vreg(first+2), vreg(first+1)),
-		asmarm64.ADDI(vreg(first+3), vreg(first+3), 1),
-		asmarm64.STRR(vreg(first+3), vreg(first+2), vreg(first+1)),
-		asmarm64.MOV(vreg(first+4), vreg(1)),
-		asmarm64.MOVK(vreg(first+4), tag(types.KindI32), 48),
-		asmarm64.STR(vreg(first+4), vreg(4), slot+8),
-		asmarm64.ADDI(vreg(first+6), bp, sp),
-		asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
-		asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
-		asmarm64.LSLI(vreg(first+8), depth, journal.Shift),
-		asmarm64.ADD(base, ctrl, vreg(first+8)),
-		asmarm64.MOVZ(vreg(first+10), 1, 0),
-		asmarm64.STP(vreg(first+10), bp, base, int16(journal.At(0, journal.RecordAddr)*8)),
-		asmarm64.MOVZ(vreg(first+11), uint16(ip), 0),
-		asmarm64.MOVZ(vreg(first+12), 1, 0),
-		asmarm64.STP(vreg(first+11), vreg(first+12), base, int16(journal.At(0, journal.RecordIP)*8)),
-		asmarm64.ADDI(depth, depth, 1),
-		asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
-		asmarm64.MOVZ(vreg(first+13), id, 0),
-		asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellExitID*8)),
-		asmarm64.MOVZ(vreg(first+14), uint16(journal.TrapFallback), 0),
-		asmarm64.STR(vreg(first+14), ctrl, int16(journal.CellTrap*8)),
-		asmarm64.MOVZ(vreg(first+15), uint16(ip), 0),
-		asmarm64.STR(vreg(first+15), ctrl, int16(journal.CellNextIP*8)),
-		asmarm64.RET(),
-	}
-}
-
-// arrayGetIP and structGetIP are where each guarded read's own opcode sits in
-// its golden stream's bytecode, which is both the IP its frame record
-// carries and the IP its stubs resume at.
-const (
-	arrayGetIP  = 5
-	structGetIP = 8
-	// guardedI64IP is where the guarded op sits in each boxability-guard
-	// golden stream's own bytecode below: every one of them precedes its op
-	// with exactly two 9-byte I64_CONST instructions (opcode plus 8-byte
-	// immediate), so the offset is the same 18 for all of them.
-	guardedI64IP = 18
-	// guardedI32IP is the same offset for an i32 divide/remainder golden's
-	// own bytecode below: every one of them precedes its op with exactly two
-	// 5-byte I32_CONST instructions (opcode plus 4-byte immediate).
-	guardedI32IP = 10
-	// callRef is the constant callee address the "calls a constant scalar
-	// callee" golden resolves, and callIP is where CALL's own opcode sits in
-	// that golden's bytecode below - both the frame record's IP and the IP
-	// its two fallback stubs resume at.
-	callRef = 2
-	callIP  = 5
-)
-
-// callReady and friends are the labels a direct call's branches take, in
-// reservation order. Label 1 belongs to the frontend's OpRetain ahead of
-// the call (see count), so these start at 2; dropDone numbers before
-// callRelDone because own.go's drop reserves its label before the guard
-// that branches to it.
-const (
-	callReady asm.Label = iota + 2
-	callRelFail
-	dropDone
-	callRelDone
-	callHasFrame
-	callNormal
-)
-
-// count is the retain sequence the frontend's OpRetain ahead of CALL
-// lowers to (see own.go's count). first names the first virtual register
-// it allocates; boxed is the retained value's own.
-func count(first, boxed int32) []asm.Instruction {
-	ctrl, addr := vreg(first), vreg(first+1)
-	rcBase, rc := vreg(first+2), vreg(first+3)
-	return []asm.Instruction{
-		asmarm64.ANDI(addr, vreg(boxed), 0xFFFFFFFF),
-		asmarm64.CMPI(addr, 0),
-		asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
-		asmarm64.LDR(rcBase, ctrl, int16(journal.CellRC*8)),
-		asmarm64.LDRR(rc, rcBase, addr),
-		asmarm64.ADDI(rc, rc, 1),
-		asmarm64.STRR(rc, rcBase, addr),
-	}
-}
-
-// callFallback is the inline unwind the direct call's three failure exits
-// share, each at its own branch point (see the golden's note on why it is
-// not deferred): the pre-call state materialized, sp published, one frame
-// record resuming callIP appended, and exitID/trap reported. first names
-// the exit's first virtual register.
-func callFallback(first int32, exitID uint16, trap journal.Trap) []asm.Instruction {
-	ctrl, box := vreg(first), vreg(first+1)
-	bp, sp := vreg(first+2), vreg(first+3)
-	depth, off := vreg(first+4), vreg(first+5)
-	base := vreg(first + 6)
-	addr, ipReg, rets := vreg(first+7), vreg(first+8), vreg(first+9)
-	exitReg, trapReg, nextReg := vreg(first+10), vreg(first+11), vreg(first+12)
-	return []asm.Instruction{
-		asmarm64.MOV(box, vreg(0)),
-		asmarm64.MOVK(box, tag(types.KindI32), 48),
-		asmarm64.STR(box, vreg(3), 8),
-		asmarm64.STR(vreg(1), vreg(3), 16),
-		asmarm64.ADDI(sp, bp, 3),
-		asmarm64.STR(sp, ctrl, int16(journal.CellSP*8)),
-		asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
-		asmarm64.LSLI(off, depth, journal.Shift),
-		asmarm64.ADD(base, ctrl, off),
-		asmarm64.MOVZ(addr, 1, 0), // the caller's own function address
-		asmarm64.STP(addr, bp, base, int16(journal.At(0, journal.RecordAddr)*8)),
-		asmarm64.MOVZ(ipReg, uint16(callIP), 0),
-		asmarm64.MOVZ(rets, 1, 0),
-		asmarm64.STP(ipReg, rets, base, int16(journal.At(0, journal.RecordIP)*8)),
-		asmarm64.ADDI(depth, depth, 1),
-		asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
-		asmarm64.MOVZ(exitReg, exitID, 0),
-		asmarm64.STR(exitReg, ctrl, int16(journal.CellExitID*8)),
-		asmarm64.MOVZ(trapReg, uint16(trap), 0),
-		asmarm64.STR(trapReg, ctrl, int16(journal.CellTrap*8)),
-		asmarm64.MOVZ(nextReg, uint16(callIP), 0),
-		asmarm64.STR(nextReg, ctrl, int16(journal.CellNextIP*8)),
-		asmarm64.RET(),
-	}
-}
-
-// overflowStub is the cold stub behind an I64_ADD/SUB/MUL/SHL/SHR_U/DIV_S/
-// DIV_U boxability guard: both operands flush boxed to their VM stack slots
-// at base (see box's ordinary TypeI64 case - each is already proven in
-// range by its own producer, so neither truncates), unlike stub above there
-// is no retain to take because neither is a reference, the stack pointer
-// advances by the two words they occupied, one frame record resumes at ip,
-// and the trap reports fallback. first names the stub's own first virtual
-// register and id the exit descriptor it reports - an i64 divide reserves
-// two exits sharing this same shape, one for its zero-divisor guard and one
-// for this boxability guard, so the two stubs differ only in id and first.
-func overflowStub(first int32, id uint16, ip int) []asm.Instruction {
-	ctrl, base := vreg(first), vreg(3)
-	depth := vreg(first + 7)
-	rbase := vreg(first + 9)
-	return slices.Concat(
-		boxI64(vreg(first+1), vreg(0), vreg(first+2)),
-		[]asm.Instruction{asmarm64.STR(vreg(first+1), base, 0)},
-		boxI64(vreg(first+3), vreg(1), vreg(first+4)),
-		[]asm.Instruction{asmarm64.STR(vreg(first+3), base, 8)},
-		[]asm.Instruction{
-			asmarm64.ADDI(vreg(first+6), vreg(first+5), 2),
-			asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
-			asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
-			asmarm64.LSLI(vreg(first+8), depth, journal.Shift),
-			asmarm64.ADD(rbase, ctrl, vreg(first+8)),
-		},
-		asmarm64.LDI(vreg(first+10), 1),
-		[]asm.Instruction{asmarm64.STP(vreg(first+10), vreg(first+5), rbase, int16(journal.At(0, journal.RecordAddr)*8))},
-		asmarm64.LDI(vreg(first+11), uint64(ip)),
-		asmarm64.LDI(vreg(first+12), 1),
-		[]asm.Instruction{asmarm64.STP(vreg(first+11), vreg(first+12), rbase, int16(journal.At(0, journal.RecordIP)*8))},
-		[]asm.Instruction{
-			asmarm64.ADDI(depth, depth, 1),
-			asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
-		},
-		asmarm64.LDI(vreg(first+13), uint64(id)),
-		[]asm.Instruction{asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellExitID*8))},
-		asmarm64.LDI(vreg(first+14), uint64(journal.TrapFallback)),
-		[]asm.Instruction{asmarm64.STR(vreg(first+14), ctrl, int16(journal.CellTrap*8))},
-		asmarm64.LDI(vreg(first+15), uint64(ip)),
-		[]asm.Instruction{
-			asmarm64.STR(vreg(first+15), ctrl, int16(journal.CellNextIP*8)),
-			asmarm64.RET(),
-		},
-	)
-}
-
-// divStub is the cold stub behind an I32_DIV_S/DIV_U/REM_S/REM_U
-// zero-divisor guard: both i32 operands flush boxed to their VM stack slots
-// at base (see box's ordinary TypeI32 case, which needs one fewer register
-// per operand than TypeI64's own - there is no separate tag register, since
-// MOVK writes the tag into the same one the value was moved into), there is
-// no retain to take because neither is a reference, the stack pointer
-// advances by the two words they occupied, one frame record resumes at ip,
-// and the trap reports fallback. first names the stub's own first virtual
-// register; the exit is always this function's only one, so id is always 1.
-func divStub(first int32, ip int) []asm.Instruction {
-	ctrl, base, bp := vreg(first), vreg(3), vreg(first+3)
-	depth := vreg(first + 5)
-	rbase := vreg(first + 7)
-	return slices.Concat(
-		[]asm.Instruction{
-			asmarm64.MOV(vreg(first+1), vreg(0)),
-			asmarm64.MOVK(vreg(first+1), tag(types.KindI32), 48),
-			asmarm64.STR(vreg(first+1), base, 0),
-			asmarm64.MOV(vreg(first+2), vreg(1)),
-			asmarm64.MOVK(vreg(first+2), tag(types.KindI32), 48),
-			asmarm64.STR(vreg(first+2), base, 8),
-			asmarm64.ADDI(vreg(first+4), bp, 2),
-			asmarm64.STR(vreg(first+4), ctrl, int16(journal.CellSP*8)),
-			asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
-			asmarm64.LSLI(vreg(first+6), depth, journal.Shift),
-			asmarm64.ADD(rbase, ctrl, vreg(first+6)),
-		},
-		asmarm64.LDI(vreg(first+8), 1),
-		[]asm.Instruction{asmarm64.STP(vreg(first+8), bp, rbase, int16(journal.At(0, journal.RecordAddr)*8))},
-		asmarm64.LDI(vreg(first+9), uint64(ip)),
-		asmarm64.LDI(vreg(first+10), 1),
-		[]asm.Instruction{asmarm64.STP(vreg(first+9), vreg(first+10), rbase, int16(journal.At(0, journal.RecordIP)*8))},
-		[]asm.Instruction{
-			asmarm64.ADDI(depth, depth, 1),
-			asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
-		},
-		asmarm64.LDI(vreg(first+11), 1),
-		[]asm.Instruction{asmarm64.STR(vreg(first+11), ctrl, int16(journal.CellExitID*8))},
-		asmarm64.LDI(vreg(first+12), uint64(journal.TrapFallback)),
-		[]asm.Instruction{asmarm64.STR(vreg(first+12), ctrl, int16(journal.CellTrap*8))},
-		asmarm64.LDI(vreg(first+13), uint64(ip)),
-		[]asm.Instruction{
-			asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellNextIP*8)),
-			asmarm64.RET(),
-		},
-	)
 }
 
 // TestARM64_PlanUpvalSetNeverGatesReleaseOnAliasing counts CMP+BEQ pairs
@@ -2903,6 +2625,284 @@ func TestARM64_SelfCall(t *testing.T) {
 	code, err := assembler.Build()
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
+}
+
+func (f fakeTraces) Anchors(addr int) []int {
+	var out []int
+	for a, tree := range f {
+		if a.Addr == addr && tree.Root != nil {
+			out = append(out, a.IP)
+		}
+	}
+	return out
+}
+
+func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
+	return f[a]
+}
+
+// input is the compile-time snapshot one function is compiled from, published
+// at the address its entry is anchored at.
+func input(addr int, fn *types.Function) *jit.Input {
+	return &jit.Input{Address: addr, Function: fn, Objects: jit.Objects{addr: {Fn: fn}}}
+}
+
+// assemble builds the code of one function.
+func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
+	t.Helper()
+	b := instr.NewBuilder()
+	emit(b)
+	instructions, err := b.Assemble()
+	require.NoError(t, err)
+	return instr.Marshal(instructions)
+}
+
+func (t *tape) at(fn *types.Function, addr, ip, depth int) *jit.Record {
+	inst := instr.Instruction(fn.Code[ip:])
+	t.ops = append(t.ops, jit.Record{Step: jit.Step{
+		Op: inst.Opcode(), Args: jit.Args(inst), Fn: addr, IP: ip, Depth: depth,
+	}})
+	return &t.ops[len(t.ops)-1]
+}
+
+// prologue is the entry every golden stream opens with: the journal header
+// mirrored into the pinned context registers. The frame base every slot is
+// addressed from follows next (see frameBase), derived once for the whole
+// compile.
+func prologue() []asm.Instruction {
+	return []asm.Instruction{
+		asmarm64.MOV(asmarm64.X14, asmarm64.X0),
+		asmarm64.LDP(asmarm64.X10, asmarm64.X11, asmarm64.X14, int16(journal.CellStack*8)),
+		asmarm64.LDR(asmarm64.X12, asmarm64.X14, int16(journal.CellBP*8)),
+	}
+}
+
+// frameBase derives the frame base every slot is addressed from: the VM
+// stack plus the frame pointer scaled to bytes.
+func frameBase(base, bp, stack int32) []asm.Instruction {
+	return []asm.Instruction{
+		asmarm64.LSLI(vreg(base), vreg(bp), 3),
+		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
+	}
+}
+
+// boxI64 is the instruction sequence box emits for a raw i64 value: mask to
+// the boxed payload width, then OR the kind tag in. It cannot be the MOVK
+// shape i1/i8/i32 use, because bit 48 of the 49-bit payload (types.VBits) is
+// that payload's own sign bit, not a bit box is free to overwrite - a MOVK
+// there would corrupt every negative value. Masking first and using ORR
+// (Tag's own bits never reach below bit 49, so the two halves never overlap)
+// keeps it exact for both signs. src is the raw i64 value being boxed, out
+// is box's own fresh result register, and tagReg is box's own fresh scratch
+// register for the loaded tag word.
+func boxI64(out, src, tagReg asm.VReg) []asm.Instruction {
+	return slices.Concat(
+		[]asm.Instruction{asmarm64.ANDI(out, src, types.VMask)},
+		asmarm64.LDI(tagReg, uint64(types.Tag(types.KindI64))),
+		[]asm.Instruction{asmarm64.ORR(out, out, tagReg)},
+	)
+}
+
+// stub is one cold stub of a guarded-read stream: the container and index
+// operands flushed to their VM stack slots (at slot and slot+8), the retain
+// the borrowed container owes the interpreter that adopts it, the published
+// stack pointer, the one frame record, and the trap. first names the stub's
+// own first virtual register and id the exit descriptor it reports; live is
+// the label its null-reference test skips the retain to; ip is both the
+// opcode's own IP (a guard exits before the operation it admits, never past
+// it) and the frame record's IP; sp is the operand-stack depth (in words)
+// the function had live at that opcode, which STRUCT_GET's one fewer
+// declared param than the ARRAY_GET golden stream's own does not share.
+func stub(first int32, id uint16, live asm.Label, ip int, slot int16, sp uint16) []asm.Instruction {
+	ctrl, bp := vreg(first), vreg(first+5)
+	depth := vreg(first + 7)
+	base := vreg(first + 9)
+	return []asm.Instruction{
+		// The container is held boxed already, so it flushes as it stands,
+		// and it borrows its count from the constant pool, so the stub takes
+		// the retain the resumed interpreter releases when it pops it.
+		asmarm64.STR(vreg(0), vreg(4), slot),
+		asmarm64.ANDI(vreg(first+1), vreg(0), 0xFFFFFFFF),
+		asmarm64.CMPI(vreg(first+1), 0),
+		asmarm64.BCondLabel(asmarm64.OpBEQ, live),
+		asmarm64.LDR(vreg(first+2), ctrl, int16(journal.CellRC*8)),
+		asmarm64.LDRR(vreg(first+3), vreg(first+2), vreg(first+1)),
+		asmarm64.ADDI(vreg(first+3), vreg(first+3), 1),
+		asmarm64.STRR(vreg(first+3), vreg(first+2), vreg(first+1)),
+		asmarm64.MOV(vreg(first+4), vreg(1)),
+		asmarm64.MOVK(vreg(first+4), tag(types.KindI32), 48),
+		asmarm64.STR(vreg(first+4), vreg(4), slot+8),
+		asmarm64.ADDI(vreg(first+6), bp, sp),
+		asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
+		asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
+		asmarm64.LSLI(vreg(first+8), depth, journal.Shift),
+		asmarm64.ADD(base, ctrl, vreg(first+8)),
+		asmarm64.MOVZ(vreg(first+10), 1, 0),
+		asmarm64.STP(vreg(first+10), bp, base, int16(journal.At(0, journal.RecordAddr)*8)),
+		asmarm64.MOVZ(vreg(first+11), uint16(ip), 0),
+		asmarm64.MOVZ(vreg(first+12), 1, 0),
+		asmarm64.STP(vreg(first+11), vreg(first+12), base, int16(journal.At(0, journal.RecordIP)*8)),
+		asmarm64.ADDI(depth, depth, 1),
+		asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
+		asmarm64.MOVZ(vreg(first+13), id, 0),
+		asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellExitID*8)),
+		asmarm64.MOVZ(vreg(first+14), uint16(journal.TrapFallback), 0),
+		asmarm64.STR(vreg(first+14), ctrl, int16(journal.CellTrap*8)),
+		asmarm64.MOVZ(vreg(first+15), uint16(ip), 0),
+		asmarm64.STR(vreg(first+15), ctrl, int16(journal.CellNextIP*8)),
+		asmarm64.RET(),
+	}
+}
+
+// count is the retain sequence the frontend's OpRetain ahead of CALL
+// lowers to (see own.go's count). first names the first virtual register
+// it allocates; boxed is the retained value's own.
+func count(first, boxed int32) []asm.Instruction {
+	ctrl, addr := vreg(first), vreg(first+1)
+	rcBase, rc := vreg(first+2), vreg(first+3)
+	return []asm.Instruction{
+		asmarm64.ANDI(addr, vreg(boxed), 0xFFFFFFFF),
+		asmarm64.CMPI(addr, 0),
+		asmarm64.BCondLabel(asmarm64.OpBEQ, 1),
+		asmarm64.LDR(rcBase, ctrl, int16(journal.CellRC*8)),
+		asmarm64.LDRR(rc, rcBase, addr),
+		asmarm64.ADDI(rc, rc, 1),
+		asmarm64.STRR(rc, rcBase, addr),
+	}
+}
+
+// callFallback is the inline unwind the direct call's three failure exits
+// share, each at its own branch point (see the golden's note on why it is
+// not deferred): the pre-call state materialized, sp published, one frame
+// record resuming callIP appended, and exitID/trap reported. first names
+// the exit's first virtual register.
+func callFallback(first int32, exitID uint16, trap journal.Trap) []asm.Instruction {
+	ctrl, box := vreg(first), vreg(first+1)
+	bp, sp := vreg(first+2), vreg(first+3)
+	depth, off := vreg(first+4), vreg(first+5)
+	base := vreg(first + 6)
+	addr, ipReg, rets := vreg(first+7), vreg(first+8), vreg(first+9)
+	exitReg, trapReg, nextReg := vreg(first+10), vreg(first+11), vreg(first+12)
+	return []asm.Instruction{
+		asmarm64.MOV(box, vreg(0)),
+		asmarm64.MOVK(box, tag(types.KindI32), 48),
+		asmarm64.STR(box, vreg(3), 8),
+		asmarm64.STR(vreg(1), vreg(3), 16),
+		asmarm64.ADDI(sp, bp, 3),
+		asmarm64.STR(sp, ctrl, int16(journal.CellSP*8)),
+		asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
+		asmarm64.LSLI(off, depth, journal.Shift),
+		asmarm64.ADD(base, ctrl, off),
+		asmarm64.MOVZ(addr, 1, 0), // the caller's own function address
+		asmarm64.STP(addr, bp, base, int16(journal.At(0, journal.RecordAddr)*8)),
+		asmarm64.MOVZ(ipReg, uint16(callIP), 0),
+		asmarm64.MOVZ(rets, 1, 0),
+		asmarm64.STP(ipReg, rets, base, int16(journal.At(0, journal.RecordIP)*8)),
+		asmarm64.ADDI(depth, depth, 1),
+		asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
+		asmarm64.MOVZ(exitReg, exitID, 0),
+		asmarm64.STR(exitReg, ctrl, int16(journal.CellExitID*8)),
+		asmarm64.MOVZ(trapReg, uint16(trap), 0),
+		asmarm64.STR(trapReg, ctrl, int16(journal.CellTrap*8)),
+		asmarm64.MOVZ(nextReg, uint16(callIP), 0),
+		asmarm64.STR(nextReg, ctrl, int16(journal.CellNextIP*8)),
+		asmarm64.RET(),
+	}
+}
+
+// overflowStub is the cold stub behind an I64_ADD/SUB/MUL/SHL/SHR_U/DIV_S/
+// DIV_U boxability guard: both operands flush boxed to their VM stack slots
+// at base (see box's ordinary TypeI64 case - each is already proven in
+// range by its own producer, so neither truncates), unlike stub above there
+// is no retain to take because neither is a reference, the stack pointer
+// advances by the two words they occupied, one frame record resumes at ip,
+// and the trap reports fallback. first names the stub's own first virtual
+// register and id the exit descriptor it reports - an i64 divide reserves
+// two exits sharing this same shape, one for its zero-divisor guard and one
+// for this boxability guard, so the two stubs differ only in id and first.
+func overflowStub(first int32, id uint16, ip int) []asm.Instruction {
+	ctrl, base := vreg(first), vreg(3)
+	depth := vreg(first + 7)
+	rbase := vreg(first + 9)
+	return slices.Concat(
+		boxI64(vreg(first+1), vreg(0), vreg(first+2)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+1), base, 0)},
+		boxI64(vreg(first+3), vreg(1), vreg(first+4)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+3), base, 8)},
+		[]asm.Instruction{
+			asmarm64.ADDI(vreg(first+6), vreg(first+5), 2),
+			asmarm64.STR(vreg(first+6), ctrl, int16(journal.CellSP*8)),
+			asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
+			asmarm64.LSLI(vreg(first+8), depth, journal.Shift),
+			asmarm64.ADD(rbase, ctrl, vreg(first+8)),
+		},
+		asmarm64.LDI(vreg(first+10), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+10), vreg(first+5), rbase, int16(journal.At(0, journal.RecordAddr)*8))},
+		asmarm64.LDI(vreg(first+11), uint64(ip)),
+		asmarm64.LDI(vreg(first+12), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+11), vreg(first+12), rbase, int16(journal.At(0, journal.RecordIP)*8))},
+		[]asm.Instruction{
+			asmarm64.ADDI(depth, depth, 1),
+			asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
+		},
+		asmarm64.LDI(vreg(first+13), uint64(id)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellExitID*8))},
+		asmarm64.LDI(vreg(first+14), uint64(journal.TrapFallback)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+14), ctrl, int16(journal.CellTrap*8))},
+		asmarm64.LDI(vreg(first+15), uint64(ip)),
+		[]asm.Instruction{
+			asmarm64.STR(vreg(first+15), ctrl, int16(journal.CellNextIP*8)),
+			asmarm64.RET(),
+		},
+	)
+}
+
+// divStub is the cold stub behind an I32_DIV_S/DIV_U/REM_S/REM_U
+// zero-divisor guard: both i32 operands flush boxed to their VM stack slots
+// at base (see box's ordinary TypeI32 case, which needs one fewer register
+// per operand than TypeI64's own - there is no separate tag register, since
+// MOVK writes the tag into the same one the value was moved into), there is
+// no retain to take because neither is a reference, the stack pointer
+// advances by the two words they occupied, one frame record resumes at ip,
+// and the trap reports fallback. first names the stub's own first virtual
+// register; the exit is always this function's only one, so id is always 1.
+func divStub(first int32, ip int) []asm.Instruction {
+	ctrl, base, bp := vreg(first), vreg(3), vreg(first+3)
+	depth := vreg(first + 5)
+	rbase := vreg(first + 7)
+	return slices.Concat(
+		[]asm.Instruction{
+			asmarm64.MOV(vreg(first+1), vreg(0)),
+			asmarm64.MOVK(vreg(first+1), tag(types.KindI32), 48),
+			asmarm64.STR(vreg(first+1), base, 0),
+			asmarm64.MOV(vreg(first+2), vreg(1)),
+			asmarm64.MOVK(vreg(first+2), tag(types.KindI32), 48),
+			asmarm64.STR(vreg(first+2), base, 8),
+			asmarm64.ADDI(vreg(first+4), bp, 2),
+			asmarm64.STR(vreg(first+4), ctrl, int16(journal.CellSP*8)),
+			asmarm64.LDR(depth, ctrl, int16(journal.CellDepth*8)),
+			asmarm64.LSLI(vreg(first+6), depth, journal.Shift),
+			asmarm64.ADD(rbase, ctrl, vreg(first+6)),
+		},
+		asmarm64.LDI(vreg(first+8), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+8), bp, rbase, int16(journal.At(0, journal.RecordAddr)*8))},
+		asmarm64.LDI(vreg(first+9), uint64(ip)),
+		asmarm64.LDI(vreg(first+10), 1),
+		[]asm.Instruction{asmarm64.STP(vreg(first+9), vreg(first+10), rbase, int16(journal.At(0, journal.RecordIP)*8))},
+		[]asm.Instruction{
+			asmarm64.ADDI(depth, depth, 1),
+			asmarm64.STR(depth, ctrl, int16(journal.CellDepth*8)),
+		},
+		asmarm64.LDI(vreg(first+11), 1),
+		[]asm.Instruction{asmarm64.STR(vreg(first+11), ctrl, int16(journal.CellExitID*8))},
+		asmarm64.LDI(vreg(first+12), uint64(journal.TrapFallback)),
+		[]asm.Instruction{asmarm64.STR(vreg(first+12), ctrl, int16(journal.CellTrap*8))},
+		asmarm64.LDI(vreg(first+13), uint64(ip)),
+		[]asm.Instruction{
+			asmarm64.STR(vreg(first+13), ctrl, int16(journal.CellNextIP*8)),
+			asmarm64.RET(),
+		},
+	)
 }
 
 // spillsTo reports whether o is a memory operand addressed off X26, the

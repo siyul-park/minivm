@@ -214,16 +214,6 @@ func (h *HostArray) Array(i *Interpreter) (types.Value, error) {
 	return convert(i, h.registry, h.copy, h.ptr)
 }
 
-// slice addresses the Go slice through the variable the view holds, so a slice
-// that append reallocated is the one the next access reaches. A Go array has no
-// header to rewrite and reports false.
-func (h *HostArray) slice() (reflect.Value, bool) {
-	if h.rtyp.Kind() != reflect.Slice {
-		return reflect.Value{}, false
-	}
-	return reflect.NewAt(h.rtyp, h.ptr).Elem(), true
-}
-
 func (h *HostMap) Kind() types.Kind { return types.KindRef }
 func (h *HostMap) Type() types.Type { return h.typ }
 func (h *HostMap) String() string   { return fmt.Sprintf("%s\n<native>", h.typ) }
@@ -291,6 +281,16 @@ func (h *HostMap) Clear() { h.value().Clear() }
 // produced, for an opcode that yields a new value rather than changing this one.
 func (h *HostMap) Map(i *Interpreter) (types.Value, error) {
 	return convert(i, h.registry, h.copy, h.ptr)
+}
+
+// slice addresses the Go slice through the variable the view holds, so a slice
+// that append reallocated is the one the next access reaches. A Go array has no
+// header to rewrite and reports false.
+func (h *HostArray) slice() (reflect.Value, bool) {
+	if h.rtyp.Kind() != reflect.Slice {
+		return reflect.Value{}, false
+	}
+	return reflect.NewAt(h.rtyp, h.ptr).Elem(), true
 }
 
 // value addresses the Go map through the variable the view holds, so a map the

@@ -25,7 +25,7 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `internal/ssa/transform` | target-independent SSA transforms |
 | `internal/asm` | machine IR, allocation, linking, executable memory |
 | `internal/asm/<arch>` | ISA encoding and ABI mechanics |
-| `internal/jit` | architecture-neutral plans and driver |
+| `internal/jit` | architecture-neutral plans, target contract, and driver |
 | `internal/jit/frontend` | bytecode/trace → SSA |
 | `internal/jit/backend` | SSA → machine orchestration, target-neutral metadata |
 | `internal/jit/<arch>` | native lowering |

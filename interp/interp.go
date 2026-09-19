@@ -22,7 +22,7 @@ type Interpreter struct {
 	// ctx is non-nil only while Run is executing and is cleared before Run returns.
 	ctx context.Context
 	// done is the current Run context's cancellation channel and has the same lifetime.
-	done <-chan struct{}
+	done        <-chan struct{}
 	tracer      *tracer
 	hook        func(*Interpreter) error
 	codec       Codec
@@ -145,6 +145,13 @@ const heapRunway = 64
 // handlers compare against it directly.
 const loopWarmup = 8
 
+// negZeroF32 and negZeroF64 are the bit patterns of -0.0. A map key folds them
+// onto +0.0 so both spellings of zero index one entry.
+const (
+	negZeroF32 = uint32(1) << 31
+	negZeroF64 = uint64(1) << 63
+)
+
 func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
 }
@@ -194,28 +201,6 @@ func WithThreshold(val int) Option {
 
 func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
-}
-
-// withQueue and withStore share compile coordination with every interpreter
-// borrowed from one pool: the queue admits one build per function at a time
-// and serves it on its worker, and the store holds the code those builds
-// publish. They are given together, which is what makes a build that finished
-// on the worker reach its interpreter: a shared store is exactly what stops
-// dispatch from skipping safepoints (see Store.Shared and dispatch). An
-// interpreter given neither runs the same seam privately, inline and with no
-// worker at all.
-func withQueue(q *compile.Queue) Option {
-	return func(o *option) { o.queue = q }
-}
-
-func withStore(s *compile.Store) Option {
-	return func(o *option) { o.store = s }
-}
-
-// withTracer shares tracing state with interpreters for the same program.
-// A tracer already bound to another program is isolated automatically.
-func withTracer(t *tracer) Option {
-	return func(o *option) { o.tracer = t }
 }
 
 // New builds an interpreter for prog. It trusts prog to be well-formed; run
@@ -859,6 +844,28 @@ func (i *Interpreter) Reset() {
 	i.pace()
 }
 
+// withQueue and withStore share compile coordination with every interpreter
+// borrowed from one pool: the queue admits one build per function at a time
+// and serves it on its worker, and the store holds the code those builds
+// publish. They are given together, which is what makes a build that finished
+// on the worker reach its interpreter: a shared store is exactly what stops
+// dispatch from skipping safepoints (see Store.Shared and dispatch). An
+// interpreter given neither runs the same seam privately, inline and with no
+// worker at all.
+func withQueue(q *compile.Queue) Option {
+	return func(o *option) { o.queue = q }
+}
+
+func withStore(s *compile.Store) Option {
+	return func(o *option) { o.store = s }
+}
+
+// withTracer shares tracing state with interpreters for the same program.
+// A tracer already bound to another program is isolated automatically.
+func withTracer(t *tracer) Option {
+	return func(o *option) { o.tracer = t }
+}
+
 // seed restores each global from its declaration rather than its previous value.
 func (i *Interpreter) seed() {
 	for idx, typ := range i.globalTypes {
@@ -1270,13 +1277,6 @@ func (i *Interpreter) zero(kind types.Kind) types.Boxed {
 		return types.BoxedNull
 	}
 }
-
-// negZeroF32 and negZeroF64 are the bit patterns of -0.0. A map key folds them
-// onto +0.0 so both spellings of zero index one entry.
-const (
-	negZeroF32 = uint32(1) << 31
-	negZeroF64 = uint64(1) << 63
-)
 
 // mapKey indexes one entry of a generic map. It is the single owner of the
 // rule every map opcode and the codec must agree on, because a key written

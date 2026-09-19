@@ -34,11 +34,48 @@ type captureResult struct {
 	reason  prof.CaptureReason
 }
 
+// loop is one loop of a function: the IP a backward branch re-enters at, and
+// the IP of the last branch that re-enters it. Together they bound the loop's
+// body, which is what tells a nested header from a sibling one - a sibling
+// starts after end, while a nested header lies inside (see encloses).
+type loopSpan struct {
+	header int
+	end    int
+}
+
 const opLimit = 1024
 
 const exitThreshold = 8
 
 const attemptLimit = 8
+
+// Anchors reports the IPs, within addr, that carry a published recorded
+// trace. It satisfies jit.RecordedTraces.
+func (t *tracer) Anchors(addr int) []int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]int, 0, len(t.trees))
+	for anchor, tree := range t.trees {
+		if anchor.Addr == addr && tree.Root != nil {
+			out = append(out, anchor.IP)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// RootAt returns the published tree anchored exactly at a, or nil when none
+// is recorded. Published roots are always usable. It satisfies
+// jit.RecordedTraces.
+func (t *tracer) RootAt(a jit.Anchor) *jit.Tree {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tr := t.trees[a]
+	if tr == nil || tr.Root == nil {
+		return nil
+	}
+	return tr.Snapshot()
+}
 
 func newTracer() *tracer {
 	return &tracer{
@@ -690,43 +727,6 @@ func (t *tracer) tree(a jit.Anchor) *jit.Tree {
 		t.trees[a] = tr
 	}
 	return tr
-}
-
-// Anchors reports the IPs, within addr, that carry a published recorded
-// trace. It satisfies jit.RecordedTraces.
-func (t *tracer) Anchors(addr int) []int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	out := make([]int, 0, len(t.trees))
-	for anchor, tree := range t.trees {
-		if anchor.Addr == addr && tree.Root != nil {
-			out = append(out, anchor.IP)
-		}
-	}
-	sort.Ints(out)
-	return out
-}
-
-// RootAt returns the published tree anchored exactly at a, or nil when none
-// is recorded. Published roots are always usable. It satisfies
-// jit.RecordedTraces.
-func (t *tracer) RootAt(a jit.Anchor) *jit.Tree {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	tr := t.trees[a]
-	if tr == nil || tr.Root == nil {
-		return nil
-	}
-	return tr.Snapshot()
-}
-
-// loop is one loop of a function: the IP a backward branch re-enters at, and
-// the IP of the last branch that re-enters it. Together they bound the loop's
-// body, which is what tells a nested header from a sibling one - a sibling
-// starts after end, while a nested header lies inside (see encloses).
-type loopSpan struct {
-	header int
-	end    int
 }
 
 // headers returns the loops of the function at addr, found from the targets of

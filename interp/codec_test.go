@@ -25,35 +25,6 @@ type marshalHostFields struct {
 	hidden int32
 }
 
-func (v *marshalHostFields) mark(n int32) { v.hidden = n }
-
-func (v marshalHostFields) marked() int32 { return v.hidden }
-
-func (v *marshalHostFields) Bump(n int32) int32 {
-	v.Count += n
-	return v.Count
-}
-
-func (*marshalHostFields) Context(ctx context.Context) int32 {
-	if ctx.Value(marshalContextKey(0)) == "value" {
-		return 7
-	}
-	return 0
-}
-
-func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
-	return types.I32(v), nil
-}
-
-func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
-	n, ok := value.(types.I32)
-	if !ok {
-		return interp.ErrTypeMismatch
-	}
-	*v = marshalCustom(n)
-	return nil
-}
-
 type codecAlias struct{ Target types.Ref }
 
 type codecStrings struct{ A, B, C string }
@@ -82,20 +53,9 @@ type codecHeld struct {
 	tag   int32
 }
 
-func (h *codecHeld) Tag() int32 { return h.tag }
-
-// stringKey publishes text as the heap reference a string key arrives as.
-func stringKey(t *testing.T, i *interp.Interpreter, text string) types.Boxed {
-	addr, err := i.Alloc(types.String(text))
-	require.NoError(t, err)
-	return types.BoxRef(addr)
-}
-
 // codecCounted is fully exported and still carries a pointer method, the case
 // that separates "has methods" from "a copy would lose something".
 type codecCounted struct{ Count int32 }
-
-func (c *codecCounted) Bump() int32 { c.Count++; return c.Count }
 
 type codecFirst struct{ Shared codecShared }
 
@@ -1115,4 +1075,43 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.ErrorIs(t, r.Unmarshal(i, types.String("x"), &dst), interp.ErrTypeMismatch)
 	})
 
+}
+func (v *marshalHostFields) Bump(n int32) int32 {
+	v.Count += n
+	return v.Count
+}
+
+func (*marshalHostFields) Context(ctx context.Context) int32 {
+	if ctx.Value(marshalContextKey(0)) == "value" {
+		return 7
+	}
+	return 0
+}
+
+func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
+	return types.I32(v), nil
+}
+
+func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
+	n, ok := value.(types.I32)
+	if !ok {
+		return interp.ErrTypeMismatch
+	}
+	*v = marshalCustom(n)
+	return nil
+}
+
+func (h *codecHeld) Tag() int32 { return h.tag }
+
+func (c *codecCounted) Bump() int32 { c.Count++; return c.Count }
+
+func (v *marshalHostFields) mark(n int32) { v.hidden = n }
+
+func (v marshalHostFields) marked() int32 { return v.hidden }
+
+// stringKey publishes text as the heap reference a string key arrives as.
+func stringKey(t *testing.T, i *interp.Interpreter, text string) types.Boxed {
+	addr, err := i.Alloc(types.String(text))
+	require.NoError(t, err)
+	return types.BoxRef(addr)
 }

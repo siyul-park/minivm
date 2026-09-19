@@ -185,6 +185,12 @@ func HostShapeByKind(kind reflect.Kind) (HostShape, bool) {
 	return shape, shape.Size != 0
 }
 
+// Itab returns the itab pointer of v's concrete type: the runtime type
+// identity a guarded access compares a heap value's shape against.
+func Itab(v types.Value) uintptr {
+	return (*iface)(unsafe.Pointer(&v)).itab
+}
+
 // Exact reports whether the Go field of shape s is as wide as a VM slot of
 // s.Kind, which makes the two the same bytes in either direction. A narrower
 // field is not: it decodes through the range check setSigned and setUnsigned
@@ -205,10 +211,4 @@ func (s HostShape) Read() (uintptr, bool) {
 		return s.Size, slotShapes[s.Kind].signed
 	}
 	return s.Size, s.signed
-}
-
-// Itab returns the itab pointer of v's concrete type: the runtime type
-// identity a guarded access compares a heap value's shape against.
-func Itab(v types.Value) uintptr {
-	return (*iface)(unsafe.Pointer(&v)).itab
 }

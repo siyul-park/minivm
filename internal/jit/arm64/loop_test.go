@@ -17,14 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testMachine() backend.Machine {
-	return jitarm64.New()
-}
-
-func testInput(fn *types.Function) *jit.Input {
-	return &jit.Input{Address: 1, Function: fn, Objects: jit.Objects{1: {Fn: fn}}}
-}
-
 // TestEmitter_EntryParams proves a loop header carrying live operands is
 // declined: native entry loads nothing into block parameters, so there is no
 // state to hand them.
@@ -195,4 +187,11 @@ func TestEmitter_MultiFrameExit(t *testing.T) {
 	built, err := a.Build()
 	require.NoError(t, err)
 	require.NotEmpty(t, built)
+}
+func testMachine() backend.Machine {
+	return jitarm64.New()
+}
+
+func testInput(fn *types.Function) *jit.Input {
+	return &jit.Input{Address: 1, Function: fn, Objects: jit.Objects{1: {Fn: fn}}}
 }

@@ -7,28 +7,18 @@ import (
 	"github.com/siyul-park/minivm/prof"
 )
 
-// Compiler lowers plans into native code for one architecture. New's caller
-// picks that architecture and the Machine that lowers against it; every
-// Compile call links its output into this Compiler's own executable buffer.
+// Compiler lowers plans into native code for one target. Target owns the
+// architecture and both lowering paths, so the compiler cannot combine a
+// machine with a different assembler architecture.
 type Compiler struct {
-	arch    asm.Arch
-	buffer  *asm.Buffer
-	machine Machine
+	target Target
+	buffer *asm.Buffer
 }
 
-// Machine is one architecture's native code, in the two forms this port has.
-// Compile takes a root and plans it itself, which is the SSA pipeline the
-// backend is being ported onto; Lower takes a Plan the Compiler's own
-// frontends built, which is what every root not yet ported still compiles
-// through. All lowering state — the symbolic value stack, inlined
-// activations, deferred work, and queued exits — lives on the machine's side
-// of both seams; the Compiler picks the arch, builds the assembler, and hands
-// it over.
-type Machine interface {
-	// Compile emits the whole native entry anchored at root, planning the
-	// snapshot itself, and reports the entry facts publication needs. False
-	// declines the root: nothing the machine emitted is kept, so the plan
-	// frontends below still compile it (see Compiler.native).
+// Target owns one architecture's native lowering. The same concrete target
+// implements the architecture-neutral plan path and the backend lowering path.
+type Target interface {
+	Arch() asm.Arch
 	Compile(a *asm.Assembler, input *Input, root Anchor) (Entry, bool)
 	Lower(a *asm.Assembler, input *Input, p Plan, nativeLoop bool) ([]Exit, bool)
 }
@@ -38,16 +28,18 @@ type Machine interface {
 // constructor parameter.
 const compilerBufferSize = 4096
 
-// New builds a Compiler for one architecture. arch and machine are the
-// caller's choice: an arch selector one level above this package is the one
-// that knows which ISA is actually available, so New accepts both rather than
-// choosing internally.
-func New(arch asm.Arch, machine Machine) (*Compiler, error) {
+var ErrInvalidTarget = errors.New("invalid jit target")
+
+// New builds a Compiler for one target.
+func New(target Target) (*Compiler, error) {
+	if target == nil || target.Arch() == nil {
+		return nil, ErrInvalidTarget
+	}
 	buffer, err := asm.NewBuffer(compilerBufferSize)
 	if err != nil {
 		return nil, err
 	}
-	return &Compiler{arch: arch, buffer: buffer, machine: machine}, nil
+	return &Compiler{target: target, buffer: buffer}, nil
 }
 
 // Close frees the executable buffer backing this Compiler's compiled code.
@@ -55,9 +47,9 @@ func (c *Compiler) Close() error {
 	return c.buffer.Free()
 }
 
-// Buffer returns the executable buffer backing this Compiler's compiled code,
-// for a caller that takes over its lifetime — publishing it into a
-// longer-lived cache, say — instead of calling Close.
+// Buffer returns the executable buffer backing this Compiler's compiled code.
+// The caller MUST take ownership immediately when publishing the compiled code;
+// after that transfer the Compiler MUST NOT be closed or reused.
 func (c *Compiler) Buffer() *asm.Buffer {
 	return c.buffer
 }
@@ -113,16 +105,16 @@ func (c *Compiler) Compile(input *Input, root Anchor) Result {
 	return result
 }
 
-// native compiles root through Machine.Compile, the seam that plans its own
-// root. It is the gate the ARM64 port advances behind: false means the
-// machine declined the root, or what it emitted did not build, and the
+// native compiles root through Target.Compile, the seam that plans its own
+// root. It is the gate the target advances behind: false means the target
+// declined the root, or what it emitted did not build, and the
 // assembler is discarded whole either way, so the plan frontends below
 // compile the root exactly as they would have. Only a genuine failure is
 // reported rather than retried, because the plan path cannot succeed where
 // linking executable memory did not.
 func (c *Compiler) native(input *Input, root Anchor) (Result, bool) {
-	a := asm.New(c.arch)
-	entry, ok := c.machine.Compile(a, input, root)
+	a := asm.New(c.target.Arch())
+	entry, ok := c.target.Compile(a, input, root)
 	if !ok {
 		return Result{}, false
 	}
@@ -172,8 +164,8 @@ func (c *Compiler) compile(input *Input, plan Plan, code *Code, frontend prof.Fr
 }
 
 func (c *Compiler) emit(input *Input, plan Plan, code *Code, frontend prof.Frontend, nativeLoop bool) (prof.CompileReason, error) {
-	asmb := asm.New(c.arch)
-	exits, ok := c.machine.Lower(asmb, input, plan, nativeLoop)
+	asmb := asm.New(c.target.Arch())
+	exits, ok := c.target.Lower(asmb, input, plan, nativeLoop)
 	if !ok {
 		return prof.CompileReasonLoweringRejected, nil
 	}
@@ -197,7 +189,7 @@ func (c *Compiler) publish(code *Code, a Anchor, asmb *asm.Assembler, entry Entr
 		}
 		return prof.CompileReasonError, err
 	}
-	callable, err := asm.Link(c.buffer, c.arch.ABI(), built)
+	callable, err := asm.Link(c.buffer, c.target.Arch().ABI(), built)
 	if err != nil {
 		return prof.CompileReasonError, err
 	}

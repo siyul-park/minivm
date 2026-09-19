@@ -33,12 +33,9 @@ Native traces use the journal, not a VM argument/return ABI. `Arch.Frame()` retu
 
 ## JIT Layer
 
-The agent `MUST` create `internal/jit/<arch>/` with target lowering and `MUST` keep one exported constructor:
+The agent `MUST` create `internal/jit/<arch>/` with target lowering and `MUST` keep one exported constructor. The constructor `MUST` return the concrete target type.
 
-```go
-type lowerer struct{}
-func New() jit.Machine { return lowerer{} }
-```
+The target `MUST` own both its architecture selection and native lowering so `jit.New(target)` cannot combine different architectures. It implements `jit.Target`; the architecture-neutral compiler owns no target mechanics.
 
 Lowering `MUST` return `false` before mutating state on unsupported opcode, kind, or heap shape. Guards `MUST` materialize live symbolic state.
 

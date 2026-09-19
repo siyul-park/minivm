@@ -15,14 +15,6 @@ type coroutineCycle struct {
 	refs []types.Ref
 }
 
-func (*coroutineCycle) Kind() types.Kind { return types.KindRef }
-func (*coroutineCycle) Type() types.Type { return types.TypeAny }
-func (*coroutineCycle) String() string   { return "cycle" }
-
-func (c *coroutineCycle) Refs(dst []types.Ref) []types.Ref {
-	return append(dst, c.refs...)
-}
-
 func TestCoroutineReferences(t *testing.T) {
 	t.Run("keeps closure captures live without duplicate collector edges", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{
@@ -227,4 +219,11 @@ func TestCoroutineReferences(t *testing.T) {
 		require.NoError(t, vm.Run(context.Background()))
 		require.Equal(t, 3, vm.Len())
 	})
+}
+func (*coroutineCycle) Kind() types.Kind { return types.KindRef }
+func (*coroutineCycle) Type() types.Type { return types.TypeAny }
+func (*coroutineCycle) String() string   { return "cycle" }
+
+func (c *coroutineCycle) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, c.refs...)
 }

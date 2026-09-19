@@ -18,25 +18,6 @@ type fakeTraces struct {
 	trees map[jit.Anchor]*jit.Tree
 }
 
-func (f fakeTraces) Anchors(addr int) []int {
-	var out []int
-	for a, tree := range f.trees {
-		if a.Addr == addr && tree.Root != nil {
-			out = append(out, a.IP)
-		}
-	}
-	sort.Ints(out)
-	return out
-}
-
-func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
-	tree, ok := f.trees[a]
-	if !ok || tree.Root == nil {
-		return nil
-	}
-	return tree
-}
-
 func TestTracePlan(t *testing.T) {
 	t.Run("folds a hot returned leg", func(t *testing.T) {
 		root := &jit.Trace{
@@ -270,4 +251,22 @@ func TestTracePlan(t *testing.T) {
 		require.Len(t, plans[0].Blocks, 1)
 	})
 
+}
+func (f fakeTraces) Anchors(addr int) []int {
+	var out []int
+	for a, tree := range f.trees {
+		if a.Addr == addr && tree.Root != nil {
+			out = append(out, a.IP)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
+	tree, ok := f.trees[a]
+	if !ok || tree.Root == nil {
+		return nil
+	}
+	return tree
 }

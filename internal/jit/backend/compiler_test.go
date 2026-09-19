@@ -36,64 +36,6 @@ type machine struct {
 	moves    [][]backend.Move
 }
 
-func (m *machine) Lowers(code instr.Opcode) bool {
-	return !slices.Contains(m.declines, code)
-}
-
-func (m *machine) Traps(code instr.Opcode) bool {
-	return slices.Contains(m.traps, code)
-}
-
-func (m *machine) Open(c *backend.Compiler) backend.Lowering {
-	m.compiler = c
-	return m
-}
-
-func (m *machine) Enter() bool {
-	// A real prologue differs by the kind of entry it opens - a function entry
-	// clears the locals its callers left, a module entry completes instead of
-	// returning, a loop entry re-enters a frame that is already live - so the
-	// recording machine states the kind it was opened for and, like a real
-	// one, gives up on an anchor that names no entry at all.
-	switch kind := m.compiler.Root().Kind(); kind {
-	case jit.EntryFunction, jit.EntryLoop, jit.EntryModule:
-		m.kind = kind
-	default:
-		return false
-	}
-	return m.stops != "enter"
-}
-
-func (m *machine) Lower(block int, ops []ssa.Operation) (int, bool) {
-	if m.stops == "lower" {
-		return 0, false
-	}
-	m.lowered = append(m.lowered, block)
-	m.ops = append(m.ops, ops[0].Op)
-	if ops[0].State != ssa.NoValue {
-		m.deopts = append(m.deopts, m.compiler.Exit(ops[0].State, m.guard, m.opcode))
-	}
-	if m.fuse > 1 && len(ops) >= m.fuse {
-		return m.fuse, true
-	}
-	return 1, true
-}
-
-func (m *machine) Term(block int, t ssa.Terminator) bool {
-	if m.stops == "term" {
-		return false
-	}
-	m.ended = append(m.ended, block)
-	for _, edge := range t.Edges {
-		m.moves = append(m.moves, m.compiler.Moves(edge))
-	}
-	return true
-}
-
-func (m *machine) Leave() bool {
-	return m.stops != "leave"
-}
-
 func TestRoot(t *testing.T) {
 	// A function the static frontend plans whole: a constant returned from a
 	// leaf entry, which needs nothing of the snapshot but the function itself.
@@ -569,4 +511,61 @@ func TestCompiler_Moves(t *testing.T) {
 		require.True(t, ok)
 		require.Nil(t, m.compiler.Moves(ssa.Edge{Block: 7}))
 	})
+}
+func (m *machine) Lowers(code instr.Opcode) bool {
+	return !slices.Contains(m.declines, code)
+}
+
+func (m *machine) Traps(code instr.Opcode) bool {
+	return slices.Contains(m.traps, code)
+}
+
+func (m *machine) Open(c *backend.Compiler) backend.Lowering {
+	m.compiler = c
+	return m
+}
+
+func (m *machine) Enter() bool {
+	// A real prologue differs by the kind of entry it opens - a function entry
+	// clears the locals its callers left, a module entry completes instead of
+	// returning, a loop entry re-enters a frame that is already live - so the
+	// recording machine states the kind it was opened for and, like a real
+	// one, gives up on an anchor that names no entry at all.
+	switch kind := m.compiler.Root().Kind(); kind {
+	case jit.EntryFunction, jit.EntryLoop, jit.EntryModule:
+		m.kind = kind
+	default:
+		return false
+	}
+	return m.stops != "enter"
+}
+
+func (m *machine) Lower(block int, ops []ssa.Operation) (int, bool) {
+	if m.stops == "lower" {
+		return 0, false
+	}
+	m.lowered = append(m.lowered, block)
+	m.ops = append(m.ops, ops[0].Op)
+	if ops[0].State != ssa.NoValue {
+		m.deopts = append(m.deopts, m.compiler.Exit(ops[0].State, m.guard, m.opcode))
+	}
+	if m.fuse > 1 && len(ops) >= m.fuse {
+		return m.fuse, true
+	}
+	return 1, true
+}
+
+func (m *machine) Term(block int, t ssa.Terminator) bool {
+	if m.stops == "term" {
+		return false
+	}
+	m.ended = append(m.ended, block)
+	for _, edge := range t.Edges {
+		m.moves = append(m.moves, m.compiler.Moves(edge))
+	}
+	return true
+}
+
+func (m *machine) Leave() bool {
+	return m.stops != "leave"
 }

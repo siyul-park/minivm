@@ -13,6 +13,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// recording is one recorded tree together with the anchors a plan could be
+// asked for and the name its case runs under.
+type recording struct {
+	name     string
+	input    *jit.Input
+	anchors  []jit.Anchor
+	diverges bool
+}
+
+// tape builds one recording the way interp's tracer writes it: one record per
+// instruction, decoded from the function the frame runs.
+type tape struct {
+	ops []jit.Record
+}
+
+// fakeTraces is a jit.RecordedTraces client built from a fixed set of trees,
+// standing in for interp's recorder.
+type fakeTraces struct {
+	trees map[jit.Anchor]*jit.Tree
+}
+
 func TestTrace(t *testing.T) {
 	for _, tc := range recordings(t) {
 		t.Run(tc.name, func(t *testing.T) {
@@ -264,13 +285,23 @@ blk0: ()
 	})
 }
 
-// recording is one recorded tree together with the anchors a plan could be
-// asked for and the name its case runs under.
-type recording struct {
-	name     string
-	input    *jit.Input
-	anchors  []jit.Anchor
-	diverges bool
+func (f fakeTraces) Anchors(addr int) []int {
+	var out []int
+	for a, tree := range f.trees {
+		if a.Addr == addr && tree.Root != nil {
+			out = append(out, a.IP)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
+	tree, ok := f.trees[a]
+	if !ok || tree.Root == nil {
+		return nil
+	}
+	return tree
 }
 
 // recordings is the set of trees the differential runs over: every status a
@@ -741,43 +772,12 @@ func tailed(t *testing.T, self bool) recording {
 	return out
 }
 
-// tape builds one recording the way interp's tracer writes it: one record per
-// instruction, decoded from the function the frame runs.
-type tape struct {
-	ops []jit.Record
-}
-
 func (t *tape) at(fn *types.Function, addr, ip, depth int) *jit.Record {
 	inst := instr.Instruction(fn.Code[ip:])
 	t.ops = append(t.ops, jit.Record{Step: jit.Step{
 		Op: inst.Opcode(), Args: jit.Args(inst), Fn: addr, IP: ip, Depth: depth,
 	}})
 	return &t.ops[len(t.ops)-1]
-}
-
-// fakeTraces is a jit.RecordedTraces client built from a fixed set of trees,
-// standing in for interp's recorder.
-type fakeTraces struct {
-	trees map[jit.Anchor]*jit.Tree
-}
-
-func (f fakeTraces) Anchors(addr int) []int {
-	var out []int
-	for a, tree := range f.trees {
-		if a.Addr == addr && tree.Root != nil {
-			out = append(out, a.IP)
-		}
-	}
-	sort.Ints(out)
-	return out
-}
-
-func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
-	tree, ok := f.trees[a]
-	if !ok || tree.Root == nil {
-		return nil
-	}
-	return tree
 }
 
 // reached is a trace plan's blocks as an adjacency list in breadth-first order

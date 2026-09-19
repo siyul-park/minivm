@@ -21,28 +21,6 @@ type poolTrackedValue struct {
 	closed int
 }
 
-func (*poolTrackedValue) Kind() types.Kind { return types.KindRef }
-func (*poolTrackedValue) Type() types.Type { return types.TypeAny }
-func (*poolTrackedValue) String() string   { return "tracked" }
-
-func (v *poolTrackedValue) Close() error {
-	v.closed++
-	return nil
-}
-
-// native reports how many native entries every pool member flushed into
-// metrics, which is how a test waits for a build the pool's worker ran to
-// reach the interpreter that claimed it.
-func native(metrics *prof.Profiler) float64 {
-	var total float64
-	for _, metric := range metrics.Metrics() {
-		if metric.Name == "vm_jit_native_entries_total" {
-			total += metric.Value
-		}
-	}
-	return total
-}
-
 func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
 		p := interp.NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
@@ -867,4 +845,25 @@ func BenchmarkPool_Put(b *testing.B) {
 		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		pool.Put(vm)
 	})
+}
+func (*poolTrackedValue) Kind() types.Kind { return types.KindRef }
+func (*poolTrackedValue) Type() types.Type { return types.TypeAny }
+func (*poolTrackedValue) String() string   { return "tracked" }
+
+func (v *poolTrackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
+// native reports how many native entries every pool member flushed into
+// metrics, which is how a test waits for a build the pool's worker ran to
+// reach the interpreter that claimed it.
+func native(metrics *prof.Profiler) float64 {
+	var total float64
+	for _, metric := range metrics.Metrics() {
+		if metric.Name == "vm_jit_native_entries_total" {
+			total += metric.Value
+		}
+	}
+	return total
 }

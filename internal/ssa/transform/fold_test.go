@@ -14,20 +14,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// deoptState gives code the ssa.NoValue verify.go admits for most opcodes, or
-// a fresh, otherwise-empty OpState for one ssa.OverflowsI64 or ssa.Divides
-// names, which can overflow the boxed 49-bit payload or fault on a zero
-// divisor and so always resumes into one (see verify.go's operation and
-// frontend/walk.go's exec).
-func deoptState(b *ssa.Builder, block int, code instr.Opcode) ssa.Value {
-	if !ssa.OverflowsI64(code) && !ssa.Divides(code) {
-		return ssa.NoValue
-	}
-	state := b.Value(ssa.TypeState)
-	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
-	return state
-}
-
 func TestNewFoldPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
 		var p pass.Pass[*ssa.Function] = transform.NewFoldPass()
@@ -393,4 +379,18 @@ func TestFoldPass_Run(t *testing.T) {
 			require.Equal(t, c.want, ops[len(ops)-1].Const)
 		})
 	}
+}
+
+// deoptState gives code the ssa.NoValue verify.go admits for most opcodes, or
+// a fresh, otherwise-empty OpState for one ssa.OverflowsI64 or ssa.Divides
+// names, which can overflow the boxed 49-bit payload or fault on a zero
+// divisor and so always resumes into one (see verify.go's operation and
+// frontend/walk.go's exec).
+func deoptState(b *ssa.Builder, block int, code instr.Opcode) ssa.Value {
+	if !ssa.OverflowsI64(code) && !ssa.Divides(code) {
+		return ssa.NoValue
+	}
+	state := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+	return state
 }

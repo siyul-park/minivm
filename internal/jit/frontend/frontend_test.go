@@ -14,6 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// fixture is one planning input together with the name its case runs under.
+type fixture struct {
+	name  string
+	input *jit.Input
+}
+
 func TestStatic(t *testing.T) {
 	for _, tc := range corpus(t) {
 		t.Run(tc.name, func(t *testing.T) {
@@ -587,12 +593,6 @@ func defines(fn *ssa.Function, v ssa.Value) (ssa.Operation, bool) {
 		}
 	}
 	return ssa.Operation{}, false
-}
-
-// fixture is one planning input together with the name its case runs under.
-type fixture struct {
-	name  string
-	input *jit.Input
 }
 
 // corpus is the set of functions the differential runs over: the shapes the

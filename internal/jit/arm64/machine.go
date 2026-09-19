@@ -1,5 +1,5 @@
 // Package arm64 is the ARM64 JIT backend. Its machine implements the stable
-// jit.Machine contract and the backend.Machine lowering contract.
+// jit.Target contract and the backend.Machine lowering contract.
 package arm64
 
 import (
@@ -13,10 +13,11 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// machine is the ARM64 JIT target. It implements the stable jit.Machine
+// machine is the ARM64 JIT target. It implements the stable jit.Target
 // contract and the internal backend.Machine lowering contract. All target
 // state shared across compiles is the immutable scratch-register binding.
 type machine struct {
+	arch    asm.Arch
 	scratch []asm.PReg
 }
 
@@ -120,13 +121,18 @@ var (
 	tagRef = types.Tag(types.KindRef)
 )
 
-// New returns the ARM64 JIT backend, a jit.Machine that lowers a compiler
-// plan into native ARM64 code. It is this package's only exported symbol;
-// the arch selector one level above (interp) picks it when the running
-// process is arm64 and hands it to jit.New alongside internal/asm/arm64's
-// concrete architecture.
+// New returns the ARM64 JIT target. It owns the ARM64 architecture and native
+// lowering used by jit.Compiler.
 func New() machine {
-	return machine{scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14}}
+	return machine{
+		arch:    arm64.New(),
+		scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14},
+	}
+}
+
+// Arch returns the ARM64 assembler architecture owned by this target.
+func (m machine) Arch() asm.Arch {
+	return m.arch
 }
 
 // Lowers reports whether this machine emits native code for code. It is the
@@ -179,6 +185,34 @@ func (m machine) Traps(instr.Opcode) bool {
 // Open begins one compile.
 func (m machine) Open(c *backend.Compiler) backend.Lowering {
 	return &emitter{c: c, a: c.Asm(), scratch: m.scratch, seen: make([]bool, c.Func().Len())}
+}
+
+// Compile emits the whole native entry anchored at root from SSA, through
+// this package's own machine. It is the seam the port advances behind: a root
+// holding anything that machine has not learned yet is declined here, and
+// jit.Compiler falls back to Lower's plan pipeline for it.
+func (m machine) Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (jit.Entry, bool) {
+	if len(m.scratch) < scratchCount {
+		return jit.Entry{}, false
+	}
+	return backend.Root(m, a, input, root)
+}
+
+// Lower lowers plan p into a for one native entry, reporting the exits it
+// queued and whether lowering succeeded. It is the jit.Target interface's
+// seam with the architecture-neutral compiler (see internal/jit/compiler.go):
+// the compiler picks the arch and builds a, and everything from here down is
+// ARM64 lowering state and mechanics.
+func (m machine) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
+	if len(m.scratch) < scratchCount {
+		return nil, false
+	}
+	ctx := m.newLowering(input, a)
+	ctx.nativeLoop = nativeLoop
+	if !m.lower(ctx, p) {
+		return nil, false
+	}
+	return append([]jit.Exit(nil), ctx.exits...), true
 }
 
 // push appends one operand to the symbolic stack.
@@ -335,34 +369,6 @@ func (m machine) baseTo(ctx *lowering, vStack, addr asm.VReg) {
 	vBP := ctx.pin(scratchBP)
 	ctx.assembler.Emit(arm64.LSLI(addr, vBP, 3))
 	ctx.assembler.Emit(arm64.ADD(addr, vStack, addr))
-}
-
-// Compile emits the whole native entry anchored at root from SSA, through
-// this package's own machine. It is the seam the port advances behind: a root
-// holding anything that machine has not learned yet is declined here, and
-// jit.Compiler falls back to Lower's plan pipeline for it.
-func (m machine) Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (jit.Entry, bool) {
-	if len(m.scratch) < scratchCount {
-		return jit.Entry{}, false
-	}
-	return backend.Root(m, a, input, root)
-}
-
-// Lower lowers plan p into a for one native entry, reporting the exits it
-// queued and whether lowering succeeded. It is the jit.Machine interface's
-// seam with the architecture-neutral compiler (see internal/jit/compiler.go):
-// the compiler picks the arch and builds a, and everything from here down is
-// ARM64 lowering state and mechanics.
-func (m machine) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
-	if len(m.scratch) < scratchCount {
-		return nil, false
-	}
-	ctx := m.newLowering(input, a)
-	ctx.nativeLoop = nativeLoop
-	if !m.lower(ctx, p) {
-		return nil, false
-	}
-	return append([]jit.Exit(nil), ctx.exits...), true
 }
 
 // newLowering builds the lowering context one plan is emitted through.

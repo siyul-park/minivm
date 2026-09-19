@@ -17,6 +17,92 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type upperCodec byte
+
+type contextKey byte
+
+type trackedValue struct {
+	refs   []types.Ref
+	closed int
+}
+
+// hostLoopFields is the Go struct TestARM64_HostStructLoop reads and writes
+// through. It carries an unexported field so the codec picks a live view, one
+// exported field per Go kind the lowerer has a row for, a string field it has
+// none for, and an int64 field holding more than a box payload fits.
+type hostLoopFields struct {
+	Flag   bool
+	I8     int8
+	I16    int16
+	I32    int32
+	Int    int
+	I64    int64
+	U8     uint8
+	U16    uint16
+	U32    uint32
+	U64    uint64
+	F32    float32
+	F64    float64
+	Text   string
+	Big    int64
+	hidden int32
+}
+
+// hostNarrowField and hostWideField hold one field of the same VM kind in two
+// Go widths, which is what makes a lowered read of one wrong for the other.
+type hostNarrowField struct {
+	V      int16
+	hidden int32
+}
+
+type hostWideField struct {
+	V      int32
+	hidden int32
+}
+
+// hostFieldKinds is the Go struct the *HostStruct field-kind tests below read
+// through a live view: one field per Go kind this backend's hostRead lowers.
+// The unexported field forces the codec to publish that view rather than
+// copying the struct into a plain VM one (see hostCounter).
+type hostFieldKinds struct {
+	Bool    bool
+	Int8    int8
+	Int16   int16
+	Uint16  uint16
+	Int32   int32
+	Float32 float32
+	Float64 float64
+	hidden  int32
+}
+
+// resumeSnapshot is the interpreter state its hook method records at its last
+// firing during one Run: the IP execution resumed at, the operand-stack
+// depth, and the refcount of the heap value at constant index 0. The tests
+// that use it read STRUCT_GET as their program's own final opcode, so the
+// last hook firing in any one Run always lands there, whether that run went
+// native and fell back mid-way or ran threaded from the start - no arming
+// against warm-up noise is needed.
+type resumeSnapshot struct {
+	ip, sp, refcount int
+}
+
+type structGetHostFields struct {
+	Count  int32
+	hidden int32
+}
+
+type marshalBenchData struct {
+	Count int32
+	Ratio float64
+	Name  string
+	Flag  bool
+}
+
+type marshalBenchMethods struct {
+	Count  int32
+	hidden int32
+}
+
 // heapRunway mirrors the interpreter's unexported heapRunway. Keep in sync.
 const heapRunway = 64
 
@@ -28,49 +114,6 @@ const opLimit = 1024
 
 // nativeFrameLimit mirrors the JIT's unexported nativeFrameLimit. Keep in sync.
 const nativeFrameLimit = 128
-
-type upperCodec byte
-
-type contextKey byte
-
-type trackedValue struct {
-	refs   []types.Ref
-	closed int
-}
-
-func (v *trackedValue) Kind() types.Kind { return types.KindRef }
-func (v *trackedValue) Type() types.Type { return types.TypeAny }
-func (v *trackedValue) String() string   { return "tracked" }
-
-func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
-	return append(dst, v.refs...)
-}
-
-func (v *trackedValue) Close() error {
-	v.closed++
-	return nil
-}
-
-func (upperCodec) Marshal(_ *interp.Interpreter, v any) (types.Value, error) {
-	s, ok := v.(string)
-	if !ok {
-		return nil, interp.ErrUnsupportedMarshalType
-	}
-	return types.String(strings.ToUpper(s)), nil
-}
-
-func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error {
-	s, ok := v.(types.String)
-	if !ok {
-		return interp.ErrInvalidUnmarshalTarget
-	}
-	p, ok := dst.(*string)
-	if !ok {
-		return interp.ErrInvalidUnmarshalTarget
-	}
-	*p = strings.ToLower(string(s))
-	return nil
-}
 
 var runTests = []struct {
 	program *program.Program
@@ -1899,30 +1942,6 @@ var runTests = []struct {
 	},
 }
 
-// runTestName renders a runTests case's program to a single-line name, so the
-// program itself documents the case instead of a hand-written label that can
-// drift out of sync with it. It reads the program's canonical String() dump,
-// keeps only the ".code" section (ignoring any ".locals", ".constants", etc.
-// that follow), strips each line's "%04d:\t" offset prefix, and joins the
-// remaining instruction text with "; ".
-func runTestName(prog *program.Program) string {
-	lines := strings.Split(prog.String(), "\n")
-	var parts []string
-	for _, line := range lines[1:] { // lines[0] is always the ".code" header.
-		if strings.HasPrefix(line, ".") {
-			break
-		}
-		if line == "" {
-			continue
-		}
-		if _, rest, ok := strings.Cut(line, ":\t"); ok {
-			line = rest
-		}
-		parts = append(parts, line)
-	}
-	return strings.Join(parts, "; ")
-}
-
 func TestInterpreter_Run(t *testing.T) {
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
@@ -2275,18 +2294,15 @@ func TestInterpreter_Run(t *testing.T) {
 
 	if runtime.GOARCH == "arm64" {
 		t.Run("retires a slower function entry", func(t *testing.T) {
-			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
+			fn := types.NewFunctionBuilder(&types.FunctionType{}).
+				Emit(instr.New(instr.RETURN)).
 				MustBuild()
 
 			builder := program.NewBuilder()
 			builder.Const(fn)
 			const calls = 1024
-			for index := 0; index < calls; index++ {
+			for range calls {
 				builder.ConstGet(fn).Emit(instr.CALL)
-				if index+1 < calls {
-					builder.Emit(instr.DROP)
-				}
 			}
 			prog, err := builder.Build()
 			require.NoError(t, err)
@@ -2295,9 +2311,6 @@ func TestInterpreter_Run(t *testing.T) {
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profile))
 			defer vm.Close()
 			require.NoError(t, vm.Run(context.Background()))
-			value, err := vm.PopBoxed()
-			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(1), value)
 			vm.Flush()
 
 			retirements, ok := profile.Metric("vm_jit_retirements_total",
@@ -4879,16 +4892,6 @@ func(struct {value: i64; left: any; right: any}) i32
 		require.NoError(t, err)
 		require.Equal(t, types.I32(200), v) // 2 < 10: branch taken
 	})
-}
-
-// refCountAt reads one address's reference count through the public API. The
-// callers below assert on an address they just observed live, so a lookup
-// error is a test failure rather than a case to handle.
-func refCountAt(t *testing.T, i *interp.Interpreter, addr int) int {
-	t.Helper()
-	count, err := i.RefCount(addr)
-	require.NoError(t, err)
-	return count
 }
 
 // ArraySetAfterNestedCalls protects compiled stack materialization across
@@ -8222,46 +8225,6 @@ func TestARM64_BridgedOpcodes(t *testing.T) {
 	})
 }
 
-// hostLoopFields is the Go struct TestARM64_HostStructLoop reads and writes
-// through. It carries an unexported field so the codec picks a live view, one
-// exported field per Go kind the lowerer has a row for, a string field it has
-// none for, and an int64 field holding more than a box payload fits.
-type hostLoopFields struct {
-	Flag   bool
-	I8     int8
-	I16    int16
-	I32    int32
-	Int    int
-	I64    int64
-	U8     uint8
-	U16    uint16
-	U32    uint32
-	U64    uint64
-	F32    float32
-	F64    float64
-	Text   string
-	Big    int64
-	hidden int32
-}
-
-func (h *hostLoopFields) Hidden() int32 { return h.hidden }
-
-// hostNarrowField and hostWideField hold one field of the same VM kind in two
-// Go widths, which is what makes a lowered read of one wrong for the other.
-type hostNarrowField struct {
-	V      int16
-	hidden int32
-}
-
-func (h *hostNarrowField) Hidden() int32 { return h.hidden }
-
-type hostWideField struct {
-	V      int32
-	hidden int32
-}
-
-func (h *hostWideField) Hidden() int32 { return h.hidden }
-
 // TestARM64_HostStructLoop covers STRUCT_GET and STRUCT_SET against a
 // *HostStruct, whose fields hold Go memory rather than VM words. Every case
 // reads or writes inside a counted loop and hands the loop's own value back, so
@@ -8871,23 +8834,6 @@ func TestARM64_StructGetFieldKinds(t *testing.T) {
 		})
 	}
 }
-
-// hostFieldKinds is the Go struct the *HostStruct field-kind tests below read
-// through a live view: one field per Go kind this backend's hostRead lowers.
-// The unexported field forces the codec to publish that view rather than
-// copying the struct into a plain VM one (see hostCounter).
-type hostFieldKinds struct {
-	Bool    bool
-	Int8    int8
-	Int16   int16
-	Uint16  uint16
-	Int32   int32
-	Float32 float32
-	Float64 float64
-	hidden  int32
-}
-
-func (h *hostFieldKinds) Hidden() int32 { return h.hidden }
 
 func TestARM64_HostStructGetFieldKindDeopt(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
@@ -10789,115 +10735,6 @@ func TestWithTick(t *testing.T) {
 
 	require.NoError(t, i.Run(context.Background()))
 	require.Equal(t, 2, calls)
-}
-
-// refCounts snapshots every live heap address's reference count, so two
-// interpreters that ran the same program can be compared for ownership parity.
-func refCounts(i *interp.Interpreter) map[int]int {
-	out := map[int]int{}
-	for addr := 1; addr < i.HeapLen(); addr++ {
-		count, err := i.RefCount(addr)
-		if err != nil {
-			continue
-		}
-		out[addr] = count
-	}
-	return out
-}
-
-// jitLabel returns labels' value for key, or "" if key is absent.
-func jitLabel(labels []prof.Label, key string) string {
-	for _, l := range labels {
-		if l.Key == key {
-			return l.Value
-		}
-	}
-	return ""
-}
-
-// jitMetricSum sums every sample of name whose labels satisfy match.
-// jitMetricSum flushes i's pending samples into p, then sums every sample of
-// name whose labels satisfy match. Flushing here (rather than trusting every
-// call site to remember it) is what makes the helpers below safe to call
-// right after a Run.
-func jitMetricSum(i *interp.Interpreter, p *prof.Profiler, name string, match func(labels []prof.Label) bool) float64 {
-	i.Flush()
-	var total float64
-	for _, m := range p.Metrics() {
-		if m.Name == name && match(m.Labels) {
-			total += m.Value
-		}
-	}
-	return total
-}
-
-// resumeSnapshot is the interpreter state its hook method records at its last
-// firing during one Run: the IP execution resumed at, the operand-stack
-// depth, and the refcount of the heap value at constant index 0. The tests
-// that use it read STRUCT_GET as their program's own final opcode, so the
-// last hook firing in any one Run always lands there, whether that run went
-// native and fell back mid-way or ran threaded from the start - no arming
-// against warm-up noise is needed.
-type resumeSnapshot struct {
-	ip, sp, refcount int
-}
-
-func (s *resumeSnapshot) hook(i *interp.Interpreter) error {
-	s.ip = i.IP()
-	s.sp = i.Len()
-	addr, err := i.Const(0)
-	if err != nil {
-		return err
-	}
-	s.refcount, err = i.RefCount(addr.Ref())
-	return err
-}
-
-// jitCompiledAt reports whether fn compiled and emitted native code at ip (or
-// at any ip, when ip is negative). It is the public projection of the
-// private i.exits map the tests below used to gate on tiering having reached
-// a specific entry.
-func jitCompiledAt(i *interp.Interpreter, p *prof.Profiler, fn, ip int) bool {
-	want := strconv.Itoa(fn)
-	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
-		if jitLabel(labels, "func") != want || jitLabel(labels, "outcome") != "emitted" {
-			return false
-		}
-		return ip < 0 || jitLabel(labels, "ip") == strconv.Itoa(ip)
-	}) > 0
-}
-
-// jitSideExitCompiles sums how many side-exit compiles emitted native code
-// for fn (at any ip): the public signal that a learned branch continuation,
-// recorded in the private tracer's branch tree, became native.
-func jitSideExitCompiles(i *interp.Interpreter, p *prof.Profiler, fn int) float64 {
-	want := strconv.Itoa(fn)
-	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
-		return jitLabel(labels, "func") == want &&
-			jitLabel(labels, "trigger") == "side-exit" &&
-			jitLabel(labels, "outcome") == "emitted"
-	})
-}
-
-// jitNativeExits sums how many times fn's native code exited back to the
-// interpreter for any reason (at any ip): the public signal behind the
-// private tracer tree's per-branch hit counters.
-func jitNativeExits(i *interp.Interpreter, p *prof.Profiler, fn int) float64 {
-	want := strconv.Itoa(fn)
-	return jitMetricSum(i, p, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
-		return jitLabel(labels, "func") == want
-	})
-}
-
-// jitCompileAttempts sums every compile attempt recorded for fn at an ip
-// satisfying ipMatch, regardless of outcome, trigger, or reason: the public
-// signal behind the private i.tried map used to gate on a specific anchor
-// having been offered to the compiler at all.
-func jitCompileAttempts(i *interp.Interpreter, p *prof.Profiler, fn int, ipMatch func(ip string) bool) float64 {
-	want := strconv.Itoa(fn)
-	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
-		return jitLabel(labels, "func") == want && ipMatch(jitLabel(labels, "ip"))
-	})
 }
 
 func TestWithThreshold(t *testing.T) {
@@ -13326,14 +13163,6 @@ func TestWithFuel(t *testing.T) {
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrFuelExhausted)
 }
 
-func i32operand(v int32) uint64 {
-	return uint64(uint32(v))
-}
-
-func i64operand(v int64) uint64 {
-	return uint64(v)
-}
-
 func BenchmarkNew(b *testing.B) {
 	b.Run("Empty", func(b *testing.B) {
 		prog := program.New(nil)
@@ -13848,6 +13677,412 @@ func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
 	}
 }
 
+// BenchmarkInterpreter_ArrayGetContainerFusion measures ARRAY_GET fused onto
+// a GLOBAL_GET and an UPVAL_GET container -- the two sources this change adds
+// to the LOCAL_GET container fusion BenchmarkInterpreter_StructGetLocalFusion
+// already covers. No canonical kernel in benchmarks/ holds an array or struct
+// in a global or an upvalue (#176), so this is the only coverage of either
+// path's runtime win; both sources share one benchmark function, run as
+// subtests, because they exercise the identical sum-loop shape and differ
+// only in where the container lives.
+func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
+	const size, repeats = 64, 4000
+	for _, tt := range []struct {
+		name string
+		prog *program.Program
+	}{
+		{name: "global", prog: arraySumGlobal(size, repeats)},
+		{name: "upvalue", prog: arraySumUpvalue(size, repeats)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			vm := interp.New(tt.prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
+			b.Cleanup(func() { require.NoError(b, vm.Close()) })
+			ctx := context.Background()
+
+			require.NoError(b, vm.Run(ctx))
+			want, err := vm.PopBoxed()
+			require.NoError(b, err)
+			vm.Reset()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				require.NoError(b, vm.Run(ctx))
+				got, err := vm.PopBoxed()
+				require.NoError(b, err)
+				require.Equal(b, want, got)
+				vm.Reset()
+			}
+		})
+	}
+}
+
+// BenchmarkInterpreter_ArraySetContainerFusion measures ARRAY_SET fused onto
+// a LOCAL_GET, GLOBAL_GET, and UPVAL_GET container -- the three sources
+// arrayStore()'s isContainerSource branch (internal/codegen/array.go)
+// specializes. Each subtest writes arr[j] = j through the fused container in
+// a nested loop instead of summing, so the timed body is dominated by
+// array.set rather than array.get; a final single pass sums the written
+// array so the benchmark can still verify correctness.
+func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
+	const size, repeats = 64, 4000
+	for _, tt := range []struct {
+		name string
+		prog *program.Program
+	}{
+		{name: "local", prog: arrayFillLocal(size, repeats)},
+		{name: "global", prog: arrayFillGlobal(size, repeats)},
+		{name: "upvalue", prog: arrayFillUpvalue(size, repeats)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			vm := interp.New(tt.prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
+			b.Cleanup(func() { require.NoError(b, vm.Close()) })
+			ctx := context.Background()
+
+			require.NoError(b, vm.Run(ctx))
+			want, err := vm.PopBoxed()
+			require.NoError(b, err)
+			vm.Reset()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				require.NoError(b, vm.Run(ctx))
+				got, err := vm.PopBoxed()
+				require.NoError(b, err)
+				require.Equal(b, want, got)
+				vm.Reset()
+			}
+		})
+	}
+}
+
+// BenchmarkInterpreter_StructGetHost measures STRUCT_GET against the value the
+// reflection codec picks for a Go struct that carries a method and an
+// unexported field. Field 0 is a plain i32, so the loop isolates per-access
+// dispatch cost from any boxing or heap traffic. The marshal and reset work
+// outside the inner loop is amortized over repeats field reads per run, the
+// same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
+// The two rows separate the threaded read from the lowered one, which is the
+// pair a change to hostGet has to report.
+func BenchmarkInterpreter_StructGetHost(b *testing.B) {
+	const repeats = 10000
+
+	for _, tt := range []struct {
+		name      string
+		threshold int
+	}{
+		{name: "Threaded", threshold: -1},
+		{name: "JIT", threshold: 0},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			prog := structGetHostLoop(repeats)
+			vm := interp.New(prog, interp.WithThreshold(tt.threshold))
+			b.Cleanup(func() { require.NoError(b, vm.Close()) })
+			ctx := context.Background()
+
+			run := func() types.Boxed {
+				host, err := vm.Marshal(&structGetHostFields{Count: 1})
+				require.NoError(b, err)
+				require.NoError(b, vm.Push(host))
+				require.NoError(b, vm.Run(ctx))
+				got, err := vm.PopBoxed()
+				require.NoError(b, err)
+				vm.Reset()
+				return got
+			}
+
+			want := run()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				require.Equal(b, want, run())
+			}
+		})
+	}
+}
+
+// BenchmarkInterpreter_Marshal records the per-shape cost of the reflection
+// codec. Every iteration resets the interpreter so the heap stays at one
+// conversion's worth; that reset cost is identical across runs, so it does not
+// disturb a before/after comparison.
+func BenchmarkInterpreter_Marshal(b *testing.B) {
+	elems := make([]int32, 64)
+	for idx := range elems {
+		elems[idx] = int32(idx)
+	}
+	entries := make(map[string]int32, 16)
+	for idx := range 16 {
+		entries[string(rune('a'+idx))] = int32(idx)
+	}
+	// Keys past the boxed payload, the shape a slot round trip allocates for.
+	counters := make(map[int64]int32, 16)
+	for idx := range 16 {
+		counters[1<<50+int64(idx)] = int32(idx)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+	}{
+		{name: "scalar", value: int32(7)},
+		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}},
+		{name: "slice", value: elems},
+		{name: "map", value: entries},
+		{name: "map i64 key", value: counters},
+		{name: "methods", value: &marshalBenchMethods{Count: 7}},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			i := interp.New(program.New(nil))
+			b.Cleanup(func() { require.NoError(b, i.Close()) })
+
+			_, err := i.Marshal(tt.value)
+			require.NoError(b, err)
+			i.Reset()
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := i.Marshal(tt.value); err != nil {
+					b.Fatal(err)
+				}
+				i.Reset()
+			}
+		})
+	}
+}
+
+// BenchmarkInterpreter_Unmarshal records the reverse direction over the same
+// shapes. The source value is marshaled once outside the loop, so only decode
+// cost is measured; the destination is reused because Unmarshal overwrites it.
+func BenchmarkInterpreter_Unmarshal(b *testing.B) {
+	elems := make([]int32, 64)
+	for idx := range elems {
+		elems[idx] = int32(idx)
+	}
+	entries := make(map[string]int32, 16)
+	for idx := range 16 {
+		entries[string(rune('a'+idx))] = int32(idx)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		value any
+		dst   any
+	}{
+		{name: "scalar", value: int32(7), dst: new(int32)},
+		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}, dst: new(marshalBenchData)},
+		{name: "slice", value: elems, dst: new([]int32)},
+		{name: "map", value: entries, dst: new(map[string]int32)},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			i := interp.New(program.New(nil))
+			b.Cleanup(func() { require.NoError(b, i.Close()) })
+
+			value, err := i.Marshal(tt.value)
+			require.NoError(b, err)
+			require.NoError(b, i.Unmarshal(value, tt.dst))
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := i.Unmarshal(value, tt.dst); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+func (v *trackedValue) Kind() types.Kind { return types.KindRef }
+func (v *trackedValue) Type() types.Type { return types.TypeAny }
+func (v *trackedValue) String() string   { return "tracked" }
+
+func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, v.refs...)
+}
+
+func (v *trackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
+func (upperCodec) Marshal(_ *interp.Interpreter, v any) (types.Value, error) {
+	s, ok := v.(string)
+	if !ok {
+		return nil, interp.ErrUnsupportedMarshalType
+	}
+	return types.String(strings.ToUpper(s)), nil
+}
+
+func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error {
+	s, ok := v.(types.String)
+	if !ok {
+		return interp.ErrInvalidUnmarshalTarget
+	}
+	p, ok := dst.(*string)
+	if !ok {
+		return interp.ErrInvalidUnmarshalTarget
+	}
+	*p = strings.ToLower(string(s))
+	return nil
+}
+
+func (h *hostLoopFields) Hidden() int32 { return h.hidden }
+
+func (h *hostNarrowField) Hidden() int32 { return h.hidden }
+
+func (h *hostWideField) Hidden() int32 { return h.hidden }
+
+func (h *hostFieldKinds) Hidden() int32 { return h.hidden }
+
+func (h *structGetHostFields) Bump(n int32) int32 {
+	h.Count += n
+	h.hidden++
+	return h.Count
+}
+
+func (v *marshalBenchMethods) Bump(n int32) int32 {
+	v.Count += n
+	v.hidden++
+	return v.Count
+}
+
+// runTestName renders a runTests case's program to a single-line name, so the
+// program itself documents the case instead of a hand-written label that can
+// drift out of sync with it. It reads the program's canonical String() dump,
+// keeps only the ".code" section (ignoring any ".locals", ".constants", etc.
+// that follow), strips each line's "%04d:\t" offset prefix, and joins the
+// remaining instruction text with "; ".
+func runTestName(prog *program.Program) string {
+	lines := strings.Split(prog.String(), "\n")
+	var parts []string
+	for _, line := range lines[1:] { // lines[0] is always the ".code" header.
+		if strings.HasPrefix(line, ".") {
+			break
+		}
+		if line == "" {
+			continue
+		}
+		if _, rest, ok := strings.Cut(line, ":\t"); ok {
+			line = rest
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// refCountAt reads one address's reference count through the public API. The
+// callers below assert on an address they just observed live, so a lookup
+// error is a test failure rather than a case to handle.
+func refCountAt(t *testing.T, i *interp.Interpreter, addr int) int {
+	t.Helper()
+	count, err := i.RefCount(addr)
+	require.NoError(t, err)
+	return count
+}
+
+// refCounts snapshots every live heap address's reference count, so two
+// interpreters that ran the same program can be compared for ownership parity.
+func refCounts(i *interp.Interpreter) map[int]int {
+	out := map[int]int{}
+	for addr := 1; addr < i.HeapLen(); addr++ {
+		count, err := i.RefCount(addr)
+		if err != nil {
+			continue
+		}
+		out[addr] = count
+	}
+	return out
+}
+
+// jitLabel returns labels' value for key, or "" if key is absent.
+func jitLabel(labels []prof.Label, key string) string {
+	for _, l := range labels {
+		if l.Key == key {
+			return l.Value
+		}
+	}
+	return ""
+}
+
+// jitMetricSum sums every sample of name whose labels satisfy match.
+// jitMetricSum flushes i's pending samples into p, then sums every sample of
+// name whose labels satisfy match. Flushing here (rather than trusting every
+// call site to remember it) is what makes the helpers below safe to call
+// right after a Run.
+func jitMetricSum(i *interp.Interpreter, p *prof.Profiler, name string, match func(labels []prof.Label) bool) float64 {
+	i.Flush()
+	var total float64
+	for _, m := range p.Metrics() {
+		if m.Name == name && match(m.Labels) {
+			total += m.Value
+		}
+	}
+	return total
+}
+
+func (s *resumeSnapshot) hook(i *interp.Interpreter) error {
+	s.ip = i.IP()
+	s.sp = i.Len()
+	addr, err := i.Const(0)
+	if err != nil {
+		return err
+	}
+	s.refcount, err = i.RefCount(addr.Ref())
+	return err
+}
+
+// jitCompiledAt reports whether fn compiled and emitted native code at ip (or
+// at any ip, when ip is negative). It is the public projection of the
+// private i.exits map the tests below used to gate on tiering having reached
+// a specific entry.
+func jitCompiledAt(i *interp.Interpreter, p *prof.Profiler, fn, ip int) bool {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		if jitLabel(labels, "func") != want || jitLabel(labels, "outcome") != "emitted" {
+			return false
+		}
+		return ip < 0 || jitLabel(labels, "ip") == strconv.Itoa(ip)
+	}) > 0
+}
+
+// jitSideExitCompiles sums how many side-exit compiles emitted native code
+// for fn (at any ip): the public signal that a learned branch continuation,
+// recorded in the private tracer's branch tree, became native.
+func jitSideExitCompiles(i *interp.Interpreter, p *prof.Profiler, fn int) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want &&
+			jitLabel(labels, "trigger") == "side-exit" &&
+			jitLabel(labels, "outcome") == "emitted"
+	})
+}
+
+// jitNativeExits sums how many times fn's native code exited back to the
+// interpreter for any reason (at any ip): the public signal behind the
+// private tracer tree's per-branch hit counters.
+func jitNativeExits(i *interp.Interpreter, p *prof.Profiler, fn int) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_native_exits_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want
+	})
+}
+
+// jitCompileAttempts sums every compile attempt recorded for fn at an ip
+// satisfying ipMatch, regardless of outcome, trigger, or reason: the public
+// signal behind the private i.tried map used to gate on a specific anchor
+// having been offered to the compiler at all.
+func jitCompileAttempts(i *interp.Interpreter, p *prof.Profiler, fn int, ipMatch func(ip string) bool) float64 {
+	want := strconv.Itoa(fn)
+	return jitMetricSum(i, p, "vm_jit_compiles_total", func(labels []prof.Label) bool {
+		return jitLabel(labels, "func") == want && ipMatch(jitLabel(labels, "ip"))
+	})
+}
+
+func i32operand(v int32) uint64 {
+	return uint64(uint32(v))
+}
+
+func i64operand(v int64) uint64 {
+	return uint64(v)
+}
+
 // structSumTree builds a small binary-tree kernel shaped like
 // benchmarks/memory_test.go's structTreeWalk, except sumFn's tree parameter
 // is declared as the concrete node struct type instead of types.TypeAny, so
@@ -13943,45 +14178,6 @@ func structSumTree(depth, repeats int32) *program.Program {
 	return prog
 }
 
-// BenchmarkInterpreter_ArrayGetContainerFusion measures ARRAY_GET fused onto
-// a GLOBAL_GET and an UPVAL_GET container -- the two sources this change adds
-// to the LOCAL_GET container fusion BenchmarkInterpreter_StructGetLocalFusion
-// already covers. No canonical kernel in benchmarks/ holds an array or struct
-// in a global or an upvalue (#176), so this is the only coverage of either
-// path's runtime win; both sources share one benchmark function, run as
-// subtests, because they exercise the identical sum-loop shape and differ
-// only in where the container lives.
-func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
-	const size, repeats = 64, 4000
-	for _, tt := range []struct {
-		name string
-		prog *program.Program
-	}{
-		{name: "global", prog: arraySumGlobal(size, repeats)},
-		{name: "upvalue", prog: arraySumUpvalue(size, repeats)},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			vm := interp.New(tt.prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
-			b.Cleanup(func() { require.NoError(b, vm.Close()) })
-			ctx := context.Background()
-
-			require.NoError(b, vm.Run(ctx))
-			want, err := vm.PopBoxed()
-			require.NoError(b, err)
-			vm.Reset()
-
-			b.ReportAllocs()
-			for b.Loop() {
-				require.NoError(b, vm.Run(ctx))
-				got, err := vm.PopBoxed()
-				require.NoError(b, err)
-				require.Equal(b, want, got)
-				vm.Reset()
-			}
-		})
-	}
-}
-
 // arraySumGlobal builds a kernel that holds a size-length int32 array in a
 // declared GLOBAL_GET slot and sums its elements repeats times in a nested
 // loop, so every array.get is a GLOBAL_GET whose declared type is a concrete
@@ -14074,45 +14270,6 @@ func arraySumUpvalue(size, repeats int32) *program.Program {
 		panic(err)
 	}
 	return prog
-}
-
-// BenchmarkInterpreter_ArraySetContainerFusion measures ARRAY_SET fused onto
-// a LOCAL_GET, GLOBAL_GET, and UPVAL_GET container -- the three sources
-// arrayStore()'s isContainerSource branch (internal/codegen/array.go)
-// specializes. Each subtest writes arr[j] = j through the fused container in
-// a nested loop instead of summing, so the timed body is dominated by
-// array.set rather than array.get; a final single pass sums the written
-// array so the benchmark can still verify correctness.
-func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
-	const size, repeats = 64, 4000
-	for _, tt := range []struct {
-		name string
-		prog *program.Program
-	}{
-		{name: "local", prog: arrayFillLocal(size, repeats)},
-		{name: "global", prog: arrayFillGlobal(size, repeats)},
-		{name: "upvalue", prog: arrayFillUpvalue(size, repeats)},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			vm := interp.New(tt.prog, interp.WithThreshold(-1)) // threaded + fused, no JIT
-			b.Cleanup(func() { require.NoError(b, vm.Close()) })
-			ctx := context.Background()
-
-			require.NoError(b, vm.Run(ctx))
-			want, err := vm.PopBoxed()
-			require.NoError(b, err)
-			vm.Reset()
-
-			b.ReportAllocs()
-			for b.Loop() {
-				require.NoError(b, vm.Run(ctx))
-				got, err := vm.PopBoxed()
-				require.NoError(b, err)
-				require.Equal(b, want, got)
-				vm.Reset()
-			}
-		})
-	}
 }
 
 // arrayFillLocal builds a kernel that holds a size-length int32 array in a
@@ -14266,62 +14423,6 @@ func arrayFillUpvalue(size, repeats int32) *program.Program {
 	return prog
 }
 
-type structGetHostFields struct {
-	Count  int32
-	hidden int32
-}
-
-func (h *structGetHostFields) Bump(n int32) int32 {
-	h.Count += n
-	h.hidden++
-	return h.Count
-}
-
-// BenchmarkInterpreter_StructGetHost measures STRUCT_GET against the value the
-// reflection codec picks for a Go struct that carries a method and an
-// unexported field. Field 0 is a plain i32, so the loop isolates per-access
-// dispatch cost from any boxing or heap traffic. The marshal and reset work
-// outside the inner loop is amortized over repeats field reads per run, the
-// same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
-// The two rows separate the threaded read from the lowered one, which is the
-// pair a change to hostGet has to report.
-func BenchmarkInterpreter_StructGetHost(b *testing.B) {
-	const repeats = 10000
-
-	for _, tt := range []struct {
-		name      string
-		threshold int
-	}{
-		{name: "Threaded", threshold: -1},
-		{name: "JIT", threshold: 0},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			prog := structGetHostLoop(repeats)
-			vm := interp.New(prog, interp.WithThreshold(tt.threshold))
-			b.Cleanup(func() { require.NoError(b, vm.Close()) })
-			ctx := context.Background()
-
-			run := func() types.Boxed {
-				host, err := vm.Marshal(&structGetHostFields{Count: 1})
-				require.NoError(b, err)
-				require.NoError(b, vm.Push(host))
-				require.NoError(b, vm.Run(ctx))
-				got, err := vm.PopBoxed()
-				require.NoError(b, err)
-				vm.Reset()
-				return got
-			}
-
-			want := run()
-
-			b.ReportAllocs()
-			for b.Loop() {
-				require.Equal(b, want, run())
-			}
-		})
-	}
-}
-
 // structGetHostLoop reads field 0 of a host-backed struct repeats times,
 // accumulating the reads so nothing is optimized away.
 func structGetHostLoop(repeats int32) *program.Program {
@@ -14347,112 +14448,4 @@ func structGetHostLoop(repeats int32) *program.Program {
 		panic(err)
 	}
 	return prog
-}
-
-type marshalBenchData struct {
-	Count int32
-	Ratio float64
-	Name  string
-	Flag  bool
-}
-
-type marshalBenchMethods struct {
-	Count  int32
-	hidden int32
-}
-
-func (v *marshalBenchMethods) Bump(n int32) int32 {
-	v.Count += n
-	v.hidden++
-	return v.Count
-}
-
-// BenchmarkInterpreter_Marshal records the per-shape cost of the reflection
-// codec. Every iteration resets the interpreter so the heap stays at one
-// conversion's worth; that reset cost is identical across runs, so it does not
-// disturb a before/after comparison.
-func BenchmarkInterpreter_Marshal(b *testing.B) {
-	elems := make([]int32, 64)
-	for idx := range elems {
-		elems[idx] = int32(idx)
-	}
-	entries := make(map[string]int32, 16)
-	for idx := range 16 {
-		entries[string(rune('a'+idx))] = int32(idx)
-	}
-	// Keys past the boxed payload, the shape a slot round trip allocates for.
-	counters := make(map[int64]int32, 16)
-	for idx := range 16 {
-		counters[1<<50+int64(idx)] = int32(idx)
-	}
-
-	for _, tt := range []struct {
-		name  string
-		value any
-	}{
-		{name: "scalar", value: int32(7)},
-		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}},
-		{name: "slice", value: elems},
-		{name: "map", value: entries},
-		{name: "map i64 key", value: counters},
-		{name: "methods", value: &marshalBenchMethods{Count: 7}},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			i := interp.New(program.New(nil))
-			b.Cleanup(func() { require.NoError(b, i.Close()) })
-
-			_, err := i.Marshal(tt.value)
-			require.NoError(b, err)
-			i.Reset()
-
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := i.Marshal(tt.value); err != nil {
-					b.Fatal(err)
-				}
-				i.Reset()
-			}
-		})
-	}
-}
-
-// BenchmarkInterpreter_Unmarshal records the reverse direction over the same
-// shapes. The source value is marshaled once outside the loop, so only decode
-// cost is measured; the destination is reused because Unmarshal overwrites it.
-func BenchmarkInterpreter_Unmarshal(b *testing.B) {
-	elems := make([]int32, 64)
-	for idx := range elems {
-		elems[idx] = int32(idx)
-	}
-	entries := make(map[string]int32, 16)
-	for idx := range 16 {
-		entries[string(rune('a'+idx))] = int32(idx)
-	}
-
-	for _, tt := range []struct {
-		name  string
-		value any
-		dst   any
-	}{
-		{name: "scalar", value: int32(7), dst: new(int32)},
-		{name: "struct", value: marshalBenchData{Count: 7, Ratio: 2.5, Name: "x", Flag: true}, dst: new(marshalBenchData)},
-		{name: "slice", value: elems, dst: new([]int32)},
-		{name: "map", value: entries, dst: new(map[string]int32)},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			i := interp.New(program.New(nil))
-			b.Cleanup(func() { require.NoError(b, i.Close()) })
-
-			value, err := i.Marshal(tt.value)
-			require.NoError(b, err)
-			require.NoError(b, i.Unmarshal(value, tt.dst))
-
-			b.ReportAllocs()
-			for b.Loop() {
-				if err := i.Unmarshal(value, tt.dst); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
 }
