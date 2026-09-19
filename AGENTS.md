@@ -2,16 +2,6 @@
 
 `minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; ARM64 JIT is an optimization with threaded fallback.
 
-## Terminology
-
-The keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` are normative and interpreted as in RFC 2119:
-
-- `MUST` / `MUST NOT` state an absolute requirement or prohibition. An agent `MUST` satisfy it and `MUST NOT` report completion while it is violated.
-- `SHOULD` / `SHOULD NOT` state the default choice. An agent `SHOULD` follow it; when it does not, it `MUST` state the reason, the alternative taken, and the risk in its output.
-- `MAY` states a permitted option with no requirement to use it.
-
-Informative sentences (facts, background, examples) carry no keyword and `MUST NOT` be treated as requirements.
-
 ## Precedence
 
 - Direct user, system, or developer instructions `MUST` override repository rules on conflict. The agent `MUST` follow the higher instruction and `SHOULD` note the conflict in its output.
@@ -52,6 +42,8 @@ The agent `MUST NOT` delegate a vague objective. Parallel work `MUST` have disjo
 | Exploration | Haiku / Sonnet | bounded search, tracing, evidence |
 | Implementation | Sonnet | TDD implementation, focused refactor |
 | Design / escalation | Opus | ownership, representation, architecture, high-risk sequencing |
+
+If a problem exceeds the agent's current capability to resolve reliably, the agent `MUST` consult an adviser for help from a higher-capability model.
 
 ## Workflow
 

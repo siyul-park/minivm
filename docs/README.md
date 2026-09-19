@@ -4,7 +4,7 @@ Each topic has one canonical owner. This document owns the topic-to-document map
 
 ## Terminology
 
-The keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` are normative as defined in `AGENTS.md`. Every doc in this directory `MUST` use them for agent requirements and `MUST NOT` use bare imperatives (`keep`, `do not`, `prefer`, `skip`) where a keyword applies. Sentences without a keyword are informative and `MUST NOT` be treated as requirements.
+Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`) for agent requirements and `MUST NOT` use bare imperatives (`keep`, `do not`, `prefer`, `skip`) where a keyword applies. Sentences without a keyword are informative and `MUST NOT` be treated as requirements.
 
 | Topic | Document |
 |---|---|
