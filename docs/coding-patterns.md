@@ -108,6 +108,8 @@ Comments MAY be added only when they are clearly necessary to preserve:
 - rejected alternatives with evidence;
 - external contracts or specifications.
 
+Necessary comments MUST be dense and concise. Every word MUST justify its presence.
+
 The agent MUST NOT use comments to narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. It MUST improve names, types, or structure instead.
 
 Exported symbols MUST have normal Go doc comments.
