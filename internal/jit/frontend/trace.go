@@ -206,6 +206,21 @@ func (r *replay) run(item work) bool {
 			// the interpreter takes the call, so native execution ends here.
 			r.b.Term(w.block, w.exit(op.IP))
 			return true
+		case instr.YIELD, instr.RESUME:
+			// A suspension ends native execution at the opcode itself: the
+			// interpreter performs the real suspend and resumes threaded.
+			// Only a returned recording suspends, only in its sole frame -
+			// the recorder aborts a terminal inside an inlined callee - only
+			// as its last record, because the recorder publishes at the
+			// boundary instead of stepping past it, and only where the
+			// bytecode holds that suspension, because a stale trace must not
+			// invent one.
+			if item.trace.Status != jit.StatusReturned || op.Depth != 0 ||
+				len(w.frames) != 1 || idx+1 != len(tr.Ops) || inst.Opcode() != op.Op {
+				return false
+			}
+			r.b.Term(w.block, w.suspend(op.IP))
+			return true
 		case instr.CALL:
 			// The recording says whether the call was entered: the ops after an
 			// inlined one run one frame deeper. Anything else - a host call, a

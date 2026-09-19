@@ -166,11 +166,14 @@ func (p *pool) index(c types.Boxed) (int, bool) {
 // expressible reports whether code holds only operations that survive the
 // round trip. UNREACHABLE traps where it stands and the IR gives it no
 // operation of its own, so a function holding one would come back without its
-// trap.
+// trap. YIELD and RESUME end native execution at their own opcode while the
+// threaded continuation runs past them, so the frontend plans only the native
+// prefix and a rewrite would come back without the continuation.
 func expressible(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
-		if inst.Opcode() == instr.UNREACHABLE {
+		switch inst.Opcode() {
+		case instr.UNREACHABLE, instr.YIELD, instr.RESUME:
 			return false
 		}
 		ip += inst.Width()

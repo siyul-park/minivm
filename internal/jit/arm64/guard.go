@@ -160,9 +160,8 @@ func (e *emitter) admit(got asm.VReg, want uint64, fail asm.Label) {
 // guard carries.
 //
 // Everything the stub cannot write is refused here rather than half-emitted:
-// exactly one frame, because a deeper chain is a callee a frontend inlined,
-// which this machine declines with the call that opened it, and every
-// coordinate within the range its immediate encodes.
+// every coordinate within the range its immediate encodes (see fits), and a
+// frame chain the snapshot cannot rebuild.
 //
 // A state a release has already spent is refused too. Resuming there hands the
 // interpreter an instruction it redoes whole, including the release native code
@@ -183,15 +182,23 @@ func (e *emitter) exit(state ssa.Value, reason prof.ExitReason) (asm.Label, bool
 }
 
 // fits reports whether every VM coordinate d carries is within the
-// immediates a cold path writes it through: exactly one frame, because a
-// deeper chain is a callee a frontend inlined, which this machine declines
-// with the call that opened it, and every coordinate within addressable's
-// range. A direct call's own overflow and trap-return paths share this test:
-// they unwind through a Deopt built outside exit's deferred stub table, so
-// they cannot lean on exit's own check.
+// immediates a cold path writes it through, and every frame it names can be
+// rebuilt: a frame the snapshot never resolved has no slot count, so the
+// whole compile is refused rather than one exit silently resuming at the
+// wrong slot. More than one frame is an inlined callee, which a trace
+// frontend reached for the first time with a call this machine lowers: each
+// frame records at its own base delta, innermost first. A direct call's own
+// overflow and trap-return paths share this test: they unwind through a Deopt
+// built outside exit's deferred stub table, so they cannot lean on exit's own
+// check.
 func fits(d backend.Deopt) bool {
-	if len(d.Frames) != 1 || !addressable(d.SP) || !addressable(d.Frames[0].BP) {
+	if len(d.Frames) == 0 || !addressable(d.SP) {
 		return false
+	}
+	for _, frame := range d.Frames {
+		if !addressable(frame.BP) {
+			return false
+		}
 	}
 	for _, flush := range d.Slots {
 		if !addressable(flush.Slot) {

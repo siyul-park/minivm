@@ -82,18 +82,21 @@ func TestNew(t *testing.T) {
 						Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(5, 6, 7), []asm.Instruction{
-				asmarm64.LDR(narrow(0), vreg(5), 0),
-				asmarm64.LDR(narrow(1), vreg(5), 8),
-				asmarm64.ADD(narrow(2), narrow(0), narrow(1)),
-				asmarm64.MOVZ(narrow(3), 3, 0),
-				asmarm64.MUL(narrow(4), narrow(2), narrow(3)),
-				asmarm64.MOV(vreg(8), vreg(4)),
-				asmarm64.MOVK(vreg(8), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(8), vreg(5), 0),
-				asmarm64.MOV(vreg(9), vreg(8)),
-				asmarm64.RET(),
-			}...),
+			want: append(prologue(), slices.Concat(
+				frameBase(5, 6, 7),
+				[]asm.Instruction{
+					asmarm64.LDR(narrow(0), vreg(5), 0),
+					asmarm64.LDR(narrow(1), vreg(5), 8),
+					asmarm64.ADD(narrow(2), narrow(0), narrow(1)),
+					asmarm64.MOVZ(narrow(3), 3, 0),
+					asmarm64.MUL(narrow(4), narrow(2), narrow(3)),
+					asmarm64.MOV(vreg(8), vreg(4)),
+					asmarm64.MOVK(vreg(8), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(8), vreg(5), 0),
+					asmarm64.MOV(vreg(9), vreg(8)),
+					asmarm64.RET(),
+				},
+			)...),
 		},
 		{
 			name: "widens a signed i32 into i64",
@@ -105,7 +108,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(2, 3, 4),
+				prologue(),
+				frameBase(2, 3, 4),
 				asmarm64.LDI(narrow(0), uint64(^uint32(6))),
 				[]asm.Instruction{asmarm64.SXTW(vreg(1), narrow(0))},
 				boxI64(vreg(5), vreg(1), vreg(6)),
@@ -124,7 +128,8 @@ func TestNew(t *testing.T) {
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 7).Emit(instr.I32_TO_I64_U).Emit(instr.RETURN) }),
 			}),
 			want: slices.Concat(
-				prologue(2, 3, 4),
+				prologue(),
+				frameBase(2, 3, 4),
 				[]asm.Instruction{
 					asmarm64.MOVZ(narrow(0), 7, 0),
 					asmarm64.UXTW(vreg(1), narrow(0)),
@@ -145,7 +150,8 @@ func TestNew(t *testing.T) {
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I64_CONST, ^uint64(6)).Emit(instr.RETURN) }),
 			}),
 			want: slices.Concat(
-				prologue(1, 2, 3),
+				prologue(),
+				frameBase(1, 2, 3),
 				asmarm64.LDI(vreg(0), ^uint64(6)),
 				boxI64(vreg(4), vreg(0), vreg(5)),
 				[]asm.Instruction{
@@ -170,7 +176,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 0x8000, 32),
 					asmarm64.MOVZ(vreg(1), 0x8000, 32),
@@ -198,7 +205,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 500, 0),
 					asmarm64.MOVZ(vreg(1), 200, 0),
@@ -227,7 +235,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 0x4000, 16),
 					asmarm64.MOVZ(vreg(1), 0x4000, 16),
@@ -255,7 +264,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 7, 0),
 					asmarm64.MOVZ(vreg(1), 3, 0),
@@ -279,7 +289,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 4, 0),
 					asmarm64.MOVZ(vreg(1), 3, 0),
@@ -303,7 +314,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 7, 0),
 					asmarm64.MOVZ(vreg(1), 3, 0),
@@ -327,7 +339,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				asmarm64.LDI(vreg(0), ^uint64(7)),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(1), 1, 0),
@@ -352,7 +365,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(0), 0x8000, 32),
 					asmarm64.MOVZ(vreg(1), 1, 0),
@@ -386,7 +400,8 @@ func TestNew(t *testing.T) {
 				}),
 			}),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				asmarm64.LDI(vreg(0), ^uint64(7)),
 				[]asm.Instruction{
 					asmarm64.MOVZ(vreg(1), 1, 0),
@@ -416,14 +431,16 @@ func TestNew(t *testing.T) {
 				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) }),
 			}),
-			want: append(prologue(1, 2, 3), []asm.Instruction{
-				asmarm64.MOVZ(narrow(0), 1, 0),
-				asmarm64.MOV(vreg(4), vreg(0)),
-				asmarm64.MOVK(vreg(4), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(4), vreg(1), 0),
-				asmarm64.MOV(vreg(5), vreg(4)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(1, 2, 3),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 1, 0),
+					asmarm64.MOV(vreg(4), vreg(0)),
+					asmarm64.MOVK(vreg(4), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(4), vreg(1), 0),
+					asmarm64.MOV(vreg(5), vreg(4)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			// A function entry clears the locals its callers left, then the
@@ -440,21 +457,27 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_SET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(append(prologue(2, 3, 4),
-				asmarm64.MOVZ(vreg(5), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(5), vreg(2), 8),
-			), []asm.Instruction{
-				asmarm64.LDR(narrow(0), vreg(2), 0),
-				asmarm64.MOV(vreg(6), vreg(0)),
-				asmarm64.MOVK(vreg(6), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(6), vreg(2), 8),
-				asmarm64.LDR(narrow(1), vreg(2), 8),
-				asmarm64.MOV(vreg(7), vreg(1)),
-				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(7), vreg(2), 0),
-				asmarm64.MOV(vreg(8), vreg(7)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(
+				prologue(),
+				frameBase(2, 3, 4),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(5), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(5), vreg(2), 8),
+				},
+				frameBase(6, 7, 8),
+				[]asm.Instruction{
+					asmarm64.LDR(narrow(0), vreg(6), 0),
+					asmarm64.MOV(vreg(9), vreg(0)),
+					asmarm64.MOVK(vreg(9), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(9), vreg(6), 8),
+					asmarm64.LDR(narrow(1), vreg(6), 8),
+					asmarm64.MOV(vreg(10), vreg(1)),
+					asmarm64.MOVK(vreg(10), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(10), vreg(6), 0),
+					asmarm64.MOV(vreg(11), vreg(10)),
+					asmarm64.RET(),
+				},
+			),
 		},
 		{
 			// The layout lays a terminator's first edge out next, so a taken
@@ -471,7 +494,7 @@ func TestNew(t *testing.T) {
 					b.Bind(other).Emit(instr.I32_CONST, 9).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
+			want: append(append(prologue(), frameBase(3, 4, 5)...), []asm.Instruction{
 				asmarm64.LDR(narrow(0), vreg(3), 0),
 				asmarm64.CBZLabel(narrow(0), 2),
 				asmarm64.MOVZ(narrow(1), 9, 0),
@@ -500,19 +523,21 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(2, 3, 4), []asm.Instruction{
-				asmarm64.MOVZ(narrow(0), 1, 0),
-				asmarm64.MOVZ(narrow(1), 2, 0),
-				asmarm64.MOV(vreg(5), vreg(0)),
-				asmarm64.MOVK(vreg(5), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(5), vreg(2), 0),
-				asmarm64.MOV(vreg(6), vreg(5)),
-				asmarm64.MOV(vreg(7), vreg(1)),
-				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(7), vreg(2), 8),
-				asmarm64.MOV(vreg(8), vreg(7)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(2, 3, 4),
+				[]asm.Instruction{
+					asmarm64.MOVZ(narrow(0), 1, 0),
+					asmarm64.MOVZ(narrow(1), 2, 0),
+					asmarm64.MOV(vreg(5), vreg(0)),
+					asmarm64.MOVK(vreg(5), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(5), vreg(2), 0),
+					asmarm64.MOV(vreg(6), vreg(5)),
+					asmarm64.MOV(vreg(7), vreg(1)),
+					asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(7), vreg(2), 8),
+					asmarm64.MOV(vreg(8), vreg(7)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			name: "compares inline i64 values",
@@ -523,17 +548,19 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.I64_CONST, 7).Emit(instr.I64_CONST, 3).Emit(instr.I64_EQ).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.MOVZ(vreg(0), 7, 0),
-				asmarm64.MOVZ(vreg(1), 3, 0),
-				asmarm64.CMP(vreg(0), vreg(1)),
-				asmarm64.CSET(narrow(2), asmarm64.CondEQ),
-				asmarm64.MOV(vreg(6), vreg(2)),
-				asmarm64.MOVK(vreg(6), tag(types.KindI1), 48),
-				asmarm64.STR(vreg(6), vreg(3), 0),
-				asmarm64.MOV(vreg(7), vreg(6)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 7, 0),
+					asmarm64.MOVZ(vreg(1), 3, 0),
+					asmarm64.CMP(vreg(0), vreg(1)),
+					asmarm64.CSET(narrow(2), asmarm64.CondEQ),
+					asmarm64.MOV(vreg(6), vreg(2)),
+					asmarm64.MOVK(vreg(6), tag(types.KindI1), 48),
+					asmarm64.STR(vreg(6), vreg(3), 0),
+					asmarm64.MOV(vreg(7), vreg(6)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			name: "tests an inline i64 value for zero",
@@ -542,16 +569,18 @@ func TestNew(t *testing.T) {
 				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI1}},
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I64_CONST, 0).Emit(instr.I64_EQZ).Emit(instr.RETURN) }),
 			}),
-			want: append(prologue(2, 3, 4), []asm.Instruction{
-				asmarm64.MOVZ(vreg(0), 0, 0),
-				asmarm64.CMPI(vreg(0), 0),
-				asmarm64.CSET(narrow(1), asmarm64.CondEQ),
-				asmarm64.MOV(vreg(5), vreg(1)),
-				asmarm64.MOVK(vreg(5), tag(types.KindI1), 48),
-				asmarm64.STR(vreg(5), vreg(2), 0),
-				asmarm64.MOV(vreg(6), vreg(5)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(2, 3, 4),
+				[]asm.Instruction{
+					asmarm64.MOVZ(vreg(0), 0, 0),
+					asmarm64.CMPI(vreg(0), 0),
+					asmarm64.CSET(narrow(1), asmarm64.CondEQ),
+					asmarm64.MOV(vreg(5), vreg(1)),
+					asmarm64.MOVK(vreg(5), tag(types.KindI1), 48),
+					asmarm64.STR(vreg(5), vreg(2), 0),
+					asmarm64.MOV(vreg(6), vreg(5)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			name: "loads an inline i64 local through a kind guard",
@@ -566,7 +595,8 @@ func TestNew(t *testing.T) {
 			// empty for a LOCAL_GET at the top of the function - so it goes
 			// straight from publishing sp to the frame record.
 			want: slices.Concat(
-				prologue(2, 3, 4),
+				prologue(),
+				frameBase(2, 3, 4),
 				[]asm.Instruction{
 					asmarm64.LDR(vreg(0), vreg(2), 0),
 					asmarm64.LSRI(vreg(5), vreg(0), uint8(types.VBits)),
@@ -616,17 +646,19 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.F64_SUB).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.LDR(vreg(6), vreg(3), 0),
-				asmarm64.FMOV(freg(0), vreg(6)),
-				asmarm64.LDR(vreg(7), vreg(3), 8),
-				asmarm64.FMOV(freg(1), vreg(7)),
-				asmarm64.FSUB(freg(2), freg(0), freg(1)),
-				asmarm64.FMOV(vreg(8), freg(2)),
-				asmarm64.STR(vreg(8), vreg(3), 0),
-				asmarm64.MOV(vreg(9), vreg(8)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.LDR(vreg(6), vreg(3), 0),
+					asmarm64.FMOV(freg(0), vreg(6)),
+					asmarm64.LDR(vreg(7), vreg(3), 8),
+					asmarm64.FMOV(freg(1), vreg(7)),
+					asmarm64.FSUB(freg(2), freg(0), freg(1)),
+					asmarm64.FMOV(vreg(8), freg(2)),
+					asmarm64.STR(vreg(8), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(8)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			// An f32 rejoins the boxed word through the same two-instruction
@@ -642,18 +674,20 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.F32_ADD).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.LDR(vreg(6), vreg(3), 0),
-				asmarm64.FMOV(freg32(0), narrow(6)),
-				asmarm64.LDR(vreg(7), vreg(3), 8),
-				asmarm64.FMOV(freg32(1), narrow(7)),
-				asmarm64.FADD(freg32(2), freg32(0), freg32(1)),
-				asmarm64.FMOV(vreg(8), freg32(2)),
-				asmarm64.MOVK(vreg(8), tag(types.KindF32), 48),
-				asmarm64.STR(vreg(8), vreg(3), 0),
-				asmarm64.MOV(vreg(9), vreg(8)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.LDR(vreg(6), vreg(3), 0),
+					asmarm64.FMOV(freg32(0), narrow(6)),
+					asmarm64.LDR(vreg(7), vreg(3), 8),
+					asmarm64.FMOV(freg32(1), narrow(7)),
+					asmarm64.FADD(freg32(2), freg32(0), freg32(1)),
+					asmarm64.FMOV(vreg(8), freg32(2)),
+					asmarm64.MOVK(vreg(8), tag(types.KindF32), 48),
+					asmarm64.STR(vreg(8), vreg(3), 0),
+					asmarm64.MOV(vreg(9), vreg(8)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			// A shift's value and amount already sit raw in the W lane, so
@@ -671,17 +705,19 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SHL).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.LDR(narrow(0), vreg(3), 0),
-				asmarm64.LDR(narrow(1), vreg(3), 8),
-				asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
-				asmarm64.LSL(narrow(2), narrow(0), narrow(6)),
-				asmarm64.MOV(vreg(7), vreg(2)),
-				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(7), vreg(3), 0),
-				asmarm64.MOV(vreg(8), vreg(7)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.LDR(narrow(0), vreg(3), 0),
+					asmarm64.LDR(narrow(1), vreg(3), 8),
+					asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
+					asmarm64.LSL(narrow(2), narrow(0), narrow(6)),
+					asmarm64.MOV(vreg(7), vreg(2)),
+					asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(7)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			// ASR on a clean W-lane value reads bit 31 as the sign bit
@@ -695,17 +731,19 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SHR_S).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.LDR(narrow(0), vreg(3), 0),
-				asmarm64.LDR(narrow(1), vreg(3), 8),
-				asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
-				asmarm64.ASR(narrow(2), narrow(0), narrow(6)),
-				asmarm64.MOV(vreg(7), vreg(2)),
-				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(7), vreg(3), 0),
-				asmarm64.MOV(vreg(8), vreg(7)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.LDR(narrow(0), vreg(3), 0),
+					asmarm64.LDR(narrow(1), vreg(3), 8),
+					asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
+					asmarm64.ASR(narrow(2), narrow(0), narrow(6)),
+					asmarm64.MOV(vreg(7), vreg(2)),
+					asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(7)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			name: "shifts an i32 right logically with no operand prep",
@@ -716,17 +754,19 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SHR_U).Emit(instr.RETURN)
 				}),
 			}),
-			want: append(prologue(3, 4, 5), []asm.Instruction{
-				asmarm64.LDR(narrow(0), vreg(3), 0),
-				asmarm64.LDR(narrow(1), vreg(3), 8),
-				asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
-				asmarm64.LSR(narrow(2), narrow(0), narrow(6)),
-				asmarm64.MOV(vreg(7), vreg(2)),
-				asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
-				asmarm64.STR(vreg(7), vreg(3), 0),
-				asmarm64.MOV(vreg(8), vreg(7)),
-				asmarm64.RET(),
-			}...),
+			want: slices.Concat(prologue(),
+				frameBase(3, 4, 5),
+				[]asm.Instruction{
+					asmarm64.LDR(narrow(0), vreg(3), 0),
+					asmarm64.LDR(narrow(1), vreg(3), 8),
+					asmarm64.ANDI(narrow(6), narrow(1), 0x1F),
+					asmarm64.LSR(narrow(2), narrow(0), narrow(6)),
+					asmarm64.MOV(vreg(7), vreg(2)),
+					asmarm64.MOVK(vreg(7), tag(types.KindI32), 48),
+					asmarm64.STR(vreg(7), vreg(3), 0),
+					asmarm64.MOV(vreg(8), vreg(7)),
+					asmarm64.RET(),
+				}),
 		},
 		{
 			// Module code has no return: it leaves its operand stack on the
@@ -741,7 +781,7 @@ func TestNew(t *testing.T) {
 					b.Emit(instr.I32_CONST, 5).Emit(instr.LOCAL_SET, 0)
 				}),
 			}),
-			want: append(prologue(1, 2, 3), []asm.Instruction{
+			want: append(append(prologue(), frameBase(1, 2, 3)...), []asm.Instruction{
 				asmarm64.MOVZ(narrow(0), 5, 0),
 				asmarm64.MOV(vreg(4), vreg(0)),
 				asmarm64.MOVK(vreg(4), tag(types.KindI32), 48),
@@ -772,7 +812,8 @@ func TestNew(t *testing.T) {
 				return in
 			}(),
 			want: slices.Concat(
-				prologue(1, 2, 3),
+				prologue(),
+				frameBase(1, 2, 3),
 				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 				[]asm.Instruction{
 					asmarm64.ANDI(vreg(5), vreg(0), 0xFFFFFFFF),
@@ -808,7 +849,8 @@ func TestNew(t *testing.T) {
 				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.DROP) }),
 			}),
 			want: slices.Concat(
-				prologue(1, 2, 3),
+				prologue(),
+				frameBase(1, 2, 3),
 				asmarm64.LDI(vreg(0), uint64(types.BoxedNull)),
 				[]asm.Instruction{
 					asmarm64.ANDI(vreg(5), vreg(0), 0xFFFFFFFF),
@@ -881,7 +923,8 @@ func TestNew(t *testing.T) {
 				return in
 			}(),
 			want: slices.Concat(
-				prologue(1, 2, 3),
+				prologue(),
+				frameBase(1, 2, 3),
 				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 				[]asm.Instruction{
 					// own's retain, materializing the constant pool's borrow
@@ -962,7 +1005,8 @@ func TestNew(t *testing.T) {
 				return in
 			}(),
 			want: slices.Concat(
-				prologue(4, 5, 6),
+				prologue(),
+				frameBase(4, 5, 6),
 				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 				[]asm.Instruction{
 					asmarm64.LDR(narrow(1), vreg(4), 0),
@@ -1021,7 +1065,8 @@ func TestNew(t *testing.T) {
 			want: func() []asm.Instruction {
 				typ := fieldsTyp
 				return slices.Concat(
-					prologue(4, 5, 6),
+					prologue(),
+					frameBase(4, 5, 6),
 					asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 					[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
 					[]asm.Instruction{
@@ -1096,7 +1141,8 @@ func TestNew(t *testing.T) {
 				return in
 			}(),
 			want: slices.Concat(
-				prologue(4, 5, 6),
+				prologue(),
+				frameBase(4, 5, 6),
 				asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 				[]asm.Instruction{
 					asmarm64.LDR(narrow(1), vreg(4), 0),
@@ -1159,7 +1205,8 @@ func TestNew(t *testing.T) {
 			want: func() []asm.Instruction {
 				typ := fieldsTyp64
 				return slices.Concat(
-					prologue(4, 5, 6),
+					prologue(),
+					frameBase(4, 5, 6),
 					asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 					[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
 					[]asm.Instruction{
@@ -1245,7 +1292,8 @@ func TestNew(t *testing.T) {
 				return in
 			}(),
 			want: slices.Concat(
-				prologue(3, 4, 5),
+				prologue(),
+				frameBase(3, 4, 5),
 				[]asm.Instruction{asmarm64.LDR(narrow(0), vreg(3), 0)},
 				asmarm64.LDI(vreg(1), uint64(types.BoxRef(2))),
 				count(6, 1),
@@ -1389,7 +1437,8 @@ func TestNew(t *testing.T) {
 		require.Equal(t, prof.FrontendTrace, entry.Frontend)
 
 		want := slices.Concat(
-			prologue(4, 5, 6),
+			prologue(),
+			frameBase(4, 5, 6),
 			asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 			[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
 			[]asm.Instruction{asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits))},
@@ -1478,7 +1527,8 @@ func TestNew(t *testing.T) {
 		require.Equal(t, prof.FrontendTrace, entry.Frontend)
 
 		want := slices.Concat(
-			prologue(4, 5, 6),
+			prologue(),
+			frameBase(4, 5, 6),
 			asmarm64.LDI(vreg(0), uint64(types.BoxRef(2))),
 			[]asm.Instruction{asmarm64.MOVZ(narrow(1), 0, 0)},
 			[]asm.Instruction{asmarm64.LSRI(vreg(7), vreg(0), uint8(types.VBits))},
@@ -1569,12 +1619,17 @@ func TestNew(t *testing.T) {
 			}),
 		},
 		{
+			// Only a back edge to the entry block itself closes natively; a
+			// loop nested past it stays on the plan pipeline. The header
+			// below sits past a prefix for exactly that reason: with the
+			// header at zero the SSA machine would own the whole loop.
 			name: "a loop, whose back edge it does not close",
 			input: input(1, &types.Function{
 				Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				Locals: []types.Type{types.TypeI32},
 				Code: assemble(t, func(b *instr.Builder) {
 					head, done := b.Label(), b.Label()
+					b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 					b.Bind(head)
 					b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
 					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
@@ -1766,6 +1821,133 @@ func input(addr int, fn *types.Function) *jit.Input {
 	return &jit.Input{Address: addr, Function: fn, Objects: jit.Objects{addr: {Fn: fn}}}
 }
 
+// TestARM64_SSALoopBackEdge proves a loop root compiles through the SSA
+// machine: the static loop frontend plans the header, and the emitter keeps
+// the loop inside native code behind a safepoint budget instead of paying a
+// deopt round trip per iteration. The budget yield publishes no exit
+// descriptor - it is not a speculation that failed - so Exits stays empty.
+func TestARM64_SSALoopBackEdge(t *testing.T) {
+	fn := &types.Function{
+		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Locals: []types.Type{types.TypeI32},
+		Code: assemble(t, func(b *instr.Builder) {
+			head, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+			b.Bind(head)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(head)
+			b.Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+		}),
+	}
+
+	assembler := asm.New(asmarm64.New())
+	entry, ok := arm64.New().Compile(assembler, input(1, fn), jit.Anchor{Addr: 1, IP: 7})
+	require.True(t, ok)
+	require.Equal(t, jit.EntryLoop, entry.Kind)
+	require.Equal(t, prof.FrontendStatic, entry.Frontend)
+	require.Empty(t, entry.Exits)
+
+	require.Equal(t, append(append(prologue(), frameBase(7, 8, 9)...), []asm.Instruction{
+		asmarm64.LDR(narrow(0), vreg(7), 0),
+		asmarm64.MOVZ(narrow(1), 10, 0),
+		asmarm64.CMP(narrow(0), narrow(1)),
+		asmarm64.CSET(narrow(2), asmarm64.CondGE),
+		asmarm64.CBZLabel(narrow(2), 2),
+		asmarm64.LDR(narrow(3), vreg(7), 0),
+		asmarm64.MOV(vreg(10), vreg(3)),
+		asmarm64.MOVK(vreg(10), tag(types.KindI32), 48),
+		asmarm64.STR(vreg(10), vreg(7), 0),
+		asmarm64.MOV(vreg(11), vreg(10)),
+		asmarm64.RET(),
+		asmarm64.LDR(narrow(4), vreg(7), 0),
+		asmarm64.MOVZ(narrow(5), 1, 0),
+		asmarm64.ADD(narrow(6), narrow(4), narrow(5)),
+		asmarm64.MOV(vreg(12), vreg(6)),
+		asmarm64.MOVK(vreg(12), tag(types.KindI32), 48),
+		asmarm64.STR(vreg(12), vreg(7), 0),
+		asmarm64.LDR(vreg(14), vreg(13), int16(journal.CellBudget*8)),
+		asmarm64.SUBI(vreg(14), vreg(14), 1),
+		asmarm64.STR(vreg(14), vreg(13), int16(journal.CellBudget*8)),
+		asmarm64.CBNZLabel(vreg(14), 0),
+		asmarm64.ADDI(vreg(17), vreg(16), 1),
+		asmarm64.STR(vreg(17), vreg(15), int16(journal.CellSP*8)),
+		asmarm64.LDR(vreg(18), vreg(15), int16(journal.CellDepth*8)),
+		asmarm64.LSLI(vreg(19), vreg(18), journal.Shift),
+		asmarm64.ADD(vreg(20), vreg(15), vreg(19)),
+		asmarm64.MOVZ(vreg(21), 1, 0),
+		asmarm64.STP(vreg(21), vreg(16), vreg(20), int16(journal.At(0, journal.RecordAddr)*8)),
+		asmarm64.MOVZ(vreg(22), 7, 0),
+		asmarm64.MOVZ(vreg(23), 1, 0),
+		asmarm64.STP(vreg(22), vreg(23), vreg(20), int16(journal.At(0, journal.RecordIP)*8)),
+		asmarm64.ADDI(vreg(18), vreg(18), 1),
+		asmarm64.STR(vreg(18), vreg(15), int16(journal.CellDepth*8)),
+		asmarm64.MOVZ(vreg(24), 0, 0),
+		asmarm64.STR(vreg(24), vreg(15), int16(journal.CellExitID*8)),
+		asmarm64.MOVZ(vreg(25), uint16(journal.TrapYield), 0),
+		asmarm64.STR(vreg(25), vreg(15), int16(journal.CellTrap*8)),
+		asmarm64.MOVZ(vreg(26), 7, 0),
+		asmarm64.STR(vreg(26), vreg(15), int16(journal.CellNextIP*8)),
+		asmarm64.RET(),
+	}...), assembler.Instructions())
+
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+}
+
+// TestARM64_SSASuspend proves a suspension leaves native execution through a
+// terminal fallback: the prefix up to the yield runs native, materialized
+// into its VM slot, and the yield itself resumes threaded at its own opcode.
+// A suspension is intended - the recorder ends the trace there - so it reports
+// ExitTerminalOp, which the tier never counts toward giving up.
+func TestARM64_SSASuspend(t *testing.T) {
+	fn := &types.Function{
+		Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN)
+		}),
+	}
+
+	assembler := asm.New(asmarm64.New())
+	entry, ok := arm64.New().Compile(assembler, input(1, fn), jit.Anchor{Addr: 1})
+	require.True(t, ok)
+	require.Equal(t, jit.EntryFunction, entry.Kind)
+	require.Equal(t, prof.FrontendStatic, entry.Frontend)
+	require.Len(t, entry.Exits, 1)
+	require.Equal(t, prof.ExitTerminalOp, entry.Exits[0].Reason)
+
+	require.Equal(t, append(append(prologue(), frameBase(1, 2, 3)...), []asm.Instruction{
+		asmarm64.MOVZ(narrow(0), 1, 0),
+		asmarm64.MOV(vreg(5), vreg(0)),
+		asmarm64.MOVK(vreg(5), tag(types.KindI32), 48),
+		asmarm64.STR(vreg(5), vreg(1), 0),
+		asmarm64.ADDI(vreg(7), vreg(6), 1),
+		asmarm64.STR(vreg(7), vreg(4), int16(journal.CellSP*8)),
+		asmarm64.LDR(vreg(8), vreg(4), int16(journal.CellDepth*8)),
+		asmarm64.LSLI(vreg(9), vreg(8), journal.Shift),
+		asmarm64.ADD(vreg(10), vreg(4), vreg(9)),
+		asmarm64.MOVZ(vreg(11), 1, 0),
+		asmarm64.STP(vreg(11), vreg(6), vreg(10), int16(journal.At(0, journal.RecordAddr)*8)),
+		asmarm64.MOVZ(vreg(12), 5, 0),
+		asmarm64.MOVZ(vreg(13), 1, 0),
+		asmarm64.STP(vreg(12), vreg(13), vreg(10), int16(journal.At(0, journal.RecordIP)*8)),
+		asmarm64.ADDI(vreg(8), vreg(8), 1),
+		asmarm64.STR(vreg(8), vreg(4), int16(journal.CellDepth*8)),
+		asmarm64.MOVZ(vreg(14), 1, 0),
+		asmarm64.STR(vreg(14), vreg(4), int16(journal.CellExitID*8)),
+		asmarm64.MOVZ(vreg(15), uint16(journal.TrapFallback), 0),
+		asmarm64.STR(vreg(15), vreg(4), int16(journal.CellTrap*8)),
+		asmarm64.MOVZ(vreg(16), 5, 0),
+		asmarm64.STR(vreg(16), vreg(4), int16(journal.CellNextIP*8)),
+		asmarm64.RET(),
+	}...), assembler.Instructions())
+
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+}
+
 // assemble builds the code of one function.
 func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
 	t.Helper()
@@ -1811,13 +1993,21 @@ func (f fakeTraces) RootAt(a jit.Anchor) *jit.Tree {
 }
 
 // prologue is the entry every golden stream opens with: the journal header
-// mirrored into the pinned context registers, then the frame base derived
-// from the stack pointer and the frame's own base.
-func prologue(base, bp, stack int32) []asm.Instruction {
+// mirrored into the pinned context registers. The frame base every slot is
+// addressed from follows next (see frameBase), derived once for the whole
+// compile.
+func prologue() []asm.Instruction {
 	return []asm.Instruction{
 		asmarm64.MOV(asmarm64.X14, asmarm64.X0),
 		asmarm64.LDP(asmarm64.X10, asmarm64.X11, asmarm64.X14, int16(journal.CellStack*8)),
 		asmarm64.LDR(asmarm64.X12, asmarm64.X14, int16(journal.CellBP*8)),
+	}
+}
+
+// frameBase derives the frame base every slot is addressed from: the VM
+// stack plus the frame pointer scaled to bytes.
+func frameBase(base, bp, stack int32) []asm.Instruction {
+	return []asm.Instruction{
 		asmarm64.LSLI(vreg(base), vreg(bp), 3),
 		asmarm64.ADD(vreg(base), vreg(stack), vreg(base)),
 	}

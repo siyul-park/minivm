@@ -53,6 +53,12 @@ type Module struct {
 // module entry, and the blocks one loop header reaches for a loop entry. It
 // returns (nil, nil) when root cannot be planned from bytecode alone, which is
 // not an error - the caller falls back to the trace frontend.
+//
+// A suspension ends the native function early: the blocks past it are planned
+// for operand facts, because threaded execution continues through them, but
+// never emitted, because native execution does not. The static plan never
+// covers suspension at all - its dataflow has no state for an opcode pushing
+// KindAny - so this frontend, not the plan, owns it.
 func Static(input *jit.Input, root jit.Anchor) (*ssa.Function, error) {
 	if input == nil || input.Function == nil || root.Addr != input.Address {
 		return nil, nil
@@ -77,13 +83,24 @@ func Static(input *jit.Input, root jit.Anchor) (*ssa.Function, error) {
 // Body returns the SSA for the whole of fn, published at addr. Address zero is
 // module code, which ends by advancing past its last instruction rather than
 // by returning. It returns (nil, nil) when fn holds an operation no
-// translation from bytecode alone can resolve.
+// translation from bytecode alone can resolve, or when fn suspends: a
+// suspension ends native execution at its own opcode while the threaded
+// continuation runs past it, so the frontend plans only the native prefix and
+// there is no whole function to return.
 func Body(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
 	if fn == nil {
 		return nil, nil
 	}
 	f, _, err := translate(m, addr, fn, 0, false)
-	return f, err
+	if err != nil || f == nil {
+		return nil, err
+	}
+	for id := 0; id < f.Len(); id++ {
+		if f.Block(id).Term.Op == ssa.OpSuspend {
+			return nil, nil
+		}
+	}
+	return f, nil
 }
 
 // translate lays out fn's spans, resolves the operand facts every one of them

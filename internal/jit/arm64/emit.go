@@ -36,6 +36,17 @@ type emitter struct {
 	locals  int
 	returns int
 
+	// base is the frame base every slot is addressed through for the whole
+	// compile: the VM stack plus the frame pointer scaled to bytes. It is
+	// derived once, at block zero's own position (see baseFor) rather than in
+	// Enter, which runs before any block's label is bound: past its label is
+	// what a back edge lands on, so jumping back to block zero re-derives base
+	// fresh every iteration instead of reading whatever the budget check
+	// between the loop body's last use and the edge left in its register (the
+	// allocator frees a register at its value's last textual reference,
+	// without regard for a later back edge - see internal/asm/rewriter.go).
+	// Every other block, and a cold stub materialize emits after every block
+	// is laid out, reuses the same register untouched.
 	base  asm.VReg
 	seen  []bool
 	stubs []stub
@@ -96,12 +107,21 @@ func (m machine) Open(c *backend.Compiler) backend.Lowering {
 	return &emitter{c: c, a: c.Asm(), scratch: m.scratch, seen: make([]bool, c.Func().Len())}
 }
 
-// Enter mirrors the journal header into the pinned registers, derives the
-// frame base every slot is addressed from, and clears the callee locals a
-// function entry owns. It declines a root whose frame this machine cannot
-// own: a loop entry re-enters a frame that is already live, and a frame
-// holding a reference in a local or handing one back needs the ownership
-// accounting the port has not reached.
+// Enter mirrors the journal header into the pinned registers and clears the
+// callee locals a function entry owns. The frame base every slot is
+// addressed from is derived later, at block zero's own position (see
+// baseFor), not here: Enter runs before any block's label is bound, and
+// deriving base past that label is what lets a back edge to block zero
+// re-derive it. The zero-init loop below runs before block zero, so it
+// derives its own one-off base instead of waiting for baseFor's (see
+// frameBase).
+//
+// It declines a root whose frame this machine cannot own: a loop entry
+// re-enters a frame that is already live, so its locals are left alone
+// rather than cleared, and a frame holding a reference in a local or handing
+// one back needs the ownership accounting the port has not reached. A loop
+// header carrying live operands is declined too: native entry loads nothing
+// into block parameters, so there is no state to hand them.
 func (e *emitter) Enter() bool {
 	root := e.c.Root()
 	in := e.c.Input()
@@ -109,7 +129,10 @@ func (e *emitter) Enter() bool {
 		return false
 	}
 	e.kind = root.Kind()
-	if e.kind != jit.EntryFunction && e.kind != jit.EntryModule {
+	if e.kind != jit.EntryFunction && e.kind != jit.EntryModule && e.kind != jit.EntryLoop {
+		return false
+	}
+	if len(e.c.Func().Block(0).Params) > 0 {
 		return false
 	}
 
@@ -139,12 +162,6 @@ func (e *emitter) Enter() bool {
 		arm64.LDP(e.scratch[scratchStack], e.scratch[scratchGlobals], e.scratch[scratchCtrl], int16(journal.CellStack*8)),
 		arm64.LDR(e.scratch[scratchBP], e.scratch[scratchCtrl], int16(journal.CellBP*8)),
 	)
-	e.base = e.a.Reg(asm.RegTypeInt, asm.Width64)
-	e.a.Emit(
-		arm64.LSLI(e.base, e.pin(scratchBP), 3),
-		arm64.ADD(e.base, e.pin(scratchStack), e.base),
-	)
-
 	// Only a whole-function entry clears: a loop plan re-enters a frame whose
 	// locals are live, and module code has no caller that would have cleared
 	// them. One register per distinct zero word serves every local carrying
@@ -153,7 +170,11 @@ func (e *emitter) Enter() bool {
 		return true
 	}
 	zeros := map[types.Boxed]asm.VReg{}
+	var base asm.VReg
 	for idx := params; idx < len(declared); idx++ {
+		if base.Width() == asm.WidthUndefined {
+			base = e.frameBase()
+		}
 		zero := types.Zero(declared[idx].Kind())
 		reg, ok := zeros[zero]
 		if !ok {
@@ -161,7 +182,7 @@ func (e *emitter) Enter() bool {
 			e.a.Emit(arm64.LDI(reg, uint64(zero))...)
 			zeros[zero] = reg
 		}
-		e.a.Emit(arm64.STR(reg, e.base, int16(idx*8)))
+		e.a.Emit(arm64.STR(reg, base, int16(idx*8)))
 	}
 	return true
 }
@@ -176,6 +197,7 @@ func (e *emitter) Enter() bool {
 // not the very next operation lowers as neither.
 func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 	e.seen[block] = true
+	e.baseFor(block)
 	op := ops[0]
 	switch op.Op {
 	case ssa.OpConst:
@@ -233,10 +255,12 @@ func (e *emitter) Lower(block int, ops []ssa.Operation) (int, bool) {
 }
 
 // Term ends a block. A terminator leaving through interpreter state - an
-// exit, a suspension - is declined with the operations that need one, and so
-// is a branch table, whose edge order this machine does not yet read.
+// exit, a suspension - unwinds inline where it stands, and a branch table,
+// whose edge order this machine does not yet read, is declined with the
+// operations that need one.
 func (e *emitter) Term(block int, t ssa.Terminator) bool {
 	e.seen[block] = true
+	e.baseFor(block)
 	switch t.Op {
 	case ssa.OpJump:
 		return e.jump(block, t)
@@ -246,6 +270,30 @@ func (e *emitter) Term(block int, t ssa.Terminator) bool {
 		return e.ret(t)
 	case ssa.OpComplete:
 		return e.complete(t)
+	case ssa.OpExit:
+		// A tail call retires its frame for another one, which no operation
+		// states and no block here is laid out for: it stays on the plan
+		// pipeline, whose tail morph lowers it, until the backend represents
+		// the morph itself.
+		if e.opcode(t.State) == int(instr.RETURN_CALL) {
+			return false
+		}
+		// An exit out of a loop is how a loop normally ends, so the tier
+		// never counts it toward giving up; every other exit is a deopt the
+		// frontend intended, which the tier counts the same way. Under-count
+		// rather than over-count here is deliberate: a cold path that stays
+		// cold is still caught by the throughput probe, while a healthy loop
+		// retired on its normal exits has no such backstop.
+		reason := prof.ExitTerminalOp
+		if e.kind == jit.EntryLoop {
+			reason = prof.ExitLoop
+		}
+		return e.terminal(t.State, reason)
+	case ssa.OpSuspend:
+		// A suspension is a deopt the frontend intended: the interpreter
+		// performs the real suspend at the opcode's own IP, so it never
+		// counts toward giving up.
+		return e.terminal(t.State, prof.ExitTerminalOp)
 	default:
 		return false
 	}
@@ -659,7 +707,68 @@ func (e *emitter) eqz(op ssa.Operation, want ssa.Type) bool {
 }
 
 func (e *emitter) jump(block int, t ssa.Terminator) bool {
-	if len(t.Edges) != 1 || !e.forward(t.Edges[0]) {
+	if len(t.Edges) != 1 {
+		return false
+	}
+	edge := t.Edges[0]
+	if e.reached(edge) {
+		return e.back(edge)
+	}
+	if !e.moves(edge) {
+		return false
+	}
+	if next, ok := e.c.Next(block); ok && next == edge.Block {
+		return true
+	}
+	e.a.Emit(arm64.BLabel(e.c.Block(edge.Block)))
+	return true
+}
+
+// branch tests the condition and continues on one of two blocks. The layout
+// puts a terminator's first edge next wherever it can, so the common shape is
+// one inverted test over the taken block that falls into it. That shape only
+// serves edges carrying nothing: an edge with block parameters emits its moves
+// on a stub instead, and a back edge spends the safepoint budget there.
+func (e *emitter) branch(block int, t ssa.Terminator) bool {
+	if len(t.Edges) != 2 || len(t.Args) != 1 || !e.lanes(ssa.TypeI32, t.Args[0]) {
+		return false
+	}
+	if !e.wired(t.Edges[0]) || !e.wired(t.Edges[1]) {
+		return false
+	}
+	if len(e.c.Moves(t.Edges[0])) == 0 && len(e.c.Moves(t.Edges[1])) == 0 &&
+		!e.reached(t.Edges[0]) && !e.reached(t.Edges[1]) {
+		cond := e.c.Reg(t.Args[0])
+		next, falls := e.c.Next(block)
+		if falls && next == t.Edges[0].Block {
+			e.a.Emit(arm64.CBZLabel(cond, e.c.Block(t.Edges[1].Block)))
+			return true
+		}
+		e.a.Emit(arm64.CBNZLabel(cond, e.c.Block(t.Edges[0].Block)))
+		if falls && next == t.Edges[1].Block {
+			return true
+		}
+		e.a.Emit(arm64.BLabel(e.c.Block(t.Edges[1].Block)))
+		return true
+	}
+	cond := e.c.Reg(t.Args[0])
+	taken := e.a.Label()
+	e.a.Emit(arm64.CBNZLabel(cond, taken))
+	if e.reached(t.Edges[1]) {
+		if !e.back(t.Edges[1]) {
+			return false
+		}
+	} else {
+		if !e.moves(t.Edges[1]) {
+			return false
+		}
+		e.a.Emit(arm64.BLabel(e.c.Block(t.Edges[1].Block)))
+	}
+	e.a.Bind(taken)
+	if e.reached(t.Edges[0]) {
+		return e.back(t.Edges[0])
+	}
+	if !e.moves(t.Edges[0]) {
 		return false
 	}
 	if next, ok := e.c.Next(block); ok && next == t.Edges[0].Block {
@@ -669,35 +778,16 @@ func (e *emitter) jump(block int, t ssa.Terminator) bool {
 	return true
 }
 
-// branch tests the condition and continues on one of two blocks. The layout
-// puts a terminator's first edge next wherever it can, so the common shape is
-// one inverted test over the taken block that falls into it.
-func (e *emitter) branch(block int, t ssa.Terminator) bool {
-	if len(t.Edges) != 2 || len(t.Args) != 1 || !e.lanes(ssa.TypeI32, t.Args[0]) {
-		return false
-	}
-	if !e.forward(t.Edges[0]) || !e.forward(t.Edges[1]) {
-		return false
-	}
-	cond := e.c.Reg(t.Args[0])
-	next, falls := e.c.Next(block)
-	if falls && next == t.Edges[0].Block {
-		e.a.Emit(arm64.CBZLabel(cond, e.c.Block(t.Edges[1].Block)))
-		return true
-	}
-	e.a.Emit(arm64.CBNZLabel(cond, e.c.Block(t.Edges[0].Block)))
-	if falls && next == t.Edges[1].Block {
-		return true
-	}
-	e.a.Emit(arm64.BLabel(e.c.Block(t.Edges[1].Block)))
-	return true
-}
-
 // ret closes a function entry: the boxed results land at the frame base for
 // the Go wrapper, which tears the frame down, and in the ABI return registers
-// for a native caller that entered through this function's own slot.
+// for a native caller that entered through this function's own slot. A loop
+// root inside a function returns the same way; a loop owning the whole module
+// completes instead.
 func (e *emitter) ret(t ssa.Terminator) bool {
-	if e.kind != jit.EntryFunction || len(t.Args) != e.returns {
+	if e.kind != jit.EntryFunction && e.kind != jit.EntryLoop {
+		return false
+	}
+	if len(t.Args) != e.returns {
 		return false
 	}
 	for idx, arg := range t.Args {
@@ -718,7 +808,10 @@ func (e *emitter) ret(t ssa.Terminator) bool {
 // it leaves behind are boxed back onto the VM stack, the stack pointer is
 // published, and the wrapper marks the frame exhausted.
 func (e *emitter) complete(t ssa.Terminator) bool {
-	if e.kind != jit.EntryModule || e.locals+len(t.Args) > maxSlot {
+	if e.kind != jit.EntryModule && e.kind != jit.EntryLoop {
+		return false
+	}
+	if e.locals+len(t.Args) > maxSlot {
 		return false
 	}
 	for idx, arg := range t.Args {
@@ -800,6 +893,32 @@ func rawTag(typ ssa.Type) uint64 {
 	}
 }
 
+// baseFor derives the frame base exactly once, at block zero's own position:
+// past its label, before any of its operations. Lower and Term both call it,
+// on every block, but it acts only for block zero and only the first time -
+// every other block, and every later call for block zero itself, reuses the
+// register already derived there, which is what a back edge to block zero
+// reads fresh on every iteration (see emitter.base).
+func (e *emitter) baseFor(block int) {
+	if block != 0 || e.base.Width() != asm.WidthUndefined {
+		return
+	}
+	e.base = e.frameBase()
+}
+
+// frameBase derives a fresh frame base into its own register: the VM stack
+// plus the frame pointer scaled to bytes. Enter's zero-init loop calls it
+// directly for a one-off base, since it runs before block zero derives the
+// function's own (see baseFor).
+func (e *emitter) frameBase() asm.VReg {
+	base := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LSLI(base, e.pin(scratchBP), 3),
+		arm64.ADD(base, e.pin(scratchStack), base),
+	)
+	return base
+}
+
 // slot resolves the base register and word offset one interpreter slot lives
 // at. A frame base other than the entry frame's names an inlined callee's
 // storage and an upvalue's base is the closure's: this machine reaches
@@ -821,13 +940,85 @@ func (e *emitter) slot(s ssa.Slot) (asm.VReg, int, bool) {
 	}
 }
 
-// forward reports whether control may branch along edge: to a block this
-// compile has not laid out yet, carrying no arguments. A block already laid
-// out is reached by a back edge, whose safepoint budget and loop-carried
-// registers this machine does not emit, and an argument is a block parameter,
-// whose edge copies it does not place.
-func (e *emitter) forward(edge ssa.Edge) bool {
-	return len(edge.Args) == 0 && edge.Block >= 0 && edge.Block < len(e.seen) && !e.seen[edge.Block]
+// terminal unwinds inline where control leaves native execution: the cold
+// stub a guard exits through cannot serve a block that ends there, because no
+// hot path falls through past it.
+func (e *emitter) terminal(state ssa.Value, reason prof.ExitReason) bool {
+	d := e.c.Exit(state, reason, e.opcode(state))
+	if !fits(d) {
+		return false
+	}
+	return e.unwind(d, journal.TrapFallback)
+}
+
+// reached reports whether edge targets a block already laid out: a back edge,
+// whose loop-carried values arrive on block parameters this machine places
+// and whose safepoint budget it spends.
+func (e *emitter) reached(edge ssa.Edge) bool {
+	return edge.Block >= 0 && edge.Block < len(e.seen) && e.seen[edge.Block]
+}
+
+// wired reports whether edge names a successor this machine emits: a laid-out
+// block, or a forward one. Anything else - out of range, or an already
+// laid-out block that is not the loop header - is declined rather than
+// branched to.
+func (e *emitter) wired(edge ssa.Edge) bool {
+	if edge.Block < 0 || edge.Block >= len(e.seen) {
+		return false
+	}
+	return !e.seen[edge.Block] || edge.Block == 0
+}
+
+// moves emits the register copies edge's arguments must make into its target
+// block's parameters. A length mismatch is declined rather than dropped: the
+// verifier pairs every argument with a parameter, so one here is a malformed
+// function, not an empty edge.
+func (e *emitter) moves(edge ssa.Edge) bool {
+	if edge.Block < 0 || edge.Block >= e.c.Func().Len() {
+		return false
+	}
+	if len(e.c.Func().Block(edge.Block).Params) != len(edge.Args) {
+		return false
+	}
+	for _, m := range e.c.Moves(edge) {
+		if m.Dst.Type() == asm.RegTypeFloat {
+			e.a.Emit(arm64.FMOV(m.Dst, m.Src))
+		} else {
+			e.a.Emit(arm64.MOV(m.Dst, m.Src))
+		}
+	}
+	return true
+}
+
+// back continues a loop at its header: the edge's arguments have already been
+// moved into the header's parameters, so what remains is the safepoint
+// budget. While budget remains control stays native; once spent, the frame
+// yields at the header with whatever the stores left in the VM slots - locals
+// are committed by every store, and the header takes no operands, which Enter
+// refused any entry carrying - and the interpreter continues threaded there.
+func (e *emitter) back(edge ssa.Edge) bool {
+	if edge.Block != 0 || len(edge.Args) != 0 {
+		return false
+	}
+	root := e.c.Root()
+	ctrl := e.pin(scratchCtrl)
+	budget := e.a.Reg(asm.RegTypeInt, asm.Width64)
+	e.a.Emit(
+		arm64.LDR(budget, ctrl, int16(journal.CellBudget*8)),
+		arm64.SUBI(budget, budget, 1),
+		arm64.STR(budget, ctrl, int16(journal.CellBudget*8)),
+		arm64.CBNZLabel(budget, e.c.Block(0)),
+	)
+	d := backend.Deopt{
+		ID:     -1,
+		Resume: root.IP,
+		SP:     e.locals,
+		Frames: []backend.Record{{Addr: root.Addr, BP: 0, IP: root.IP, Returns: e.returns}},
+	}
+	if !fits(d) {
+		return false
+	}
+	return e.unwind(d, journal.TrapYield)
 }
 
 func (e *emitter) lanes(want ssa.Type, vs ...ssa.Value) bool {

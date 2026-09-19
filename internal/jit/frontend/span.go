@@ -9,7 +9,10 @@ import (
 // span is one straight-line run of bytecode that becomes one SSA block. A
 // basic block is one span, or one more for every opcode it bridges: the
 // interpreter re-enters natively at the instruction after a bridged opcode, and
-// a point a backend can be entered at is a block of its own.
+// a point a backend can be entered at is a block of its own. A suspension
+// point ends its span the same way, except nothing resumes natively after it:
+// the interpreter performs the real suspend and continues threaded, so the
+// span carries no successor and the blocks after it are not emitted.
 //
 // Control and dataflow are not the same successors. An opcode that leaves the
 // function - a throw, an unreachable - is followed by the bytecode after it,
@@ -21,6 +24,10 @@ type span struct {
 	end   int
 	flow  []int
 	succs []int
+	// suspend marks a span ending on a suspension point: its facts still flow
+	// to the next span, because threaded execution continues there, but its
+	// terminator wires no successor, because native execution does not.
+	suspend bool
 }
 
 // split cuts every basic block into its spans and wires both successor sets.
@@ -40,6 +47,10 @@ func split(code []byte, blocks []*analysis.BasicBlock) []span {
 				spans = append(spans, span{start: start, end: ip})
 				start = ip
 			}
+			if inst.Opcode() == instr.YIELD || inst.Opcode() == instr.RESUME {
+				spans = append(spans, span{start: start, end: ip, suspend: true})
+				start = ip
+			}
 		}
 		last[i] = len(spans)
 		spans = append(spans, span{start: start, end: block.End})
@@ -47,7 +58,10 @@ func split(code []byte, blocks []*analysis.BasicBlock) []span {
 	// A block ending on a bridge leaves an empty span at its end, which shares
 	// its start with the next block's first span. The later one wins, exactly
 	// as the plan's anchor map resolves the same collision, and the empty span
-	// stays reachable through the bridge that precedes it.
+	// stays reachable through the bridge that precedes it. A suspension leaves
+	// the same shape, except the empty span is reached only through flow - the
+	// threaded continuation - never through succs, so no successor is emitted
+	// for it.
 	at := make(map[int]int, len(spans))
 	for i, s := range spans {
 		at[s.start] = i
@@ -62,7 +76,12 @@ func split(code []byte, blocks []*analysis.BasicBlock) []span {
 	for i, block := range blocks {
 		for id := first[i]; id < last[i]; id++ {
 			spans[id].flow = []int{id + 1}
-			spans[id].succs = []int{id + 1}
+			// A suspension ends native execution at its own opcode: the facts
+			// still flow on for the threaded continuation, but the terminator
+			// wires no successor.
+			if !spans[id].suspend {
+				spans[id].succs = []int{id + 1}
+			}
 		}
 		for _, succ := range block.Succs {
 			spans[last[i]].flow = append(spans[last[i]].flow, first[succ])

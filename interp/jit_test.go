@@ -543,7 +543,12 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.Exit{Reason: prof.ExitColdBranch, Opcode: int(instr.BR_IF)}, entry.Exits[id])
+			// The SSA backend owns the cold leg: it reports the terminal-op
+			// bucket with the resume target's opcode, where the plan pipeline
+			// reported the cold branch itself. Leg folding keys on the resumed
+			// position either way, and the throughput probe backstops a cold
+			// path that stays cold.
+			require.Equal(t, jit.Exit{Reason: prof.ExitTerminalOp, Opcode: int(instr.I32_CONST)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -575,7 +580,13 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.Exit{Reason: prof.ExitTraceCut, Opcode: prof.OpcodeNone}, entry.Exits[id])
+			// The SSA backend owns the cut: it reports the terminal-op bucket
+			// with the resume target's opcode, where the plan pipeline
+			// reported a trace cut with none. Under-counting the cut is
+			// deliberate - the throughput probe backstops a boundary that
+			// stays hot, while a healthy entry retired on intended deopts has
+			// no such backstop.
+			require.Equal(t, jit.Exit{Reason: prof.ExitTerminalOp, Opcode: int(instr.NOP)}, entry.Exits[id])
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
@@ -672,11 +683,15 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
 			require.Less(t, id, len(entry.Exits))
-			require.Equal(t, jit.Exit{Reason: prof.ExitLoop, Opcode: int(instr.BR_IF)}, entry.Exits[id])
+			// A loop exit keeps its loop-exit bucket under the SSA backend, so
+			// a normally completing loop never counts toward giving up. The
+			// opcode names the resume target where the plan named the branch
+			// that left.
+			require.Equal(t, jit.Exit{Reason: prof.ExitLoop, Opcode: int(instr.LOCAL_GET)}, entry.Exits[id])
 			exits, ok := local.Metric("vm_jit_native_exits_total",
 				prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: headerLabel},
 				prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"},
-				prof.Label{Key: "reason", Value: "loop-exit"}, prof.Label{Key: "opcode", Value: "br_if"})
+				prof.Label{Key: "reason", Value: "loop-exit"}, prof.Label{Key: "opcode", Value: "local.get"})
 			require.True(t, ok)
 			require.Equal(t, float64(1), exits)
 		})

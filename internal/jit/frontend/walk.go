@@ -60,6 +60,17 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 			return w.leave(), true
 		case instr.RETURN_CALL:
 			return w.tail(ip)
+		case instr.YIELD, instr.RESUME:
+			// A suspension ends native execution at the opcode itself: the
+			// interpreter performs the real suspend and resumes threaded, so
+			// the span carries no successor (see span.suspend). Only the frame
+			// that owns the coroutine suspends; an inlined frame reaching one
+			// is refused, because no journal deopt rebuilds a suspended
+			// callee.
+			if len(w.frames) > 1 {
+				return ssa.Terminator{}, false
+			}
+			return w.suspend(ip), true
 		}
 		if !w.perform(inst) {
 			return ssa.Terminator{}, false
@@ -781,6 +792,17 @@ func (w *walk) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
 	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
+}
+
+// suspend ends native execution on a suspension point, resuming the
+// interpreter at the opcode's own IP in the frame that owns the coroutine.
+// Like exit it hands the interpreter an adopted operand stack; unlike exit the
+// threaded continuation runs past the opcode, so the span after it is planned
+// for facts but never emitted (see span.suspend).
+func (w *walk) suspend(ip int) ssa.Terminator {
+	w.begin(ip)
+	w.adopt()
+	return ssa.Terminator{Op: ssa.OpSuspend, State: w.deopt()}
 }
 
 // guard admits only a container of the shape the plan resolved for it, so the

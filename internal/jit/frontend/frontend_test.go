@@ -113,6 +113,120 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
+	t.Run("suspends at yield and drops the threaded continuation", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:i32 = const 1
+	v2:state = state {addr=1 base=0 ip=5 returns=1 stack=[v1]}
+	suspend state v2
+`, ssa.Format(out))
+	})
+
+	// Suspension belongs to the frontend, not the plan: the static plan's
+	// dataflow has no state for an opcode pushing KindAny, so it refuses any
+	// function holding YIELD, while the frontend plans the native prefix the
+	// backend lowers up to the suspension.
+	t.Run("plans the suspension prefix the static plan refuses", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN)
+			}),
+		}
+		input := &jit.Input{Address: 1, Function: fn}
+
+		plans, err := jit.StaticPlan(input)
+		require.NoError(t, err)
+		require.Empty(t, plans)
+
+		out, err := frontend.Static(input, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+	})
+
+	// A suspension on one leg of a join must not poison the other: the facts
+	// flowing past it are the pre-op stack for a continuation native code
+	// never emits, so the join plans from the paths that do reach it, widened
+	// where they disagree.
+	t.Run("suspends one leg of a join without poisoning the other", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				alt, done := b.Label(), b.Label()
+				b.Emit(instr.I32_CONST, 0).BrIf(alt)
+				b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD)
+				b.Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Br(done)
+				b.Bind(alt).Emit(instr.I32_CONST, 10).Emit(instr.I32_CONST, 20).Emit(instr.I32_ADD).Br(done)
+				b.Bind(done).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+
+		// Five spans become four blocks: the suspension's continuation is
+		// planned for facts but never emitted.
+		require.Equal(t, 4, out.Len())
+		suspends, returns := 0, 0
+		for id := 0; id < out.Len(); id++ {
+			switch out.Block(id).Term.Op {
+			case ssa.OpSuspend:
+				suspends++
+			case ssa.OpReturn:
+				returns++
+				require.Len(t, out.Block(id).Params, 1)
+			}
+		}
+		require.Equal(t, 1, suspends)
+		require.Equal(t, 1, returns)
+	})
+
+	// A suspension ending its basic block leaves an empty span at the block's
+	// end: the span is reached only through flow, never through succs, so the
+	// prefix still plans and verifies.
+	t.Run("suspends at the end of a basic block", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+			Code: assemble(t, func(b *instr.Builder) {
+				skip, cont, done := b.Label(), b.Label(), b.Label()
+				b.Emit(instr.I32_CONST, 0).BrIf(skip)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.YIELD)
+				b.Bind(cont).Emit(instr.LOCAL_GET, 0).Emit(instr.DROP).Br(done)
+				b.Bind(skip).Emit(instr.I32_CONST, 1).Br(cont)
+				b.Bind(done).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
+			}),
+		}
+
+		out, err := frontend.Static(&jit.Input{Address: 1, Function: fn}, jit.Anchor{Addr: 1})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+
+		suspends := 0
+		for id := 0; id < out.Len(); id++ {
+			if out.Block(id).Term.Op == ssa.OpSuspend {
+				suspends++
+			}
+		}
+		require.Equal(t, 1, suspends)
+	})
+
 	// An i64 slot may hold either an inline value or a reference to one
 	// Interpreter.boxI64 heap-promoted, and only the tag on the loaded word
 	// tells them apart. load states that as an OpGuardKind immediately after
@@ -218,6 +332,16 @@ func TestBody(t *testing.T) {
 		require.Nil(t, out)
 	})
 
+	t.Run("declines a function holding a suspension", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) }),
+		}
+		out, err := frontend.Body(frontend.Module{}, 1, fn)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
 	// LOCAL_TEE and GLOBAL_TEE of a reference used to be refused whole: the
 	// slot's overwritten count and the surviving stack copy's count both need
 	// resolving, and nothing at IR build time could tell a self-store from an
@@ -247,6 +371,12 @@ func TestBody(t *testing.T) {
 // accepts can require the reverse as well: the frontend declines an operand of
 // a kind its opcode cannot pop, which the plan never checks and verified
 // bytecode never contains.
+//
+// Suspension is the one exception to the first rule, and the corpus holds no
+// suspending function for exactly that reason: the static plan's dataflow has
+// no state for an opcode pushing KindAny, so it refuses any function holding
+// YIELD, while this frontend plans the native prefix ending in OpSuspend. The
+// divergence is pinned by its own test below, not by this differential.
 func agrees(t *testing.T, input *jit.Input) (int, int) {
 	t.Helper()
 
@@ -316,11 +446,11 @@ func owns(t *testing.T, plan jit.Plan, blocks []int, fn *ssa.Function, ids []int
 }
 
 // adopts checks the rule every handoff out of native code shares: a bridge, a
-// call, and a deopt hand the flushed operand stack to code that adopts every
-// reference on it and later releases each one, so none may still be borrowed
-// there. It is the barrier the plan emits at its cold path instead - ownRefs
-// before a call, retainDeferred before a fallback or a bridge - stated in the
-// IR here.
+// call, a suspension, and a deopt hand the flushed operand stack to code that
+// adopts every reference on it and later releases each one, so none may still
+// be borrowed there. It is the barrier the plan emits at its cold path instead
+// - ownRefs before a call, retainDeferred before a fallback or a bridge -
+// stated in the IR here.
 func adopts(t *testing.T, fn *ssa.Function) {
 	t.Helper()
 	states := map[ssa.Value]ssa.Operation{}
@@ -347,7 +477,7 @@ func adopts(t *testing.T, fn *ssa.Function) {
 				owned(op.State)
 			}
 		}
-		if blk.Term.Op == ssa.OpExit {
+		if blk.Term.Op == ssa.OpExit || blk.Term.Op == ssa.OpSuspend {
 			owned(blk.Term.State)
 		}
 	}

@@ -117,6 +117,151 @@ blk0: () <-- (blk0)
 		_, blocks := breadth(0, fn.Len(), fn.Succ)
 		require.Equal(t, [][]int{{1, 2}, {3}, {3}, nil}, blocks)
 	})
+
+	// A suspension is a terminator, not a shape: the differential above only
+	// compares block graphs, so this pins what the suspended recording means.
+	t.Run("suspends at the recorded yield", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) }),
+		}
+		at := offsets(fn.Code)
+		rec := &tape{}
+		rec.at(fn, 1, at[0], 0)
+		rec.at(fn, 1, at[1], 0)
+		root := jit.Anchor{Addr: 1}
+		out := frontend.Trace(&jit.Input{
+			Traces:   fakeTraces{trees: map[jit.Anchor]*jit.Tree{root: {Root: &jit.Trace{Anchor: root, Ops: rec.ops, Status: jit.StatusReturned}}}},
+			Address:  1,
+			Function: fn,
+			Objects:  jit.Objects{1: {Fn: fn}},
+		}, root)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:i32 = const 1
+	v2:state = state {addr=1 base=0 ip=5 returns=1 stack=[v1]}
+	suspend state v2
+`, ssa.Format(out))
+	})
+
+	// A suspension names the anchor frame's own opcode at the recording's end.
+	// Anything else - mid-trace, nested, stale, or on another status - is
+	// refused rather than suspended.
+	t.Run("refuses a suspension it cannot own", func(t *testing.T) {
+		build := func(code []byte, ops []jit.Record, status jit.Status) *jit.Input {
+			fn := &types.Function{
+				Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				Code: code,
+			}
+			root := jit.Anchor{Addr: 1}
+			return &jit.Input{
+				Traces:   fakeTraces{trees: map[jit.Anchor]*jit.Tree{root: {Root: &jit.Trace{Anchor: root, Ops: ops, Status: status}}}},
+				Address:  1,
+				Function: fn,
+				Objects:  jit.Objects{1: {Fn: fn}},
+			}
+		}
+		suspends := func() (code []byte, at []int) {
+			fn := &types.Function{
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) }),
+			}
+			return fn.Code, offsets(fn.Code)
+		}
+
+		t.Run("mid-trace yield", func(t *testing.T) {
+			code, at := suspends()
+			fn := &types.Function{Code: code}
+			rec := &tape{}
+			rec.at(fn, 1, at[0], 0)
+			rec.at(fn, 1, at[1], 0)
+			rec.at(fn, 1, at[2], 0)
+			require.Nil(t, frontend.Trace(build(code, rec.ops, jit.StatusReturned), jit.Anchor{Addr: 1}))
+		})
+
+		t.Run("nested yield", func(t *testing.T) {
+			code, at := suspends()
+			fn := &types.Function{Code: code}
+			rec := &tape{}
+			rec.at(fn, 1, at[0], 0)
+			rec.at(fn, 1, at[1], 1)
+			require.Nil(t, frontend.Trace(build(code, rec.ops, jit.StatusReturned), jit.Anchor{Addr: 1}))
+		})
+
+		t.Run("stale opcode", func(t *testing.T) {
+			fn := &types.Function{
+				Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.DROP).Emit(instr.RETURN) }),
+			}
+			at := offsets(fn.Code)
+			rec := &tape{}
+			rec.at(fn, 1, at[0], 0)
+			yield := rec.at(fn, 1, at[1], 0)
+			yield.Op = instr.YIELD
+			require.Nil(t, frontend.Trace(build(fn.Code, rec.ops, jit.StatusReturned), jit.Anchor{Addr: 1}))
+		})
+
+		t.Run("wrong status", func(t *testing.T) {
+			code, at := suspends()
+			fn := &types.Function{Code: code}
+			rec := &tape{}
+			rec.at(fn, 1, at[0], 0)
+			rec.at(fn, 1, at[1], 0)
+			require.Nil(t, frontend.Trace(build(code, rec.ops, jit.StatusFallback), jit.Anchor{Addr: 1}))
+		})
+	})
+
+	// A suspension inside an inlined frame is refused even when the recording
+	// mislabels its depth: only the sole frame suspends, and a leg folded
+	// inside a callee replays with the caller's frames still on the stack.
+	// Without the frame guard the leg below plans a two-frame suspend, which
+	// ssa.Verify rejects.
+	t.Run("refuses a suspension inside an inlined leg", func(t *testing.T) {
+		callee := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				other := b.Label()
+				b.Emit(instr.I32_CONST, 0).BrIf(other)
+				b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
+				b.Bind(other).Emit(instr.I32_CONST, 2).Emit(instr.YIELD).Emit(instr.RETURN)
+			}),
+		}
+		caller := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN) }),
+		}
+		outer, inner := offsets(caller.Code), offsets(callee.Code)
+
+		rec := &tape{}
+		rec.at(caller, 1, outer[0], 0)
+		call := rec.at(caller, 1, outer[1], 0)
+		call.Callee, call.Seen = 2, types.BoxRef(2)
+		rec.at(callee, 2, inner[0], 1)
+		rec.at(callee, 2, inner[1], 1).Target = inner[4]
+		rec.at(callee, 2, inner[2], 1)
+		rec.at(callee, 2, inner[3], 1)
+		rec.at(caller, 1, outer[2], 0)
+
+		// Forged depth: a leg captured inside the callee would carry depth 1,
+		// which the depth guard already refuses. Depth 0 reaches the frame
+		// guard instead.
+		leg := &tape{}
+		leg.at(callee, 2, inner[4], 0)
+		leg.at(callee, 2, inner[5], 0)
+
+		root := jit.Anchor{Addr: 1}
+		require.Nil(t, frontend.Trace(&jit.Input{
+			Traces: fakeTraces{trees: map[jit.Anchor]*jit.Tree{root: {
+				Root:     &jit.Trace{Anchor: root, Ops: rec.ops, Status: jit.StatusReturned},
+				Branches: map[int]*jit.Trace{0: {Anchor: jit.Anchor{Addr: 2, IP: inner[4]}, Ops: leg.ops, Status: jit.StatusReturned}},
+				Hits:     []int64{9},
+			}}},
+			Address:   1,
+			Function:  caller,
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   jit.Objects{1: {Fn: caller}, 2: {Fn: callee}},
+		}, root))
+	})
 }
 
 // recording is one recorded tree together with the anchors a plan could be
@@ -155,6 +300,7 @@ func recordings(t *testing.T) []recording {
 	add("entry is partial", ending(t, jit.StatusPartial, 0))
 	add("self tail call closes the recording", tailed(t, true))
 	add("tail call morphs into another function", tailed(t, false))
+	add("yield suspends the recording", suspended(t))
 	add("call is inlined", inlined(t, 1))
 	add("nested call is inlined", inlined(t, 2))
 	add("observed callee is guarded and entered", observed(t, true))
@@ -538,6 +684,22 @@ func tree(fn *types.Function, addr int, root *jit.Trace, branches map[int]*jit.T
 		},
 		anchors: []jit.Anchor{{Addr: addr}, root.Anchor},
 	}
+}
+
+// suspended records a function reaching a suspension point: the recorder ends
+// the trace on the yield itself without stepping past it, so native execution
+// ends there and the interpreter performs the real suspend.
+func suspended(t *testing.T) recording {
+	t.Helper()
+	fn := &types.Function{
+		Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) }),
+	}
+	at := offsets(fn.Code)
+	rec := &tape{}
+	rec.at(fn, 1, at[0], 0)
+	rec.at(fn, 1, at[1], 0)
+	return tree(fn, 1, &jit.Trace{Anchor: jit.Anchor{Addr: 1}, Ops: rec.ops, Status: jit.StatusReturned}, nil)
 }
 
 // tailed records a function reaching a tail call: back to itself, which the
