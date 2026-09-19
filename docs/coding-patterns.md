@@ -6,16 +6,13 @@ Normative code-design rules for `minivm`.
 
 ## Design
 
-The agent `MUST` implement required behavior with the fewest necessary symbols and least necessary code without weakening responsibility boundaries. Conceptual surface is minimized, not line count.
+Required behavior `MUST` be implemented with the fewest necessary symbols and least necessary code without weakening responsibility boundaries. Conceptual surface is minimized, not line count.
 
-Every symbol `MUST` earn its existence through a distinct responsibility, invariant, ownership boundary, or reusable abstraction. Every behavior `MUST` have one implementation and every semantic rule `MUST` have one owner; other code `MUST` call, compose, or encode that owner.
+Every symbol `MUST` earn its existence through a distinct responsibility, invariant, ownership boundary, or reusable abstraction.
 
-Symbols `MUST` have one coherent responsibility, a narrow contract, and a scope broad enough to serve every caller needing that responsibility. The agent `MUST NOT` combine unrelated roles to force reuse.
+Every behavior `MUST` have one implementation and every semantic rule `MUST` have one owner. Other code `MUST` call, compose, or encode that owner.
 
-1. **Abstract semantic duplication.** When multiple sites implement the same behavior or rule, the agent `MUST` move it into one owner. Similar syntax alone `MUST NOT` trigger abstraction.
-2. **Merge overlapping symbols.** When symbols have substantially the same responsibility at the same abstraction level, the agent `MUST` consolidate them. It `SHOULD` prefer one general symbol over parallel variants, wrappers, aliases, or coordinators.
-3. **Split real boundaries.** The agent `MUST` separate symbols only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. It `MUST NOT` split to shorten code or create symmetry.
-4. **Reuse before extension.** The agent `SHOULD` prefer existing symbols and composition before adding layers, extension points, policy knobs, or parallel mechanisms.
+Symbols `MUST` have one coherent responsibility, a narrow contract, and a scope broad enough to serve every caller needing that responsibility. Unrelated roles `MUST NOT` be combined to force reuse.
 
 ### Dependency Direction
 
@@ -25,7 +22,7 @@ Lower-level or reusable symbols `MUST` be refined to the most general form that 
 
 Higher-level symbols `MAY` depend on lower-level symbols when those symbols provide behavior in a more general and context-independent form. Lower-level symbols `MUST NOT` depend on the higher-level code that uses them.
 
-When extracting shared functionality, the agent `MUST NOT` merely move code into a lower layer. It `MUST` generalize the responsibility and its dependencies so that the resulting symbol can serve a broader context and has fewer reasons to change than its dependents.
+When extracting shared functionality, code `MUST NOT` merely be moved into a lower layer. The responsibility and its dependencies `MUST` be generalized so that the resulting symbol can serve a broader context and has fewer reasons to change than its dependents.
 
 ### Physical Cohesion
 
@@ -37,69 +34,107 @@ Strongly related symbols `MUST` be placed physically close together. Symbols tha
 
 Files and declaration order `MUST` make ownership, responsibility, and relationships easy to read. Physical separation `MUST` represent a real responsibility, ownership, or abstraction boundary.
 
+### Structural Rules
+
+1. **Abstract semantic duplication.*- When multiple sites implement the same behavior or rule, it `MUST` move into one owner. Similar syntax alone `MUST NOT` trigger abstraction.
+
+2. **Merge overlapping symbols.*- When symbols have substantially the same responsibility at the same abstraction level, they `MUST` be consolidated. One general symbol `SHOULD` be preferred over parallel variants, wrappers, aliases, or coordinators.
+
+3. **Split real boundaries.*- Symbols `MUST` be separated only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. They `MUST NOT` be split to shorten code or create symmetry.
+
+4. **Reuse before extension.*- Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
+
 ## Functions
 
-The agent `MUST` extract a helper only when it removes semantic duplication, names reusable behavior or policy, isolates an abstraction level, or is required as a function value. A private helper `SHOULD` have at least two callers; the agent `MUST` inline a single-use helper unless its name expresses a real policy or mechanic.
+A helper `MUST` be extracted only when it removes semantic duplication, names reusable behavior or policy, isolates an abstraction level, or is required as a function value.
 
-The agent `SHOULD` use methods for receiver-owned behavior and package functions for construction or behavior with no natural receiver. One function `MUST` stay at one abstraction level.
+A private helper `SHOULD` have at least two callers. A single-use helper `MUST` be inlined unless its name expresses a real policy or mechanic.
 
-The agent `MUST` order declarations for reading: callers before callees, related symbols adjacent, type and methods together.
+Methods `SHOULD` be used for receiver-owned behavior and package functions for construction or behavior with no natural receiver.
+
+One function `MUST` stay at one abstraction level.
+
+Declarations `MUST` be ordered for reading: callers before callees, related symbols adjacent, type and methods together.
 
 ## Naming
 
-A name `MUST` describe role, contract, or ownership. One word is the rule, not a preference: the agent `SHOULD` use one word by default. A multi-word name `MUST` be used only when one word cannot express the required distinction, and then it `MUST` add only the minimum necessary qualifier.
+A name `MUST` describe role, contract, or ownership.
 
-- The agent `MUST` use one term for one concept across packages.
-- The agent `MUST NOT` repeat package, receiver, phase, or representation without meaning.
-- The agent `MUST` keep standard abbreviations: `ID`, `IP`, `ABI`, `JIT`, `VM`, `SSA`, `CFG`, `GVN`, `DCE`.
-- The agent `MUST` use one-letter names only for conventional receivers, indexes, and tiny scopes.
+One word is the rule, not a preference: one word `SHOULD` be used by default. A multi-word name `MUST` be used only when one word cannot express the required distinction, and then it `MUST` add only the minimum necessary qualifier.
 
-| Form | Meaning |
-|---|---|
-| `HasX` | contains or registers X |
-| `IsX` | state predicate |
+- One term `MUST` be used for one concept across packages.
+- Package, receiver, phase, or representation `MUST NOT` be repeated without meaning.
+- Standard abbreviations `MUST` be kept: `ID`, `IP`, `ABI`, `JIT`, `VM`, `SSA`, `CFG`, `GVN`, `DCE`.
+- One-letter names `MUST` be used only for conventional receivers, indexes, and tiny scopes.
+
+| Form     | Meaning                            |
+| -------- | ---------------------------------- |
+| `HasX`   | contains or registers X            |
+| `IsX`    | state predicate                    |
 | `MatchX` | comparison or validation against X |
-| `X` | direct boolean value |
+| `X`      | direct boolean value               |
 
-The agent `MUST` use `At` for position/time predicates. It `MUST` reserve `Build`, `Compile`, `Publish`, `Capture`, and `Use` for actions or transitions. Capability names `MUST` be singular; collections and stores `MUST` be plural.
+`At` `MUST` be used for position/time predicates.
+
+`Build`, `Compile`, `Publish`, `Capture`, and `Use` `MUST` be reserved for actions or transitions.
+
+Capability names `MUST` be singular; collections and stores `MUST` be plural.
 
 ## Types and APIs
 
 Every exported symbol is a maintenance commitment.
 
-- The agent `MUST` accept interfaces only when callers supply behavior; it `MUST` define them where behavior is consumed.
+- Interfaces `MUST` be accepted only when callers supply behavior; they `MUST` be defined where behavior is consumed.
 - Constructors `MUST` return concrete types.
 - Exported structs `SHOULD` stay small; writable state `MUST` stay behind its owner.
-- The agent `SHOULD` prefer immutable values and defensive copies at ownership boundaries.
-- The agent `MUST NOT` add parameter-group structs named `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` without a contract.
-- The agent `MUST NOT` expose speculative options, algorithms, extension points, or policy knobs.
-- The agent `MUST NOT` add aliases or pass-through wrappers without a distinct contract.
+- Immutable values and defensive copies at ownership boundaries `SHOULD` be preferred.
+- Parameter-group structs named `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` `MUST NOT` be added without a contract.
+- Speculative options, algorithms, extension points, or policy knobs `MUST NOT` be exposed.
+- Aliases or pass-through wrappers `MUST NOT` be added without a distinct contract.
 
-Constructors `MUST` require inputs with no safe default. Functional options `MUST` be used only for optional behavior that improves the API. The agent `MUST` validate required dependencies and shape at construction, and `MUST` validate complete builders at `Build`.
+Constructors `MUST` require inputs with no safe default.
+
+Functional options `MUST` be used only for optional behavior that improves the API.
+
+Required dependencies and shape `MUST` be validated at construction, and complete builders `MUST` be validated at `Build`.
 
 Types `MUST` own invariants and transitions. Compile, publish, install, reset, retain, release, and close `MUST` be implemented as behavior, not as external field assignments.
 
-## Errors
-
-- Semantic errors `MUST` use stable `ErrXxx` sentinels.
-- The agent `MUST` preserve dependency identity when callers depend on it; it `MUST` use `%w` when adding context.
-- The agent `MUST` translate error categories only at their owning boundary.
-- The agent `MUST NOT` create semantic categories with `fmt.Errorf` alone.
-- Errors `MUST NOT` expose private or sensitive process state.
-
-Panic `MUST` be used only for impossible programmer errors, `Must*` APIs, or documented hot-path invariants with one recovery boundary. Normal runtime failures `MUST` return errors.
-
 ## Ownership and Concurrency
 
-Ownership `MUST` be explicit. Mutable storage `MUST` stay within its owner; borrowed values `MUST NOT` cross ownership boundaries. Retain/release transitions `MUST` belong to the owner of the transition.
+Ownership `MUST` be explicit.
 
-Contexts `MUST` be first parameters for blocking, I/O, or process-boundary operations; the agent `MUST NOT` store request contexts in long-lived objects.
+Mutable storage `MUST` stay within its owner; borrowed values `MUST NOT` cross ownership boundaries.
 
-Shared mutable state `MUST` have one owner and one synchronization strategy. Long-lived goroutines `MUST` have explicit shutdown. Resources `MUST` be released exactly once.
+Retain/release transitions `MUST` belong to the owner of the transition.
+
+Contexts `MUST` be first parameters for blocking, I/O, or process-boundary operations; request contexts `MUST NOT` be stored in long-lived objects.
+
+Shared mutable state `MUST` have one owner and one synchronization strategy.
+
+Long-lived goroutines `MUST` have explicit shutdown.
+
+Resources `MUST` be released exactly once.
+
+## Errors
+
+Semantic errors `MUST` use stable `ErrXxx` sentinels.
+
+Dependency identity `MUST` be preserved when callers depend on it; `%w` `MUST` be used when adding context.
+
+Error categories `MUST` be translated only at their owning boundary.
+
+Semantic categories `MUST NOT` be created with `fmt.Errorf` alone.
+
+Errors `MUST NOT` expose private or sensitive process state.
+
+Panic `MUST` be used only for impossible programmer errors, `Must*` APIs, or documented hot-path invariants with one recovery boundary.
+
+Normal runtime failures `MUST` return errors.
 
 ## File Order
 
-Within a Go file, the agent `MUST` declare in this order:
+Within a Go file, declarations `MUST` appear in this order:
 
 1. public types
 2. private types
@@ -117,24 +152,26 @@ Struct fields `MUST` read from ownership/policy toward runtime state; synchroniz
 
 ## Comments
 
-Comments SHOULD be omitted unless they express facts the code cannot express.
+Comments `SHOULD` be omitted unless they express facts the code cannot express.
 
-Comments MAY be added only when they are clearly necessary to preserve:
+Comments `MAY` be added only when they are clearly necessary to preserve:
 
 - invariants and consequences;
 - external or cross-package constraints;
 - rejected alternatives with evidence;
 - external contracts or specifications.
 
-Necessary comments MUST be dense and concise. Every word MUST justify its presence.
+Necessary comments `MUST` be dense and concise. Every word `MUST` justify its presence.
 
-The agent MUST NOT use comments to narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. It MUST improve names, types, or structure instead.
+Comments `MUST NOT` be used to narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Names, types, or structure `MUST` be improved instead.
 
-Exported symbols MUST have normal Go doc comments.
+Exported symbols `MUST` have normal Go doc comments.
 
 ## Generated and Platform Code
 
-Generated files `MUST` change only through their generator. Platform mechanics `MUST` stay behind matching build constraints and owner packages.
+Generated files `MUST` change only through their generator.
+
+Platform mechanics `MUST` stay behind matching build constraints and owner packages.
 
 ## Related
 
