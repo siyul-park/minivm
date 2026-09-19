@@ -26,13 +26,11 @@ The agent `MUST` use one case representation per test function: direct cases or 
 
 When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice `MAY` be used. The data and generation code `MUST` remain simple enough to read as specification.
 
+Tests `MUST` use only the public interface of the code under test. If testing a behavior requires direct reference to a private symbol, the implementation `MUST` be refactored to provide an appropriate public abstraction instead.
+
 ### F.I.R.S.T.
 
 Tests `MUST` be **Fast, Independent, Repeatable, Self-validating, and Timely**. They `MUST NOT` depend on other tests, uncontrolled mutable state, manual inspection, or unnecessary setup.
-
-## Internal Contracts
-
-Internal tests `MUST` be used only when an internal boundary is itself a contract, such as verifier policy, frontend acceptance or SSA shape, backend lowering, or native instruction output. The agent `MUST` use the smallest owning boundary and `MUST` apply the same clarity, organization, and F.I.R.S.T. rules.
 
 ## TDD
 
