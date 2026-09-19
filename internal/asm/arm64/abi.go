@@ -20,13 +20,16 @@ var (
 	_ asm.Callable = (*caller)(nil)
 )
 
+// NewCallable binds addr to an ARM64 callable entry.
 func (abi) NewCallable(addr unsafe.Pointer) (asm.Callable, error) {
 	return &caller{addr: addr}, nil
 }
 
+// Call invokes the native entry with ctx as its execution context.
 func (c *caller) Call(ctx unsafe.Pointer) error {
 	invoke(uintptr(c.addr), ctx)
 	return nil
 }
 
+// Addr returns the native entry address.
 func (c *caller) Addr() unsafe.Pointer { return c.addr }

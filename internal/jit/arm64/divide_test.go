@@ -1,4 +1,4 @@
-package arm64
+package arm64_test
 
 import (
 	"testing"
@@ -7,6 +7,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	asmarm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	jitarm64 "github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/jit/backend"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
@@ -25,7 +26,7 @@ import (
 // would trip before Lower ever ran, proving the wrong thing.
 func TestEmitter_Divide(t *testing.T) {
 	in := &jit.Input{Address: 1, Function: &types.Function{Typ: &types.FunctionType{}}}
-	m := machine{scratch: []asm.PReg{asmarm64.X10, asmarm64.X11, asmarm64.X12, asmarm64.X13, asmarm64.X14}}
+	m := jitarm64.New()
 
 	t.Run("declines a divide missing its divisor", func(t *testing.T) {
 		b := ssa.New("f")

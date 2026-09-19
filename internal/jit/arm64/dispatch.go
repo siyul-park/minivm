@@ -11,14 +11,14 @@ import (
 
 // steps emits the ordinary operations of one normalized block. Control flow
 // is owned by the block terminator and never appears here.
-func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
+func (m machine) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 	for idx := 0; idx < len(ops); idx++ {
 		op := ops[idx]
 		f := ctx.frame()
 		if op.Fn != f.addr {
 			return false, false
 		}
-		consumed := l.fuse(ctx, ops, idx)
+		consumed := m.fuse(ctx, ops, idx)
 		if consumed > 0 {
 			idx += consumed - 1
 			continue
@@ -28,322 +28,322 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 		case instr.NOP:
 			ok = true
 		case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
-			ok = l.constant(ctx, op)
+			ok = m.constant(ctx, op)
 		case instr.CONST_GET:
 			if op.Known {
-				ok = l.constGetKnown(ctx, op)
+				ok = m.constGetKnown(ctx, op)
 			} else {
-				ok = l.constGet(ctx, op)
+				ok = m.constGet(ctx, op)
 			}
 		case instr.LOCAL_GET:
-			ok = l.localGet(ctx, op)
+			ok = m.localGet(ctx, op)
 		case instr.LOCAL_SET:
-			ok = l.localSet(ctx, op, true)
+			ok = m.localSet(ctx, op, true)
 		case instr.LOCAL_TEE:
-			ok = l.localSet(ctx, op, false)
+			ok = m.localSet(ctx, op, false)
 		case instr.GLOBAL_GET:
-			ok = l.globalGet(ctx, op)
+			ok = m.globalGet(ctx, op)
 		case instr.GLOBAL_SET:
-			ok = l.globalSet(ctx, op, true)
+			ok = m.globalSet(ctx, op, true)
 		case instr.GLOBAL_TEE:
-			ok = l.globalSet(ctx, op, false)
+			ok = m.globalSet(ctx, op, false)
 		case instr.DROP:
-			ok = l.drop(ctx, op)
+			ok = m.drop(ctx, op)
 		case instr.DUP:
-			ok = l.dup(ctx)
+			ok = m.dup(ctx)
 		case instr.SWAP:
-			ok = l.swap(ctx)
+			ok = m.swap(ctx)
 		case instr.SELECT:
-			ok = l.selectOp(ctx)
+			ok = m.selectOp(ctx)
 		case instr.I32_ADD:
-			ok = l.i32Binary(ctx, arm64.ADD)
+			ok = m.i32Binary(ctx, arm64.ADD)
 		case instr.I32_SUB:
-			ok = l.i32Binary(ctx, arm64.SUB)
+			ok = m.i32Binary(ctx, arm64.SUB)
 		case instr.I32_MUL:
-			ok = l.i32Binary(ctx, arm64.MUL)
+			ok = m.i32Binary(ctx, arm64.MUL)
 		case instr.I32_AND:
-			ok = l.i32Bitwise(ctx, arm64.AND)
+			ok = m.i32Bitwise(ctx, arm64.AND)
 		case instr.I32_OR:
-			ok = l.i32Bitwise(ctx, arm64.ORR)
+			ok = m.i32Bitwise(ctx, arm64.ORR)
 		case instr.I32_XOR:
-			ok = l.i32Bitwise(ctx, arm64.EOR)
+			ok = m.i32Bitwise(ctx, arm64.EOR)
 		case instr.I32_EQZ:
-			ok = l.i32Eqz(ctx)
+			ok = m.i32Eqz(ctx)
 		case instr.I32_EQ:
-			ok = l.i32Cmp(ctx, arm64.CondEQ)
+			ok = m.i32Cmp(ctx, arm64.CondEQ)
 		case instr.I32_NE:
-			ok = l.i32Cmp(ctx, arm64.CondNE)
+			ok = m.i32Cmp(ctx, arm64.CondNE)
 		case instr.I32_LT_S:
-			ok = l.i32Cmp(ctx, arm64.CondLT)
+			ok = m.i32Cmp(ctx, arm64.CondLT)
 		case instr.I32_LE_S:
-			ok = l.i32Cmp(ctx, arm64.CondLE)
+			ok = m.i32Cmp(ctx, arm64.CondLE)
 		case instr.I32_GT_S:
-			ok = l.i32Cmp(ctx, arm64.CondGT)
+			ok = m.i32Cmp(ctx, arm64.CondGT)
 		case instr.I32_GE_S:
-			ok = l.i32Cmp(ctx, arm64.CondGE)
+			ok = m.i32Cmp(ctx, arm64.CondGE)
 		case instr.I32_LT_U:
-			ok = l.i32Cmp(ctx, arm64.CondCC)
+			ok = m.i32Cmp(ctx, arm64.CondCC)
 		case instr.I32_LE_U:
-			ok = l.i32Cmp(ctx, arm64.CondLS)
+			ok = m.i32Cmp(ctx, arm64.CondLS)
 		case instr.I32_GT_U:
-			ok = l.i32Cmp(ctx, arm64.CondHI)
+			ok = m.i32Cmp(ctx, arm64.CondHI)
 		case instr.I32_GE_U:
-			ok = l.i32Cmp(ctx, arm64.CondCS)
+			ok = m.i32Cmp(ctx, arm64.CondCS)
 		case instr.I64_ADD:
-			ok = l.i64Binary(ctx, op, arm64.ADD, true)
+			ok = m.i64Binary(ctx, op, arm64.ADD, true)
 		case instr.I64_SUB:
-			ok = l.i64Binary(ctx, op, arm64.SUB, true)
+			ok = m.i64Binary(ctx, op, arm64.SUB, true)
 		case instr.I64_MUL:
-			ok = l.i64Binary(ctx, op, arm64.MUL, true)
+			ok = m.i64Binary(ctx, op, arm64.MUL, true)
 		case instr.I64_AND:
-			ok = l.i64Binary(ctx, op, arm64.AND, false)
+			ok = m.i64Binary(ctx, op, arm64.AND, false)
 		case instr.I64_OR:
-			ok = l.i64Binary(ctx, op, arm64.ORR, false)
+			ok = m.i64Binary(ctx, op, arm64.ORR, false)
 		case instr.I64_XOR:
-			ok = l.i64Binary(ctx, op, arm64.EOR, false)
+			ok = m.i64Binary(ctx, op, arm64.EOR, false)
 		case instr.I64_EQZ:
-			ok = l.i64Eqz(ctx)
+			ok = m.i64Eqz(ctx)
 		case instr.I64_EQ:
-			ok = l.i64Cmp(ctx, arm64.CondEQ)
+			ok = m.i64Cmp(ctx, arm64.CondEQ)
 		case instr.I64_NE:
-			ok = l.i64Cmp(ctx, arm64.CondNE)
+			ok = m.i64Cmp(ctx, arm64.CondNE)
 		case instr.I64_LT_S:
-			ok = l.i64Cmp(ctx, arm64.CondLT)
+			ok = m.i64Cmp(ctx, arm64.CondLT)
 		case instr.I64_LE_S:
-			ok = l.i64Cmp(ctx, arm64.CondLE)
+			ok = m.i64Cmp(ctx, arm64.CondLE)
 		case instr.I64_GT_S:
-			ok = l.i64Cmp(ctx, arm64.CondGT)
+			ok = m.i64Cmp(ctx, arm64.CondGT)
 		case instr.I64_GE_S:
-			ok = l.i64Cmp(ctx, arm64.CondGE)
+			ok = m.i64Cmp(ctx, arm64.CondGE)
 		case instr.I64_LT_U:
-			ok = l.i64Cmp(ctx, arm64.CondCC)
+			ok = m.i64Cmp(ctx, arm64.CondCC)
 		case instr.I64_LE_U:
-			ok = l.i64Cmp(ctx, arm64.CondLS)
+			ok = m.i64Cmp(ctx, arm64.CondLS)
 		case instr.I64_GT_U:
-			ok = l.i64Cmp(ctx, arm64.CondHI)
+			ok = m.i64Cmp(ctx, arm64.CondHI)
 		case instr.I64_GE_U:
-			ok = l.i64Cmp(ctx, arm64.CondCS)
+			ok = m.i64Cmp(ctx, arm64.CondCS)
 		case instr.F32_ADD:
-			ok = l.f32Binary(ctx, arm64.FADD)
+			ok = m.f32Binary(ctx, arm64.FADD)
 		case instr.F32_SUB:
-			ok = l.f32Binary(ctx, arm64.FSUB)
+			ok = m.f32Binary(ctx, arm64.FSUB)
 		case instr.F32_MUL:
-			ok = l.f32Binary(ctx, arm64.FMUL)
+			ok = m.f32Binary(ctx, arm64.FMUL)
 		case instr.F32_DIV:
-			ok = l.f32Binary(ctx, arm64.FDIV)
+			ok = m.f32Binary(ctx, arm64.FDIV)
 		case instr.F32_EQ:
-			ok = l.f32Cmp(ctx, arm64.CondEQ)
+			ok = m.f32Cmp(ctx, arm64.CondEQ)
 		case instr.F32_NE:
-			ok = l.f32Cmp(ctx, arm64.CondNE)
+			ok = m.f32Cmp(ctx, arm64.CondNE)
 		case instr.F32_LT:
-			ok = l.f32Cmp(ctx, arm64.CondMI)
+			ok = m.f32Cmp(ctx, arm64.CondMI)
 		case instr.F32_GT:
-			ok = l.f32Cmp(ctx, arm64.CondGT)
+			ok = m.f32Cmp(ctx, arm64.CondGT)
 		case instr.F32_LE:
-			ok = l.f32Cmp(ctx, arm64.CondLS)
+			ok = m.f32Cmp(ctx, arm64.CondLS)
 		case instr.F32_GE:
-			ok = l.f32Cmp(ctx, arm64.CondGE)
+			ok = m.f32Cmp(ctx, arm64.CondGE)
 		case instr.F64_ADD:
-			ok = l.f64Binary(ctx, arm64.FADD)
+			ok = m.f64Binary(ctx, arm64.FADD)
 		case instr.F64_SUB:
-			ok = l.f64Binary(ctx, arm64.FSUB)
+			ok = m.f64Binary(ctx, arm64.FSUB)
 		case instr.F64_MUL:
-			ok = l.f64Binary(ctx, arm64.FMUL)
+			ok = m.f64Binary(ctx, arm64.FMUL)
 		case instr.F64_DIV:
-			ok = l.f64Binary(ctx, arm64.FDIV)
+			ok = m.f64Binary(ctx, arm64.FDIV)
 		case instr.F64_EQ:
-			ok = l.f64Cmp(ctx, arm64.CondEQ)
+			ok = m.f64Cmp(ctx, arm64.CondEQ)
 		case instr.F64_NE:
-			ok = l.f64Cmp(ctx, arm64.CondNE)
+			ok = m.f64Cmp(ctx, arm64.CondNE)
 		case instr.F64_LT:
-			ok = l.f64Cmp(ctx, arm64.CondMI)
+			ok = m.f64Cmp(ctx, arm64.CondMI)
 		case instr.F64_GT:
-			ok = l.f64Cmp(ctx, arm64.CondGT)
+			ok = m.f64Cmp(ctx, arm64.CondGT)
 		case instr.F64_LE:
-			ok = l.f64Cmp(ctx, arm64.CondLS)
+			ok = m.f64Cmp(ctx, arm64.CondLS)
 		case instr.F64_GE:
-			ok = l.f64Cmp(ctx, arm64.CondGE)
+			ok = m.f64Cmp(ctx, arm64.CondGE)
 		case instr.ARRAY_GET:
 			if ctx.count() >= 2 && ctx.values[len(ctx.values)-2].backing == jit.BackingConst && ctx.values[len(ctx.values)-2].ref > 0 {
-				ok = l.arrayGetKnown(ctx, op)
+				ok = m.arrayGetKnown(ctx, op)
 			} else {
-				ok = l.arrayGet(ctx, op)
+				ok = m.arrayGet(ctx, op)
 			}
 		case instr.UNREACHABLE:
-			ok = l.unreachable(ctx, op)
+			ok = m.unreachable(ctx, op)
 		case instr.UPVAL_GET:
-			ok = l.upvalGet(ctx, op)
+			ok = m.upvalGet(ctx, op)
 		case instr.UPVAL_SET:
-			ok = l.upvalSet(ctx, op)
+			ok = m.upvalSet(ctx, op)
 		case instr.I32_DIV_S:
-			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, false)
+			ok = m.i32Divide(ctx, op, arm64.SDIV, m.sign32, false)
 		case instr.I32_DIV_U:
-			ok = l.i32Divide(ctx, op, arm64.UDIV, l.zero32, false)
+			ok = m.i32Divide(ctx, op, arm64.UDIV, m.zero32, false)
 		case instr.I32_REM_S:
-			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, true)
+			ok = m.i32Divide(ctx, op, arm64.SDIV, m.sign32, true)
 		case instr.I32_REM_U:
-			ok = l.i32Divide(ctx, op, arm64.UDIV, l.zero32, true)
+			ok = m.i32Divide(ctx, op, arm64.UDIV, m.zero32, true)
 		case instr.I32_SHL:
-			ok = l.i32Shift(ctx, arm64.LSL, l.zero32)
+			ok = m.i32Shift(ctx, arm64.LSL, m.zero32)
 		case instr.I32_SHR_S:
-			ok = l.i32Shift(ctx, arm64.ASR, l.sign32)
+			ok = m.i32Shift(ctx, arm64.ASR, m.sign32)
 		case instr.I32_SHR_U:
-			ok = l.i32Shift(ctx, arm64.LSR, l.zero32)
+			ok = m.i32Shift(ctx, arm64.LSR, m.zero32)
 		case instr.F64_REM, instr.F64_MOD:
-			if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+			if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
 		case instr.F32_REM, instr.F32_MOD:
-			if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+			if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
 		case instr.I32_TO_F64_S:
-			ok = l.i32ToF64(ctx, l.sign32)
+			ok = m.i32ToF64(ctx, m.sign32)
 		case instr.I32_TO_F64_U:
-			ok = l.i32ToF64(ctx, l.zero32)
+			ok = m.i32ToF64(ctx, m.zero32)
 		case instr.F64_TO_I32_S:
-			ok = l.f64ToI32(ctx, arm64.FCVTZS)
+			ok = m.f64ToI32(ctx, arm64.FCVTZS)
 		case instr.F64_TO_I32_U:
-			ok = l.f64ToI32(ctx, arm64.FCVTZU)
+			ok = m.f64ToI32(ctx, arm64.FCVTZU)
 		case instr.I32_TO_F32_S:
-			ok = l.i32ToF32(ctx, l.sign32)
+			ok = m.i32ToF32(ctx, m.sign32)
 		case instr.I32_TO_F32_U:
-			ok = l.i32ToF32(ctx, l.zero32)
+			ok = m.i32ToF32(ctx, m.zero32)
 		case instr.F32_TO_I32_S:
-			ok = l.f32ToI32(ctx, arm64.FCVTZS)
+			ok = m.f32ToI32(ctx, arm64.FCVTZS)
 		case instr.F32_TO_I32_U:
-			ok = l.f32ToI32(ctx, arm64.FCVTZU)
+			ok = m.f32ToI32(ctx, arm64.FCVTZU)
 		case instr.F32_TO_F64:
-			ok = l.f32ToF64(ctx)
+			ok = m.f32ToF64(ctx)
 		case instr.F64_TO_F32:
-			ok = l.f64ToF32(ctx)
+			ok = m.f64ToF32(ctx)
 		case instr.I64_DIV_S:
-			ok = l.i64Divide(ctx, op, arm64.SDIV, false)
+			ok = m.i64Divide(ctx, op, arm64.SDIV, false)
 		case instr.I64_DIV_U:
-			ok = l.i64Divide(ctx, op, arm64.UDIV, false)
+			ok = m.i64Divide(ctx, op, arm64.UDIV, false)
 		case instr.I64_REM_S:
-			ok = l.i64Divide(ctx, op, arm64.SDIV, true)
+			ok = m.i64Divide(ctx, op, arm64.SDIV, true)
 		case instr.I64_REM_U:
-			ok = l.i64Divide(ctx, op, arm64.UDIV, true)
+			ok = m.i64Divide(ctx, op, arm64.UDIV, true)
 		case instr.I64_SHL:
-			ok = l.i64Shift(ctx, op, arm64.LSL, true)
+			ok = m.i64Shift(ctx, op, arm64.LSL, true)
 		case instr.I64_SHR_S:
-			ok = l.i64Shift(ctx, op, arm64.ASR, false)
+			ok = m.i64Shift(ctx, op, arm64.ASR, false)
 		case instr.I64_SHR_U:
-			ok = l.i64Shift(ctx, op, arm64.LSR, true)
+			ok = m.i64Shift(ctx, op, arm64.LSR, true)
 		case instr.I32_TO_I64_S:
-			ok = l.i32ToI64(ctx, l.sign32)
+			ok = m.i32ToI64(ctx, m.sign32)
 		case instr.I32_TO_I64_U:
-			ok = l.i32ToI64(ctx, l.zero32)
+			ok = m.i32ToI64(ctx, m.zero32)
 		case instr.I64_TO_I32:
-			ok = l.i64ToI32(ctx)
+			ok = m.i64ToI32(ctx)
 		case instr.I64_TO_F64_S:
-			ok = l.i64ToF64(ctx, arm64.SCVTF)
+			ok = m.i64ToF64(ctx, arm64.SCVTF)
 		case instr.I64_TO_F64_U:
-			ok = l.i64ToF64(ctx, arm64.UCVTF)
+			ok = m.i64ToF64(ctx, arm64.UCVTF)
 		case instr.I64_TO_F32_S:
-			ok = l.i64ToF32(ctx, arm64.SCVTF)
+			ok = m.i64ToF32(ctx, arm64.SCVTF)
 		case instr.I64_TO_F32_U:
-			ok = l.i64ToF32(ctx, arm64.UCVTF)
+			ok = m.i64ToF32(ctx, arm64.UCVTF)
 		case instr.F32_TO_I64_S:
-			ok = l.f32ToI64(ctx, op, arm64.FCVTZS)
+			ok = m.f32ToI64(ctx, op, arm64.FCVTZS)
 		case instr.F32_TO_I64_U:
-			ok = l.f32ToI64(ctx, op, arm64.FCVTZU)
+			ok = m.f32ToI64(ctx, op, arm64.FCVTZU)
 		case instr.F64_TO_I64_S:
-			ok = l.f64ToI64(ctx, op, arm64.FCVTZS)
+			ok = m.f64ToI64(ctx, op, arm64.FCVTZS)
 		case instr.F64_TO_I64_U:
-			ok = l.f64ToI64(ctx, op, arm64.FCVTZU)
+			ok = m.f64ToI64(ctx, op, arm64.FCVTZU)
 		case instr.I32_CLZ:
-			ok = l.countZeros(ctx, types.KindI32, false)
+			ok = m.countZeros(ctx, types.KindI32, false)
 		case instr.I32_CTZ:
-			ok = l.countZeros(ctx, types.KindI32, true)
+			ok = m.countZeros(ctx, types.KindI32, true)
 		case instr.I64_CLZ:
-			ok = l.countZeros(ctx, types.KindI64, false)
+			ok = m.countZeros(ctx, types.KindI64, false)
 		case instr.I64_CTZ:
-			ok = l.countZeros(ctx, types.KindI64, true)
+			ok = m.countZeros(ctx, types.KindI64, true)
 		case instr.I32_POPCNT:
-			ok = l.popcnt(ctx, types.KindI32)
+			ok = m.popcnt(ctx, types.KindI32)
 		case instr.I64_POPCNT:
-			ok = l.popcnt(ctx, types.KindI64)
+			ok = m.popcnt(ctx, types.KindI64)
 		case instr.I32_ROTL:
-			ok = l.rotate(ctx, op, types.KindI32, true)
+			ok = m.rotate(ctx, op, types.KindI32, true)
 		case instr.I32_ROTR:
-			ok = l.rotate(ctx, op, types.KindI32, false)
+			ok = m.rotate(ctx, op, types.KindI32, false)
 		case instr.I64_ROTL:
-			ok = l.rotate(ctx, op, types.KindI64, true)
+			ok = m.rotate(ctx, op, types.KindI64, true)
 		case instr.I64_ROTR:
-			ok = l.rotate(ctx, op, types.KindI64, false)
+			ok = m.rotate(ctx, op, types.KindI64, false)
 		case instr.I32_EXTEND8_S:
-			ok = l.extend(ctx, types.KindI32, arm64.SXTB)
+			ok = m.extend(ctx, types.KindI32, arm64.SXTB)
 		case instr.I32_EXTEND16_S:
-			ok = l.extend(ctx, types.KindI32, arm64.SXTH)
+			ok = m.extend(ctx, types.KindI32, arm64.SXTH)
 		case instr.I64_EXTEND8_S:
-			ok = l.extend(ctx, types.KindI64, arm64.SXTB)
+			ok = m.extend(ctx, types.KindI64, arm64.SXTB)
 		case instr.I64_EXTEND16_S:
-			ok = l.extend(ctx, types.KindI64, arm64.SXTH)
+			ok = m.extend(ctx, types.KindI64, arm64.SXTH)
 		case instr.I64_EXTEND32_S:
-			ok = l.extend(ctx, types.KindI64, arm64.SXTW)
+			ok = m.extend(ctx, types.KindI64, arm64.SXTW)
 		case instr.I32_REINTERPRET_F32:
-			ok = l.reinterpret(ctx, op, types.KindF32, types.KindI32)
+			ok = m.reinterpret(ctx, op, types.KindF32, types.KindI32)
 		case instr.F32_REINTERPRET_I32:
-			ok = l.reinterpret(ctx, op, types.KindI32, types.KindF32)
+			ok = m.reinterpret(ctx, op, types.KindI32, types.KindF32)
 		case instr.I64_REINTERPRET_F64:
-			ok = l.reinterpret(ctx, op, types.KindF64, types.KindI64)
+			ok = m.reinterpret(ctx, op, types.KindF64, types.KindI64)
 		case instr.F64_REINTERPRET_I64:
-			ok = l.reinterpret(ctx, op, types.KindI64, types.KindF64)
+			ok = m.reinterpret(ctx, op, types.KindI64, types.KindF64)
 		case instr.F32_ABS:
-			ok = l.f32Unary(ctx, arm64.FABS)
+			ok = m.f32Unary(ctx, arm64.FABS)
 		case instr.F32_NEG:
-			ok = l.f32Unary(ctx, arm64.FNEG)
+			ok = m.f32Unary(ctx, arm64.FNEG)
 		case instr.F32_SQRT:
-			ok = l.f32Unary(ctx, arm64.FSQRT)
+			ok = m.f32Unary(ctx, arm64.FSQRT)
 		case instr.F32_CEIL:
-			ok = l.f32Unary(ctx, arm64.FRINTP)
+			ok = m.f32Unary(ctx, arm64.FRINTP)
 		case instr.F32_FLOOR:
-			ok = l.f32Unary(ctx, arm64.FRINTM)
+			ok = m.f32Unary(ctx, arm64.FRINTM)
 		case instr.F32_TRUNC:
-			ok = l.f32Unary(ctx, arm64.FRINTZ)
+			ok = m.f32Unary(ctx, arm64.FRINTZ)
 		case instr.F32_NEAREST:
-			ok = l.f32Unary(ctx, arm64.FRINTN)
+			ok = m.f32Unary(ctx, arm64.FRINTN)
 		case instr.F32_MIN:
-			ok = l.f32Binary(ctx, arm64.FMIN)
+			ok = m.f32Binary(ctx, arm64.FMIN)
 		case instr.F32_MAX:
-			ok = l.f32Binary(ctx, arm64.FMAX)
+			ok = m.f32Binary(ctx, arm64.FMAX)
 		case instr.F32_COPYSIGN:
-			ok = l.copysign(ctx, types.KindF32)
+			ok = m.copysign(ctx, types.KindF32)
 		case instr.F64_ABS:
-			ok = l.f64Unary(ctx, arm64.FABS)
+			ok = m.f64Unary(ctx, arm64.FABS)
 		case instr.F64_NEG:
-			ok = l.f64Unary(ctx, arm64.FNEG)
+			ok = m.f64Unary(ctx, arm64.FNEG)
 		case instr.F64_SQRT:
-			ok = l.f64Unary(ctx, arm64.FSQRT)
+			ok = m.f64Unary(ctx, arm64.FSQRT)
 		case instr.F64_CEIL:
-			ok = l.f64Unary(ctx, arm64.FRINTP)
+			ok = m.f64Unary(ctx, arm64.FRINTP)
 		case instr.F64_FLOOR:
-			ok = l.f64Unary(ctx, arm64.FRINTM)
+			ok = m.f64Unary(ctx, arm64.FRINTM)
 		case instr.F64_TRUNC:
-			ok = l.f64Unary(ctx, arm64.FRINTZ)
+			ok = m.f64Unary(ctx, arm64.FRINTZ)
 		case instr.F64_NEAREST:
-			ok = l.f64Unary(ctx, arm64.FRINTN)
+			ok = m.f64Unary(ctx, arm64.FRINTN)
 		case instr.F64_MIN:
-			ok = l.f64Binary(ctx, arm64.FMIN)
+			ok = m.f64Binary(ctx, arm64.FMIN)
 		case instr.F64_MAX:
-			ok = l.f64Binary(ctx, arm64.FMAX)
+			ok = m.f64Binary(ctx, arm64.FMAX)
 		case instr.F64_COPYSIGN:
-			ok = l.copysign(ctx, types.KindF64)
+			ok = m.copysign(ctx, types.KindF64)
 		case instr.REF_NULL:
-			ok = l.refNull(ctx)
+			ok = m.refNull(ctx)
 		case instr.REF_IS_NULL:
-			ok = l.refIsNull(ctx, op)
+			ok = m.refIsNull(ctx, op)
 		case instr.REF_EQ, instr.REF_NE:
 			// Ref equality is a boxed-word compare. With at most one owned
 			// operand the compare stays native; two owned operands fall back
 			// terminally because releasing both natively risks a double release
 			// when the second release deopts after the first already
 			// decremented a refcount inline.
-			terminal, okEq := l.refEq(ctx, op, op.Op == instr.REF_NE)
+			terminal, okEq := m.refEq(ctx, op, op.Op == instr.REF_NE)
 			if !okEq {
 				return false, false
 			}
@@ -352,12 +352,12 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 			}
 			ok = true
 		case instr.REF_GET:
-			ok = l.refGet(ctx, op)
+			ok = m.refGet(ctx, op)
 		case instr.ARRAY_LEN:
-			ok = l.arrayLen(ctx, op)
+			ok = m.arrayLen(ctx, op)
 		case instr.ARRAY_SET:
 			var terminal bool
-			ok, terminal = l.arraySet(ctx, op)
+			ok, terminal = m.arraySet(ctx, op)
 			if !ok {
 				return false, false
 			}
@@ -365,13 +365,13 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 				return true, idx == len(ops)-1
 			}
 		case instr.STRUCT_GET:
-			if !l.structGet(ctx, op) {
+			if !m.structGet(ctx, op) {
 				return false, false
 			}
 			ok = true
 		case instr.STRUCT_SET:
 			var terminal bool
-			ok, terminal = l.structSet(ctx, op)
+			ok, terminal = m.structSet(ctx, op)
 			if !ok {
 				return false, false
 			}
@@ -379,19 +379,19 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 				return true, idx == len(ops)-1
 			}
 		case instr.ERROR_GET:
-			ok = l.errorGet(ctx, op)
+			ok = m.errorGet(ctx, op)
 		case instr.CORO_DONE:
-			ok = l.coroDone(ctx, op)
+			ok = m.coroDone(ctx, op)
 		case instr.CORO_VALUE:
-			ok = l.coroValue(ctx, op)
+			ok = m.coroValue(ctx, op)
 		case instr.STRING_LEN:
-			ok = l.stringLen(ctx, op)
+			ok = m.stringLen(ctx, op)
 		// REF_SET stays threaded because it needs a fresh
 		// interface box (an allocation); storing in place is unsound against
 		// shared static boxes. REF_TEST/REF_CAST stay threaded because they
 		// need structural type equality that an itab guard cannot express.
 		// MAP_* stay threaded because they reach into Go map internals the
-		// lowerer has no native access to. All of these are bridgeable (see
+		// machine has no native access to. All of these are bridgeable (see
 		// bridgeable in interp/jit_plan.go): the static planner ends its
 		// block on the opcode instead of including it here, so this case is
 		// reached only when a trace records one as an ordinary mid-block
@@ -407,7 +407,7 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 			instr.MAP_ITER,
 			instr.REF_TEST,
 			instr.REF_CAST:
-			if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+			if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
@@ -417,7 +417,7 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 			// see the comment above), so the compiled prefix runs native and
 			// this unconditional deopt hands the op to the threaded handler,
 			// which performs its own IP advance.
-			if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+			if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
@@ -426,7 +426,7 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 			// bridgeable for the static planner; see the comment above).
 			// Resume at op.IP because each threaded handler performs its own
 			// IP update or handler transfer.
-			if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+			if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
@@ -434,33 +434,33 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 			// True suspension points: deopt to the threaded handler, which runs
 			// the real suspend/resume. Resume at op.IP (not op.IP+1) because the
 			// YIELD and RESUME handlers perform their own ip advance.
-			if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+			if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
 		case instr.CALL:
 			if op.Known {
-				ok = l.directCall(ctx, op)
+				ok = m.directCall(ctx, op)
 			} else {
-				ok = l.call(ctx, op)
+				ok = m.call(ctx, op)
 			}
 		case instr.RETURN_CALL:
 			// A tail call back to the trace anchor closes the loop with a native
 			// back-edge (terminal); a tail call to another function morphs the
 			// current frame into the callee in place and keeps walking.
 			if op.Callee == ctx.addr {
-				if !l.tailLoop(ctx, op) {
+				if !m.tailLoop(ctx, op) {
 					return false, false
 				}
 				return true, idx == len(ops)-1
 			}
-			ok = l.tailMorph(ctx, op)
+			ok = m.tailMorph(ctx, op)
 		case instr.RETURN:
 			if len(ctx.frames) > 1 {
-				ok = l.stitch(ctx, op.IP)
+				ok = m.stitch(ctx, op.IP)
 				break
 			}
-			if !l.ret(ctx, op.IP) {
+			if !m.ret(ctx, op.IP) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
@@ -475,7 +475,7 @@ func (l lowerer) steps(ctx *lowering, ops []jit.Step) (bool, bool) {
 // fuse lowers an adjacent constant function load and call as one marker.
 // It returns the number of source steps consumed; a miss leaves standalone
 // lowering untouched.
-func (l lowerer) fuse(ctx *lowering, ops []jit.Step, idx int) int {
+func (m machine) fuse(ctx *lowering, ops []jit.Step, idx int) int {
 	if idx+1 >= len(ops) {
 		return 0
 	}
@@ -516,7 +516,7 @@ func (l lowerer) fuse(ctx *lowering, ops []jit.Step, idx int) int {
 
 // constant pushes an immediate operand. Integer constants keep their known
 // compile-time value for downstream folding; floats stay raw bits only.
-func (l lowerer) constant(ctx *lowering, op jit.Step) bool {
+func (m machine) constant(ctx *lowering, op jit.Step) bool {
 	out := value{kind: types.KindI32, raw: true}
 	bits := op.Args[0]
 	switch op.Op {
@@ -541,8 +541,8 @@ func (l lowerer) constant(ctx *lowering, op jit.Step) bool {
 	return true
 }
 
-func (l lowerer) unreachable(ctx *lowering, op jit.Step) bool {
-	return l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op))
+func (m machine) unreachable(ctx *lowering, op jit.Step) bool {
+	return m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op))
 }
 
 // localGet loads local idx and, for a ref, pushes it deferred: jit.BackingLocal
@@ -551,7 +551,7 @@ func (l lowerer) unreachable(ctx *lowering, op jit.Step) bool {
 // operand elides its matching release to balance the missing retain; a
 // LOCAL_SET/tail/RETURN that would invalidate the slot detaches this deferral
 // into a real retain first.
-func (l lowerer) localGet(ctx *lowering, op jit.Step) bool {
+func (m machine) localGet(ctx *lowering, op jit.Step) bool {
 	f := ctx.frame()
 	idx := int(op.Args[0])
 	if idx >= len(f.kinds) {
@@ -560,7 +560,7 @@ func (l lowerer) localGet(ctx *lowering, op jit.Step) bool {
 	if f.kinds[idx] == types.KindRef {
 		f.state[idx] &^= localLoaded
 	}
-	if !l.loadLocal(ctx, f, idx, op.IP) {
+	if !m.loadLocal(ctx, f, idx, op.IP) {
 		return false
 	}
 	v := f.locals[idx]
@@ -572,7 +572,7 @@ func (l lowerer) localGet(ctx *lowering, op jit.Step) bool {
 	return true
 }
 
-func (l lowerer) localSet(ctx *lowering, op jit.Step, pop bool) bool {
+func (m machine) localSet(ctx *lowering, op jit.Step, pop bool) bool {
 	f := ctx.frame()
 	idx := int(op.Args[0])
 	if idx >= len(f.kinds) || ctx.count() < 1 {
@@ -583,24 +583,24 @@ func (l lowerer) localSet(ctx *lowering, op jit.Step, pop bool) bool {
 		return false
 	}
 	if vp.kind == types.KindRef {
-		boxed, ok := l.box(ctx, *vp)
+		boxed, ok := m.box(ctx, *vp)
 		if !ok {
 			return false
 		}
 		pre := ctx.pre()
 		vStack := ctx.pin(scratchStack)
-		addr := l.base(ctx, vStack)
+		addr := m.base(ctx, vStack)
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, addr, int16((f.base+idx)*8)))
-		l.releaseOverwritten(ctx, old, boxed, pop, pre, op.IP)
-		if _, ok := l.own(ctx, vp); !ok {
+		m.releaseOverwritten(ctx, old, boxed, pop, pre, op.IP)
+		if _, ok := m.own(ctx, vp); !ok {
 			return false
 		}
-		if !l.detach(ctx, jit.BackingLocal, f.base+idx) {
+		if !m.detach(ctx, jit.BackingLocal, f.base+idx) {
 			return false
 		}
 		if !pop {
-			l.retainBoxExcept(ctx, old, boxed)
+			m.retainBoxExcept(ctx, old, boxed)
 		}
 		ctx.assembler.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
 		f.locals[idx] = value{reg: boxed, kind: types.KindRef}
@@ -613,7 +613,7 @@ func (l lowerer) localSet(ctx *lowering, op jit.Step, pop bool) bool {
 	if !vp.raw {
 		return false
 	}
-	if carried := l.carried(ctx, f.base+idx); carried != nil {
+	if carried := m.carried(ctx, f.base+idx); carried != nil {
 		if carried.value.reg.ID() != vp.reg.ID() {
 			ctx.assembler.Emit(arm64.MOV(carried.value.reg, vp.reg))
 		}
@@ -631,8 +631,8 @@ func (l lowerer) localSet(ctx *lowering, op jit.Step, pop bool) bool {
 // globalGet loads a global directly from the globals base. Scalars push
 // raw; a ref pushes deferred (jit.BackingGlobal, slot idx): the slot itself
 // still carries the retain, so no retain is taken here (see localGet).
-func (l lowerer) globalGet(ctx *lowering, op jit.Step) bool {
-	idx, kind, ok := l.global(ctx, op)
+func (m machine) globalGet(ctx *lowering, op jit.Step) bool {
+	idx, kind, ok := m.global(ctx, op)
 	if !ok {
 		return false
 	}
@@ -640,10 +640,10 @@ func (l lowerer) globalGet(ctx *lowering, op jit.Step) bool {
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(dst, base, int16(idx*8)))
 	if kind == types.KindI64 {
-		if !l.guardI64(ctx, dst, op.IP) {
+		if !m.guardI64(ctx, dst, op.IP) {
 			return false
 		}
-		dst = l.sign64(ctx, dst)
+		dst = m.sign64(ctx, dst)
 	}
 	if kind == types.KindRef {
 		ctx.push(value{reg: dst, kind: kind, backing: jit.BackingGlobal, slot: idx})
@@ -655,8 +655,8 @@ func (l lowerer) globalGet(ctx *lowering, op jit.Step) bool {
 
 // globalSet boxes the top value and stores it to the global. Ref-capable
 // slots release the overwritten runtime ref before the store.
-func (l lowerer) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
-	idx, kind, ok := l.global(ctx, op)
+func (m machine) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
+	idx, kind, ok := m.global(ctx, op)
 	if !ok {
 		return false
 	}
@@ -672,7 +672,7 @@ func (l lowerer) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
 		return false
 	}
 	var boxed asm.VReg
-	boxed, ok = l.box(ctx, *vp)
+	boxed, ok = m.box(ctx, *vp)
 	if !ok {
 		return false
 	}
@@ -681,15 +681,15 @@ func (l lowerer) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		l.releaseOverwritten(ctx, old, boxed, pop, pre, op.IP)
-		if _, ok := l.own(ctx, vp); !ok {
+		m.releaseOverwritten(ctx, old, boxed, pop, pre, op.IP)
+		if _, ok := m.own(ctx, vp); !ok {
 			return false
 		}
-		if !l.detach(ctx, jit.BackingGlobal, idx) {
+		if !m.detach(ctx, jit.BackingGlobal, idx) {
 			return false
 		}
 		if !pop {
-			l.retainBoxExcept(ctx, old, boxed)
+			m.retainBoxExcept(ctx, old, boxed)
 		}
 	}
 	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
@@ -704,7 +704,7 @@ func (l lowerer) globalSet(ctx *lowering, op jit.Step, pop bool) bool {
 // Slots), so GLOBAL_GET/SET see a stable kind at lower time: a per-run
 // input is seeded via SetGlobal before Run, so the entry trace already observes
 // it. Out-of-range indices and offsets past the 12-bit LDR/STR limit reject.
-func (l lowerer) global(ctx *lowering, op jit.Step) (int, types.Kind, bool) {
+func (m machine) global(ctx *lowering, op jit.Step) (int, types.Kind, bool) {
 	idx := int(op.Args[0])
 	if idx >= len(ctx.globals) || idx > 4095 {
 		return 0, 0, false
@@ -717,18 +717,18 @@ func (l lowerer) global(ctx *lowering, op jit.Step) (int, types.Kind, bool) {
 	return 0, 0, false
 }
 
-func (l lowerer) drop(ctx *lowering, op jit.Step) bool {
+func (m machine) drop(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 {
 		return false
 	}
 	pre := ctx.pre()
 	v := ctx.values[len(ctx.values)-1]
 	if v.kind == types.KindRef && v.backing == jit.BackingStack {
-		boxed, ok := l.box(ctx, v)
+		boxed, ok := m.box(ctx, v)
 		if !ok {
 			return false
 		}
-		l.releaseBox(ctx, boxed, pre, op.IP)
+		m.releaseBox(ctx, boxed, pre, op.IP)
 	}
 	ctx.pop()
 	return true
@@ -737,24 +737,24 @@ func (l lowerer) drop(ctx *lowering, op jit.Step) bool {
 // dup duplicates the top operand. A deferred ref (backing != jit.BackingStack) is
 // still backed by its slot, so the duplicate stays deferred with the same
 // backing/slot and no retain; an owned ref takes a fresh retain for the copy.
-func (l lowerer) dup(ctx *lowering) bool {
+func (m machine) dup(ctx *lowering) bool {
 	if ctx.count() < 1 {
 		return false
 	}
 	v := ctx.values[len(ctx.values)-1]
 	if v.kind == types.KindRef && v.backing == jit.BackingStack {
-		boxed, ok := l.box(ctx, v)
+		boxed, ok := m.box(ctx, v)
 		if !ok {
 			return false
 		}
-		l.retainBox(ctx, boxed)
+		m.retainBox(ctx, boxed)
 		v = value{reg: boxed, kind: types.KindRef}
 	}
 	ctx.push(v)
 	return true
 }
 
-func (l lowerer) swap(ctx *lowering) bool {
+func (m machine) swap(ctx *lowering) bool {
 	if ctx.count() < 2 {
 		return false
 	}
@@ -763,7 +763,7 @@ func (l lowerer) swap(ctx *lowering) bool {
 	return true
 }
 
-func (l lowerer) selectOp(ctx *lowering) bool {
+func (m machine) selectOp(ctx *lowering) bool {
 	if ctx.count() < 3 {
 		return false
 	}
@@ -780,21 +780,21 @@ func (l lowerer) selectOp(ctx *lowering) bool {
 	return true
 }
 
-func (l lowerer) constGetKnown(ctx *lowering, op jit.Step) bool {
+func (m machine) constGetKnown(ctx *lowering, op jit.Step) bool {
 	idx := int(op.Args[0])
 	if idx >= len(ctx.constants) {
 		return false
 	}
 	boxed := ctx.constants[idx]
 	if boxed.Kind() != types.KindRef {
-		return l.constGet(ctx, op)
+		return m.constGet(ctx, op)
 	}
 	ref := boxed.Ref()
 	if ref <= 0 {
 		return false
 	}
 	if _, ok := ctx.elemShape(ref); !ok {
-		return l.constGet(ctx, op)
+		return m.constGet(ctx, op)
 	}
 	ctx.push(value{kind: types.KindRef, backing: jit.BackingConst, ref: ref})
 	return true
@@ -802,7 +802,7 @@ func (l lowerer) constGetKnown(ctx *lowering, op jit.Step) bool {
 
 // constGet pushes a scalar constant as an unboxed immediate. Refs retain
 // ordinary standalone ownership; call-target fusion owns direct markers.
-func (l lowerer) constGet(ctx *lowering, op jit.Step) bool {
+func (m machine) constGet(ctx *lowering, op jit.Step) bool {
 	idx := int(op.Args[0])
 	if idx >= len(ctx.constants) {
 		return false
@@ -832,7 +832,7 @@ func (l lowerer) constGet(ctx *lowering, op jit.Step) bool {
 		}
 		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
-		l.retain(ctx, ref)
+		m.retain(ctx, ref)
 		ctx.push(value{reg: boxed, kind: types.KindRef, ref: ref})
 		return true
 	}

@@ -19,8 +19,10 @@ import (
 )
 
 type Interpreter struct {
-	ctx         context.Context
-	done        <-chan struct{}
+	// ctx is non-nil only while Run is executing and is cleared before Run returns.
+	ctx context.Context
+	// done is the current Run context's cancellation channel and has the same lifetime.
+	done <-chan struct{}
 	tracer      *tracer
 	hook        func(*Interpreter) error
 	codec       Codec

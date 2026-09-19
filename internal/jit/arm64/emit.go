@@ -12,17 +12,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// machine is the ARM64 SSA machine: what this target lowers, and the emitter
-// it opens for one compile. It holds the pinned journal registers and nothing
-// a compile mutates, so one machine serves concurrent compiles.
-//
-// What it lowers is narrow while the port runs; see Lowers for the set. A
-// root needing anything outside it compiles through jit.Compiler's plan
-// pipeline instead.
-type machine struct {
-	scratch []asm.PReg
-}
-
 // emitter emits one function's ARM64 code from SSA. It holds nothing shared
 // across compiles; anything not named on the struct - a value's register and
 // type, a block's label, the journal words a deopt writes - it asks
@@ -61,58 +50,6 @@ type emitter struct {
 // maxSlot is the largest slot index a load or store reaches: the offset is
 // scaled by eight into the 12-bit unsigned immediate LDR and STR encode.
 const maxSlot = 4095
-
-// Lowers reports whether this machine emits native code for code. It is the
-// opcode ratchet the port advances: a function holding an opcode missing here
-// is refused whole, and its root compiles through the plan pipeline.
-//
-// It restates the set exec has a rule for, because the seam asks the question
-// before anything is planned and no answer can come from emitting. The two
-// disagreeing costs a wasted compile rather than a wrong one: an opcode named
-// here that exec declines abandons the compile it had already begun, and one
-// exec handles but this refuses is simply never reached.
-func (m machine) Lowers(code instr.Opcode) bool {
-	switch code {
-	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL,
-		instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
-		instr.I32_AND, instr.I32_OR, instr.I32_XOR,
-		instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
-		instr.I32_EQZ, instr.I32_EQ, instr.I32_NE,
-		instr.I32_LT_S, instr.I32_LE_S, instr.I32_GT_S, instr.I32_GE_S,
-		instr.I32_LT_U, instr.I32_LE_U, instr.I32_GT_U, instr.I32_GE_U,
-		instr.I64_ADD, instr.I64_SUB, instr.I64_MUL,
-		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U,
-		instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQZ,
-		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LE_S,
-		instr.I64_GT_S, instr.I64_GE_S, instr.I64_LT_U, instr.I64_LE_U,
-		instr.I64_GT_U, instr.I64_GE_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
-		instr.I32_TO_I64_S, instr.I32_TO_I64_U,
-		instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV,
-		instr.F32_ABS, instr.F32_NEG, instr.F32_SQRT,
-		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_LE, instr.F32_GT, instr.F32_GE,
-		instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV,
-		instr.F64_ABS, instr.F64_NEG, instr.F64_SQRT,
-		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE,
-		instr.ARRAY_GET, instr.ARRAY_SET, instr.STRUCT_GET, instr.STRUCT_SET, instr.CALL:
-		return true
-	default:
-		return false
-	}
-}
-
-// Traps reports whether lowering code ends the block by handing control back.
-// Nothing this machine lowers does: an opcode it cannot compute it declines
-// outright rather than running as an exit, because an unconditional exit ends
-// the block, and every exit this machine emits is the cold path behind a
-// guard the hot path falls through.
-func (m machine) Traps(instr.Opcode) bool {
-	return false
-}
-
-// Open begins one compile.
-func (m machine) Open(c *backend.Compiler) backend.Lowering {
-	return &emitter{c: c, a: c.Asm(), scratch: m.scratch, seen: make([]bool, c.Func().Len())}
-}
 
 // Enter mirrors the journal header into the pinned registers and clears the
 // callee locals a function entry owns. The frame base every slot is

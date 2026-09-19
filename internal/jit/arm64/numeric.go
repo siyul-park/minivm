@@ -7,14 +7,14 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-func (l lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
+func (m machine) zero32(ctx *lowering, v asm.VReg) asm.VReg {
 	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(out, v, maskI32))
 	return out
 }
 
-func (l lowerer) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	b, a, ok := l.operands(ctx, types.KindI32)
+func (m machine) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	b, a, ok := m.operands(ctx, types.KindI32)
 	if !ok {
 		return false
 	}
@@ -29,8 +29,8 @@ func (l lowerer) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.I
 // shared narrow kind (i8&i8 → i8, i1^i1 → i1) and widens to i32 only for a
 // mixed pair. The op runs on the full register; the low 32 bits carry the value
 // and box masks the rest.
-func (l lowerer) i32Bitwise(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	b, a, ok := l.operands(ctx, types.KindI32)
+func (m machine) i32Bitwise(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	b, a, ok := m.operands(ctx, types.KindI32)
 	if !ok {
 		return false
 	}
@@ -40,14 +40,14 @@ func (l lowerer) i32Bitwise(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.
 	return true
 }
 
-func (l lowerer) i32Divide(
+func (m machine) i32Divide(
 	ctx *lowering,
 	op jit.Step,
 	div func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*lowering, asm.VReg) asm.VReg,
 	rem bool,
 ) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, types.KindI32, 2) {
+	if ctx.count() < 2 || !m.kinds(ctx, types.KindI32, 2) {
 		return false
 	}
 	b := prep(ctx, ctx.values[len(ctx.values)-1].reg)
@@ -58,7 +58,7 @@ func (l lowerer) i32Divide(
 	if op.Arg.Kind().Repr() == types.KindI32 {
 		observed = uint64(uint32(op.Arg.I32()))
 	}
-	if !l.guardDivisor(ctx, top, narrow32(b), observed, op.IP) {
+	if !m.guardDivisor(ctx, top, narrow32(b), observed, op.IP) {
 		return false
 	}
 
@@ -75,12 +75,12 @@ func (l lowerer) i32Divide(
 	return true
 }
 
-func (l lowerer) i32Shift(
+func (m machine) i32Shift(
 	ctx *lowering,
 	shiftOp func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*lowering, asm.VReg) asm.VReg,
 ) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, types.KindI32, 2) {
+	if ctx.count() < 2 || !m.kinds(ctx, types.KindI32, 2) {
 		return false
 	}
 	b := ctx.values[len(ctx.values)-1]
@@ -100,31 +100,31 @@ func (l lowerer) i32Shift(
 	return true
 }
 
-func (l lowerer) i32Eqz(ctx *lowering) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+func (m machine) i32Eqz(ctx *lowering) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI32, 1) {
 		return false
 	}
 	a := ctx.pop()
 	ctx.assembler.Emit(arm64.CMPI(narrow32(a.reg), 0))
-	l.setBool(ctx, arm64.CondEQ)
+	m.setBool(ctx, arm64.CondEQ)
 	return true
 }
 
 // i32Cmp compares the 32-bit lanes through W-register views: raw upper
 // bits never participate, so signed and unsigned conditions both read correct
 // flags from the 32-bit subtraction.
-func (l lowerer) i32Cmp(ctx *lowering, cond uint8) bool {
-	b, a, ok := l.operands(ctx, types.KindI32)
+func (m machine) i32Cmp(ctx *lowering, cond uint8) bool {
+	b, a, ok := m.operands(ctx, types.KindI32)
 	if !ok {
 		return false
 	}
 	ctx.assembler.Emit(arm64.CMP(narrow32(a.reg), narrow32(b.reg)))
-	l.setBool(ctx, cond)
+	m.setBool(ctx, cond)
 	return true
 }
 
-func (l lowerer) f64Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	b, a, ok := l.operands(ctx, types.KindF64)
+func (m machine) f64Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	b, a, ok := m.operands(ctx, types.KindF64)
 	if !ok {
 		return false
 	}
@@ -142,8 +142,8 @@ func (l lowerer) f64Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.I
 	return true
 }
 
-func (l lowerer) f64Cmp(ctx *lowering, cond uint8) bool {
-	b, a, ok := l.operands(ctx, types.KindF64)
+func (m machine) f64Cmp(ctx *lowering, cond uint8) bool {
+	b, a, ok := m.operands(ctx, types.KindF64)
 	if !ok {
 		return false
 	}
@@ -154,12 +154,12 @@ func (l lowerer) f64Cmp(ctx *lowering, cond uint8) bool {
 		arm64.FMOV(fb, b.reg),
 		arm64.FCMP(fa, fb),
 	)
-	l.setBool(ctx, cond)
+	m.setBool(ctx, cond)
 	return true
 }
 
-func (l lowerer) i32ToF64(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+func (m machine) i32ToF64(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI32, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -172,8 +172,8 @@ func (l lowerer) i32ToF64(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg
 	return true
 }
 
-func (l lowerer) f64ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF64, 1) {
+func (m machine) f64ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF64, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -188,8 +188,8 @@ func (l lowerer) f64ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruct
 // f32Binary lowers an f32 arithmetic opcode. A raw f32 keeps its float
 // bits in the low 32 of an int register, so both inputs unbox with a 32-bit
 // FMOV and the result moves back untagged — box tags it at a boundary.
-func (l lowerer) f32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	b, a, ok := l.operands(ctx, types.KindF32)
+func (m machine) f32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	b, a, ok := m.operands(ctx, types.KindF32)
 	if !ok {
 		return false
 	}
@@ -207,8 +207,8 @@ func (l lowerer) f32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.I
 	return true
 }
 
-func (l lowerer) f32Cmp(ctx *lowering, cond uint8) bool {
-	b, a, ok := l.operands(ctx, types.KindF32)
+func (m machine) f32Cmp(ctx *lowering, cond uint8) bool {
+	b, a, ok := m.operands(ctx, types.KindF32)
 	if !ok {
 		return false
 	}
@@ -219,15 +219,15 @@ func (l lowerer) f32Cmp(ctx *lowering, cond uint8) bool {
 		arm64.FMOV(fb, narrow32(b.reg)),
 		arm64.FCMP(fa, fb),
 	)
-	l.setBool(ctx, cond)
+	m.setBool(ctx, cond)
 	return true
 }
 
 // i32ToF32 converts a raw i32 to a raw f32. prep sign- or zero-extends
 // the value lane; SCVTF over the extended 64-bit value is correct for both
 // signed and (non-negative, zero-extended) unsigned sources.
-func (l lowerer) i32ToF32(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+func (m machine) i32ToF32(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI32, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -240,8 +240,8 @@ func (l lowerer) i32ToF32(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg
 	return true
 }
 
-func (l lowerer) f32ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF32, 1) {
+func (m machine) f32ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF32, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -253,8 +253,8 @@ func (l lowerer) f32ToI32(ctx *lowering, cvt func(dst, src asm.Reg) asm.Instruct
 	return true
 }
 
-func (l lowerer) f32ToF64(ctx *lowering) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF32, 1) {
+func (m machine) f32ToF64(ctx *lowering) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF32, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -270,8 +270,8 @@ func (l lowerer) f32ToF64(ctx *lowering) bool {
 	return true
 }
 
-func (l lowerer) f64ToF32(ctx *lowering) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF64, 1) {
+func (m machine) f64ToF32(ctx *lowering) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF64, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -291,15 +291,15 @@ func (l lowerer) f64ToF32(ctx *lowering) bool {
 // value, so the op runs directly on 64-bit registers; checked ops guard that
 // the result still fits the boxable range and deopt with the operands intact
 // when it overflows, so the interpreter handles the heap promotion.
-func (l lowerer) i64Binary(ctx *lowering, op jit.Step, opfn func(dst, src1, src2 asm.Reg) asm.Instruction, checked bool) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, types.KindI64, 2) {
+func (m machine) i64Binary(ctx *lowering, op jit.Step, opfn func(dst, src1, src2 asm.Reg) asm.Instruction, checked bool) bool {
+	if ctx.count() < 2 || !m.kinds(ctx, types.KindI64, 2) {
 		return false
 	}
 	b := ctx.values[len(ctx.values)-1].reg
 	a := ctx.values[len(ctx.values)-2].reg
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(opfn(raw, a, b))
-	if checked && !l.boxableI64(ctx, raw, op.IP) {
+	if checked && !m.boxableI64(ctx, raw, op.IP) {
 		return false
 	}
 	ctx.pop()
@@ -308,8 +308,8 @@ func (l lowerer) i64Binary(ctx *lowering, op jit.Step, opfn func(dst, src1, src2
 	return true
 }
 
-func (l lowerer) i64Divide(ctx *lowering, op jit.Step, div func(dst, src1, src2 asm.Reg) asm.Instruction, rem bool) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, types.KindI64, 2) {
+func (m machine) i64Divide(ctx *lowering, op jit.Step, div func(dst, src1, src2 asm.Reg) asm.Instruction, rem bool) bool {
+	if ctx.count() < 2 || !m.kinds(ctx, types.KindI64, 2) {
 		return false
 	}
 	b := ctx.values[len(ctx.values)-1].reg
@@ -320,7 +320,7 @@ func (l lowerer) i64Divide(ctx *lowering, op jit.Step, div func(dst, src1, src2 
 	if op.Arg.Kind() == types.KindI64 {
 		observed = uint64(op.Arg.I64())
 	}
-	if !l.guardDivisor(ctx, top, b, observed, op.IP) {
+	if !m.guardDivisor(ctx, top, b, observed, op.IP) {
 		return false
 	}
 
@@ -331,7 +331,7 @@ func (l lowerer) i64Divide(ctx *lowering, op jit.Step, div func(dst, src1, src2 
 		raw = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
 	}
-	if !l.boxableI64(ctx, raw, op.IP) {
+	if !m.boxableI64(ctx, raw, op.IP) {
 		return false
 	}
 	ctx.pop()
@@ -340,8 +340,8 @@ func (l lowerer) i64Divide(ctx *lowering, op jit.Step, div func(dst, src1, src2 
 	return true
 }
 
-func (l lowerer) i64Shift(ctx *lowering, op jit.Step, opfn func(dst, src1, src2 asm.Reg) asm.Instruction, checked bool) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, types.KindI64, 2) {
+func (m machine) i64Shift(ctx *lowering, op jit.Step, opfn func(dst, src1, src2 asm.Reg) asm.Instruction, checked bool) bool {
+	if ctx.count() < 2 || !m.kinds(ctx, types.KindI64, 2) {
 		return false
 	}
 	b := ctx.values[len(ctx.values)-1].reg
@@ -354,7 +354,7 @@ func (l lowerer) i64Shift(ctx *lowering, op jit.Step, opfn func(dst, src1, src2 
 	}
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(opfn(raw, a, shift))
-	if checked && !l.boxableI64(ctx, raw, op.IP) {
+	if checked && !m.boxableI64(ctx, raw, op.IP) {
 		return false
 	}
 	ctx.pop()
@@ -363,19 +363,19 @@ func (l lowerer) i64Shift(ctx *lowering, op jit.Step, opfn func(dst, src1, src2 
 	return true
 }
 
-func (l lowerer) i64Cmp(ctx *lowering, cond uint8) bool {
-	b, a, ok := l.operands(ctx, types.KindI64)
+func (m machine) i64Cmp(ctx *lowering, cond uint8) bool {
+	b, a, ok := m.operands(ctx, types.KindI64)
 	if !ok {
 		return false
 	}
 	ctx.assembler.Emit(arm64.CMP(a.reg, b.reg))
-	l.setBool(ctx, cond)
+	m.setBool(ctx, cond)
 	return true
 }
 
 // operands pops a typed binary-op pair after checking both kinds.
-func (l lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
-	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+func (m machine) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
+	if ctx.count() < 2 || !m.kinds(ctx, kind, 2) {
 		return value{}, value{}, false
 	}
 	b := ctx.pop()
@@ -383,13 +383,13 @@ func (l lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
 	return b, a, true
 }
 
-func (l lowerer) i64Eqz(ctx *lowering) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI64, 1) {
+func (m machine) i64Eqz(ctx *lowering) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI64, 1) {
 		return false
 	}
 	a := ctx.pop()
 	ctx.assembler.Emit(arm64.CMPI(a.reg, 0))
-	l.setBool(ctx, arm64.CondEQ)
+	m.setBool(ctx, arm64.CondEQ)
 	return true
 }
 
@@ -397,7 +397,7 @@ func (l lowerer) i64Eqz(ctx *lowering) bool {
 // eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
 // which boxes these through BoxI1). The 0/1 flag still satisfies any later
 // i32 operand because kinds compares by representation.
-func (l lowerer) setBool(ctx *lowering, cond uint8) {
+func (m machine) setBool(ctx *lowering, cond uint8) {
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSET(flag, cond))
 	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
@@ -405,8 +405,8 @@ func (l lowerer) setBool(ctx *lowering, cond uint8) {
 
 // i32ToI64 widens a raw i32 to a raw i64; the i32 range is within the
 // boxable i64 range so no guard is needed.
-func (l lowerer) i32ToI64(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+func (m machine) i32ToI64(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI32, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -415,8 +415,8 @@ func (l lowerer) i32ToI64(ctx *lowering, prep func(*lowering, asm.VReg) asm.VReg
 	return true
 }
 
-func (l lowerer) i64ToI32(ctx *lowering) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI64, 1) {
+func (m machine) i64ToI32(ctx *lowering) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI64, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -426,8 +426,8 @@ func (l lowerer) i64ToI32(ctx *lowering) bool {
 	return true
 }
 
-func (l lowerer) i64ToF64(ctx *lowering, cvtf func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI64, 1) {
+func (m machine) i64ToF64(ctx *lowering, cvtf func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI64, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -439,8 +439,8 @@ func (l lowerer) i64ToF64(ctx *lowering, cvtf func(dst, src asm.Reg) asm.Instruc
 	return true
 }
 
-func (l lowerer) i64ToF32(ctx *lowering, cvtf func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI64, 1) {
+func (m machine) i64ToF32(ctx *lowering, cvtf func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindI64, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -452,8 +452,8 @@ func (l lowerer) i64ToF32(ctx *lowering, cvtf func(dst, src asm.Reg) asm.Instruc
 	return true
 }
 
-func (l lowerer) f32ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF32, 1) {
+func (m machine) f32ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF32, 1) {
 		return false
 	}
 	a := ctx.values[len(ctx.values)-1]
@@ -461,7 +461,7 @@ func (l lowerer) f32ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg)
 	ctx.assembler.Emit(arm64.FMOV(fa, narrow32(a.reg)))
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(cvt(raw, fa))
-	if !l.boxableI64(ctx, raw, op.IP) {
+	if !m.boxableI64(ctx, raw, op.IP) {
 		return false
 	}
 	ctx.pop()
@@ -469,8 +469,8 @@ func (l lowerer) f32ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg)
 	return true
 }
 
-func (l lowerer) f64ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF64, 1) {
+func (m machine) f64ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF64, 1) {
 		return false
 	}
 	a := ctx.values[len(ctx.values)-1]
@@ -478,7 +478,7 @@ func (l lowerer) f64ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg)
 	ctx.assembler.Emit(arm64.FMOV(fa, a.reg))
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(cvt(raw, fa))
-	if !l.boxableI64(ctx, raw, op.IP) {
+	if !m.boxableI64(ctx, raw, op.IP) {
 		return false
 	}
 	ctx.pop()
@@ -490,8 +490,8 @@ func (l lowerer) f64ToI64(ctx *lowering, op jit.Step, cvt func(dst, src asm.Reg)
 // CLZ) for an integer kind. The count is always in [0, width] so the result is
 // boxable without a guard. i32 operates on the W view so the upper lane is
 // ignored.
-func (l lowerer) countZeros(ctx *lowering, kind types.Kind, reverse bool) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+func (m machine) countZeros(ctx *lowering, kind types.Kind, reverse bool) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, kind, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -513,8 +513,8 @@ func (l lowerer) countZeros(ctx *lowering, kind types.Kind, reverse bool) bool {
 // popcnt lowers a population count through the SIMD pipe (FMOV → CNT → ADDV →
 // FMOV); ARMv8.0 has no scalar GPR popcount. The result is small and boxable.
 // i32 masks the upper lane so CNT counts only the 32-bit value.
-func (l lowerer) popcnt(ctx *lowering, kind types.Kind) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+func (m machine) popcnt(ctx *lowering, kind types.Kind) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, kind, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -539,8 +539,8 @@ func (l lowerer) popcnt(ctx *lowering, kind types.Kind) bool {
 // ROR by the negated amount; the rotate width follows the register view (W for
 // i32, X for i64). An i64 rotate of the full 64-bit value can leave the boxable
 // range, so it guards before pushing; i32 always fits.
-func (l lowerer) rotate(ctx *lowering, op jit.Step, kind types.Kind, left bool) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+func (m machine) rotate(ctx *lowering, op jit.Step, kind types.Kind, left bool) bool {
+	if ctx.count() < 2 || !m.kinds(ctx, kind, 2) {
 		return false
 	}
 	src := ctx.values[len(ctx.values)-2].reg
@@ -559,7 +559,7 @@ func (l lowerer) rotate(ctx *lowering, op jit.Step, kind types.Kind, left bool) 
 		amount = neg
 	}
 	ctx.assembler.Emit(arm64.ROR(out, src, amount))
-	if kind == types.KindI64 && !l.boxableI64(ctx, raw, op.IP) {
+	if kind == types.KindI64 && !m.boxableI64(ctx, raw, op.IP) {
 		return false
 	}
 	ctx.pop()
@@ -571,8 +571,8 @@ func (l lowerer) rotate(ctx *lowering, op jit.Step, kind types.Kind, left bool) 
 // extend lowers a sign-extend op (SXTB/SXTH/SXTW). The 64-bit form is correct
 // for both kinds: it reads only the low byte/half/word and the sign-extended
 // result stays within the boxable i64 range, so no guard is needed.
-func (l lowerer) extend(ctx *lowering, kind types.Kind, emit func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+func (m machine) extend(ctx *lowering, kind types.Kind, emit func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, kind, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -586,12 +586,12 @@ func (l lowerer) extend(ctx *lowering, kind types.Kind, emit func(dst, src asm.R
 // i32/f32 pair and the i64→f64 direction share their register representation,
 // so only the kind changes. Reading an f64 bit pattern as i64 can leave the
 // boxable range, so that direction guards first.
-func (l lowerer) reinterpret(ctx *lowering, op jit.Step, from, to types.Kind) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, from, 1) {
+func (m machine) reinterpret(ctx *lowering, op jit.Step, from, to types.Kind) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, from, 1) {
 		return false
 	}
 	if to == types.KindI64 {
-		if !l.boxableI64(ctx, ctx.values[len(ctx.values)-1].reg, op.IP) {
+		if !m.boxableI64(ctx, ctx.values[len(ctx.values)-1].reg, op.IP) {
 			return false
 		}
 	}
@@ -603,8 +603,8 @@ func (l lowerer) reinterpret(ctx *lowering, op jit.Step, from, to types.Kind) bo
 // f32Unary lowers a single-operand f32 op. The raw f32 keeps its bits in the
 // low 32 of an int register, so it unboxes with a 32-bit FMOV and the result
 // moves back untagged.
-func (l lowerer) f32Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF32, 1) {
+func (m machine) f32Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF32, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -621,8 +621,8 @@ func (l lowerer) f32Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instructi
 }
 
 // f64Unary lowers a single-operand f64 op. A raw f64 is its own bit pattern.
-func (l lowerer) f64Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindF64, 1) {
+func (m machine) f64Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !m.kinds(ctx, types.KindF64, 1) {
 		return false
 	}
 	a := ctx.pop()
@@ -641,8 +641,8 @@ func (l lowerer) f64Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instructi
 // copysign splices the sign bit of the top operand onto the magnitude of the
 // one below it with GPR bit ops, matching math.Copysign(magnitude, sign). The
 // raw float bits already live in int registers, so no FP move is needed.
-func (l lowerer) copysign(ctx *lowering, kind types.Kind) bool {
-	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+func (m machine) copysign(ctx *lowering, kind types.Kind) bool {
+	if ctx.count() < 2 || !m.kinds(ctx, kind, 2) {
 		return false
 	}
 	sign := ctx.pop()
@@ -657,10 +657,10 @@ func (l lowerer) copysign(ctx *lowering, kind types.Kind) bool {
 	ctx.assembler.Emit(arm64.LDI(notSign, ^mask)...)
 	s := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.AND(s, sign.reg, signbit))
-	m := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.AND(m, magnitude.reg, notSign))
+	magnitudeReg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.AND(magnitudeReg, magnitude.reg, notSign))
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ORR(dst, m, s))
+	ctx.assembler.Emit(arm64.ORR(dst, magnitudeReg, s))
 	ctx.push(value{reg: dst, kind: kind, raw: true})
 	return true
 }
@@ -669,7 +669,7 @@ func (l lowerer) copysign(ctx *lowering, kind types.Kind) bool {
 // The match is by representation, so the narrow integer kinds (i1, i8) satisfy
 // an i32 operand exactly as they do in the interpreter; for every other kind
 // Repr is the identity, so the check stays exact.
-func (l lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
+func (m machine) kinds(ctx *lowering, kind types.Kind, n int) bool {
 	for k := 0; k < n; k++ {
 		v := ctx.values[len(ctx.values)-1-k]
 		if v.kind.Repr() != kind.Repr() || !v.raw {
@@ -686,7 +686,7 @@ func narrow32(v asm.VReg) asm.VReg {
 	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
 }
 
-func (l lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
+func (m machine) sign32(ctx *lowering, v asm.VReg) asm.VReg {
 	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.SXTW(out, v))
 	return out

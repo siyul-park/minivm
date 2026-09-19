@@ -8,10 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
-// ---------------------------------------------------------------------------
-// Encoder
-// ---------------------------------------------------------------------------
-
+// Encoder emits ARM64 machine encodings.
 type Encoder struct{}
 
 // ---------------------------------------------------------------------------
@@ -218,8 +215,10 @@ var floatTernaryOpcodes = map[Op]struct{ single, double uint32 }{
 	OpFNMSUB: {0x1F208000, 0x1F608000},
 }
 
+// NewEncoder returns an ARM64 instruction encoder.
 func NewEncoder() *Encoder { return &Encoder{} }
 
+// Encode converts one architecture-neutral instruction to ARM64 machine code.
 func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	op := Op(inst.Op)
 	switch op {

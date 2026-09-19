@@ -13,9 +13,9 @@ type arch struct {
 
 var _ asm.Arch = arch{}
 
-// New returns an asm.Arch placeholder for amd64. Every operation that would
-// actually need to emit machine code returns asm.ErrNotImplemented.
-func New() asm.Arch {
+// New returns the amd64 assembler architecture placeholder. Operations that
+// emit or invoke machine code return asm.ErrNotImplemented.
+func New() arch {
 	return arch{
 		registers: asm.NewRegInfo(16, 16, nil, nil, nil),
 		encoder:   encoder{},
@@ -23,7 +23,14 @@ func New() asm.Arch {
 	}
 }
 
+// Registers returns the target register set.
 func (a arch) Registers() asm.RegInfo { return a.registers }
-func (a arch) Encoder() asm.Encoder   { return a.encoder }
-func (a arch) ABI() asm.ABI           { return a.abi }
-func (a arch) Frame() asm.Frame       { return nil }
+
+// Encoder returns the target instruction encoder.
+func (a arch) Encoder() asm.Encoder { return a.encoder }
+
+// ABI returns the target call-boundary policy.
+func (a arch) ABI() asm.ABI { return a.abi }
+
+// Frame returns nil because amd64 does not implement spilling.
+func (a arch) Frame() asm.Frame { return nil }

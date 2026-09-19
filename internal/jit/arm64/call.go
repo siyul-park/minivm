@@ -73,18 +73,18 @@ func (f *activation) isLoadedAt(idx int) bool {
 	return f.state[idx]&localLoaded != 0
 }
 
-func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
+func (m machine) directCall(ctx *lowering, op jit.Step) bool {
 	target := ctx.objects.Function(op.Callee)
 	if target == nil || target.Typ == nil || ctx.count() < 1 {
 		return false
 	}
 	params := len(target.Typ.Params)
-	if ctx.count() < params+1 || op.Callee > 4095 || !l.checkReturns(target) {
+	if ctx.count() < params+1 || op.Callee > 4095 || !m.checkReturns(target) {
 		return false
 	}
 
 	marker := ctx.pop()
-	if marker.fn != op.Callee || !l.checkArgs(ctx, target, params) {
+	if marker.fn != op.Callee || !m.checkArgs(ctx, target, params) {
 		ctx.push(marker)
 		return false
 	}
@@ -94,7 +94,7 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 	// stack that still carries the marker.
 	if op.Callee == ctx.addr {
 		if ctx.kind == jit.EntryFunction && len(ctx.frames) == 1 && len(target.Captures) == 0 &&
-			l.selfCall(ctx, op, target, params) {
+			m.selfCall(ctx, op, target, params) {
 			return true
 		}
 		ctx.push(marker)
@@ -112,7 +112,7 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 	// The threaded fallback re-executes the whole CALL, so the exit has to see
 	// the marker this lowering already consumed.
 	ctx.push(marker)
-	if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+	if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 		return false
 	}
 	a.Bind(ready)
@@ -125,10 +125,10 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 	// interpreter/callee would release a reference this trace never took.
 	// Post-call consumers are emitted after this mutation, so they observe
 	// jit.BackingStack and release normally.
-	if !l.ownRefs(ctx) {
+	if !m.ownRefs(ctx) {
 		return false
 	}
-	if !l.flush(ctx, flushSnapshot) {
+	if !m.flush(ctx, flushSnapshot) {
 		return false
 	}
 
@@ -138,7 +138,7 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 	a.Emit(arm64.CMP(active, limit))
 	hasFrame := a.Label()
 	a.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame))
-	l.overflow(ctx, op)
+	m.overflow(ctx, op)
 	a.Bind(hasFrame)
 	a.Emit(arm64.ADDI(active, active, 1))
 	a.Emit(arm64.STR(active, vCtrl, int16(journal.CellActive*8)))
@@ -188,7 +188,7 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 	a.Emit(arm64.LDR(trap, vCtrl, int16(journal.CellTrap*8)))
 	normal := a.Label()
 	a.Emit(arm64.CBZLabel(trap, normal), arm64.LDR(oldBP, arm64.SP, 0))
-	l.unwind(ctx, vCtrl, op.IP+1)
+	m.unwind(ctx, vCtrl, op.IP+1)
 	a.Emit(
 		arm64.LDR(arm64.LR, arm64.SP, 16),
 		arm64.ADDI(arm64.SP, arm64.SP, 32),
@@ -216,8 +216,8 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 		regs[idx] = ctx.pinTo(arm64.IntRets[idx])
 	}
 	ctx.values = ctx.values[:len(ctx.values)-params]
-	l.clearLocals(ctx)
-	l.reload(ctx)
+	m.clearLocals(ctx)
+	m.reload(ctx)
 	for idx, typ := range rets {
 		out := typ.Kind()
 		ctx.push(value{reg: regs[idx], kind: out, raw: out != types.KindRef})
@@ -228,7 +228,7 @@ func (l lowerer) directCall(ctx *lowering, op jit.Step) bool {
 // call lowers a recorded CALL. The callee marker must resolve to an observed
 // function ref: a self-call becomes a framed native BL into this trace's own
 // head, and non-self callees inline as fused frames the deopt path can rebuild.
-func (l lowerer) call(ctx *lowering, op jit.Step) bool {
+func (m machine) call(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 {
 		return false
 	}
@@ -270,7 +270,7 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 			return false
 		}
 		pre := ctx.pre()
-		fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+		fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 		if !ok {
 			return false
 		}
@@ -279,7 +279,7 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 		ctx.assembler.Emit(arm64.CMP(v.reg, want))
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 		if v.backing == jit.BackingStack {
-			l.releaseBox(ctx, v.reg, pre, op.IP)
+			m.releaseBox(ctx, v.reg, pre, op.IP)
 		}
 	}
 	if len(target.Captures) > 0 {
@@ -289,15 +289,15 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 	} else {
 		closureRef = 0
 	}
-	if op.Callee == ctx.addr && !l.checkReturns(target) {
+	if op.Callee == ctx.addr && !m.checkReturns(target) {
 		return false
 	}
 	ctx.pop()
-	if ctx.count() < params || !l.checkArgs(ctx, target, params) {
+	if ctx.count() < params || !m.checkArgs(ctx, target, params) {
 		return false
 	}
 	if op.Callee == ctx.addr {
-		return l.selfCall(ctx, op, target, params)
+		return m.selfCall(ctx, op, target, params)
 	}
 	if len(ctx.frames) >= 4 {
 		return false
@@ -305,13 +305,13 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 
 	base := ctx.sp() - params
 	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
+	addr := m.base(ctx, vStack)
 	for k := 0; k < params; k++ {
 		// This inlines the callee's own activation directly onto the VM
 		// stack, so a deferred argument must own its retain here: its backing slot
 		// slot is unrelated storage that may change independently of this
 		// new frame's local.
-		boxed, ok := l.own(ctx, &ctx.values[len(ctx.values)-params+k])
+		boxed, ok := m.own(ctx, &ctx.values[len(ctx.values)-params+k])
 		if !ok {
 			return false
 		}
@@ -341,17 +341,17 @@ func (l lowerer) call(ctx *lowering, op jit.Step) bool {
 }
 
 // selfCall lowers recursion through the function entry.
-func (l lowerer) selfCall(ctx *lowering, op jit.Step, target *types.Function, params int) bool {
-	if ctx.kind != jit.EntryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !l.checkReturns(target) {
+func (m machine) selfCall(ctx *lowering, op jit.Step, target *types.Function, params int) bool {
+	if ctx.kind != jit.EntryFunction || len(ctx.frames) != 1 || len(target.Captures) > 0 || !m.checkReturns(target) {
 		return false
 	}
 
 	a := ctx.assembler
 	// Own deferred refs before the callee can mutate their backing storage.
-	if !l.ownRefs(ctx) {
+	if !m.ownRefs(ctx) {
 		return false
 	}
-	if !l.flush(ctx, flushCommit) {
+	if !m.flush(ctx, flushCommit) {
 		return false
 	}
 
@@ -362,7 +362,7 @@ func (l lowerer) selfCall(ctx *lowering, op jit.Step, target *types.Function, pa
 	a.Emit(arm64.CMP(active, budget))
 	hasFrame := a.Label()
 	a.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame))
-	l.overflow(ctx, op)
+	m.overflow(ctx, op)
 	a.Bind(hasFrame)
 
 	a.Emit(
@@ -404,7 +404,7 @@ func (l lowerer) selfCall(ctx *lowering, op jit.Step, target *types.Function, pa
 		arm64.CBZLabel(trap, normal),
 		arm64.LDR(oldBP, arm64.SP, 0),
 	)
-	l.unwind(ctx, vCtrl, op.IP+1)
+	m.unwind(ctx, vCtrl, op.IP+1)
 	a.Emit(
 		arm64.LDR(arm64.LR, arm64.SP, 16),
 		arm64.ADDI(arm64.SP, arm64.SP, 32),
@@ -435,10 +435,10 @@ func (l lowerer) selfCall(ctx *lowering, op jit.Step, target *types.Function, pa
 		f := &ctx.frames[fi]
 		clear(f.state)
 	}
-	l.reload(ctx)
+	m.reload(ctx)
 	if len(rets) > len(arm64.IntRets) {
 		vStack := ctx.pin(scratchStack)
-		addr := l.base(ctx, vStack)
+		addr := m.base(ctx, vStack)
 		for k := range rets {
 			regs[k] = a.Reg(asm.RegTypeInt, asm.Width64)
 			a.Emit(arm64.LDR(regs[k], addr, int16((base+k)*8)))
@@ -453,7 +453,7 @@ func (l lowerer) selfCall(ctx *lowering, op jit.Step, target *types.Function, pa
 
 // checkReturns verifies every return kind fits the registers a native call
 // hands results back in.
-func (l lowerer) checkReturns(target *types.Function) bool {
+func (m machine) checkReturns(target *types.Function) bool {
 	for _, typ := range target.Typ.Returns {
 		switch typ.Kind() {
 		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
@@ -469,8 +469,8 @@ func (l lowerer) checkReturns(target *types.Function) bool {
 // other locals reset, everything commits to the VM stack, and iterate branches
 // to the head (or yields when the safepoint budget runs out). Constant stack
 // depth — no BL, no journal.CellActive — so self/mutual tail recursion never grows.
-func (l lowerer) tailLoop(ctx *lowering, op jit.Step) bool {
-	target, params, ok := l.tailTarget(ctx, op)
+func (m machine) tailLoop(ctx *lowering, op jit.Step) bool {
+	target, params, ok := m.tailTarget(ctx, op)
 	if !ok {
 		return false
 	}
@@ -487,19 +487,19 @@ func (l lowerer) tailLoop(ctx *lowering, op jit.Step) bool {
 	}
 	old := ctx.frame()
 	f := newActivation(ctx.addr, target, 0, 0)
-	refs, ok := l.guardFrame(ctx, old, op.IP)
+	refs, ok := m.guardFrame(ctx, old, op.IP)
 	if !ok {
 		return false
 	}
-	if !l.initLocals(ctx, &f, args) {
+	if !m.initLocals(ctx, &f, args) {
 		return false
 	}
-	l.releaseFrame(ctx, refs)
+	m.releaseFrame(ctx, refs)
 	ctx.frames = append(ctx.frames[:0], f)
-	if !l.flush(ctx, flushCommit) {
+	if !m.flush(ctx, flushCommit) {
 		return false
 	}
-	return l.iterate(ctx, 0)
+	return m.iterate(ctx, 0)
 }
 
 // tailMorph lowers a tail call to a different function by reusing the current
@@ -508,8 +508,8 @@ func (l lowerer) tailLoop(ctx *lowering, op jit.Step) bool {
 // step emission continues into the callee's body. The frame record save/unwind writes
 // describes the callee, so a later trap rebuilds the reused frame as the callee
 // exactly as threaded tail() leaves it.
-func (l lowerer) tailMorph(ctx *lowering, op jit.Step) bool {
-	target, params, ok := l.tailTarget(ctx, op)
+func (m machine) tailMorph(ctx *lowering, op jit.Step) bool {
+	target, params, ok := m.tailTarget(ctx, op)
 	if !ok {
 		return false
 	}
@@ -528,14 +528,14 @@ func (l lowerer) tailMorph(ctx *lowering, op jit.Step) bool {
 	// frame needs, then releaseFrame drops the retiring activation.
 	f := newActivation(op.Callee, target, base, len(ctx.values))
 	f.resume = op.IP + 1
-	refs, ok := l.guardFrame(ctx, old, op.IP)
+	refs, ok := m.guardFrame(ctx, old, op.IP)
 	if !ok {
 		return false
 	}
-	if !l.initLocals(ctx, &f, args) {
+	if !m.initLocals(ctx, &f, args) {
 		return false
 	}
-	l.releaseFrame(ctx, refs)
+	m.releaseFrame(ctx, refs)
 	ctx.frames[len(ctx.frames)-1] = f
 	return true
 }
@@ -545,7 +545,7 @@ func (l lowerer) tailMorph(ctx *lowering, op jit.Step) bool {
 // non-constant ref (mirrors call's guard). Tail calls carry no closure upvals,
 // so a captured target is rejected; the trace stays threaded. On success the
 // top params operands are the validated arguments, still live.
-func (l lowerer) tailTarget(ctx *lowering, op jit.Step) (*types.Function, int, bool) {
+func (m machine) tailTarget(ctx *lowering, op jit.Step) (*types.Function, int, bool) {
 	if ctx.count() < 1 {
 		return nil, 0, false
 	}
@@ -577,24 +577,24 @@ func (l lowerer) tailTarget(ctx *lowering, op jit.Step) (*types.Function, int, b
 		ctx.assembler.Emit(arm64.CMP(v.reg, want))
 		ok := ctx.assembler.Label()
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-		if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+		if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 			return nil, 0, false
 		}
 		ctx.assembler.Bind(ok)
 		pre := ctx.pre()
 		if v.backing == jit.BackingStack {
-			l.releaseBox(ctx, v.reg, pre, op.IP)
+			m.releaseBox(ctx, v.reg, pre, op.IP)
 		}
 	}
 	ctx.pop()
-	if ctx.count() < params || !l.checkArgs(ctx, target, params) {
+	if ctx.count() < params || !m.checkArgs(ctx, target, params) {
 		return nil, 0, false
 	}
 	return target, params, true
 }
 
 // checkArgs verifies the top params operands match the callee's parameter kinds.
-func (l lowerer) checkArgs(ctx *lowering, target *types.Function, params int) bool {
+func (m machine) checkArgs(ctx *lowering, target *types.Function, params int) bool {
 	kinds := target.Slots()
 	if len(kinds) < params {
 		return false
@@ -627,7 +627,7 @@ func (l lowerer) checkArgs(ctx *lowering, target *types.Function, params int) bo
 //
 // Only a whole-function entry may do this. A loop plan re-enters a frame whose
 // locals are live, and module code has no caller to have cleared them.
-func (l lowerer) zeroLocals(ctx *lowering) {
+func (m machine) zeroLocals(ctx *lowering) {
 	if ctx.kind != jit.EntryFunction || len(ctx.frames) == 0 {
 		return
 	}
@@ -636,7 +636,7 @@ func (l lowerer) zeroLocals(ctx *lowering) {
 		return
 	}
 	a := ctx.assembler
-	base := l.base(ctx, ctx.pin(scratchStack))
+	base := m.base(ctx, ctx.pin(scratchStack))
 	for idx := ctx.params; idx < len(kinds); idx++ {
 		reg := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDI(reg, uint64(types.Zero(kinds[idx])))...)
@@ -647,13 +647,13 @@ func (l lowerer) zeroLocals(ctx *lowering) {
 // initLocals fills frame f with call arguments in its parameter slots and
 // a raw zero in every remaining local, matching threaded tail()/CALL's clear.
 // Each slot is loaded and dirty so the next flush commits it to the VM stack.
-func (l lowerer) initLocals(ctx *lowering, f *activation, args []value) bool {
+func (m machine) initLocals(ctx *lowering, f *activation, args []value) bool {
 	for k := range args {
 		// This becomes a new frame's own tracked local, so a deferred ref
 		// argument must own its retain: the new backing slot is unrelated storage
 		// from the one it deferred to.
 		if args[k].kind == types.KindRef && args[k].backing != jit.BackingStack {
-			if _, ok := l.own(ctx, &args[k]); !ok {
+			if _, ok := m.own(ctx, &args[k]); !ok {
 				return false
 			}
 		}
@@ -678,13 +678,13 @@ func (l lowerer) initLocals(ctx *lowering, f *activation, args []value) bool {
 
 // stitch retires an inlined frame at its RETURN: the top return values
 // land where the interpreter would put them — on the caller's operand stack.
-func (l lowerer) stitch(ctx *lowering, ip int) bool {
+func (m machine) stitch(ctx *lowering, ip int) bool {
 	f := ctx.frame()
 	if ctx.count() < f.returns {
 		return false
 	}
 	rets := append([]value(nil), ctx.values[len(ctx.values)-f.returns:]...)
-	refs, ok := l.guardFrame(ctx, f, ip)
+	refs, ok := m.guardFrame(ctx, f, ip)
 	if !ok {
 		return false
 	}
@@ -696,12 +696,12 @@ func (l lowerer) stitch(ctx *lowering, ip int) bool {
 			continue
 		}
 		if (v.backing == jit.BackingLocal && v.slot >= f.base) || v.backing == jit.BackingUpval {
-			if _, ok := l.own(ctx, v); !ok {
+			if _, ok := m.own(ctx, v); !ok {
 				return false
 			}
 		}
 	}
-	l.releaseFrame(ctx, refs)
+	m.releaseFrame(ctx, refs)
 	ctx.values = ctx.values[:f.opBase]
 	ctx.frames = ctx.frames[:len(ctx.frames)-1]
 	ctx.values = append(ctx.values, rets...)
@@ -710,7 +710,7 @@ func (l lowerer) stitch(ctx *lowering, ip int) bool {
 
 // ret closes the entry frame: boxed returns land at the frame base for
 // the Go wrapper and in the ABI return registers for native callers.
-func (l lowerer) ret(ctx *lowering, ip int) bool {
+func (m machine) ret(ctx *lowering, ip int) bool {
 	if ctx.count() < ctx.returns {
 		return false
 	}
@@ -725,21 +725,21 @@ func (l lowerer) ret(ctx *lowering, ip int) bool {
 	// releaseFrame's decrement leaves the exact one live reference the caller now
 	// owns.
 	for idx := 0; idx < ctx.returns; idx++ {
-		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx]); !ok {
+		if _, ok := m.own(ctx, &ctx.values[len(ctx.values)-ctx.returns+idx]); !ok {
 			return false
 		}
 	}
-	refs, ok := l.guardFrame(ctx, f, ip)
+	refs, ok := m.guardFrame(ctx, f, ip)
 	if !ok {
 		return false
 	}
-	l.releaseFrame(ctx, refs)
+	m.releaseFrame(ctx, refs)
 	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
+	addr := m.base(ctx, vStack)
 	for idx := 0; idx < ctx.returns; idx++ {
 		// The entry frame is ending; the owned return is written into the
 		// caller-visible result slot after the frame's local refs are released.
-		boxed, ok := l.box(ctx, ctx.values[len(ctx.values)-ctx.returns+idx])
+		boxed, ok := m.box(ctx, ctx.values[len(ctx.values)-ctx.returns+idx])
 		if !ok {
 			return false
 		}
@@ -756,7 +756,7 @@ func (l lowerer) ret(ctx *lowering, ip int) bool {
 }
 
 // guardFrame checks that an activation can be released without deopt.
-func (l lowerer) guardFrame(ctx *lowering, f *activation, ip int) ([]asm.VReg, bool) {
+func (m machine) guardFrame(ctx *lowering, f *activation, ip int) ([]asm.VReg, bool) {
 	addrs := make([]asm.VReg, 0, len(f.kinds))
 	var stack asm.VReg
 	a := ctx.assembler
@@ -767,13 +767,13 @@ func (l lowerer) guardFrame(ctx *lowering, f *activation, ip int) ([]asm.VReg, b
 		var ref asm.VReg
 		if f.isLoadedAt(i) {
 			var ok bool
-			ref, ok = l.box(ctx, f.locals[i])
+			ref, ok = m.box(ctx, f.locals[i])
 			if !ok {
 				return nil, false
 			}
 		} else {
 			if stack.Width() == asm.WidthUndefined {
-				stack = l.base(ctx, ctx.pin(scratchStack))
+				stack = m.base(ctx, ctx.pin(scratchStack))
 			}
 			ref = a.Reg(asm.RegTypeInt, asm.Width64)
 			a.Emit(arm64.LDR(ref, stack, int16((f.base+i)*8)))
@@ -786,11 +786,11 @@ func (l lowerer) guardFrame(ctx *lowering, f *activation, ip int) ([]asm.VReg, b
 		return nil, true
 	}
 	pre := ctx.pre()
-	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
+	fail, ok := m.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
 	if !ok {
 		return nil, false
 	}
-	rcBase := l.rcBase(ctx)
+	rcBase := m.rcBase(ctx)
 	for i, addr := range addrs {
 		skip := a.Label()
 		pending := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -810,11 +810,11 @@ func (l lowerer) guardFrame(ctx *lowering, f *activation, ip int) ([]asm.VReg, b
 }
 
 // releaseFrame drops refs after guardFrame succeeds.
-func (l lowerer) releaseFrame(ctx *lowering, addrs []asm.VReg) {
+func (m machine) releaseFrame(ctx *lowering, addrs []asm.VReg) {
 	if len(addrs) == 0 {
 		return
 	}
-	rcBase := l.rcBase(ctx)
+	rcBase := m.rcBase(ctx)
 	a := ctx.assembler
 	for _, addr := range addrs {
 		skip := a.Label()
@@ -827,24 +827,24 @@ func (l lowerer) releaseFrame(ctx *lowering, addrs []asm.VReg) {
 
 // complete finishes top-level module code: live locals and operands are boxed
 // back to the VM stack, SP is published, and the wrapper marks the frame done.
-func (l lowerer) complete(ctx *lowering) bool {
-	if !l.flush(ctx, flushSnapshot) {
+func (m machine) complete(ctx *lowering) bool {
+	if !m.flush(ctx, flushSnapshot) {
 		return false
 	}
-	if !l.commitCarried(ctx) {
+	if !m.commitCarried(ctx) {
 		return false
 	}
 	// The wrapper preserves this top-level operand stack on journal.TrapNone (see
 	// start()), and the interpreter adopts each stack ref as owned, so a
 	// deferred ref left on the stack at module end must re-take its retain.
-	l.retainDeferred(ctx)
+	m.retainDeferred(ctx)
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	vBP := ctx.pin(scratchBP)
 	sp := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
 	a.Emit(arm64.STR(sp, vCtrl, int16(journal.CellSP*8)))
-	l.report(ctx, vCtrl, journal.TrapNone, ctx.frame().end)
+	m.report(ctx, vCtrl, journal.TrapNone, ctx.frame().end)
 	a.Emit(
 		arm64.RET(),
 	)
@@ -855,7 +855,7 @@ func (l lowerer) complete(ctx *lowering) bool {
 // decrement journal.CellBudget and branch to the loop head while budget remains,
 // otherwise yield to the safepoint at the header. The caller has already
 // committed loop-carried locals to the VM stack.
-func (l lowerer) iterate(ctx *lowering, header int) bool {
+func (m machine) iterate(ctx *lowering, header int) bool {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	budget := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -863,29 +863,29 @@ func (l lowerer) iterate(ctx *lowering, header int) bool {
 	a.Emit(arm64.SUBI(budget, budget, 1))
 	a.Emit(arm64.STR(budget, vCtrl, int16(journal.CellBudget*8)))
 	a.Emit(arm64.CBNZLabel(budget, ctx.back))
-	return l.trap(ctx, journal.TrapYield, header, prof.ExitNone, prof.OpcodeNone)
+	return m.trap(ctx, journal.TrapYield, header, prof.ExitNone, prof.OpcodeNone)
 }
 
 // overflow surfaces a frame-budget overflow: the consumed callee marker
 // is rematerialized and retained so the rebuilt interpreter state owns the
 // reference the threaded CALL expects on top of the stack.
-func (l lowerer) overflow(ctx *lowering, op jit.Step) {
+func (m machine) overflow(ctx *lowering, op jit.Step) {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
+	addr := m.base(ctx, vStack)
 
 	boxed := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(boxed, uint64(types.BoxRef(op.Callee)))...)
-	l.retain(ctx, op.Callee)
+	m.retain(ctx, op.Callee)
 	a.Emit(arm64.STR(boxed, addr, int16(ctx.sp()*8)))
 
 	vBP := ctx.pin(scratchBP)
 	sp := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp()+1)))
 	a.Emit(arm64.STR(sp, vCtrl, int16(journal.CellSP*8)))
-	l.unwind(ctx, vCtrl, op.IP)
-	l.report(ctx, vCtrl, journal.TrapOverflow, op.IP)
+	m.unwind(ctx, vCtrl, op.IP)
+	m.report(ctx, vCtrl, journal.TrapOverflow, op.IP)
 	a.Emit(
 		arm64.RET(),
 	)
@@ -896,7 +896,7 @@ func (l lowerer) overflow(ctx *lowering, op jit.Step) {
 // value in the low lane and a boxed f64 is its own bit pattern. The narrow
 // integer locals (i8, i1) share the i32 representation, so they load the same
 // way and keep their kind.
-func (l lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
+func (m machine) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
 	if f.isLoadedAt(idx) {
 		return true
 	}
@@ -907,17 +907,17 @@ func (l lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
 		return false
 	}
 	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
+	addr := m.base(ctx, vStack)
 	reg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(reg, addr, int16((f.base+idx)*8)))
 	if kind == types.KindI64 {
 		// A heap-promoted i64 is a ref the trace cannot read as a value; guard
 		// the inline tag and deopt at the load if it promoted, then sign-extend
 		// the 49-bit value lane to a full raw i64 (always boxable thereafter).
-		if !l.guardI64(ctx, reg, ip) {
+		if !m.guardI64(ctx, reg, ip) {
 			return false
 		}
-		reg = l.sign64(ctx, reg)
+		reg = m.sign64(ctx, reg)
 	}
 	raw := kind != types.KindRef
 	f.locals[idx] = value{reg: reg, kind: kind, raw: raw}
@@ -925,21 +925,21 @@ func (l lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
 	return true
 }
 
-func (l lowerer) upvalGet(ctx *lowering, op jit.Step) bool {
+func (m machine) upvalGet(ctx *lowering, op jit.Step) bool {
 	f := ctx.frame()
 	idx := int(op.Args[0])
 	if idx >= len(f.upvals) {
 		return false
 	}
 	kind := f.upvals[idx]
-	base := l.upvalBase(ctx)
+	base := m.upvalBase(ctx)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(dst, base, int16(idx*8)))
 	if kind == types.KindI64 {
-		if !l.guardI64(ctx, dst, op.IP) {
+		if !m.guardI64(ctx, dst, op.IP) {
 			return false
 		}
-		dst = l.sign64(ctx, dst)
+		dst = m.sign64(ctx, dst)
 	}
 	if kind == types.KindRef {
 		ctx.push(value{reg: dst, kind: kind, backing: jit.BackingUpval, slot: idx})
@@ -949,7 +949,7 @@ func (l lowerer) upvalGet(ctx *lowering, op jit.Step) bool {
 	return true
 }
 
-func (l lowerer) upvalSet(ctx *lowering, op jit.Step) bool {
+func (m machine) upvalSet(ctx *lowering, op jit.Step) bool {
 	f := ctx.frame()
 	idx := int(op.Args[0])
 	if idx >= len(f.upvals) || ctx.count() < 1 {
@@ -962,20 +962,20 @@ func (l lowerer) upvalSet(ctx *lowering, op jit.Step) bool {
 	}
 	var boxed asm.VReg
 	var ok bool
-	boxed, ok = l.box(ctx, *vp)
+	boxed, ok = m.box(ctx, *vp)
 	if !ok {
 		return false
 	}
-	base := l.upvalBase(ctx)
+	base := m.upvalBase(ctx)
 	if kind == types.KindRef {
 		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
-		l.releaseBox(ctx, old, pre, op.IP)
-		if _, ok := l.own(ctx, vp); !ok {
+		m.releaseBox(ctx, old, pre, op.IP)
+		if _, ok := m.own(ctx, vp); !ok {
 			return false
 		}
-		if !l.detach(ctx, jit.BackingUpval, idx) {
+		if !m.detach(ctx, jit.BackingUpval, idx) {
 			return false
 		}
 	}
@@ -984,7 +984,7 @@ func (l lowerer) upvalSet(ctx *lowering, op jit.Step) bool {
 	return true
 }
 
-func (l lowerer) upvalBase(ctx *lowering) asm.VReg {
+func (m machine) upvalBase(ctx *lowering) asm.VReg {
 	f := ctx.frame()
 	if f.upvalRef > 0 {
 		heap := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)

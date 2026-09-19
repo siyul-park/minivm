@@ -9,21 +9,21 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-func (l lowerer) refNull(ctx *lowering) bool {
+func (m machine) refNull(ctx *lowering) bool {
 	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(boxed, uint64(types.BoxedNull))...)
-	l.retainBox(ctx, boxed)
+	m.retainBox(ctx, boxed)
 	ctx.push(value{reg: boxed, kind: types.KindRef})
 	return true
 }
 
-func (l lowerer) refIsNull(ctx *lowering, op jit.Step) bool {
+func (m machine) refIsNull(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
 	owned := ctx.values[len(ctx.values)-1].backing == jit.BackingStack
 	pre := ctx.pre()
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := m.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -40,7 +40,7 @@ func (l lowerer) refIsNull(ctx *lowering, op jit.Step) bool {
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
 	if owned {
-		l.releaseBox(ctx, ref, pre, op.IP)
+		m.releaseBox(ctx, ref, pre, op.IP)
 	}
 	ctx.pop()
 	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
@@ -52,21 +52,21 @@ func (l lowerer) refIsNull(ctx *lowering, op jit.Step) bool {
 // most one operand may own its retain: a single owned operand releases like refIsNull,
 // while two owned operands report a terminal fallback because the second
 // release could deopt after the first already decremented a refcount inline.
-func (l lowerer) refEq(ctx *lowering, op jit.Step, negate bool) (bool, bool) {
+func (m machine) refEq(ctx *lowering, op jit.Step, negate bool) (bool, bool) {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindRef || ctx.values[len(ctx.values)-2].kind != types.KindRef {
 		return false, false
 	}
 	owned1 := ctx.values[len(ctx.values)-1].backing == jit.BackingStack
 	owned2 := ctx.values[len(ctx.values)-2].backing == jit.BackingStack
 	if owned1 && owned2 {
-		return true, l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op))
+		return true, m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op))
 	}
 	pre := ctx.pre()
-	v1, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	v1, ok := m.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false, false
 	}
-	v2, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
+	v2, ok := m.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false, false
 	}
@@ -80,9 +80,9 @@ func (l lowerer) refEq(ctx *lowering, op jit.Step, negate bool) (bool, bool) {
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSET(flag, cond))
 	if owned1 {
-		l.releaseBox(ctx, v1, pre, op.IP)
+		m.releaseBox(ctx, v1, pre, op.IP)
 	} else if owned2 {
-		l.releaseBox(ctx, v2, pre, op.IP)
+		m.releaseBox(ctx, v2, pre, op.IP)
 	}
 	ctx.pop()
 	ctx.pop()
@@ -101,24 +101,24 @@ func (l lowerer) refEq(ctx *lowering, op jit.Step, negate bool) (bool, bool) {
 // symbolic state. Each call allocates fresh registers; the guard-exit stubs
 // need a register-reusing variant instead (see emitExits) because they
 // emit this per exit rather than once per trace.
-func (l lowerer) retainDeferred(ctx *lowering) {
+func (m machine) retainDeferred(ctx *lowering) {
 	var addr asm.VReg
 	for j, v := range ctx.values {
 		switch v.backing {
 		case jit.BackingStack:
 		case jit.BackingConst:
 			if ref := v.ref; ref > 0 {
-				l.retain(ctx, ref)
+				m.retain(ctx, ref)
 			}
 		default:
 			if addr.Width() == asm.WidthUndefined {
-				addr = l.base(ctx, ctx.pin(scratchStack))
+				addr = m.base(ctx, ctx.pin(scratchStack))
 			}
 			reg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 			ctx.assembler.Emit(arm64.LDR(reg, addr, int16(ctx.slot(j)*8)))
 			refAddr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 			ctx.assembler.Emit(arm64.ANDI(refAddr, reg, maskI32))
-			l.retainRef(ctx, refAddr)
+			m.retainRef(ctx, refAddr)
 		}
 	}
 }
@@ -132,47 +132,47 @@ func (l lowerer) retainDeferred(ctx *lowering) {
 // consuming one, so an aliased retain/release pair is skipped rather than
 // executed: the two would cancel exactly, and skipping both saves the work.
 // localSet and globalSet pass pop to choose between the two.
-func (l lowerer) releaseOverwritten(ctx *lowering, old, val asm.VReg, pop bool, pre []value, ip int) {
+func (m machine) releaseOverwritten(ctx *lowering, old, val asm.VReg, pop bool, pre []value, ip int) {
 	if pop {
-		l.releaseBox(ctx, old, pre, ip)
+		m.releaseBox(ctx, old, pre, ip)
 		return
 	}
-	l.releaseBoxExcept(ctx, old, val, pre, ip)
+	m.releaseBoxExcept(ctx, old, val, pre, ip)
 }
 
-func (l lowerer) releaseBoxExcept(ctx *lowering, old, val asm.VReg, pre []value, ip int) {
+func (m machine) releaseBoxExcept(ctx *lowering, old, val asm.VReg, pre []value, ip int) {
 	done := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.CMP(old, val), arm64.BCondLabel(arm64.OpBEQ, done))
-	l.releaseBox(ctx, old, pre, ip)
+	m.releaseBox(ctx, old, pre, ip)
 	ctx.assembler.Bind(done)
 	ctx.values = append(ctx.values[:0], pre...)
 }
 
-func (l lowerer) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int) {
-	l.refOnly(ctx, v, func(addr asm.VReg) {
+func (m machine) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int) {
+	m.refOnly(ctx, v, func(addr asm.VReg) {
 		a := ctx.assembler
 		done := a.Label()
 		a.Emit(arm64.CMPI(addr, 0), arm64.BCondLabel(arm64.OpBEQ, done))
-		l.releaseRef(ctx, addr, pre, ip)
+		m.releaseRef(ctx, addr, pre, ip)
 		a.Bind(done)
 	})
 }
 
-func (l lowerer) retainBoxExcept(ctx *lowering, old, val asm.VReg) {
+func (m machine) retainBoxExcept(ctx *lowering, old, val asm.VReg) {
 	done := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.CMP(old, val), arm64.BCondLabel(arm64.OpBEQ, done))
-	l.retainBox(ctx, val)
+	m.retainBox(ctx, val)
 	ctx.assembler.Bind(done)
 }
 
-func (l lowerer) retainBox(ctx *lowering, v asm.VReg) {
-	l.refOnly(ctx, v, func(addr asm.VReg) {
-		l.retainRef(ctx, addr)
+func (m machine) retainBox(ctx *lowering, v asm.VReg) {
+	m.refOnly(ctx, v, func(addr asm.VReg) {
+		m.retainRef(ctx, addr)
 	})
 }
 
-func (l lowerer) retainRef(ctx *lowering, addr asm.VReg) {
-	base := l.rcBase(ctx)
+func (m machine) retainRef(ctx *lowering, addr asm.VReg) {
+	base := m.rcBase(ctx)
 	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
 	ctx.assembler.Emit(arm64.ADDI(rc, rc, 1))
@@ -180,13 +180,13 @@ func (l lowerer) retainRef(ctx *lowering, addr asm.VReg) {
 }
 
 // releaseRef decrements addr after guardRC proves it will stay live.
-func (l lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
-	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
+func (m machine) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
+	fail, ok := m.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
 	if !ok {
 		return
 	}
-	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, fail)
+	rcBase := m.rcBase(ctx)
+	rc := m.guardRC(ctx, addr, rcBase, fail)
 	ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
 	ctx.assembler.Emit(arm64.STRR(rc, rcBase, addr))
 }
@@ -196,11 +196,11 @@ func (l lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
 // write, or a frame dying at RETURN/tail dispatch. A deferred value left
 // undetached would keep pointing at a slot whose content (or existence) no
 // longer matches what it observed.
-func (l lowerer) detach(ctx *lowering, b jit.Backing, slot int) bool {
+func (m machine) detach(ctx *lowering, b jit.Backing, slot int) bool {
 	for i := range ctx.values {
 		v := &ctx.values[i]
 		if v.kind == types.KindRef && v.backing == b && v.slot == slot {
-			if _, ok := l.own(ctx, v); !ok {
+			if _, ok := m.own(ctx, v); !ok {
 				return false
 			}
 		}
@@ -211,11 +211,11 @@ func (l lowerer) detach(ctx *lowering, b jit.Backing, slot int) bool {
 // ownRefs transfers every live deferred ref onto the operand stack. Calls use
 // this ownership barrier before handing flushed state to another execution
 // context that may release or mutate the backing storage.
-func (l lowerer) ownRefs(ctx *lowering) bool {
+func (m machine) ownRefs(ctx *lowering) bool {
 	for i := range ctx.values {
 		v := &ctx.values[i]
 		if v.kind == types.KindRef && v.backing != jit.BackingStack {
-			if _, ok := l.own(ctx, v); !ok {
+			if _, ok := m.own(ctx, v); !ok {
 				return false
 			}
 		}
@@ -228,8 +228,8 @@ func (l lowerer) ownRefs(ctx *lowering) bool {
 // operand stack and marks v owned. Callers pass a pointer into ctx.values (or
 // other frame-owned storage) so a later exit snapshot never also stub-retains
 // the same transfer.
-func (l lowerer) own(ctx *lowering, v *value) (asm.VReg, bool) {
-	reg, ok := l.box(ctx, *v)
+func (m machine) own(ctx *lowering, v *value) (asm.VReg, bool) {
+	reg, ok := m.box(ctx, *v)
 	if !ok {
 		return asm.VReg{}, false
 	}
@@ -237,12 +237,12 @@ func (l lowerer) own(ctx *lowering, v *value) (asm.VReg, bool) {
 		return reg, true
 	}
 	if v.backing == jit.BackingConst {
-		l.retain(ctx, v.ref)
+		m.retain(ctx, v.ref)
 		v.reg = reg
 	} else {
 		addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.ANDI(addr, reg, maskI32))
-		l.retainRef(ctx, addr)
+		m.retainRef(ctx, addr)
 	}
 	v.backing = jit.BackingStack
 	return reg, true
@@ -252,7 +252,7 @@ func (l lowerer) own(ctx *lowering, v *value) (asm.VReg, bool) {
 // It takes no reference-count action: a jit.BackingConst ref materializes its
 // compile-time constant with no retain, and every other ref (jit.BackingStack or
 // deferred to slot-backed storage) is already boxed in v.reg.
-func (l lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
+func (m machine) box(ctx *lowering, v value) (asm.VReg, bool) {
 	a := ctx.assembler
 	switch v.kind {
 	case types.KindI32:
@@ -309,7 +309,7 @@ func (l lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
 }
 
 // retain bumps the refcount of the heap cell at compile-time address fn.
-func (l lowerer) retain(ctx *lowering, fn int) {
+func (m machine) retain(ctx *lowering, fn int) {
 	a := ctx.assembler
 	base := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journal.CellRC*8)))
@@ -322,14 +322,14 @@ func (l lowerer) retain(ctx *lowering, fn int) {
 }
 
 // guardRC keeps releases that could free objects in the interpreter.
-func (l lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
+func (m machine) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
 	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	a := ctx.assembler
 	a.Emit(arm64.LDRR(rc, rcBase, addr), arm64.CMPI(rc, 1), arm64.BCondLabel(arm64.OpBLE, fail))
 	return rc
 }
 
-func (l lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
+func (m machine) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
 	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
 	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -346,7 +346,7 @@ func (l lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
 	ctx.assembler.Bind(done)
 }
 
-func (l lowerer) rcBase(ctx *lowering) asm.VReg {
+func (m machine) rcBase(ctx *lowering) asm.VReg {
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journal.CellRC*8)))
 	return base

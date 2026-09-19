@@ -23,7 +23,7 @@ const (
 	errorValue  = types.ErrorValueOffset
 )
 
-func (l lowerer) arrayGetKnown(ctx *lowering, op jit.Step) bool {
+func (m machine) arrayGetKnown(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 {
 		return false
 	}
@@ -39,10 +39,10 @@ func (l lowerer) arrayGetKnown(ctx *lowering, op jit.Step) bool {
 	kind, want, scale := shape.Kind, shape.Itab, shape.Scale
 
 	pre := ctx.pre()
-	if !l.flush(ctx, flushSnapshot) {
+	if !m.flush(ctx, flushSnapshot) {
 		return false
 	}
-	l.clearLocals(ctx)
+	m.clearLocals(ctx)
 	fail := ctx.queueExit(nil, op.IP, prof.ExitGuardValue, int(op.Op))
 
 	a := ctx.assembler
@@ -56,11 +56,11 @@ func (l lowerer) arrayGetKnown(ctx *lowering, op jit.Step) bool {
 	actual := a.Reg(asm.RegTypeInt, asm.Width64)
 	data := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(actual, cell, 0), arm64.LDR(data, cell, 8))
-	l.guardItab(ctx, actual, want, fail)
+	m.guardItab(ctx, actual, want, fail)
 
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
-	dataPtr, n := l.sliceHeader(ctx, data, 0)
-	l.guardIndex(ctx, idx, n, fail)
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	dataPtr, n := m.sliceHeader(ctx, data, 0)
+	m.guardIndex(ctx, idx, n, fail)
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	switch kind {
 	case types.KindI1:
@@ -90,7 +90,7 @@ func (l lowerer) arrayGetKnown(ctx *lowering, op jit.Step) bool {
 	return true
 }
 
-func (l lowerer) refGet(ctx *lowering, op jit.Step) bool {
+func (m machine) refGet(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
@@ -113,16 +113,16 @@ func (l lowerer) refGet(ctx *lowering, op jit.Step) bool {
 	}
 	owned := ctx.values[len(ctx.values)-1].backing == jit.BackingStack
 	pre := ctx.pre()
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := m.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, op.Shape.Itab, fail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, op.Shape.Itab, fail)
 
 	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	if kind == types.KindF64 {
@@ -131,7 +131,7 @@ func (l lowerer) refGet(ctx *lowering, op jit.Step) bool {
 		ctx.assembler.Emit(arm64.LDRSW(result, data, 0))
 	}
 	if owned {
-		l.releaseRef(ctx, addr, pre, op.IP)
+		m.releaseRef(ctx, addr, pre, op.IP)
 	}
 	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: result, kind: kind, raw: true})
 	return true
@@ -143,35 +143,35 @@ func (l lowerer) refGet(ctx *lowering, op jit.Step) bool {
 // the opcode's target concrete type is always types.String, so there is no
 // shape to pick among; guardItab below is the only check needed and it deopts
 // at runtime instead of aborting the lowering at trace-build time.
-func (l lowerer) stringLen(ctx *lowering, op jit.Step) bool {
+func (m machine) stringLen(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
 	owned := ctx.values[len(ctx.values)-1].backing == jit.BackingStack
 	pre := ctx.pre()
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := m.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, jit.HeapString, fail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, jit.HeapString, fail)
 
 	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(n, data, sliceLen))
 	ctx.assembler.Emit(arm64.MOV(result, n))
 	if owned {
-		l.releaseRef(ctx, addr, pre, op.IP)
+		m.releaseRef(ctx, addr, pre, op.IP)
 	}
 	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: result, kind: types.KindI32, raw: true})
 	return true
 }
 
-func (l lowerer) arrayLen(ctx *lowering, op jit.Step) bool {
+func (m machine) arrayLen(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
@@ -182,29 +182,29 @@ func (l lowerer) arrayLen(ctx *lowering, op jit.Step) bool {
 	base := shape.Base
 	owned := ctx.values[len(ctx.values)-1].backing == jit.BackingStack
 	pre := ctx.pre()
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := m.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, op.Shape.Itab, fail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, op.Shape.Itab, fail)
 
 	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(n, data, base+sliceLen))
 	ctx.assembler.Emit(arm64.MOV(result, n))
 	if owned {
-		l.releaseRef(ctx, addr, pre, op.IP)
+		m.releaseRef(ctx, addr, pre, op.IP)
 	}
 	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: result, kind: types.KindI32, raw: true})
 	return true
 }
 
-func (l lowerer) arrayGet(ctx *lowering, op jit.Step) bool {
+func (m machine) arrayGet(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 || ctx.values[len(ctx.values)-2].kind != types.KindRef {
 		return false
 	}
@@ -221,15 +221,15 @@ func (l lowerer) arrayGet(ctx *lowering, op jit.Step) bool {
 	owned := container.backing == jit.BackingStack
 	hoisted := ctx.hoist.live && container.backing == jit.BackingLocal && container.slot == ctx.hoist.slot && want == ctx.hoist.want
 	pre := ctx.pre()
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	a := ctx.assembler
-	bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+	bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 	if !ok {
 		return false
 	}
 	var fail, valueFail asm.Label
 	if !hoisted || kind == types.KindI64 {
-		valueFail, ok = l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+		valueFail, ok = m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 		if !ok {
 			return false
 		}
@@ -238,20 +238,20 @@ func (l lowerer) arrayGet(ctx *lowering, op jit.Step) bool {
 	if hoisted {
 		dataPtr, n = ctx.hoist.dataPtr, ctx.hoist.n
 	} else {
-		fail, ok = l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+		fail, ok = m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 		if !ok {
 			return false
 		}
-		ref, ok := l.box(ctx, container)
+		ref, ok := m.box(ctx, container)
 		if !ok {
 			return false
 		}
 		var itab, data asm.VReg
-		addr, itab, data = l.guardHeap(ctx, ref, fail)
-		l.guardItab(ctx, itab, want, fail)
-		dataPtr, n = l.sliceHeader(ctx, data, base)
+		addr, itab, data = m.guardHeap(ctx, ref, fail)
+		m.guardItab(ctx, itab, want, fail)
+		dataPtr, n = m.sliceHeader(ctx, data, base)
 	}
-	l.guardIndex(ctx, idx, n, bounds)
+	m.guardIndex(ctx, idx, n, bounds)
 
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	switch kind {
@@ -283,22 +283,22 @@ func (l lowerer) arrayGet(ctx *lowering, op jit.Step) bool {
 		}
 	}
 	if kind == types.KindI64 {
-		l.guardBoxable(ctx, result, valueFail)
+		m.guardBoxable(ctx, result, valueFail)
 	}
 	if owned {
-		rcBase := l.rcBase(ctx)
-		rc := l.guardRC(ctx, addr, rcBase, valueFail)
+		rcBase := m.rcBase(ctx)
+		rc := m.guardRC(ctx, addr, rcBase, valueFail)
 		a.Emit(arm64.SUBI(rc, rc, 1))
 		a.Emit(arm64.STRR(rc, rcBase, addr))
 	}
 	if kind == types.KindRef {
-		l.retainBox(ctx, result)
+		m.retainBox(ctx, result)
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: raw})
 	return true
 }
 
-func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
+func (m machine) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false, false
 	}
@@ -315,15 +315,15 @@ func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
 	a := ctx.assembler
 	if ctx.hoist.live && kind != types.KindRef && !op.Terminal &&
 		container.backing == jit.BackingLocal && container.slot == ctx.hoist.slot && want == ctx.hoist.want {
-		bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+		bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 		if !ok {
 			return false, false
 		}
-		l.guardIndex(ctx, idx, ctx.hoist.n, bounds)
+		m.guardIndex(ctx, idx, ctx.hoist.n, bounds)
 		switch kind {
 		case types.KindI1, types.KindI8:
 			target := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -340,36 +340,36 @@ func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 		ctx.values = ctx.values[:len(ctx.values)-3]
 		return true, op.Terminal
 	}
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+	bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+	valueFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	ref, ok := l.box(ctx, container)
+	ref, ok := m.box(ctx, container)
 	if !ok {
 		return false, false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, want, fail)
-	dataPtr, n := l.sliceHeader(ctx, data, base)
-	l.guardIndex(ctx, idx, n, bounds)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, want, fail)
+	dataPtr, n := m.sliceHeader(ctx, data, base)
+	m.guardIndex(ctx, idx, n, bounds)
 	var rcBase, rc asm.VReg
 	if owned {
-		rcBase = l.rcBase(ctx)
-		rc = l.guardRC(ctx, addr, rcBase, valueFail)
+		rcBase = m.rcBase(ctx)
+		rc = m.guardRC(ctx, addr, rcBase, valueFail)
 	}
 	if kind == types.KindRef {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
-		l.releaseBox(ctx, old, pre, op.IP)
-		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
+		m.releaseBox(ctx, old, pre, op.IP)
+		if _, ok := m.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false, false
 		}
 		if owned {
@@ -394,17 +394,17 @@ func (l lowerer) arraySet(ctx *lowering, op jit.Step) (bool, bool) {
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
 	if op.Terminal {
-		return l.exit(ctx, op.IP+1, prof.ExitTerminalOp, int(op.Op)), true
+		return m.exit(ctx, op.IP+1, prof.ExitTerminalOp, int(op.Op)), true
 	}
 	return true, false
 }
 
-func (l lowerer) structGet(ctx *lowering, op jit.Step) bool {
+func (m machine) structGet(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 || ctx.values[len(ctx.values)-2].kind != types.KindRef {
 		return false
 	}
 	if op.Shape.Itab == ctx.layout.HostStructItab {
-		return l.hostGet(ctx, op)
+		return m.hostGet(ctx, op)
 	}
 	out := op.Seen.Kind()
 	switch out {
@@ -417,30 +417,30 @@ func (l lowerer) structGet(ctx *lowering, op jit.Step) bool {
 	}
 	owned := ctx.values[len(ctx.values)-2].backing == jit.BackingStack
 	pre := ctx.pre()
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	ref, ok := m.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
 	}
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+	bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 	if !ok {
 		return false
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+	valueFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 	if !ok {
 		return false
 	}
-	kindFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
+	kindFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, jit.HeapStruct, fail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, jit.HeapStruct, fail)
 
 	typ := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
@@ -450,8 +450,8 @@ func (l lowerer) structGet(ctx *lowering, op jit.Step) bool {
 		a.Emit(arm64.CMP(typ, want))
 		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	}
-	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
-	l.guardIndex(ctx, idx, n, bounds)
+	fields, n := m.sliceHeader(ctx, typ, int16(fieldsSlice))
+	m.guardIndex(ctx, idx, n, bounds)
 
 	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
@@ -463,22 +463,22 @@ func (l lowerer) structGet(ctx *lowering, op jit.Step) bool {
 	a.Emit(arm64.CMPI(fieldKindReg, uint16(out)))
 	a.Emit(arm64.BCondLabel(arm64.OpBNE, kindFail))
 
-	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
+	dataPtr, _ := m.sliceHeader(ctx, data, int16(structData))
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDRR(result, dataPtr, idx))
 	if out == types.KindI64 {
-		l.guardBoxable(ctx, result, valueFail)
+		m.guardBoxable(ctx, result, valueFail)
 	}
 	if owned {
-		rcBase := l.rcBase(ctx)
-		rc := l.guardRC(ctx, addr, rcBase, valueFail)
+		rcBase := m.rcBase(ctx)
+		rc := m.guardRC(ctx, addr, rcBase, valueFail)
 		if out == types.KindRef {
-			l.retainBox(ctx, result)
+			m.retainBox(ctx, result)
 		}
 		a.Emit(arm64.SUBI(rc, rc, 1))
 		a.Emit(arm64.STRR(rc, rcBase, addr))
 	} else if out == types.KindRef {
-		l.retainBox(ctx, result)
+		m.retainBox(ctx, result)
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
 	return true
@@ -489,10 +489,10 @@ func (l lowerer) structGet(ctx *lowering, op jit.Step) bool {
 // struct. The index is bounds-guarded against the layout the view carries and
 // the field's Go kind is guarded against the one the trace recorded, so the
 // caller's load or store is the one that kind compiled to.
-func (l lowerer) hostEntry(ctx *lowering, data, idx asm.VReg, kind reflect.Kind, bounds, kindFail asm.Label) asm.VReg {
+func (m machine) hostEntry(ctx *lowering, data, idx asm.VReg, kind reflect.Kind, bounds, kindFail asm.Label) asm.VReg {
 	a := ctx.assembler
-	fields, n := l.sliceHeader(ctx, data, int16(ctx.layout.HostFields))
-	l.guardIndex(ctx, idx, n, bounds)
+	fields, n := m.sliceHeader(ctx, data, int16(ctx.layout.HostFields))
+	m.guardIndex(ctx, idx, n, bounds)
 
 	stride := a.Reg(asm.RegTypeInt, asm.Width64)
 	entry := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -514,7 +514,7 @@ func (l lowerer) hostEntry(ctx *lowering, data, idx asm.VReg, kind reflect.Kind,
 // hostLoad reads size bytes at target into an integer register, extending them
 // as signed says, which leaves the register holding what a VM slot of that
 // field's kind holds raw. hostGet settles which widths reach here.
-func (l lowerer) hostLoad(ctx *lowering, size uintptr, signed bool, target asm.VReg) asm.VReg {
+func (m machine) hostLoad(ctx *lowering, size uintptr, signed bool, target asm.VReg) asm.VReg {
 	a := ctx.assembler
 	out := a.Reg(asm.RegTypeInt, asm.Width64)
 	switch {
@@ -538,7 +538,7 @@ func (l lowerer) hostLoad(ctx *lowering, size uintptr, signed bool, target asm.V
 // hostGet lowers STRUCT_GET against a *HostStruct. A host field holds Go memory
 // rather than a VM word, so the read loads that memory in the form the field's
 // conversion produces instead of reading a struct data slot.
-func (l lowerer) hostGet(ctx *lowering, op jit.Step) bool {
+func (m machine) hostGet(ctx *lowering, op jit.Step) bool {
 	s, ok := jit.HostShapeByKind(op.Shape.Field)
 	if !ok || s.Kind != op.Seen.Kind() {
 		return false
@@ -547,38 +547,38 @@ func (l lowerer) hostGet(ctx *lowering, op jit.Step) bool {
 	container := ctx.values[len(ctx.values)-2]
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
-	ref, ok := l.box(ctx, container)
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	ref, ok := m.box(ctx, container)
 	if !ok {
 		return false
 	}
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+	bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 	if !ok {
 		return false
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+	valueFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 	if !ok {
 		return false
 	}
-	kindFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
+	kindFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, ctx.layout.HostStructItab, fail)
-	target := l.hostEntry(ctx, data, idx, op.Shape.Field, bounds, kindFail)
-	result := l.hostLoad(ctx, size, signed, target)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, ctx.layout.HostStructItab, fail)
+	target := m.hostEntry(ctx, data, idx, op.Shape.Field, bounds, kindFail)
+	result := m.hostLoad(ctx, size, signed, target)
 	if s.Kind == types.KindI64 {
-		l.guardBoxable(ctx, result, valueFail)
+		m.guardBoxable(ctx, result, valueFail)
 	}
 	if owned {
-		rcBase := l.rcBase(ctx)
-		rc := l.guardRC(ctx, addr, rcBase, valueFail)
+		rcBase := m.rcBase(ctx)
+		rc := m.guardRC(ctx, addr, rcBase, valueFail)
 		a.Emit(arm64.SUBI(rc, rc, 1), arm64.STRR(rc, rcBase, addr))
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: s.Kind, raw: true})
@@ -589,7 +589,7 @@ func (l lowerer) hostGet(ctx *lowering, op jit.Step) bool {
 // is the exact image of its VM slot, because every other field decodes through
 // the range check setSigned and setUnsigned perform, and a check that can fail
 // belongs with the interpreter that reports it.
-func (l lowerer) hostSet(ctx *lowering, op jit.Step) (bool, bool) {
+func (m machine) hostSet(ctx *lowering, op jit.Step) (bool, bool) {
 	s, ok := jit.HostShapeByKind(op.Shape.Field)
 	if !ok || !s.Exact() || s.Kind != ctx.values[len(ctx.values)-1].kind {
 		return false, false
@@ -598,34 +598,34 @@ func (l lowerer) hostSet(ctx *lowering, op jit.Step) (bool, bool) {
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
-	ref, ok := l.box(ctx, container)
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
+	ref, ok := m.box(ctx, container)
 	if !ok {
 		return false, false
 	}
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+	bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+	valueFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	kindFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
+	kindFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, ctx.layout.HostStructItab, fail)
-	target := l.hostEntry(ctx, data, idx, op.Shape.Field, bounds, kindFail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, ctx.layout.HostStructItab, fail)
+	target := m.hostEntry(ctx, data, idx, op.Shape.Field, bounds, kindFail)
 	if owned {
-		rcBase := l.rcBase(ctx)
-		rc := l.guardRC(ctx, addr, rcBase, valueFail)
+		rcBase := m.rcBase(ctx)
+		rc := m.guardRC(ctx, addr, rcBase, valueFail)
 		a.Emit(arm64.SUBI(rc, rc, 1), arm64.STRR(rc, rcBase, addr))
 	}
 	// exact leaves three widths, so the store is total over them.
@@ -639,24 +639,24 @@ func (l lowerer) hostSet(ctx *lowering, op jit.Step) (bool, bool) {
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
 	if op.Terminal {
-		return l.exit(ctx, op.IP+1, prof.ExitTerminalOp, int(op.Op)), true
+		return m.exit(ctx, op.IP+1, prof.ExitTerminalOp, int(op.Op)), true
 	}
 	return true, false
 }
 
-func (l lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
+func (m machine) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
 	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.SBFX(ext, v, 0, boxableWidth))
 	ctx.assembler.Emit(arm64.CMP(ext, v))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 }
 
-func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
+func (m machine) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false, false
 	}
 	if op.Shape.Itab == ctx.layout.HostStructItab {
-		return l.hostSet(ctx, op)
+		return m.hostSet(ctx, op)
 	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	switch kind {
@@ -671,30 +671,30 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 	owned := container.backing == jit.BackingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
-	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
-	ref, ok := l.box(ctx, container)
+	idx := m.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
+	ref, ok := m.box(ctx, container)
 	if !ok {
 		return false, false
 	}
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
+	bounds, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardBounds, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
+	valueFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardValue, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	kindFail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
+	kindFail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardKind, int(op.Op))
 	if !ok {
 		return false, false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, jit.HeapStruct, fail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, jit.HeapStruct, fail)
 	typ := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
 	if op.Shape.Typ != 0 {
@@ -702,8 +702,8 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 		a.Emit(arm64.LDI(want, uint64(op.Shape.Typ))...)
 		a.Emit(arm64.CMP(typ, want), arm64.BCondLabel(arm64.OpBNE, fail))
 	}
-	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
-	l.guardIndex(ctx, idx, n, bounds)
+	fields, n := m.sliceHeader(ctx, typ, int16(fieldsSlice))
+	m.guardIndex(ctx, idx, n, bounds)
 	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
 	field := a.Reg(asm.RegTypeInt, asm.Width64)
 	fieldKindReg := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -711,15 +711,15 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 	a.Emit(arm64.MUL(fieldOff, idx, fieldOff), arm64.ADD(field, fields, fieldOff), arm64.LDRB(fieldKindReg, field, int16(fieldKind)), arm64.CMPI(fieldKindReg, uint16(kind)), arm64.BCondLabel(arm64.OpBNE, kindFail))
 	var rcBase, rc asm.VReg
 	if owned {
-		rcBase = l.rcBase(ctx)
-		rc = l.guardRC(ctx, addr, rcBase, valueFail)
+		rcBase = m.rcBase(ctx)
+		rc = m.guardRC(ctx, addr, rcBase, valueFail)
 	}
-	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
+	dataPtr, _ := m.sliceHeader(ctx, data, int16(structData))
 	if kind == types.KindRef {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
-		l.releaseBox(ctx, old, pre, op.IP)
-		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
+		m.releaseBox(ctx, old, pre, op.IP)
+		if _, ok := m.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false, false
 		}
 		if owned {
@@ -742,7 +742,7 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 	}
 	ctx.values = ctx.values[:len(ctx.values)-3]
 	if op.Terminal {
-		return l.exit(ctx, op.IP+1, prof.ExitTerminalOp, int(op.Op)), true
+		return m.exit(ctx, op.IP+1, prof.ExitTerminalOp, int(op.Op)), true
 	}
 	return true, false
 }
@@ -755,7 +755,7 @@ func (l lowerer) structSet(ctx *lowering, op jit.Step) (bool, bool) {
 // The exclusive-owner guard on the ref case exists only to protect a
 // release-triggered free: with no release to follow, the container cannot
 // reach zero here, so a borrowed handle skips it.
-func (l lowerer) payloadGet(ctx *lowering, op jit.Step, want uintptr, offset int16) bool {
+func (m machine) payloadGet(ctx *lowering, op jit.Step, want uintptr, offset int16) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
@@ -764,54 +764,54 @@ func (l lowerer) payloadGet(ctx *lowering, op jit.Step, want uintptr, offset int
 	}
 	owned := ctx.values[len(ctx.values)-1].backing == jit.BackingStack
 	pre := ctx.pre()
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := m.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, want, fail)
+	addr, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, want, fail)
 
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(dst, data, offset))
 	kind := op.Seen.Kind()
 	switch kind {
 	case types.KindI64:
-		if !l.guardI64(ctx, dst, op.IP) {
+		if !m.guardI64(ctx, dst, op.IP) {
 			return false
 		}
-		dst = l.sign64(ctx, dst)
+		dst = m.sign64(ctx, dst)
 		if owned {
-			l.releaseRef(ctx, addr, pre, op.IP)
+			m.releaseRef(ctx, addr, pre, op.IP)
 		}
 		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
 	case types.KindRef:
 		if !owned {
-			l.retainBox(ctx, dst)
+			m.retainBox(ctx, dst)
 			ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
 			break
 		}
-		base := l.rcBase(ctx)
+		base := m.rcBase(ctx)
 		rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
 		ctx.assembler.Emit(arm64.CMPI(rc, 1))
 		shared := ctx.assembler.Label()
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGT, shared))
 		ctx.values = append(ctx.values[:0], pre...)
-		if !l.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
+		if !m.exit(ctx, op.IP, prof.ExitTerminalOp, int(op.Op)) {
 			return false
 		}
 		ctx.assembler.Bind(shared)
 		ctx.values = append(ctx.values[:0], pre...)
-		l.retainBox(ctx, dst)
-		l.releaseRef(ctx, addr, pre, op.IP)
+		m.retainBox(ctx, dst)
+		m.releaseRef(ctx, addr, pre, op.IP)
 		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
 	case types.KindI32, types.KindF32, types.KindF64:
 		if owned {
-			l.releaseRef(ctx, addr, pre, op.IP)
+			m.releaseRef(ctx, addr, pre, op.IP)
 		}
 		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
 	default:
@@ -820,15 +820,15 @@ func (l lowerer) payloadGet(ctx *lowering, op jit.Step, want uintptr, offset int
 	return true
 }
 
-func (l lowerer) errorGet(ctx *lowering, op jit.Step) bool {
-	return l.payloadGet(ctx, op, jit.HeapError, int16(errorValue))
+func (m machine) errorGet(ctx *lowering, op jit.Step) bool {
+	return m.payloadGet(ctx, op, jit.HeapError, int16(errorValue))
 }
 
 // coroDone reads a coroutine handle's done flag and pushes it as an i32 (0 or
 // 1). It mirrors the threaded handler: the handle ref stays owned by its stack
 // slot, so no refcount changes. A constant coroutine handle is impossible, so
 // a raw (unboxed constant) ref is rejected to avoid a retain side effect.
-func (l lowerer) coroDone(ctx *lowering, op jit.Step) bool {
+func (m machine) coroDone(ctx *lowering, op jit.Step) bool {
 	if ctx.count() < 1 {
 		return false
 	}
@@ -840,16 +840,16 @@ func (l lowerer) coroDone(ctx *lowering, op jit.Step) bool {
 		return false
 	}
 	pre := ctx.pre()
-	ref, ok := l.box(ctx, v)
+	ref, ok := m.box(ctx, v)
 	if !ok {
 		return false
 	}
-	fail, ok := l.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
+	fail, ok := m.sideExit(ctx, pre, op.IP, prof.ExitGuardShape, int(op.Op))
 	if !ok {
 		return false
 	}
-	_, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, ctx.layout.CoroutineItab, fail)
+	_, itab, data := m.guardHeap(ctx, ref, fail)
+	m.guardItab(ctx, itab, ctx.layout.CoroutineItab, fail)
 
 	done := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDRB(done, data, int16(ctx.layout.CoroutineDone)))
@@ -861,14 +861,14 @@ func (l lowerer) coroDone(ctx *lowering, op jit.Step) bool {
 // mirrors the threaded handler: retain the value, then release the handle.
 // The stored field is a full Boxed, so its representation matches a global
 // slot (see globalGet) — scalars push raw, refs stay boxed.
-func (l lowerer) coroValue(ctx *lowering, op jit.Step) bool {
-	return l.payloadGet(ctx, op, ctx.layout.CoroutineItab, int16(ctx.layout.CoroutineValue))
+func (m machine) coroValue(ctx *lowering, op jit.Step) bool {
+	return m.payloadGet(ctx, op, ctx.layout.CoroutineItab, int16(ctx.layout.CoroutineValue))
 }
 
 // guardHeap loads a heap cell or branches to fail on a non-ref tag. Unlike
 // it preserves ref because queued side exits may still need the boxed
 // operand.
-func (lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
+func (machine) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
 	tag := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
@@ -894,7 +894,7 @@ func (lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg,
 	return addr, itab, data
 }
 
-func (l lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
+func (m machine) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
 	ptr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(ptr, data, base+sliceData), arm64.LDR(n, data, base+sliceLen))
@@ -903,12 +903,12 @@ func (l lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg
 
 // guardIndex uses one unsigned check: sign-extended negative i32 indexes are
 // above any VM array or struct length.
-func (lowerer) guardIndex(ctx *lowering, idx, n asm.VReg, fail asm.Label) {
+func (machine) guardIndex(ctx *lowering, idx, n asm.VReg, fail asm.Label) {
 	ctx.assembler.Emit(arm64.CMP(idx, n))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCS, fail))
 }
 
-func (l lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
+func (m machine) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
 	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
 	ctx.assembler.Emit(arm64.CMP(got, v), arm64.BCondLabel(arm64.OpBNE, fail))

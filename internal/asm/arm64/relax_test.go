@@ -17,8 +17,7 @@ import (
 // replacement B would be out of range is rejected so Build falls back to
 // ErrBranchOutOfRange.
 func TestArch_Relax(t *testing.T) {
-	relaxer, ok := arm64.New().(asm.Relaxer)
-	require.True(t, ok)
+	relaxer := arm64.New()
 
 	label := asm.Label(7)
 	target := asm.LabelOperand{ID: label}

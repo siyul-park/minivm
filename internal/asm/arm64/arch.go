@@ -12,9 +12,9 @@ type arch struct {
 var _ asm.Arch = arch{}
 var _ asm.Relaxer = arch{}
 
-// New returns an asm.Arch targeting ARM64. The arch's encoder, ABI, and
-// frame are stateless singletons; allocate once per process.
-func New() asm.Arch {
+// New returns the ARM64 assembler architecture. The encoder, ABI, and frame
+// are stateless and reusable.
+func New() arch {
 	return arch{
 		registers: asm.NewRegInfo(
 			31, 32,
@@ -42,7 +42,14 @@ func New() asm.Arch {
 	}
 }
 
+// Registers returns the target register set.
 func (a arch) Registers() asm.RegInfo { return a.registers }
-func (a arch) Encoder() asm.Encoder   { return a.encoder }
-func (a arch) ABI() asm.ABI           { return a.abi }
-func (a arch) Frame() asm.Frame       { return a.frame }
+
+// Encoder returns the target instruction encoder.
+func (a arch) Encoder() asm.Encoder { return a.encoder }
+
+// ABI returns the target call-boundary policy.
+func (a arch) ABI() asm.ABI { return a.abi }
+
+// Frame returns the target spill-frame policy.
+func (a arch) Frame() asm.Frame { return a.frame }

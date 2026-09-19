@@ -1,7 +1,5 @@
-// Package arm64 is the ARM64 JIT backend: it lowers an architecture-neutral
-// compiler plan (internal/jit) into native ARM64 code through the
-// jit.Machine seam. New is the package's only exported symbol; every
-// lowering mechanic below it is package-private.
+// Package arm64 is the ARM64 JIT backend. Its machine implements the stable
+// jit.Machine contract and the backend.Machine lowering contract.
 package arm64
 
 import (
@@ -15,10 +13,10 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// lowerer is the AArch64 JIT lowerer. It owns the ARM64 scratch
-// registers used to pin the frame journal (see enter): the physical
-// registers a lowering context reaches through ctx.scratch.
-type lowerer struct {
+// machine is the ARM64 JIT target. It implements the stable jit.Machine
+// contract and the internal backend.Machine lowering contract. All target
+// state shared across compiles is the immutable scratch-register binding.
+type machine struct {
 	scratch []asm.PReg
 }
 
@@ -54,7 +52,7 @@ type lowering struct {
 	carried    []carriedLocal
 
 	// hoist caches one loop-invariant container's slice header, derived by a
-	// per-entry prologue (see lowerer.hoist). The registers are pure
+	// per-entry prologue (see machine.hoist). The registers are pure
 	// derived state: flush, snapshots, and reload never see them, and an
 	// access uses them only when its operand matches slot and want.
 	hoist struct {
@@ -100,7 +98,7 @@ const (
 
 // scratchStack..scratchCtrl index the physical registers a lowering context
 // pins the frame journal header into on external entry (see
-// lowerer.enter); scratchCount is their count.
+// machine.enter); scratchCount is their count.
 const (
 	scratchStack = iota
 	scratchGlobals
@@ -126,9 +124,61 @@ var (
 // plan into native ARM64 code. It is this package's only exported symbol;
 // the arch selector one level above (interp) picks it when the running
 // process is arm64 and hands it to jit.New alongside internal/asm/arm64's
-// own Arch.
-func New() jit.Machine {
-	return lowerer{scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14}}
+// concrete architecture.
+func New() machine {
+	return machine{scratch: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14}}
+}
+
+// Lowers reports whether this machine emits native code for code. It is the
+// opcode ratchet the port advances: a function holding an opcode missing here
+// is refused whole, and its root compiles through the plan pipeline.
+//
+// It restates the set exec has a rule for, because the seam asks the question
+// before anything is planned and no answer can come from emitting. The two
+// disagreeing costs a wasted compile rather than a wrong one: an opcode named
+// here that exec declines abandons the compile it had already begun, and one
+// exec handles but this refuses is simply never reached.
+func (m machine) Lowers(code instr.Opcode) bool {
+	switch code {
+	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL,
+		instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
+		instr.I32_AND, instr.I32_OR, instr.I32_XOR,
+		instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
+		instr.I32_EQZ, instr.I32_EQ, instr.I32_NE,
+		instr.I32_LT_S, instr.I32_LE_S, instr.I32_GT_S, instr.I32_GE_S,
+		instr.I32_LT_U, instr.I32_LE_U, instr.I32_GT_U, instr.I32_GE_U,
+		instr.I64_ADD, instr.I64_SUB, instr.I64_MUL,
+		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U,
+		instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQZ,
+		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LE_S,
+		instr.I64_GT_S, instr.I64_GE_S, instr.I64_LT_U, instr.I64_LE_U,
+		instr.I64_GT_U, instr.I64_GE_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
+		instr.I32_TO_I64_S, instr.I32_TO_I64_U,
+		instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV,
+		instr.F32_ABS, instr.F32_NEG, instr.F32_SQRT,
+		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_LE, instr.F32_GT, instr.F32_GE,
+		instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV,
+		instr.F64_ABS, instr.F64_NEG, instr.F64_SQRT,
+		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE,
+		instr.ARRAY_GET, instr.ARRAY_SET, instr.STRUCT_GET, instr.STRUCT_SET, instr.CALL:
+		return true
+	default:
+		return false
+	}
+}
+
+// Traps reports whether lowering code ends the block by handing control back.
+// Nothing this machine lowers does: an opcode it cannot compute it declines
+// outright rather than running as an exit, because an unconditional exit ends
+// the block, and every exit this machine emits is the cold path behind a
+// guard the hot path falls through.
+func (m machine) Traps(instr.Opcode) bool {
+	return false
+}
+
+// Open begins one compile.
+func (m machine) Open(c *backend.Compiler) backend.Lowering {
+	return &emitter{c: c, a: c.Asm(), scratch: m.scratch, seen: make([]bool, c.Func().Len())}
 }
 
 // push appends one operand to the symbolic stack.
@@ -255,7 +305,7 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 // the BL target for recursive trace calls — saves the link register. A
 // recursive self-call branches straight to head and never runs the dispatch,
 // because it always starts its callee at IP zero.
-func (l lowerer) enter(ctx *lowering) {
+func (m machine) enter(ctx *lowering) {
 	a := ctx.assembler
 	a.Emit(
 		arm64.MOV(ctx.scratch[scratchCtrl], arm64.X0),
@@ -265,23 +315,23 @@ func (l lowerer) enter(ctx *lowering) {
 	vCtrl := ctx.pin(scratchCtrl)
 	active := ctx.pinTo(arm64.X15)
 	a.Emit(arm64.LDR(active, vCtrl, int16(journal.CellActive*8)))
-	l.dispatch(ctx, vCtrl)
+	m.dispatch(ctx, vCtrl)
 	a.Bind(ctx.head)
-	l.zeroLocals(ctx)
+	m.zeroLocals(ctx)
 }
 
-func (l lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
+func (m machine) base(ctx *lowering, vStack asm.VReg) asm.VReg {
 	if ctx.leaf {
 		addr := ctx.pin(scratchSP)
-		l.baseTo(ctx, vStack, addr)
+		m.baseTo(ctx, vStack, addr)
 		return addr
 	}
 	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	l.baseTo(ctx, vStack, addr)
+	m.baseTo(ctx, vStack, addr)
 	return addr
 }
 
-func (l lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
+func (m machine) baseTo(ctx *lowering, vStack, addr asm.VReg) {
 	vBP := ctx.pin(scratchBP)
 	ctx.assembler.Emit(arm64.LSLI(addr, vBP, 3))
 	ctx.assembler.Emit(arm64.ADD(addr, vStack, addr))
@@ -291,11 +341,11 @@ func (l lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
 // this package's own machine. It is the seam the port advances behind: a root
 // holding anything that machine has not learned yet is declined here, and
 // jit.Compiler falls back to Lower's plan pipeline for it.
-func (l lowerer) Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (jit.Entry, bool) {
-	if len(l.scratch) < scratchCount {
+func (m machine) Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (jit.Entry, bool) {
+	if len(m.scratch) < scratchCount {
 		return jit.Entry{}, false
 	}
-	return backend.Root(machine{scratch: l.scratch[:scratchCount]}, a, input, root)
+	return backend.Root(m, a, input, root)
 }
 
 // Lower lowers plan p into a for one native entry, reporting the exits it
@@ -303,27 +353,27 @@ func (l lowerer) Compile(a *asm.Assembler, input *jit.Input, root jit.Anchor) (j
 // seam with the architecture-neutral compiler (see internal/jit/compiler.go):
 // the compiler picks the arch and builds a, and everything from here down is
 // ARM64 lowering state and mechanics.
-func (l lowerer) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
-	if len(l.scratch) < scratchCount {
+func (m machine) Lower(a *asm.Assembler, input *jit.Input, p jit.Plan, nativeLoop bool) ([]jit.Exit, bool) {
+	if len(m.scratch) < scratchCount {
 		return nil, false
 	}
-	ctx := l.newLowering(input, a)
+	ctx := m.newLowering(input, a)
 	ctx.nativeLoop = nativeLoop
-	if !l.lower(ctx, p) {
+	if !m.lower(ctx, p) {
 		return nil, false
 	}
 	return append([]jit.Exit(nil), ctx.exits...), true
 }
 
 // newLowering builds the lowering context one plan is emitted through.
-func (l lowerer) newLowering(input *jit.Input, a *asm.Assembler) *lowering {
+func (m machine) newLowering(input *jit.Input, a *asm.Assembler) *lowering {
 	ctx := &lowering{
 		assembler: a,
 		labels:    map[int]asm.Label{},
 		constants: input.Constants,
 		globals:   input.Globals,
 		objects:   input.Objects,
-		scratch:   l.scratch[:scratchCount],
+		scratch:   m.scratch[:scratchCount],
 		layout:    input.Layout,
 		head:      a.Label(),
 		addr:      input.Address,
@@ -337,7 +387,7 @@ func (l lowerer) newLowering(input *jit.Input, a *asm.Assembler) *lowering {
 }
 
 // lower emits one plan through the common block pipeline.
-func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
+func (m machine) lower(ctx *lowering, plan jit.Plan) bool {
 	ctx.leaf = true
 	for _, block := range plan.Blocks {
 		for _, step := range block.Steps {
@@ -347,7 +397,7 @@ func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
 		}
 	}
 	// blocks, kind, and labels must exist before enter, because enter's entry
-	// dispatch (see lowerer.dispatch) branches to a bridge block's label
+	// dispatch (see machine.dispatch) branches to a bridge block's label
 	// on external re-entry.
 	ctx.blocks = plan.Blocks
 	ctx.kind = plan.Kind
@@ -356,7 +406,7 @@ func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
 			ctx.labels[id] = ctx.assembler.Label()
 		}
 	}
-	l.enter(ctx)
+	m.enter(ctx)
 	root := plan.Root
 	ctx.loopRoot = root
 	if _, ok := ctx.labels[root]; !ok {
@@ -367,14 +417,14 @@ func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
 		ctx.budget = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journal.CellBudget*8)))
 	}
-	if len(plan.Carried) > 0 && !l.carry(ctx, plan.Carried, plan.Anchor.IP) {
+	if len(plan.Carried) > 0 && !m.carry(ctx, plan.Carried, plan.Anchor.IP) {
 		return false
 	}
-	if plan.Kind == jit.EntryLoop && plan.Hoist != nil && !l.hoist(ctx, *plan.Hoist, plan.Anchor.IP) {
+	if plan.Kind == jit.EntryLoop && plan.Hoist != nil && !m.hoist(ctx, *plan.Hoist, plan.Anchor.IP) {
 		return false
 	}
 	ctx.assembler.Bind(ctx.back)
-	if !l.emitBlock(ctx, root, nil) {
+	if !m.emitBlock(ctx, root, nil) {
 		return false
 	}
 	for id, block := range ctx.blocks {
@@ -382,7 +432,7 @@ func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
 			continue
 		}
 		ctx.assembler.Bind(ctx.labels[id])
-		if !l.emitBlock(ctx, id, nil) {
+		if !m.emitBlock(ctx, id, nil) {
 			return false
 		}
 	}
@@ -391,11 +441,11 @@ func (l lowerer) lower(ctx *lowering, plan jit.Plan) bool {
 		ctx.values = work.values
 		ctx.frames = work.frames
 		ctx.assembler.Bind(work.label)
-		l.clearLocals(ctx)
-		l.reload(ctx)
-		if !l.emitBlock(ctx, work.block, work.tail) {
+		m.clearLocals(ctx)
+		m.reload(ctx)
+		if !m.emitBlock(ctx, work.block, work.tail) {
 			return false
 		}
 	}
-	return l.emitExits(ctx)
+	return m.emitExits(ctx)
 }

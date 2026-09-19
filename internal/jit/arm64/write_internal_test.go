@@ -17,6 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func testInput(fn *types.Function) *jit.Input {
+	return &jit.Input{Address: 1, Function: fn, Objects: jit.Objects{1: {Fn: fn}}}
+}
+
 func vreg(id int32) asm.VReg     { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
 func narrow(id int32) asm.VReg   { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
 func tag(kind types.Kind) uint16 { return uint16(types.Tag(kind) >> 48) }
@@ -84,7 +88,7 @@ func TestEmitter_Write(t *testing.T) {
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
 
 		a := asm.New(asmarm64.New())
-		_, ok := backend.Compile(testMachine(), a, in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), a, in, jit.Anchor{Addr: 1}, fn)
 		require.True(t, ok)
 
 		want := slices.Concat(
@@ -135,14 +139,14 @@ func TestEmitter_Write(t *testing.T) {
 		require.True(t, ok)
 		fn := heapSetFn(instr.ARRAY_SET, ssa.Shape{Itab: elem.Itab}, types.BoxRef(2), types.BoxRef(3), ssa.TypeRef)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
-		_, ok = backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok = backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 
 	t.Run("declines a guard shape no element row recognizes", func(t *testing.T) {
 		fn := heapSetFn(instr.ARRAY_SET, ssa.Shape{Itab: jit.HeapStruct}, types.BoxRef(2), types.BoxI32(9), ssa.TypeI32)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
-		_, ok := backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 
@@ -167,7 +171,7 @@ func TestEmitter_Write(t *testing.T) {
 			fn := heapSetFn(instr.ARRAY_SET, ssa.Shape{Itab: elem.Itab}, types.BoxRef(2), tt.val, tt.valTyp)
 			in := testInput(&types.Function{Typ: &types.FunctionType{}})
 			a := asm.New(asmarm64.New())
-			_, ok = backend.Compile(testMachine(), a, in, jit.Anchor{Addr: 1}, fn)
+			_, ok = backend.Compile(New(), a, in, jit.Anchor{Addr: 1}, fn)
 			require.True(t, ok)
 			code, err := a.Build()
 			require.NoError(t, err)
@@ -201,7 +205,7 @@ func TestEmitter_StructWrite(t *testing.T) {
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
 
 		a := asm.New(asmarm64.New())
-		_, ok := backend.Compile(testMachine(), a, in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), a, in, jit.Anchor{Addr: 1}, fn)
 		require.True(t, ok)
 
 		want := slices.Concat(
@@ -259,7 +263,7 @@ func TestEmitter_StructWrite(t *testing.T) {
 	t.Run("declines a reference-typed field", func(t *testing.T) {
 		fn := heapSetFn(instr.STRUCT_SET, ssa.Shape{Itab: jit.HeapStruct}, types.BoxRef(2), types.BoxRef(3), ssa.TypeRef)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
-		_, ok := backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 
@@ -268,7 +272,7 @@ func TestEmitter_StructWrite(t *testing.T) {
 		require.True(t, ok)
 		fn := heapSetFn(instr.STRUCT_SET, ssa.Shape{Itab: elem.Itab}, types.BoxRef(2), types.BoxI32(9), ssa.TypeI32)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
-		_, ok = backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok = backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 }
@@ -306,7 +310,7 @@ func TestEmitter_HostWrite(t *testing.T) {
 		in.Layout = layout
 
 		a := asm.New(asmarm64.New())
-		_, ok := backend.Compile(testMachine(), a, in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), a, in, jit.Anchor{Addr: 1}, fn)
 		require.True(t, ok)
 
 		code, err := a.Build()
@@ -318,7 +322,7 @@ func TestEmitter_HostWrite(t *testing.T) {
 		fn := heapSetFn(instr.STRUCT_SET, ssa.Shape{Itab: layout.HostStructItab, Host: reflect.Int16}, types.BoxRef(2), types.BoxI32(9), ssa.TypeI32)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
 		in.Layout = layout
-		_, ok := backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 
@@ -326,7 +330,7 @@ func TestEmitter_HostWrite(t *testing.T) {
 		fn := heapSetFn(instr.STRUCT_SET, ssa.Shape{Itab: layout.HostStructItab, Host: reflect.Int32}, types.BoxRef(2), types.Box(0, types.KindF32), ssa.TypeF32)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
 		in.Layout = layout
-		_, ok := backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 
@@ -334,7 +338,7 @@ func TestEmitter_HostWrite(t *testing.T) {
 		fn := heapSetFn(instr.STRUCT_SET, ssa.Shape{Itab: layout.HostStructItab, Typ: 1, Host: reflect.Int32}, types.BoxRef(2), types.BoxI32(9), ssa.TypeI32)
 		in := testInput(&types.Function{Typ: &types.FunctionType{}})
 		in.Layout = layout
-		_, ok := backend.Compile(testMachine(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
+		_, ok := backend.Compile(New(), asm.New(asmarm64.New()), in, jit.Anchor{Addr: 1}, fn)
 		require.False(t, ok)
 	})
 }

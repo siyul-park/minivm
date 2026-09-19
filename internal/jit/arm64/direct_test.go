@@ -1,4 +1,4 @@
-package arm64
+package arm64_test
 
 import (
 	"testing"
@@ -7,6 +7,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	asmarm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	jitarm64 "github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/jit/backend"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
@@ -18,8 +19,8 @@ import (
 // enforces on its own: a callee no operation defines (a block parameter
 // here, see backend.Compiler.Def) declines rather than reading as a
 // constant. Neither frontend hands this machine such a value (see
-// frontend/walk.go's callee), so this is an internal contract test built
-// from a hand-assembled ssa.Function (see docs/testing.md).
+// frontend/walk.go's callee), so this backend contract test builds the
+// malformed SSA shape directly (see docs/testing.md).
 func TestEmitter_CallDynamicCallee(t *testing.T) {
 	callee := &types.Function{Typ: &types.FunctionType{}}
 	in := &jit.Input{
@@ -37,7 +38,7 @@ func TestEmitter_CallDynamicCallee(t *testing.T) {
 	fn := b.Build()
 
 	a := asm.New(asmarm64.New())
-	m := machine{scratch: []asm.PReg{asmarm64.X10, asmarm64.X11, asmarm64.X12, asmarm64.X13, asmarm64.X14}}
+	m := jitarm64.New()
 	_, ok := backend.Compile(m, a, in, jit.Anchor{Addr: 1}, fn)
 	require.False(t, ok)
 }

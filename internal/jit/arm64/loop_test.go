@@ -1,4 +1,4 @@
-package arm64
+package arm64_test
 
 import (
 	"testing"
@@ -7,6 +7,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	asmarm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	jitarm64 "github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/jit/backend"
 	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/internal/ssa"
@@ -16,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testMachine() machine {
-	return machine{scratch: []asm.PReg{asmarm64.X10, asmarm64.X11, asmarm64.X12, asmarm64.X13, asmarm64.X14}}
+func testMachine() backend.Machine {
+	return jitarm64.New()
 }
 
 func testInput(fn *types.Function) *jit.Input {
@@ -73,9 +74,6 @@ func TestEmitter_ForwardBranchMoves(t *testing.T) {
 	_, ok := backend.Compile(testMachine(), a, in, jit.Anchor{Addr: 1}, fn)
 	require.True(t, ok)
 
-	vreg := func(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
-	narrow := func(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
-	tag := func(kind types.Kind) uint16 { return uint16(types.Tag(kind) >> 48) }
 	require.Equal(t, []asm.Instruction{
 		asmarm64.MOV(asmarm64.X14, asmarm64.X0),
 		asmarm64.LDP(asmarm64.X10, asmarm64.X11, asmarm64.X14, int16(journal.CellStack*8)),
@@ -197,28 +195,4 @@ func TestEmitter_MultiFrameExit(t *testing.T) {
 	built, err := a.Build()
 	require.NoError(t, err)
 	require.NotEmpty(t, built)
-}
-
-func TestFits(t *testing.T) {
-	t.Run("empty frames cannot be rebuilt", func(t *testing.T) {
-		require.False(t, fits(backend.Deopt{}))
-	})
-	t.Run("one frame within range", func(t *testing.T) {
-		require.True(t, fits(backend.Deopt{SP: 8, Frames: []backend.Record{{BP: 0}}}))
-	})
-	t.Run("inlined frames within range", func(t *testing.T) {
-		require.True(t, fits(backend.Deopt{
-			SP:     10,
-			Slots:  []backend.Flush{{Slot: 8}, {Slot: 9}},
-			Frames: []backend.Record{{BP: 0}, {BP: 8}},
-		}))
-	})
-	t.Run("coordinates past the immediate stay threaded", func(t *testing.T) {
-		require.False(t, fits(backend.Deopt{SP: maxSlot + 1, Frames: []backend.Record{{}}}))
-		require.False(t, fits(backend.Deopt{Frames: []backend.Record{{BP: maxSlot + 1}}}))
-		require.False(t, fits(backend.Deopt{
-			Frames: []backend.Record{{}},
-			Slots:  []backend.Flush{{Slot: maxSlot + 1}},
-		}))
-	})
 }
