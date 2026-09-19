@@ -14,6 +14,7 @@ Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `S
 | value representation | `value-representation.md` |
 | memory/ownership | `memory-model.md` |
 | JIT | `jit-internals.md` |
+| JIT rebuild history | `jit-lessons.md` |
 | threaded fusion | `fusion.md` |
 | profiling/hotness | `profile.md` |
 | optimization passes | `pass-system.md` |
