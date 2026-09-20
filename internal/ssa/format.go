@@ -6,16 +6,13 @@ import (
 	"strings"
 )
 
-// Format renders f as text: one line per block header, naming its parameters
-// and the predecessors that reach it, then one indented line per operation and
-// a last line for the terminator. It is the readable form every later phase is
-// tested against.
-func Format(f *Function) string {
+// Format renders a readable SSA dump.
+func Format(function *Function) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "func %s\n", f.name)
-	for id, block := range f.blocks {
-		fmt.Fprintf(&sb, "blk%d: (%s)", id, defs(f, block.Params))
-		if preds := f.preds[id]; len(preds) > 0 {
+	fmt.Fprintf(&sb, "func %s\n", function.name)
+	for id, block := range function.blocks {
+		fmt.Fprintf(&sb, "blk%d: (%s)", id, definitions(function, block.Params))
+		if preds := function.preds[id]; len(preds) > 0 {
 			names := make([]string, len(preds))
 			for i, pred := range preds {
 				names[i] = fmt.Sprintf("blk%d", pred)
@@ -24,19 +21,17 @@ func Format(f *Function) string {
 		}
 		sb.WriteString("\n")
 		for _, o := range block.Ops {
-			fmt.Fprintf(&sb, "\t%s\n", op(f, o))
+			fmt.Fprintf(&sb, "\t%s\n", operationText(function, o))
 		}
-		fmt.Fprintf(&sb, "\t%s\n", term(f, block.Term))
+		fmt.Fprintf(&sb, "\t%s\n", terminatorText(function, block.Term))
 	}
 	return sb.String()
 }
 
-// op renders one operation as "results = name operands", dropping the halves
-// it has none of.
-func op(f *Function, o Operation) string {
+func operationText(function *Function, o Operation) string {
 	var sb strings.Builder
 	if len(o.Results) > 0 {
-		fmt.Fprintf(&sb, "%s = ", defs(f, o.Results))
+		fmt.Fprintf(&sb, "%s = ", definitions(function, o.Results))
 	}
 	sb.WriteString(o.name())
 
@@ -45,36 +40,34 @@ func op(f *Function, o Operation) string {
 	case OpConst:
 		args = append(args, o.Const.String())
 	case OpLoad, OpStore:
-		args = append(args, slot(o.Slot))
+		args = append(args, slotText(o.Slot))
 	case OpState:
 		for _, frame := range o.Frames {
 			at := fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]",
-				frame.Addr, frame.Base, frame.IP, frame.Returns, strings.Join(stack(frame.Stack), ", "))
+				frame.Address, frame.Base, frame.IP, frame.Returns, strings.Join(stackText(frame.Stack), ", "))
 			if len(frame.Locals) > 0 {
-				at += fmt.Sprintf(" locals=[%s]", strings.Join(locals(frame.Locals), ", "))
+				at += fmt.Sprintf(" locals=[%s]", strings.Join(localText(frame.Locals), ", "))
 			}
 			args = append(args, at+"}")
 		}
 	}
-	args = append(args, refs(o.Args)...)
+	args = append(args, references(o.Args)...)
 	if len(args) > 0 {
 		fmt.Fprintf(&sb, " %s", strings.Join(args, ", "))
 	}
-	sb.WriteString(shape(o.Shape))
+	sb.WriteString(shapeText(o.Shape))
 	if o.State != NoValue {
 		fmt.Fprintf(&sb, " state v%d", o.State)
 	}
 	return sb.String()
 }
 
-// term renders one terminator as "operation operands successors", each
-// successor carrying the arguments it passes.
-func term(f *Function, t Terminator) string {
+func terminatorText(function *Function, t Terminator) string {
 	var sb strings.Builder
 	sb.WriteString(t.Op.String())
-	args := refs(t.Args)
+	args := references(t.Args)
 	for _, edge := range t.Edges {
-		args = append(args, fmt.Sprintf("blk%d(%s)", edge.Block, strings.Join(refs(edge.Args), ", ")))
+		args = append(args, fmt.Sprintf("blk%d(%s)", edge.Block, strings.Join(references(edge.Args), ", ")))
 	}
 	if len(args) > 0 {
 		fmt.Fprintf(&sb, " %s", strings.Join(args, ", "))
@@ -85,24 +78,20 @@ func term(f *Function, t Terminator) string {
 	return sb.String()
 }
 
-// slot renders the storage an operation reads or writes, naming the frame
-// floor a local counts from only when it is not the entry frame's.
-func slot(s Slot) string {
+func slotText(s Slot) string {
 	if s.Base != 0 {
 		return fmt.Sprintf("%s[%d+%d]", s.Space, s.Base, s.Index)
 	}
 	return fmt.Sprintf("%s[%d]", s.Space, s.Index)
 }
 
-// shape renders the speculated container facts an operation is compiled
-// against, omitting every fact it does not carry.
-func shape(s Shape) string {
+func shapeText(s Shape) string {
 	var sb strings.Builder
 	if s.Tag != 0 {
 		fmt.Fprintf(&sb, " tag 0x%x", s.Tag)
 	}
-	if s.Typ != 0 {
-		fmt.Fprintf(&sb, " type 0x%x", s.Typ)
+	if s.Type != 0 {
+		fmt.Fprintf(&sb, " type 0x%x", s.Type)
 	}
 	if s.Host != reflect.Invalid {
 		fmt.Fprintf(&sb, " host %s", s.Host)
@@ -110,20 +99,17 @@ func shape(s Shape) string {
 	return sb.String()
 }
 
-// defs renders the values being defined, each with its type.
-func defs(f *Function, vs []Value) string {
-	names := make([]string, len(vs))
-	for i, v := range vs {
-		names[i] = fmt.Sprintf("v%d:%s", v, f.Type(v))
+func definitions(function *Function, values []Value) string {
+	names := make([]string, len(values))
+	for i, v := range values {
+		names[i] = fmt.Sprintf("v%d:%s", v, function.Type(v))
 	}
 	return strings.Join(names, ", ")
 }
 
-// stack names the operands one frame resumes with, marking the entries that
-// own the reference count the interpreter adopts.
-func stack(os []Operand) []string {
-	names := make([]string, len(os))
-	for i, o := range os {
+func stackText(operands []Operand) []string {
+	names := make([]string, len(operands))
+	for i, o := range operands {
 		names[i] = fmt.Sprintf("v%d", o.Value)
 		if o.Owned {
 			names[i] += " owned"
@@ -132,20 +118,17 @@ func stack(os []Operand) []string {
 	return names
 }
 
-// locals names the local slots a promotion emptied, each with the value the
-// frame must be written back with.
-func locals(ls []Local) []string {
-	names := make([]string, len(ls))
-	for i, l := range ls {
+func localText(locals []Local) []string {
+	names := make([]string, len(locals))
+	for i, l := range locals {
 		names[i] = fmt.Sprintf("%d=v%d", l.Index, l.Value)
 	}
 	return names
 }
 
-// refs names the values being read.
-func refs(vs []Value) []string {
-	names := make([]string, len(vs))
-	for i, v := range vs {
+func references(values []Value) []string {
+	names := make([]string, len(values))
+	for i, v := range values {
 		names[i] = fmt.Sprintf("v%d", v)
 	}
 	return names

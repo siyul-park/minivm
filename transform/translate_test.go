@@ -16,12 +16,12 @@ func TestTranslate(t *testing.T) {
 			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 			Locals: []types.Type{types.TypeI32},
 			Code: assemble(t, func(b *instr.Builder) {
-				head, done := b.Label(), b.Label()
+				header, done := b.Label(), b.Label()
 				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
-				b.Bind(head)
+				b.Bind(header)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.I32_GE_S).BrIf(done)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-				b.Br(head)
+				b.Br(header)
 				b.Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
 			})}
 
@@ -76,7 +76,7 @@ blk3: () <-- (blk1)
 			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.CALL) })}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Objects:   transform.Objects{2: {Fn: callee}}}
+			Objects:   transform.Objects{2: {Function: callee}}}
 
 		out, err := transform.Translate(m, 0, fn, 0)
 		require.NoError(t, err)
@@ -206,11 +206,6 @@ blk3: (v5:ref) <-- (blk1)
 	})
 
 	t.Run("declines what bytecode alone cannot resolve/a constant read no object resolves", func(t *testing.T) {
-		// Object no longer carries the concrete container identity a constant
-		// typed array's cell would resolve to: a read against a reference
-		// straight off the constant pool, with no declared array type behind
-		// it, is bytecode the translation cannot resolve a shape for and
-		// declines instead of guessing one.
 		fn := &types.Function{
 			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
 			Code: assemble(t, func(b *instr.Builder) {
@@ -231,11 +226,6 @@ blk3: (v5:ref) <-- (blk1)
 		require.Nil(t, out)
 	})
 
-	// LOCAL_TEE and GLOBAL_TEE of a reference used to be refused whole: the
-	// slot's overwritten count and the surviving stack copy's count both need
-	// resolving, and nothing at IR build time could tell a self-store from an
-	// ordinary one. dup composed with store resolves both through the same
-	// own/detach machinery an ordinary ref store already uses.
 	t.Run("translates a tee of a reference", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny}},
@@ -255,13 +245,13 @@ blk3: (v5:ref) <-- (blk1)
 			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
 			Locals: []types.Type{types.TypeI32},
 			Code: assemble(t, func(b *instr.Builder) {
-				head, done := b.Label(), b.Label()
+				header, done := b.Label(), b.Label()
 				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-				b.Bind(head)
+				b.Bind(header)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_LE_S).BrIf(done)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET)
 				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-				b.Br(head)
+				b.Br(header)
 				b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
 			})}
 
@@ -269,9 +259,6 @@ blk3: (v5:ref) <-- (blk1)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 
-		// tag 0x3 is this translation's own guard identity for an i32 array
-		// element (see walk.go's shapeArrayI32): a token distinguishing one
-		// container shape from another within this SSA, not a runtime type.
 		require.Equal(t, `func 1:0
 blk0: ()
 	v1:i32 = const 0
@@ -336,13 +323,10 @@ blk0: ()
 					Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.STRUCT_SET).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{Decl: []types.Type{record}}, 1, fn, 0)
+		out, err := transform.Translate(transform.Module{Types: []types.Type{record}}, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 
-		// tag 0x8 is this translation's own guard identity for any struct
-		// (see walk.go's shapeStruct); the field's own declared record narrows
-		// it further only where STRUCT_GET resolves one.
 		require.Equal(t, `func 1:0
 blk0: ()
 	v1:i32 = const 0
@@ -358,10 +342,6 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
-	// A struct field's kind and guard both resolve through the record a
-	// constant reference's resolved object carries, the same way a call
-	// resolves its target: the reference is the whole answer, so no cast or
-	// declared type has to stand in for one a constant cell already names.
 	t.Run("reads a struct field through a constant cell's resolved record", func(t *testing.T) {
 		record := types.NewStructType(types.NewStructField(types.TypeF64))
 		fn := &types.Function{
@@ -371,14 +351,11 @@ blk0: ()
 			})}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Objects:   transform.Objects{2: {Typ: record}}}
+			Objects:   transform.Objects{2: {Type: record}}}
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
-		// The guard's Typ names the record itself, a real Go pointer no golden
-		// string can fix; every other fact - the field's f64 kind, the generic
-		// struct itab - is checked structurally instead.
 		require.Contains(t, ssa.Format(out), "v3:ref = guard.shape v1 tag 0x8 type ")
 		require.Contains(t, ssa.Format(out), "f64 = struct.get v3, v2")
 	})
@@ -392,7 +369,7 @@ blk0: ()
 			})}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Objects:   transform.Objects{2: {Fn: callee}}}
+			Objects:   transform.Objects{2: {Function: callee}}}
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
@@ -407,11 +384,6 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
-	// An i64 slot may hold either an inline value or a reference to one
-	// Interpreter.boxI64 heap-promoted, and only the tag on the loaded word
-	// tells them apart. load states that as an OpGuardKind immediately after
-	// the OpLoad, carrying the interpreter state OpLoad itself cannot resume
-	// into.
 	t.Run("guards an i64 slot load against a heap-promoted value", func(t *testing.T) {
 		fn := &types.Function{
 			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
@@ -450,7 +422,6 @@ func loopFunction(t *testing.T) (*types.Function, int) {
 	}, instr.New(instr.LOCAL_GET, 0).Width()
 }
 
-// assemble builds the code of one function.
 func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
 	t.Helper()
 	b := instr.NewBuilder()

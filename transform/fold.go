@@ -10,124 +10,98 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// FoldPass replaces a pure operation with the constant, argument, or shift
-// its arguments already decide, so an operation whose answer is known before
-// it runs does not run.
-//
-// A division or remainder whose divisor folds to zero is left as a runtime
-// operation: the interpreter's own trap for that case is not this pass's to
-// pre-empt. An i64 arithmetic or shift result that does not survive
-// types.BoxI64's NaN-boxed round trip is left unfolded too - every i64
-// OpConst the frontend builds is already round-trip-safe, so a result that is
-// not would silently corrupt the value if boxed anyway. Float identities are
-// left alone because IEEE-754's NaN and signed zero make them unsound, and so
-// are annihilators such as x*0, whose result is known but whose left
-// argument would have to be dropped along with them - which is DCEPass's
-// judgement to make, not this pass's.
+// FoldPass evaluates pure operations with constant operands.
 type FoldPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*FoldPass)(nil)
 
+// NewFoldPass returns the pass.
 func NewFoldPass() *FoldPass {
 	return &FoldPass{}
 }
 
-func (p *FoldPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
-	consts := map[ssa.Value]types.Boxed{}
+// Run applies the pass to one SSA function.
+func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+	constants := map[ssa.Value]types.Boxed{}
 	computed := map[ssa.Value]bool{}
-	rb := newRebuilder(fn)
+	rebuilder := newRebuilder(function)
 	changed := false
 
-	for _, block := range order(fn) {
-		id := rb.block(block)
-		blk := fn.Block(block)
-		for _, param := range blk.Params {
-			rb.alias(param, rb.b.Param(id, fn.Type(param)))
+	for _, block := range reversePostorder(function) {
+		id := rebuilder.block(block)
+		currentBlock := function.Block(block)
+		for _, param := range currentBlock.Params {
+			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
-		for _, op := range blk.Ops {
-			op = rb.operation(op)
-			if op.Op == ssa.OpExec && op.Code.IsPure() {
-				if next, ok := p.fold(rb, id, fn, consts, computed, op); ok {
+		for _, operation := range currentBlock.Ops {
+			operation = rebuilder.operation(operation)
+			if operation.Op == ssa.OpExec && operation.Code.IsPure() {
+				if next, ok := p.fold(rebuilder, id, function, constants, computed, operation); ok {
 					changed = true
 					if len(next.Results) == 0 {
 						continue
 					}
-					op = next
+					operation = next
 				}
 			}
-			op = rb.define(fn, op)
-			rb.b.Add(id, op)
-			switch op.Op {
+			operation = rebuilder.define(function, operation)
+			rebuilder.builder.Add(id, operation)
+			switch operation.Op {
 			case ssa.OpConst:
-				consts[op.Results[0]] = op.Const
-				computed[op.Results[0]] = true
+				constants[operation.Results[0]] = operation.Const
+				computed[operation.Results[0]] = true
 			case ssa.OpExec:
-				// A value an opcode computed carries the representation its
-				// static type names; one read out of a slot need not (see
-				// fold).
-				for _, r := range op.Results {
+				for _, r := range operation.Results {
 					computed[r] = true
 				}
 			}
 		}
-		rb.b.Term(id, rb.terminator(blk.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
 	}
 
 	if !changed {
 		return pass.PreserveAll(), nil
 	}
-	*fn = *rb.b.Build()
+	*function = *rebuilder.builder.Build()
 	return pass.PreserveNone(), nil
 }
 
-// fold returns what op becomes once its constant arguments are accounted for,
-// and false when it stays as it is. An operation that reduces to one of its
-// own arguments comes back with no results at all: fold has already aliased
-// the value it produced onto that argument.
-func (p *FoldPass) fold(rb *rebuilder, id int, fn *ssa.Function, consts map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, op ssa.Operation) (ssa.Operation, bool) {
-	args := make([]types.Boxed, 0, len(op.Args))
-	for _, a := range op.Args {
-		c, ok := consts[a]
+func (p *FoldPass) fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
+	args := make([]types.Boxed, 0, len(operation.Args))
+	for _, a := range operation.Args {
+		c, ok := constants[a]
 		if !ok {
 			break
 		}
 		args = append(args, c)
 	}
-	if len(args) == len(op.Args) {
-		if result, ok := eval(op.Code, args); ok {
-			return ssa.Operation{Op: ssa.OpConst, Const: result, Results: op.Results}, true
+	if len(args) == len(operation.Args) {
+		if result, ok := evaluate(operation.Code, args); ok {
+			return ssa.Operation{Op: ssa.OpConst, Const: result, Results: operation.Results}, true
 		}
-		return op, false
+		return operation, false
 	}
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return op, false
+	if len(operation.Args) != 2 || len(operation.Results) != 1 {
+		return operation, false
 	}
-	right, ok := consts[op.Args[1]]
+	right, ok := constants[operation.Args[1]]
 	if !ok {
-		return op, false
+		return operation, false
 	}
-	// An identity hands back its left argument, and with it that argument's
-	// own representation, so the rewrite applies only when that argument's
-	// type already matches the result's: a slot is zero-filled rather than
-	// written with its declared type's zero, so an unwritten i32 local reads
-	// back as a raw Boxed(0), whose kind is f64 (docs/memory-model.md), and
-	// the arithmetic this rewrite removes is what re-tags it.
-	if identity(op.Code, right) && computed[op.Args[0]] && rb.b.Type(op.Args[0]) == fn.Type(op.Results[0]) {
-		rb.alias(op.Results[0], op.Args[0])
-		return ssa.Operation{Op: op.Op, Code: op.Code, Args: op.Args}, true
+	if identity(operation.Code, right) && computed[operation.Args[0]] && rebuilder.builder.Type(operation.Args[0]) == function.Type(operation.Results[0]) {
+		rebuilder.alias(operation.Results[0], operation.Args[0])
+		return ssa.Operation{Op: operation.Op, Code: operation.Code, Args: operation.Args}, true
 	}
-	code, amount, ok := reduce(op.Code, right)
+	code, amount, ok := shift(operation.Code, right)
 	if !ok {
-		return op, false
+		return operation, false
 	}
-	shift := rb.b.Value(rb.b.Type(op.Args[1]))
-	rb.b.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{shift}})
-	consts[shift] = amount
-	return ssa.Operation{Op: op.Op, Code: code, Args: []ssa.Value{op.Args[0], shift}, State: op.State, Results: op.Results}, true
+	shift := rebuilder.builder.Value(rebuilder.builder.Type(operation.Args[1]))
+	rebuilder.builder.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{shift}})
+	constants[shift] = amount
+	return ssa.Operation{Op: operation.Op, Code: code, Args: []ssa.Value{operation.Args[0], shift}, State: operation.State, Results: operation.Results}, true
 }
 
-// identity reports whether code hands back its left argument unchanged when
-// its right one is c.
 func identity(code instr.Opcode, c types.Boxed) bool {
 	switch code {
 	case instr.I32_ADD, instr.I32_SUB, instr.I32_OR, instr.I32_XOR,
@@ -149,11 +123,7 @@ func identity(code instr.Opcode, c types.Boxed) bool {
 	}
 }
 
-// reduce returns the shift a multiply or an unsigned divide by the
-// power-of-two c becomes, and its amount. A signed divide is not one of them:
-// an arithmetic shift right rounds toward negative infinity where the divide
-// rounds toward zero.
-func reduce(code instr.Opcode, c types.Boxed) (instr.Opcode, types.Boxed, bool) {
+func shift(code instr.Opcode, c types.Boxed) (instr.Opcode, types.Boxed, bool) {
 	var shift instr.Opcode
 	switch code {
 	case instr.I32_MUL, instr.I64_MUL:
@@ -181,7 +151,6 @@ func reduce(code instr.Opcode, c types.Boxed) (instr.Opcode, types.Boxed, bool) 
 	}
 }
 
-// log2 returns the exponent of v when v is a power of two greater than one.
 func log2(v uint64) (uint64, bool) {
 	if v < 2 || v&(v-1) != 0 {
 		return 0, false
@@ -189,17 +158,15 @@ func log2(v uint64) (uint64, bool) {
 	return uint64(bits.TrailingZeros64(v)), true
 }
 
-// eval computes the constant Code performs over args, or reports false when
-// Code is outside the folded family or the result cannot be folded safely.
-func eval(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
+func evaluate(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 	switch code {
 	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U,
 		instr.I32_REM_S, instr.I32_REM_U, instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
 		instr.I32_XOR, instr.I32_AND, instr.I32_OR:
-		return evalI32(code, args[0].I32(), args[1].I32())
+		return evaluateI32(code, args[0].I32(), args[1].I32())
 	case instr.I32_EQ, instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
 		instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U:
-		return evalI32Cmp(code, args[0].I32(), args[1].I32())
+		return evaluateI32Cmp(code, args[0].I32(), args[1].I32())
 	case instr.I32_EQZ:
 		return types.BoxI1(args[0].I32() == 0), true
 	case instr.I32_TO_F32_S:
@@ -210,10 +177,10 @@ func eval(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U,
 		instr.I64_REM_S, instr.I64_REM_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
 		instr.I64_XOR, instr.I64_AND, instr.I64_OR:
-		return evalI64(code, args[0].I64(), args[1].I64())
+		return evaluateI64(code, args[0].I64(), args[1].I64())
 	case instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U,
 		instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U:
-		return evalI64Cmp(code, args[0].I64(), args[1].I64())
+		return evaluateI64Cmp(code, args[0].I64(), args[1].I64())
 	case instr.I64_EQZ:
 		return types.BoxI1(args[0].I64() == 0), true
 	case instr.I64_TO_I32:
@@ -228,18 +195,18 @@ func eval(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 		return types.BoxF64(float64(uint64(args[0].I64()))), true
 
 	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD:
-		return evalF32(code, args[0].F32(), args[1].F32())
+		return evaluateF32(code, args[0].F32(), args[1].F32())
 	case instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
-		return evalF32Cmp(code, args[0].F32(), args[1].F32())
+		return evaluateF32Cmp(code, args[0].F32(), args[1].F32())
 	case instr.F32_TO_I32_S:
 		return types.BoxI32(int32(args[0].F32())), true
 	case instr.F32_TO_I32_U:
 		return types.BoxI32(int32(uint32(args[0].F32()))), true
 
 	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD:
-		return evalF64(code, args[0].F64(), args[1].F64())
+		return evaluateF64(code, args[0].F64(), args[1].F64())
 	case instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
-		return evalF64Cmp(code, args[0].F64(), args[1].F64())
+		return evaluateF64Cmp(code, args[0].F64(), args[1].F64())
 	case instr.F64_TO_I32_S:
 		return types.BoxI32(int32(args[0].F64())), true
 	case instr.F64_TO_I32_U:
@@ -256,7 +223,7 @@ func eval(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 	}
 }
 
-func evalI32(code instr.Opcode, a, b int32) (types.Boxed, bool) {
+func evaluateI32(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	switch code {
 	case instr.I32_ADD:
 		return types.BoxI32(a + b), true
@@ -301,7 +268,7 @@ func evalI32(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	}
 }
 
-func evalI32Cmp(code instr.Opcode, a, b int32) (types.Boxed, bool) {
+func evaluateI32Cmp(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	switch code {
 	case instr.I32_EQ:
 		return types.BoxI1(a == b), true
@@ -328,7 +295,7 @@ func evalI32Cmp(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	}
 }
 
-func evalI64(code instr.Opcode, a, b int64) (types.Boxed, bool) {
+func evaluateI64(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	switch code {
 	case instr.I64_ADD:
 		return i64(a + b)
@@ -373,7 +340,7 @@ func evalI64(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	}
 }
 
-func evalI64Cmp(code instr.Opcode, a, b int64) (types.Boxed, bool) {
+func evaluateI64Cmp(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	switch code {
 	case instr.I64_EQ:
 		return types.BoxI1(a == b), true
@@ -400,7 +367,7 @@ func evalI64Cmp(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	}
 }
 
-func evalF32(code instr.Opcode, a, b float32) (types.Boxed, bool) {
+func evaluateF32(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	switch code {
 	case instr.F32_ADD:
 		return types.BoxF32(a + b), true
@@ -428,7 +395,7 @@ func evalF32(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	}
 }
 
-func evalF32Cmp(code instr.Opcode, a, b float32) (types.Boxed, bool) {
+func evaluateF32Cmp(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	switch code {
 	case instr.F32_EQ:
 		return types.BoxI1(a == b), true
@@ -447,7 +414,7 @@ func evalF32Cmp(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	}
 }
 
-func evalF64(code instr.Opcode, a, b float64) (types.Boxed, bool) {
+func evaluateF64(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	switch code {
 	case instr.F64_ADD:
 		return types.BoxF64(a + b), true
@@ -475,7 +442,7 @@ func evalF64(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	}
 }
 
-func evalF64Cmp(code instr.Opcode, a, b float64) (types.Boxed, bool) {
+func evaluateF64Cmp(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	switch code {
 	case instr.F64_EQ:
 		return types.BoxI1(a == b), true
@@ -494,9 +461,6 @@ func evalF64Cmp(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	}
 }
 
-// mod computes IEEE remainder (rem) or, when floored is true, floored
-// modulo (mod): the sign of a floored result follows the divisor, matching
-// the interpreter's own F32_MOD and F64_MOD.
 func mod(a, b float64, floored bool) float64 {
 	m := math.Mod(a, b)
 	if floored && m != 0 && (m < 0) != (b < 0) {
@@ -505,10 +469,6 @@ func mod(a, b float64, floored bool) float64 {
 	return m
 }
 
-// i64 boxes v as an i64 constant, or reports failure when v does not survive
-// types.BoxI64's NaN-boxed round trip - the same guard the frontend applies to
-// every I64_CONST it builds, which a folded result must honor too or the fold
-// would silently corrupt the value.
 func i64(v int64) (types.Boxed, bool) {
 	b := types.BoxI64(v)
 	return b, b.I64() == v

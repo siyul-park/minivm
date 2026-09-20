@@ -20,7 +20,7 @@ func TestFormat(t *testing.T) {
 		array := b.Value(ssa.TypeRef)
 		checked := b.Value(ssa.TypeRef)
 		zero := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 0, Returns: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 0, Returns: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 0x2a}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
@@ -39,7 +39,7 @@ func TestFormat(t *testing.T) {
 		next := b.Value(ssa.TypeI32)
 		one := b.Value(ssa.TypeI32)
 		step := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 12, Returns: 1, Stack: []ssa.Operand{{Value: index}}}}, Results: []ssa.Value{inner}})
+		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 12, Returns: 1, Stack: []ssa.Operand{{Value: index}}}}, Results: []ssa.Value{inner}})
 		b.Add(body, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{index, length}, State: inner})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{checked, index}, State: state, Results: []ssa.Value{elem}})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{total, elem}, State: state, Results: []ssa.Value{next}})
@@ -82,10 +82,8 @@ func TestFormat(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{array}})
-		// One value in two stack positions, retained once: ownership is the
-		// entry's, so the two positions print differently.
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
-			{Addr: 1, Stack: []ssa.Operand{{Value: array}, {Value: array, Owned: true}}},
+			{Address: 1, Stack: []ssa.Operand{{Value: array}, {Value: array, Owned: true}}},
 		}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
 
@@ -106,7 +104,7 @@ func TestFormat(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{counter}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
-			{Addr: 1, Locals: []ssa.Local{{Index: 2, Value: counter}}},
+			{Address: 1, Locals: []ssa.Local{{Index: 2, Value: counter}}},
 		}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
 
@@ -133,7 +131,7 @@ func TestFormat(t *testing.T) {
 		returned := b.Value(ssa.TypeI32)
 		fresh := b.Value(ssa.TypeRef)
 		field := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 2, Base: 4, IP: 3}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 2, Base: 4, IP: 3}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(7), Results: []ssa.Value{callee}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval, Index: 1}, Results: []ssa.Value{slot}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, callee}, State: state, Results: []ssa.Value{target}})
@@ -146,7 +144,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{fresh}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Shape: ssa.Shape{Typ: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target, three}, State: state, Results: []ssa.Value{field}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Shape: ssa.Shape{Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target, three}, State: state, Results: []ssa.Value{field}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
 
 		b.Term(stop, ssa.Terminator{Op: ssa.OpSuspend, State: state})

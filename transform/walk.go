@@ -8,28 +8,18 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// walk translates one span into one block: it decodes each instruction, emits
-// the operations that perform it, and carries the abstract operand stack the
-// next instruction reads. One walk serves both passes - the fixpoint keeps only
-// the facts it leaves behind, the build keeps the block it filled.
-type walk struct {
+type walker struct {
 	facts
-	b     *ssa.Builder
-	block int
-	fr    frame
-	stack []operand
+	builder    *ssa.Builder
+	block      int
+	activation activation
+	stack      []operand
 
-	ip    int
-	pre   []operand
-	state ssa.Value
+	ip     int
+	before []operand
+	state  ssa.Value
 }
 
-// Guard identities the translation admits a heap cell through: one per
-// concrete array element kind, plus one for any struct. Bytecode emission
-// erases every guard it meets (see emit.go), so these exist only to tell two
-// guards over different containers apart from two guards over the same one
-// within the SSA a pass over one function sees; the concrete value carries no
-// meaning past that.
 const (
 	shapeArrayI1 uintptr = iota + 1
 	shapeArrayI8
@@ -41,16 +31,13 @@ const (
 	shapeStruct
 )
 
-// run fills the block with s and returns the terminator it ends on, carrying no
-// edges: which blocks those name is the caller's to resolve, because a span
-// knows its successors only as spans.
-func (w *walk) adopt() {
+func (w *walker) adopt() {
 	for i := range w.stack {
 		w.own(i)
 	}
 }
 
-func (w *walk) detach(from backing, offset int) {
+func (w *walker) detach(from backing, offset int) {
 	for i := range w.stack {
 		if w.stack[i].backing == from && w.stack[i].offset == offset {
 			w.own(i)
@@ -58,31 +45,31 @@ func (w *walk) detach(from backing, offset int) {
 	}
 }
 
-func (w *walk) own(at int) {
+func (w *walker) own(at int) {
 	o := &w.stack[at]
 	if o.kind != types.KindRef || o.backing == backingStack {
 		return
 	}
 	w.retain(o.value)
 	o.backing, o.offset = backingStack, 0
-	if at < len(w.pre) {
-		w.pre[at] = *o
+	if at < len(w.before) {
+		w.before[at] = *o
 		w.state = ssa.NoValue
 	}
 }
 
-func (w *walk) retain(value ssa.Value) {
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
+func (w *walker) retain(value ssa.Value) {
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
 }
 
-func (w *walk) release(o operand) {
+func (w *walker) release(o operand) {
 	if o.kind != types.KindRef || o.backing != backingStack {
 		return
 	}
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
 }
 
-func (w *walk) dup() bool {
+func (w *walker) dup() bool {
 	if len(w.stack) == 0 {
 		return false
 	}
@@ -94,30 +81,30 @@ func (w *walk) dup() bool {
 	return true
 }
 
-func (w *walk) begin(ip int) {
+func (w *walker) begin(ip int) {
 	w.ip, w.state = ip, ssa.NoValue
-	w.pre = append(w.pre[:0], w.stack...)
+	w.before = append(w.before[:0], w.stack...)
 }
 
-func (w *walk) deopt() ssa.Value {
+func (w *walker) deopt() ssa.Value {
 	if w.state != ssa.NoValue {
 		return w.state
 	}
-	w.state = w.b.Value(ssa.TypeState)
-	w.b.Add(w.block, ssa.Operation{
+	w.state = w.builder.Value(ssa.TypeState)
+	w.builder.Add(w.block, ssa.Operation{
 		Op:      ssa.OpState,
-		Frames:  []ssa.Frame{{Addr: w.fr.addr, IP: w.ip, Returns: w.fr.returns(), Stack: deoptOperands(w.pre)}},
+		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.resultCount(), Stack: deoptOperands(w.before)}},
 		Results: []ssa.Value{w.state},
 	})
 	return w.state
 }
 
-func (w *walk) push(value ssa.Value, out fact) {
+func (w *walker) push(value ssa.Value, out fact) {
 	w.stack = append(w.stack, operand{value: value, fact: out})
 }
 
-func (w *walk) run(s span) (ssa.Terminator, bool) {
-	code := w.fr.fn.Code
+func (w *walker) translate(s span) (ssa.Terminator, bool) {
+	code := w.activation.function.Code
 	for ip := s.start; ip < s.end; {
 		inst := instr.Instruction(code[ip:])
 		w.begin(ip)
@@ -135,41 +122,30 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 			}
 			return ssa.Terminator{Op: ssa.OpBranch, Args: args}, true
 		case instr.RETURN:
-			if len(w.stack) < w.returns() {
+			if len(w.stack) < w.resultCount() {
 				return ssa.Terminator{}, false
 			}
 			return w.leave(), true
 		case instr.RETURN_CALL:
 			return w.tail(ip)
 		case instr.YIELD, instr.RESUME:
-			// A suspension ends execution at the opcode itself: the
-			// interpreter performs the real suspend and resumes threaded, so
-			// the span carries no successor (see span.suspend).
 			return w.suspend(ip), true
 		}
-		if !w.perform(inst) {
+		if !w.instruction(inst) {
 			return ssa.Terminator{}, false
 		}
 		ip += inst.Width()
 	}
-	// A span that leaves anywhere continues at its successor. Otherwise the
-	// code has run out, which ends module
-	// code by advancing past it and ends a function by returning.
 	if len(s.succs) > 0 {
 		return ssa.Terminator{Op: ssa.OpJump}, true
 	}
-	if w.fr.addr == 0 {
+	if w.activation.address == 0 {
 		return w.complete(), true
 	}
 	return w.leave(), true
 }
 
-// edges resolves a span's successors into the edges its terminator names, each
-// handing the successor's parameters the operands live here. A reference the
-// successor holds owned is owned here first; two successors that disagree about
-// one operand cannot both be served from a single block, so the function is
-// left unplanned rather than retained on a path that never releases it.
-func (w *walk) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
+func (w *walker) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
 	if len(s.succs) == 0 {
 		return nil, true
 	}
@@ -205,20 +181,13 @@ func (w *walk) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
 	return edges, true
 }
 
-// perform translates one instruction. The cases below are the opcodes whose
-// effect instr cannot state on its own - a slot, a compile-time value, a stack
-// shuffle, an arity read off the stack, or a kind only the snapshot resolves;
-// every other opcode is performed from its declared stack effect.
-func (w *walk) perform(inst instr.Instruction) bool {
-	op := inst.Opcode()
-	switch op {
+func (w *walker) instruction(inst instr.Instruction) bool {
+	operation := inst.Opcode()
+	switch operation {
 	case instr.NOP:
 		return true
 	case instr.UNREACHABLE:
-		// instr states no stack effect for it, but it is not a no-op: reaching
-		// it raises. The IR performs the operation so a backend has to answer
-		// for it, instead of compiling a function that runs straight past it.
-		return w.exec(op, 0, nil)
+		return w.emit(operation, 0, nil)
 
 	case instr.LOCAL_GET:
 		return w.load(ssa.SpaceLocal, int(inst.Operand(0)))
@@ -227,12 +196,12 @@ func (w *walk) perform(inst instr.Instruction) bool {
 	case instr.GLOBAL_GET:
 		return w.load(ssa.SpaceGlobal, int(inst.Operand(0)))
 	case instr.LOCAL_SET, instr.LOCAL_TEE:
-		if op == instr.LOCAL_TEE && !w.dup() {
+		if operation == instr.LOCAL_TEE && !w.dup() {
 			return false
 		}
 		return w.store(ssa.SpaceLocal, int(inst.Operand(0)))
 	case instr.GLOBAL_SET, instr.GLOBAL_TEE:
-		if op == instr.GLOBAL_TEE && !w.dup() {
+		if operation == instr.GLOBAL_TEE && !w.dup() {
 			return false
 		}
 		return w.store(ssa.SpaceGlobal, int(inst.Operand(0)))
@@ -243,7 +212,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		return w.pool(int(inst.Operand(0)))
 	case instr.I32_CONST:
 		val := int32(inst.Operand(0))
-		return w.constant(types.BoxI32(val), fact{kind: types.KindI32, val: val, valKnown: true})
+		return w.constant(types.BoxI32(val), fact{kind: types.KindI32, value: val, valueKnown: true})
 	case instr.I64_CONST:
 		val := int64(inst.Operand(0))
 		boxed := types.BoxI64(val)
@@ -282,34 +251,30 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if w.stack[n-2].kind != w.stack[n-3].kind {
 			return false
 		}
-		return w.exec(op, 3, []fact{{kind: w.stack[n-2].kind}})
+		return w.emit(operation, 3, []fact{{kind: w.stack[n-2].kind}})
 
 	case instr.ARRAY_GET, instr.ARRAY_DELETE:
 		if len(w.stack) < 2 {
 			return false
 		}
-		kind, tok, ok := w.elem(w.stack[len(w.stack)-2].fact)
+		kind, tok, ok := w.element(w.stack[len(w.stack)-2].fact)
 		if !ok {
 			return false
 		}
-		if op == instr.ARRAY_GET {
+		if operation == instr.ARRAY_GET {
 			w.guard(len(w.stack)-2, ssa.Shape{Tag: tok})
 		}
-		return w.exec(op, 2, []fact{{kind: kind}})
+		return w.emit(operation, 2, []fact{{kind: kind}})
 	case instr.ARRAY_SET:
-		// The element shape comes from the value's own kind rather than from
-		// the container, unlike ARRAY_GET: a write has no result to type, so
-		// what it needs from the guard is only that the container's shape
-		// agrees with what the value being stored already is.
 		if len(w.stack) < 3 {
 			return false
 		}
-		tok, ok := elemToken(w.stack[len(w.stack)-1].kind)
+		tok, ok := elementToken(w.stack[len(w.stack)-1].kind)
 		if !ok {
 			return false
 		}
 		w.guard(len(w.stack)-3, ssa.Shape{Tag: tok})
-		return w.exec(op, 3, nil)
+		return w.emit(operation, 3, nil)
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
 			return false
@@ -319,29 +284,23 @@ func (w *walk) perform(inst instr.Instruction) bool {
 			return false
 		}
 		w.guard(len(w.stack)-2, shape)
-		return w.exec(op, 2, []fact{{kind: kind}})
+		return w.emit(operation, 2, []fact{{kind: kind}})
 	case instr.STRUCT_SET:
-		// Unlike STRUCT_GET, a write needs no field kind resolved ahead of
-		// time: the store's runtime kind check is against the value's own
-		// already-known SSA kind, so the guard only needs a struct shape to
-		// admit.
 		if len(w.stack) < 3 {
 			return false
 		}
 		w.guard(len(w.stack)-3, ssa.Shape{Tag: shapeStruct})
-		return w.exec(op, 3, nil)
+		return w.emit(operation, 3, nil)
 	case instr.REF_CAST:
-		// A successful cast validates the operand's declared type in place and
-		// leaves the same value; only what is known about it narrows.
 		if len(w.stack) == 0 {
 			return false
 		}
 		cast := fact{kind: w.stack[len(w.stack)-1].kind}
-		if idx := int(inst.Operand(0)); idx < len(w.decl) {
-			cast.styp, _ = w.decl[idx].(*types.StructType)
-			cast.atyp, _ = w.decl[idx].(*types.ArrayType)
+		if idx := int(inst.Operand(0)); idx < len(w.types) {
+			cast.structType, _ = w.types[idx].(*types.StructType)
+			cast.arrayType, _ = w.types[idx].(*types.ArrayType)
 		}
-		return w.exec(op, 1, []fact{cast})
+		return w.emit(operation, 1, []fact{cast})
 
 	case instr.CALL:
 		if len(w.stack) == 0 {
@@ -355,58 +314,50 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		for i, t := range target.Typ.Returns {
 			results[i] = fact{kind: t.Kind()}
 		}
-		return w.exec(op, 1+len(target.Typ.Params), results)
+		return w.emit(operation, 1+len(target.Typ.Params), results)
 	case instr.CLOSURE_NEW:
-		// A closure pops its captures plus the function reference below them, an
-		// arity only a resolved heap function states.
 		if len(w.stack) == 0 {
 			return false
 		}
 		capture := w.stack[len(w.stack)-1].fact
-		if !capture.refKnown || capture.ref <= 0 {
+		if !capture.referenceKnown || capture.reference <= 0 {
 			return false
 		}
-		target := w.objects.function(capture.ref)
+		target := w.objects.function(capture.reference)
 		if target == nil {
 			return false
 		}
-		return w.exec(op, 1+len(target.Captures), []fact{{kind: types.KindRef}})
+		return w.emit(operation, 1+len(target.Captures), []fact{{kind: types.KindRef}})
 	case instr.STRUCT_NEW:
-		// A struct pops one value per field of its declared type, an arity that
-		// is on neither the stack nor the operand.
 		idx := int(inst.Operand(0))
-		if idx >= len(w.decl) {
+		if idx >= len(w.types) {
 			return false
 		}
-		record, ok := w.decl[idx].(*types.StructType)
+		record, ok := w.types[idx].(*types.StructType)
 		if !ok {
 			return false
 		}
-		return w.exec(op, len(record.Fields), []fact{{kind: types.KindRef, styp: record}})
+		return w.emit(operation, len(record.Fields), []fact{{kind: types.KindRef, structType: record}})
 	case instr.ARRAY_NEW, instr.MAP_NEW, instr.ARRAY_APPEND:
-		// These read their count as a runtime i32 on top of the values they take,
-		// so their effect is knowable only where that count is a known constant.
 		if len(w.stack) == 0 {
 			return false
 		}
 		top := w.stack[len(w.stack)-1].fact
-		if top.kind != types.KindI32 || !top.valKnown || top.val < 0 {
+		if top.kind != types.KindI32 || !top.valueKnown || top.value < 0 {
 			return false
 		}
-		count := int(top.val)
-		switch op {
+		count := int(top.value)
+		switch operation {
 		case instr.MAP_NEW:
-			return w.exec(op, 1+count*2, []fact{{kind: types.KindRef}})
+			return w.emit(operation, 1+count*2, []fact{{kind: types.KindRef}})
 		case instr.ARRAY_APPEND:
-			// The array below the values is never popped, so it survives - as a
-			// fresh operand, because the interpreter handed the old one away.
-			return w.exec(op, 2+count, []fact{{kind: types.KindRef}})
+			return w.emit(operation, 2+count, []fact{{kind: types.KindRef}})
 		default:
-			return w.exec(op, 1+count, []fact{{kind: types.KindRef}})
+			return w.emit(operation, 1+count, []fact{{kind: types.KindRef}})
 		}
 	}
 
-	effect := instr.TypeOf(op)
+	effect := instr.TypeOf(operation)
 	if effect.Pop == nil && effect.Push == nil {
 		return false
 	}
@@ -417,12 +368,10 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		}
 		results[i] = fact{kind: types.Kind(kind)}
 	}
-	return w.exec(op, len(effect.Pop), results)
+	return w.emit(operation, len(effect.Pop), results)
 }
 
-// elemToken resolves the guard identity one array element kind is stored
-// under.
-func elemToken(kind types.Kind) (uintptr, bool) {
+func elementToken(kind types.Kind) (uintptr, bool) {
 	switch kind {
 	case types.KindI1:
 		return shapeArrayI1, true
@@ -443,81 +392,58 @@ func elemToken(kind types.Kind) (uintptr, bool) {
 	}
 }
 
-// elem resolves the element kind and guard identity one array access is
-// compiled against: the operand's declared array type, which answers only in
-// a call-free function. It is a hint the shape guard verifies before any
-// access, so a slot declared as an array that currently holds null or a
-// differently shaped array deopts instead of being read.
-func (w *walk) elem(array fact) (types.Kind, uintptr, bool) {
-	if !w.declared || array.atyp == nil || array.atyp.ElemKind == instr.KindAny {
+func (w *walker) element(array fact) (types.Kind, uintptr, bool) {
+	if !w.callFree || array.arrayType == nil || array.arrayType.ElemKind == instr.KindAny {
 		return 0, 0, false
 	}
-	tok, ok := elemToken(array.atyp.ElemKind)
-	return array.atyp.ElemKind, tok, ok
+	tok, ok := elementToken(array.arrayType.ElemKind)
+	return array.arrayType.ElemKind, tok, ok
 }
 
-// field resolves a struct field's kind and the shape the access reading it is
-// admitted through: the one a container carrying a struct type answers for a
-// known in-bounds constant index.
-func (w *walk) field(container, index fact) (types.Kind, ssa.Shape, bool) {
-	record := w.record(container)
-	if record == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(record.Fields) {
+func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
+	record := w.structType(container)
+	if record == nil || !index.valueKnown || index.value < 0 || int(index.value) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
-	return record.Fields[index.val].Kind, ssa.Shape{Tag: shapeStruct, Typ: uintptr(unsafe.Pointer(record))}, true
+	return record.Fields[index.value].Kind, ssa.Shape{Tag: shapeStruct, Type: uintptr(unsafe.Pointer(record))}, true
 }
 
-// record resolves the struct type a container carries: the one its declared
-// type or a ref.cast states, or the one a constant cell was resolved to carry.
-func (w *walk) record(container fact) *types.StructType {
-	if container.styp != nil {
-		return container.styp
+func (w *walker) structType(container fact) *types.StructType {
+	if container.structType != nil {
+		return container.structType
 	}
-	if container.refKnown && container.ref > 0 {
-		return w.objects[container.ref].Typ
+	if container.referenceKnown && container.reference > 0 {
+		return w.objects[container.reference].Type
 	}
 	return nil
 }
 
-// callee resolves the function a call enters and pins its operand to the
-// reference naming it, answering with the address that function is published
-// at. Everything reading the operand after that - this walk, and a lowering
-// resolving the call's target - reads a value that certainly holds that
-// reference.
-//
-// The reference is the whole answer, so a call whose operand names anything
-// this translation does not resolve to a function is left unplanned: a host
-// function, a coroutine, and a closure allocated at runtime all name no
-// function here.
-func (w *walk) callee(at int) (int, *types.Function) {
+func (w *walker) callee(at int) (int, *types.Function) {
 	o := w.stack[at]
-	if !o.refKnown || o.ref <= 0 {
+	if !o.referenceKnown || o.reference <= 0 {
 		return 0, nil
 	}
-	target := w.objects.function(o.ref)
+	target := w.objects.function(o.reference)
 	if target == nil || target.Typ == nil {
 		return 0, nil
 	}
-	return o.ref, target
+	return o.reference, target
 }
 
-// load pushes what a slot holds. A ref takes no retain and records the slot its
-// count is deferred to, so a container loop pays no retain and release per
-// element.
-func (w *walk) load(space ssa.Space, index int) bool {
-	slot, out, ok := w.addressed(space, index)
+func (w *walker) load(space ssa.Space, index int) bool {
+	slot, out, ok := w.slot(space, index)
 	if !ok {
 		return false
 	}
-	t, ok := typ(out.kind)
+	t, ok := ssaType(out.kind)
 	if !ok {
 		return false
 	}
-	value := w.b.Value(t)
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpLoad, Slot: slot, Results: []ssa.Value{value}})
+	value := w.builder.Value(t)
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpLoad, Slot: slot, Results: []ssa.Value{value}})
 	if out.kind == types.KindI64 {
-		guarded := w.b.Value(t)
-		w.b.Add(w.block, ssa.Operation{
+		guarded := w.builder.Value(t)
+		w.builder.Add(w.block, ssa.Operation{
 			Op:      ssa.OpGuardKind,
 			Args:    []ssa.Value{value},
 			State:   w.deopt(),
@@ -529,20 +455,11 @@ func (w *walk) load(space ssa.Space, index int) bool {
 	return true
 }
 
-// store writes the top operand into a slot, which releases whatever it
-// replaces, and always consumes that operand. A ref hands its retain to the
-// slot, so a borrowed one is owned first and every other operand borrowed
-// from that slot is owned before its content changes underneath it; a store
-// back over itself is exactly the case detach also owns, so the backend's
-// release of the overwritten word never has to special-case it. A tee
-// duplicates the operand before calling this (see perform), so the surviving
-// stack copy is a second owned operand rather than something this function
-// has to keep alive itself.
-func (w *walk) store(space ssa.Space, index int) bool {
+func (w *walker) store(space ssa.Space, index int) bool {
 	if len(w.stack) == 0 {
 		return false
 	}
-	slot, out, ok := w.addressed(space, index)
+	slot, out, ok := w.slot(space, index)
 	if !ok {
 		return false
 	}
@@ -551,7 +468,7 @@ func (w *walk) store(space ssa.Space, index int) bool {
 		w.own(top)
 		w.detach(out.backing, out.offset)
 	}
-	w.b.Add(w.block, ssa.Operation{
+	w.builder.Add(w.block, ssa.Operation{
 		Op:    ssa.OpStore,
 		Slot:  slot,
 		Args:  []ssa.Value{w.stack[top].value},
@@ -561,25 +478,22 @@ func (w *walk) store(space ssa.Space, index int) bool {
 	return true
 }
 
-// addressed resolves the storage a slot opcode names and what is known about
-// the value in it. A local's deferred reference count is named by its own
-// slot index.
-func (w *walk) addressed(space ssa.Space, index int) (ssa.Slot, fact, bool) {
-	fr := w.fr
+func (w *walker) slot(space ssa.Space, index int) (ssa.Slot, fact, bool) {
+	frame := w.activation
 	slot := ssa.Slot{Space: space, Index: index}
 	var out fact
 	switch space {
 	case ssa.SpaceLocal:
-		if index >= len(fr.slots) {
+		if index >= len(frame.slots) {
 			return slot, out, false
 		}
-		out = holds(fr.slots[index])
+		out = fromType(frame.slots[index])
 		out.backing, out.offset = backingLocal, index
 	case ssa.SpaceUpval:
-		if index >= len(fr.fn.Captures) {
+		if index >= len(frame.function.Captures) {
 			return slot, out, false
 		}
-		out = holds(fr.fn.Captures[index])
+		out = fromType(frame.function.Captures[index])
 		out.backing, out.offset = backingUpval, index
 	default:
 		if index >= len(w.globals) {
@@ -590,10 +504,7 @@ func (w *walk) addressed(space ssa.Space, index int) (ssa.Slot, fact, bool) {
 	return slot, out, true
 }
 
-// pool pushes a constant. A ref constant is an ownership-neutral marker whose
-// retain stays with the pool, and the reference it carries is what resolves the
-// container it accesses or the function it calls.
-func (w *walk) pool(index int) bool {
+func (w *walker) pool(index int) bool {
 	if index >= len(w.constants) {
 		return false
 	}
@@ -601,41 +512,27 @@ func (w *walk) pool(index int) bool {
 	out := fact{kind: boxed.Kind()}
 	if out.kind == types.KindRef {
 		out.backing = backingConst
-		out.ref, out.refKnown = boxed.Ref(), true
+		out.reference, out.referenceKnown = boxed.Ref(), true
 	}
 	return w.constant(boxed, out)
 }
 
-// constant pushes a compile-time value.
-func (w *walk) constant(boxed types.Boxed, out fact) bool {
-	t, ok := typ(out.kind)
+func (w *walker) constant(boxed types.Boxed, out fact) bool {
+	t, ok := ssaType(out.kind)
 	if !ok {
 		return false
 	}
-	value := w.b.Value(t)
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: boxed, Results: []ssa.Value{value}})
+	value := w.builder.Value(t)
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: boxed, Results: []ssa.Value{value}})
 	w.push(value, out)
 	return true
 }
 
-// exec performs op over the top pops operands, leaving results in their place.
-// Every OpExec carries the interpreter state at its instruction start.
-//
-// Ownership invariants:
-//  1. State.Frames[0].Stack is the operand stack at the instruction's start
-//     (w.pre); each entry is Owned iff the native copy holds its own count.
-//  2. An OpExec borrows its arguments; owned arguments it consumed are released
-//     after it by explicit OpRelease. A frame-writing operation lets the callee
-//     adopt every stack entry after the stack was made owned.
-//  3. A ref result of an OpExec is owned (backingStack).
-func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
+func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	if len(w.stack) < pops {
 		return false
 	}
-	// instr states a fixed arity for array.new that only approximates its real
-	// one, so the arguments follow what it declares and the operands beyond them
-	// reach the interpreter through the deopt state its interpreter state carries.
-	effect := instr.TypeOf(op)
+	effect := instr.TypeOf(opcode)
 	named := pops
 	if effect.Pop != nil || effect.Push != nil {
 		named = len(effect.Pop)
@@ -643,10 +540,6 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	if named > pops {
 		return false
 	}
-	// An operand of a kind the opcode cannot pop leaves the function unplanned.
-	// program.Verify rejects such bytecode before it ever runs, so this only
-	// declines to build an operation that could not be typed anyway. i1 and i8
-	// stand wherever the i32 they compute as is wanted.
 	for i, want := range effect.Pop {
 		got := instr.Kind(w.stack[len(w.stack)-1-i].kind)
 		if want != instr.KindAny && got.Repr() != want.Repr() {
@@ -655,21 +548,19 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	}
 	out := make([]ssa.Value, len(results))
 	for i, r := range results {
-		t, ok := typ(r.kind)
+		t, ok := ssaType(r.kind)
 		if !ok {
 			return false
 		}
-		out[i] = w.b.Value(t)
+		out[i] = w.builder.Value(t)
 	}
 
 	adopted := 0
 	switch {
-	case op.Writes(instr.Frame):
-		// A call hands its operands to the callee, which adopts every reference
-		// on the flushed stack.
+	case opcode.Writes(instr.Frame):
 		w.adopt()
 		adopted = pops
-	case op.Reads(instr.Heap) && op.Writes(instr.Heap):
+	case opcode.Reads(instr.Heap) && opcode.Writes(instr.Heap):
 		w.own(len(w.stack) - 1)
 		adopted = 1
 	}
@@ -680,8 +571,8 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	consumed := append([]operand(nil), w.stack[len(w.stack)-pops:]...)
 	w.stack = w.stack[:len(w.stack)-pops]
 
-	operation := ssa.Operation{Op: ssa.OpExec, Code: op, Args: args, State: w.deopt(), Results: out}
-	w.b.Add(w.block, operation)
+	operation := ssa.Operation{Op: ssa.OpExec, Code: opcode, Args: args, State: w.deopt(), Results: out}
+	w.builder.Add(w.block, operation)
 
 	for i, r := range results {
 		w.push(out[i], r)
@@ -692,11 +583,7 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	return true
 }
 
-// complete ends module code with the operands it leaves on the interpreter's
-// operand stack, which is a module's result the way a function's is what it
-// returns. A borrowed one is owned first, because the interpreter adopts what
-// it finds there.
-func (w *walk) complete() ssa.Terminator {
+func (w *walker) complete() ssa.Terminator {
 	w.adopt()
 	args := make([]ssa.Value, len(w.stack))
 	for i, o := range w.stack {
@@ -705,10 +592,8 @@ func (w *walk) complete() ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpComplete, Args: args}
 }
 
-// leave ends the function with the results its type declares. A borrowed one is
-// owned first, because the caller adopts what it is handed.
-func (w *walk) leave() ssa.Terminator {
-	n := w.returns()
+func (w *walker) leave() ssa.Terminator {
+	n := w.resultCount()
 	if n > len(w.stack) {
 		n = len(w.stack)
 	}
@@ -720,12 +605,7 @@ func (w *walk) leave() ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args}
 }
 
-// tail ends the function on a tail call, which retires this frame. No
-// operation of this IR states that and no edge of this graph leads there - the
-// frame the block was translated in is gone, and the results the new
-// activation hands back are its own - so execution ends here and the
-// interpreter performs the call from the operand stack the exit hands it.
-func (w *walk) tail(ip int) (ssa.Terminator, bool) {
+func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if len(w.stack) == 0 {
 		return ssa.Terminator{}, false
 	}
@@ -736,35 +616,24 @@ func (w *walk) tail(ip int) (ssa.Terminator, bool) {
 	return w.exit(ip), true
 }
 
-// exit abandons execution, resuming the interpreter at ip. The interpreter
-// adopts the operand stack it is handed, so every reference still borrowed
-// from storage is owned first.
-func (w *walk) exit(ip int) ssa.Terminator {
+func (w *walker) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
 	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
 }
 
-// suspend ends execution on a suspension point, resuming the interpreter at
-// the opcode's own IP. Like exit it hands the interpreter an adopted operand
-// stack; unlike exit the threaded continuation runs past the opcode, so the
-// span after it is planned for facts but never emitted (see span.suspend).
-func (w *walk) suspend(ip int) ssa.Terminator {
+func (w *walker) suspend(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
 	return ssa.Terminator{Op: ssa.OpSuspend, State: w.deopt()}
 }
 
-// guard admits only a container of the shape the plan resolved for it, so the
-// access after it may load through that shape. It refines the operand in place:
-// everything after reads the guarded value, while the state the guard resumes
-// into still names the operands the opcode started with.
-func (w *walk) guard(at int, shape ssa.Shape) {
+func (w *walker) guard(at int, shape ssa.Shape) {
 	if w.stack[at].kind != types.KindRef || shape == (ssa.Shape{}) {
 		return
 	}
-	value := w.b.Value(ssa.TypeRef)
-	w.b.Add(w.block, ssa.Operation{
+	value := w.builder.Value(ssa.TypeRef)
+	w.builder.Add(w.block, ssa.Operation{
 		Op:      ssa.OpGuardShape,
 		Shape:   shape,
 		Args:    []ssa.Value{w.stack[at].value},
@@ -774,7 +643,6 @@ func (w *walk) guard(at int, shape ssa.Shape) {
 	w.stack[at].value = value
 }
 
-// returns is how many results the function this walk translates hands back.
-func (w *walk) returns() int {
-	return w.fr.returns()
+func (w *walker) resultCount() int {
+	return w.activation.resultCount()
 }

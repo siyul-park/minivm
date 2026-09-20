@@ -13,13 +13,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// TestPassOrder composes this package's passes into a caller-owned
-// pipeline, exactly as a compiler pipeline or a future bytecode-to-SSA route would,
-// and asserts the ordering fact this package itself no longer enforces:
-// CSEPass must run before GuardPass, because a guard's operand is only
-// recognizably equal to an earlier guard's once CSEPass has unified the
-// values they read, and DCEPass must run last to sweep up what folding,
-// deduplicating, and guard elimination leave behind.
 func TestPassOrder(t *testing.T) {
 	t.Run("folds, deduplicates, eliminates a redundant guard, and sweeps the dead code left behind", func(t *testing.T) {
 		b := ssa.New("f")
@@ -30,15 +23,15 @@ func TestPassOrder(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
 		sum1 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum1}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum1}})
 		sum2 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum2}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum2}})
 
 		unused := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(99), Results: []ssa.Value{unused}})
 
 		state := b.Value(ssa.TypeState)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeRef)
@@ -64,27 +57,13 @@ func TestPassOrder(t *testing.T) {
 		require.NotContains(t, got, "const 99")
 		require.Equal(t, 1, strings.Count(got, "guard.shape"))
 
-		// sum1, sum2, and the survivor of the two additions all collapse to the
-		// same folded-and-deduplicated constant.
 		require.Equal(t, 1, strings.Count(got, "const 5"))
 	})
 
 	t.Run("hoists a loop-invariant computation once CSE has unified a redundant guard, and DCE sweeps the rest", func(t *testing.T) {
-		// HoistPass carries no hard ordering requirement against the other
-		// three: it never unifies a value (only CSEPass and GuardPass's
-		// shared dedup do that) and never moves a guard or anything else
-		// that carries deopt state (only GuardPass's target), so it is sound
-		// wherever it runs in the sequence. It still reads best placed after
-		// FoldPass and CSEPass - so it moves one canonical instance rather
-		// than a would-be duplicate - and before DCEPass, matching this
-		// package's existing convention that liveness-based sweeping runs
-		// last over whatever placement every earlier pass settled on.
 		b := ssa.New("f")
 		pre, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
 		array := b.Param(pre, ssa.TypeRef)
-		// x and y are parameters, not constants: FoldPass cannot reduce
-		// their sum to a literal, so it stays an i32.add for HoistPass to
-		// actually move rather than something FoldPass already erased.
 		x, y := b.Param(pre, ssa.TypeI32), b.Param(pre, ssa.TypeI32)
 
 		bound := b.Value(ssa.TypeI32)
@@ -95,29 +74,21 @@ func TestPassOrder(t *testing.T) {
 
 		counter := b.Param(header, ssa.TypeI32)
 		cond := b.Value(ssa.TypeI1)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: deoptState(b, pre, instr.I32_LT_S), Results: []ssa.Value{cond}})
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: deoptState(b, pre), Results: []ssa.Value{cond}})
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
-		// sum is loop-invariant (x and y both come from pre) and eligible to
-		// hoist. state, guardA, and guardB are a redundant pair of guards
-		// CSEPass and GuardPass collapse to one before this pass ever looks
-		// at the loop, and remain a guard regardless - HoistPass never moves
-		// them, carrying deopt state as they do. next reads sum, keeping it
-		// live (and loop-variant itself, since it also reads counter), so
-		// the hoisted addition survives DCEPass rather than being swept as
-		// dead code regardless of where it sits.
 		sum := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{sum}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, pre), Results: []ssa.Value{sum}})
 		state := b.Value(ssa.TypeState)
-		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		guardA := b.Value(ssa.TypeRef)
 		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardA}})
 		guardB := b.Value(ssa.TypeRef)
 		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardB}})
 		length := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guardB}, State: deoptState(b, pre, instr.ARRAY_LEN), Results: []ssa.Value{length}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guardB}, State: deoptState(b, pre), Results: []ssa.Value{length}})
 		next := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, sum}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{next}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, sum}, State: deoptState(b, pre), Results: []ssa.Value{next}})
 		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
 
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})
@@ -141,4 +112,10 @@ func TestPassOrder(t *testing.T) {
 		require.Equal(t, 2, strings.Count(got, "i32.add"))
 		require.Equal(t, 1, strings.Count(blockChunk(got, 0), "i32.add"))
 	})
+}
+
+func deoptState(b *ssa.Builder, block int) ssa.Value {
+	state := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+	return state
 }

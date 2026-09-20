@@ -2,22 +2,13 @@ package ssa
 
 import "github.com/siyul-park/minivm/types"
 
-// Value names one SSA value: a block parameter or an instruction result. It
-// is a dense index into the function that defines it, assigned once and never
-// redefined, so a pass reasons about values with slices rather than pointer
-// graphs.
+// Value identifies one SSA definition.
 type Value int32
 
-// Type is the vocabulary a Value is typed in: minivm's own value kinds plus
-// the interpreter state a deoptimizing instruction resumes into, which is a
-// value here (see Frame) but not a value the guest can hold. The zero Type is
-// invalid, so a value the builder never typed is rejected rather than read as
-// i1.
+// Type identifies an SSA value representation.
 type Type uint8
 
-// NoValue is the absent Value, and the zero Value, so an instruction or
-// terminator that names no interpreter state needs no field for it. Real
-// values are numbered from one.
+// NoValue identifies an absent value.
 const NoValue Value = 0
 
 const (
@@ -28,14 +19,10 @@ const (
 	TypeF32
 	TypeF64
 	TypeRef
-	// TypeState is the interpreter state an instruction deoptimizes into.
-	// Only OpState produces it and only an Instruction.State or a
-	// Terminator.State may name it.
 	TypeState
 )
 
-// TypeOf returns the Type mirroring kind, or the invalid zero Type for a kind
-// with no representation here (types.KindAny).
+// TypeOf returns the SSA type for a guest kind.
 func TypeOf(kind types.Kind) Type {
 	switch kind {
 	case types.KindI1:
@@ -57,6 +44,7 @@ func TypeOf(kind types.Kind) Type {
 	}
 }
 
+// String returns the type name.
 func (t Type) String() string {
 	switch t {
 	case TypeI1:

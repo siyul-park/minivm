@@ -10,49 +10,38 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Module is the read-only, module-wide evidence a bytecode translation
-// resolves value kinds, container shapes, and call targets against. It is
-// everything a translation reads outside the function being translated.
+// Module contains read-only module facts used by translation.
 type Module struct {
-	// Constants is the module's constant pool, as the values CONST_GET
-	// pushes.
+	// Constants is the constant pool.
 	Constants []types.Boxed
-	// Globals is the declared kind of each global slot.
+	// Globals is the declared global-kind table.
 	Globals []types.Kind
+	// Objects resolves constant references to known cells.
 	Objects Objects
-	// Decl is the program's declared-type table, indexed by the type operand
-	// of STRUCT_NEW and REF_CAST.
-	Decl []types.Type
+	// Types is the declared-type table.
+	Types []types.Type
 }
 
-// Objects resolves the reference a constant carries into the facts about the
-// cell it names. The identity a reference carries is the constant's own pool
-// slot, because a translation only ever hands it straight back to Objects.
+// Objects maps constant references to object facts.
 type Objects map[int]Object
 
-// Object is one constant cell's facts a translation resolves a reference
-// against. Every field is zero for a cell that carries no such fact.
+// Object contains facts known for one referenced cell.
 type Object struct {
-	// Fn is the function published at this address.
-	Fn *types.Function
-	// Typ is the type a struct cell carries.
-	Typ *types.StructType
+	// Function is the referenced function, when known.
+	Function *types.Function
+	// Type is the referenced struct type, when known.
+	Type *types.StructType
 }
 
-// Translate returns the SSA for the whole of fn, published at addr. Address
-// zero is module code, which ends by advancing past its last instruction
-// rather than by returning. It returns (nil, nil) when fn holds an operation
-// no translation from bytecode alone can resolve, or when fn suspends: a
-// suspension ends execution at its own opcode while the threaded
-// continuation runs past it, so a translation covering only the prefix up to
-// it is not the whole function this returns.
+// ErrEntry reports an entry offset that does not start a basic block.
 var ErrEntry = errors.New("entry starts no block")
 
-func Translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function, error) {
-	if fn == nil {
+// Translate converts one bytecode function to SSA.
+func Translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
+	if function == nil {
 		return nil, nil
 	}
-	f, err := translate(m, addr, fn, entry)
+	f, err := translate(module, address, function, entry)
 	if err != nil || f == nil {
 		return nil, err
 	}
@@ -64,26 +53,22 @@ func Translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function
 	return f, nil
 }
 
-// translate lays out the whole fn, resolves the operand facts every span is
-// entered with, and emits the blocks reachable from entry. A span
-// nothing reaches is dead code and is simply left out, which is what a
-// caller optimizing a whole function wants.
-func translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function, error) {
-	if len(fn.Code) == 0 {
+func translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
+	if len(function.Code) == 0 {
 		return nil, nil
 	}
 	f := facts{
-		constants: m.Constants,
-		globals:   m.Globals,
-		objects:   m.Objects,
-		decl:      m.Decl,
-		declared:  !calls(fn.Code),
+		constants: module.Constants,
+		globals:   module.Globals,
+		objects:   module.Objects,
+		types:     module.Types,
+		callFree:  !hasCall(function.Code),
 	}
-	blocks, err := analysis.Blocks(fn)
+	blocks, err := analysis.Blocks(function)
 	if err != nil {
 		return nil, err
 	}
-	spans, at := split(fn.Code, blocks)
+	spans, at := splitSpans(function.Code, blocks)
 	root, ok := at[entry]
 	if !ok {
 		return nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
@@ -91,8 +76,8 @@ func translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function
 	if spans[0].start != 0 {
 		return nil, nil
 	}
-	fr := frame{fn: fn, addr: addr, slots: fn.Declared()}
-	states, ok := f.resolve(fr, spans, 0, nil)
+	activation := activation{function: function, address: address, slots: function.Declared()}
+	states, ok := f.analyze(activation, spans, 0, nil)
 	if !ok {
 		return nil, nil
 	}
@@ -100,16 +85,15 @@ func translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function
 		if states[root] == nil {
 			return nil, nil
 		}
-		states, ok = f.resolve(fr, spans, root, owned(states[root]))
+		states, ok = f.analyze(activation, spans, root, ownReferences(states[root]))
 		if !ok {
 			return nil, nil
 		}
 	}
-	return f.build(fr, spans, states, root), nil
+	return f.build(activation, spans, states, root), nil
 }
 
-// calls reports whether code enters another function.
-func calls(code []byte) bool {
+func hasCall(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
 		if inst.Opcode().Writes(instr.Frame) {
@@ -120,8 +104,6 @@ func calls(code []byte) bool {
 	return false
 }
 
-// function returns the function published at addr, or nil when addr names no
-// function.
-func (o Objects) function(addr int) *types.Function {
-	return o[addr].Fn
+func (o Objects) function(address int) *types.Function {
+	return o[address].Function
 }
