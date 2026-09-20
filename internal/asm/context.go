@@ -5,43 +5,19 @@ import (
 	"unsafe"
 )
 
-// Context is the state one native execution and the Go code around it share.
-// Native code holds its address in the pinned context register for as long
-// as it runs, and leaves through it: every way out of native code lands in
-// the trampoline with Trap saying which way, and Regs, Fregs, PC, and NSP
-// holding enough of the machine state for Resume to continue exactly there.
-//
-// It is a heap object Go never moves, and native code writes only its scalar
-// fields, so no write barrier is ever owed. The native stack it owns is
-// noscan memory: a Go pointer stored there is invisible to the collector,
-// which is why native code stores none.
+// Context owns the state shared by Go and native activations. Native code
+// accesses its layout through the offsets below; Go code uses the state methods.
 type Context struct {
 	stub  uintptr
 	stack []uint64
 
 	sp, fp, lr uintptr
-	// PC is where the last exit left native code, and where Resume
-	// continues.
-	PC uintptr
-	// NSP is the native stack pointer: where Enter starts, where the last
-	// exit stopped, and, after a native activation returns, where that
-	// activation was entered.
-	NSP uintptr
-	// Trap is how native code last left. The trampoline writes TrapReturn;
-	// native code writes any other value before it exits.
-	Trap Trap
-	// Exit identifies the exit native code last left through. Native code
-	// writes it before exiting; what it names is the code publisher's to
-	// say.
-	Exit uint64
-	// Regs holds X0-X29 as they were at the last exit, indexed by register
-	// number, and is what Resume loads them from. The slots of the scratch,
-	// platform, Go-reserved, and context registers (X16, X17, X18, X28, X26)
-	// are never written or read: Resume takes the context from its argument.
-	Regs [32]uint64
-	// Fregs holds D0-D31 as they were at the last exit and is what Resume
-	// loads them from.
-	Fregs [32]uint64
+	pc         uintptr
+	nsp        uintptr
+	trap       Trap
+	exit       uint64
+	regs       [32]uint64
+	fregs      [32]uint64
 }
 
 // Trap is how native code left the last time control returned to Go.
@@ -64,12 +40,12 @@ const (
 // is the one layout both sides share.
 const (
 	OffsetStub  = unsafe.Offsetof(Context{}.stub)
-	OffsetPC    = unsafe.Offsetof(Context{}.PC)
-	OffsetNSP   = unsafe.Offsetof(Context{}.NSP)
-	OffsetTrap  = unsafe.Offsetof(Context{}.Trap)
-	OffsetExit  = unsafe.Offsetof(Context{}.Exit)
-	OffsetRegs  = unsafe.Offsetof(Context{}.Regs)
-	OffsetFregs = unsafe.Offsetof(Context{}.Fregs)
+	OffsetPC    = unsafe.Offsetof(Context{}.pc)
+	OffsetNSP   = unsafe.Offsetof(Context{}.nsp)
+	OffsetTrap  = unsafe.Offsetof(Context{}.trap)
+	OffsetExit  = unsafe.Offsetof(Context{}.exit)
+	OffsetRegs  = unsafe.Offsetof(Context{}.regs)
+	OffsetFregs = unsafe.Offsetof(Context{}.fregs)
 )
 
 // NewContext returns a context owning a native stack of size bytes, with NSP
@@ -78,11 +54,27 @@ func NewContext(size int) (*Context, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("%w: stack size %d", ErrInvalidArgs, size)
 	}
-	stack := make([]uint64, (size+7)/8)
+	stack := make([]uint64, size/8+2)
 	top := uintptr(unsafe.Pointer(&stack[0])) + uintptr(len(stack))*8
-	return &Context{stub: exitPC(), NSP: top &^ 15, stack: stack}, nil
+	return &Context{stub: exitPC(), nsp: top &^ 15, stack: stack}, nil
 }
 
+// Exit reports the exit identifier native code last wrote before leaving.
+func (c *Context) Exit() uint64 {
+	return c.exit
+}
+
+// Reg reports the saved value of r. r must be saved by the native exit protocol.
+func (c *Context) Reg(r PReg) uint64 {
+	return *c.slot(r)
+}
+
+// SetReg stores v in the saved register file for r. r must be saved by the native exit protocol.
+func (c *Context) SetReg(r PReg, v uint64) {
+	*c.slot(r) = v
+}
+
+// String reports how native code last left.
 func (t Trap) String() string {
 	switch t {
 	case TrapReturn:
@@ -93,5 +85,19 @@ func (t Trap) String() string {
 		return "bridge"
 	default:
 		return "invalid"
+	}
+}
+
+func (c *Context) slot(r PReg) *uint64 {
+	if r.id >= uint8(len(c.regs)) {
+		panic("asm: invalid register")
+	}
+	switch r.typ {
+	case RegTypeInt:
+		return &c.regs[r.id]
+	case RegTypeFloat:
+		return &c.fregs[r.id]
+	default:
+		panic("asm: invalid register type")
 	}
 }

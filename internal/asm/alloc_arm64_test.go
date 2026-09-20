@@ -38,6 +38,6 @@ func TestAssembler_Build_arm64(t *testing.T) {
 
 		require.Equal(t, asm.TrapBridge, asm.Enter(addr, ctx))
 		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(43), ctx.Regs[0])
+		require.Equal(t, uint64(43), ctx.Reg(arm64.X0))
 	})
 }

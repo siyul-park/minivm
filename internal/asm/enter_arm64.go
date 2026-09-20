@@ -1,18 +1,18 @@
 package asm
 
-// Enter runs the native code at code on ctx's native stack, starting at
-// ctx.NSP, until that activation returns or exits. It returns how native code
-// left; anything but TrapReturn leaves the activation suspended for Resume.
+// Enter runs native code at code on the context's native stack until that
+// activation returns or exits. Anything but TrapReturn leaves the activation
+// suspended for Resume.
 func Enter(code uintptr, ctx *Context) Trap {
 	enter(code, ctx)
-	return ctx.Trap
+	return ctx.trap
 }
 
-// Resume continues the activation ctx last suspended, with the registers
-// Regs and Fregs hold, at PC, on the native stack at NSP.
+// Resume continues the last suspended activation from its saved native PC
+// and native stack pointer, after restoring its saved register file.
 func Resume(ctx *Context) Trap {
 	resume(ctx)
-	return ctx.Trap
+	return ctx.trap
 }
 
 func enter(code uintptr, ctx *Context)

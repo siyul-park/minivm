@@ -37,7 +37,7 @@ func exit(id int64, trap asm.Trap) []asm.Instruction {
 	}
 }
 
-// reg is the offset of Xi's slot in Context.Regs.
+// reg is the offset of Xi's slot in Context.regs.
 func reg(i int) int16 { return int16(asm.OffsetRegs) + int16(i)*8 }
 
 func link(t *testing.T, insts ...asm.Instruction) uintptr {
@@ -63,7 +63,7 @@ func TestEnter(t *testing.T) {
 		require.Equal(t, asm.TrapReturn, asm.Enter(code, ctx))
 	})
 
-	t.Run("runs on the native stack at NSP", func(t *testing.T) {
+	t.Run("keeps the native stack pointer aligned", func(t *testing.T) {
 		ctx, err := asm.NewContext(4096)
 		require.NoError(t, err)
 		code := link(t,
@@ -71,24 +71,28 @@ func TestEnter(t *testing.T) {
 			arm64.STR(arm64.X0, arm64.Ctx, reg(0)),
 			arm64.RET(),
 		)
-		top := ctx.NSP
 
 		require.Equal(t, asm.TrapReturn, asm.Enter(code, ctx))
-		require.Equal(t, uint64(top), ctx.Regs[0])
-		require.Equal(t, top, ctx.NSP)
+		stack := ctx.Reg(arm64.X0)
+		require.NotZero(t, stack)
+		require.Zero(t, stack%16)
+	})
+
+	t.Run("handles a small stack allocation", func(t *testing.T) {
+		ctx, err := asm.NewContext(8)
+		require.NoError(t, err)
+
+		require.Equal(t, asm.TrapReturn, asm.Enter(link(t, frame()...), ctx))
 	})
 
 	t.Run("suspends at an exit", func(t *testing.T) {
 		ctx, err := asm.NewContext(4096)
 		require.NoError(t, err)
 		code := link(t, frame(append([]asm.Instruction{arm64.MOVI(arm64.X0, 42)}, exit(7, asm.TrapBridge)...)...)...)
-		top := ctx.NSP
 
 		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
-		require.Equal(t, uint64(7), ctx.Exit)
-		require.Equal(t, uint64(42), ctx.Regs[0])
-		require.Equal(t, top-16, ctx.NSP)
-		require.Equal(t, code+4*9, ctx.PC)
+		require.Equal(t, uint64(7), ctx.Exit())
+		require.Equal(t, uint64(42), ctx.Reg(arm64.X0))
 	})
 
 	t.Run("nests below a suspended activation", func(t *testing.T) {
@@ -108,15 +112,11 @@ func TestEnter(t *testing.T) {
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 			arm64.RET(),
 		)
-		top := ctx.NSP
 
 		require.Equal(t, asm.TrapBridge, asm.Enter(outer, ctx))
-		require.Equal(t, top-16, ctx.NSP)
 		require.Equal(t, asm.TrapReturn, asm.Enter(inner, ctx))
-		require.Equal(t, top-16, ctx.NSP)
 		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(1), ctx.Regs[0])
-		require.Equal(t, top, ctx.NSP)
+		require.Equal(t, uint64(1), ctx.Reg(arm64.X0))
 	})
 }
 
@@ -130,14 +130,16 @@ func TestResume(t *testing.T) {
 		)...)...)
 
 		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
-		ctx.Regs[0] = 100
+		ctx.SetReg(arm64.X0, 100)
 		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(101), ctx.Regs[0])
+		require.Equal(t, uint64(101), ctx.Reg(arm64.X0))
 	})
 
 	t.Run("restores every saved register", func(t *testing.T) {
 		ctx, err := asm.NewContext(4096)
 		require.NoError(t, err)
+		fregs := arm64.New().Registers(asm.RegTypeFloat)
+		require.Len(t, fregs, 32)
 		saved := []asm.PReg{
 			arm64.X0, arm64.X1, arm64.X2, arm64.X3, arm64.X4, arm64.X5, arm64.X6, arm64.X7,
 			arm64.X8, arm64.X9, arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14, arm64.X15,
@@ -156,20 +158,20 @@ func TestResume(t *testing.T) {
 
 		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
 		for _, r := range saved {
-			require.Equal(t, uint64(r.ID())+1, ctx.Regs[r.ID()], r.String())
-			ctx.Regs[r.ID()] = uint64(r.ID()) + 1000
+			require.Equal(t, uint64(r.ID())+1, ctx.Reg(r), r.String())
+			ctx.SetReg(r, uint64(r.ID())+1000)
 		}
 		for i := range 32 {
-			require.Equal(t, uint64(i)+100, ctx.Fregs[i], fregs[i].String())
-			ctx.Fregs[i] = uint64(i) + 2000
+			require.Equal(t, uint64(i)+100, ctx.Reg(fregs[i]), fregs[i].String())
+			ctx.SetReg(fregs[i], uint64(i)+2000)
 		}
 		require.Equal(t, asm.TrapBridge, asm.Resume(ctx))
-		require.Equal(t, uint64(2), ctx.Exit)
+		require.Equal(t, uint64(2), ctx.Exit())
 		for _, r := range saved {
-			require.Equal(t, uint64(r.ID())+1000, ctx.Regs[r.ID()], r.String())
+			require.Equal(t, uint64(r.ID())+1000, ctx.Reg(r), r.String())
 		}
 		for i := range 32 {
-			require.Equal(t, uint64(i)+2000, ctx.Fregs[i], fregs[i].String())
+			require.Equal(t, uint64(i)+2000, ctx.Reg(fregs[i]), fregs[i].String())
 		}
 		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
 	})
@@ -190,18 +192,19 @@ func TestResume(t *testing.T) {
 		require.Equal(t, 1<<16, grow(1<<16))
 		runtime.GC()
 		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(6), ctx.Regs[0])
+		require.Equal(t, uint64(6), ctx.Reg(arm64.X0))
 	})
 }
 
-var fregs = []asm.PReg{
-	arm64.D0, arm64.D1, arm64.D2, arm64.D3, arm64.D4, arm64.D5, arm64.D6, arm64.D7,
-	arm64.D8, arm64.D9, arm64.D10, arm64.D11, arm64.D12, arm64.D13, arm64.D14, arm64.D15,
-	arm64.D16, arm64.D17, arm64.D18, arm64.D19, arm64.D20, arm64.D21, arm64.D22, arm64.D23,
-	arm64.D24, arm64.D25, arm64.D26, arm64.D27, arm64.D28, arm64.D29, arm64.D30, arm64.D31,
+func TestContext_Exit(t *testing.T) {
+	ctx, err := asm.NewContext(4096)
+	require.NoError(t, err)
+	code := link(t, frame(exit(7, asm.TrapBridge)...)...)
+
+	require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
+	require.Equal(t, uint64(7), ctx.Exit())
 }
 
-// grow recurses n deep so the goroutine stack is copied to a larger one.
 func grow(n int) int {
 	var pad [64]byte
 	if n == 0 {

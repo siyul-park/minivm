@@ -21,10 +21,11 @@ type Loc struct {
 // Those fresh registers never cross a call or a block boundary, so the rerun
 // only ever has less to do; the loop ends when a scan spills nothing.
 type allocator struct {
-	frame  Frame
-	insts  []Instruction
-	labels map[Label]int
-	usable map[value]bool
+	frame     Frame
+	insts     []Instruction
+	labels    map[Label]int
+	usable    map[value]bool
+	registers [2][]PReg
 
 	locs  map[VReg]Loc
 	tiny  map[VReg]bool
@@ -59,7 +60,8 @@ func newAllocator(frame Frame, insts []Instruction, labels map[Label]int) *alloc
 		tiny:   map[VReg]bool{},
 	}
 	for _, typ := range []RegType{RegTypeInt, RegTypeFloat} {
-		for _, r := range frame.Registers(typ) {
+		a.registers[typ] = frame.Registers(typ)
+		for _, r := range a.registers[typ] {
 			a.usable[physical(r)] = true
 		}
 	}
@@ -333,7 +335,7 @@ func (a *allocator) free(iv interval, active []interval, assigned map[value]PReg
 		}
 	}
 next:
-	for _, r := range a.frame.Registers(iv.value.typ) {
+	for _, r := range a.registers[iv.value.typ] {
 		if held[r.id] {
 			continue
 		}

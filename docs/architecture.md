@@ -48,13 +48,9 @@ The agent `MUST` place behavior by dominant ownership, not import convenience. I
 
 ```text
 program → Verify → optimize? → interp → threaded
-                                         ↓ hot root
-                                      JIT compile
-                                         ↓
-                              native ↔ threaded fallback
 ```
 
-Threaded execution is the semantic baseline. Native execution `MUST` preserve observable behavior.
+Threaded execution is the semantic baseline. Native compilation is a planned optimization tier and is not part of the current execution path.
 
 ## Runtime
 
@@ -71,7 +67,6 @@ The following invariants `MUST` hold, and the agent `MUST` preserve them:
 - Heap indexes are stable; reference cleanup is iterative.
 - A frame distinguishes function address from callable reference.
 - External bytecode is verified before execution.
-- Native fallback materializes exactly the state required by threaded execution.
 - Debugger mode disables JIT and preserves bytecode boundaries.
 
 ## Planned Native Boundary

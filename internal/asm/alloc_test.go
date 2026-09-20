@@ -8,6 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// narrow is an ARM64 frame whose integer bank holds one register.
+type narrow struct {
+	asm.Arch
+	asm.Frame
+}
+
+func (narrow) Registers(typ asm.RegType) []asm.PReg {
+	if typ == asm.RegTypeFloat {
+		return arm64.New().Registers(typ)
+	}
+	return []asm.PReg{arm64.X0}
+}
+
 // vint and vfloat name the virtual registers a case allocates.
 func vint(id int32) asm.VReg   { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
 func vfloat(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64) }
@@ -26,19 +39,6 @@ func encode(t *testing.T, insts ...asm.Instruction) []byte {
 	code, err := a.Build()
 	require.NoError(t, err)
 	return code
-}
-
-// narrow is an ARM64 frame whose integer bank holds one register.
-type narrow struct {
-	asm.Arch
-	asm.Frame
-}
-
-func (narrow) Registers(typ asm.RegType) []asm.PReg {
-	if typ == asm.RegTypeFloat {
-		return arm64.New().Registers(typ)
-	}
-	return []asm.PReg{arm64.X0}
 }
 
 func TestAssembler_Loc(t *testing.T) {

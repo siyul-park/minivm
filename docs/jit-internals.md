@@ -25,9 +25,11 @@ The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimiz
 
 | Symbol | Contract |
 |---|---|
-| `Context` | Shared state: saved Go registers, `NSP` (native SP), `PC`, `Trap`, `Exit`, `Regs`/`Fregs` (the register file at the last exit), the native stack. Native code writes only scalar fields; no Go pointer is ever stored on the native stack. |
-| `Enter(code, ctx)` | Switches to the native stack at `NSP` and calls `code`. Returns `TrapReturn` when the activation returns; any other trap leaves it suspended. |
-| `Resume(ctx)` | Continues the suspended activation: restores `Regs`/`Fregs`, `SP = NSP`, `LR = PC`, and returns into it. |
+| `Context` | Owns the native stack and activation state: native SP, PC, trap, exit identifier, and saved registers. Go accesses saved registers through `Reg`/`SetReg`; mutable state stays behind the owner. Native code writes only scalar state; no Go pointer is stored on the native stack. |
+| `Enter(code, ctx)` | Switches to the context-owned native stack and calls `code`. Returns `TrapReturn` when the activation returns; any other trap leaves it suspended. |
+| `Resume(ctx)` | Continues the suspended activation: restores the saved register file, `SP = NSP`, `LR = PC`, and returns into it. |
+| `Context.Reg` / `SetReg` | Read or replace one saved register value from the Go side. These are the public ownership boundary for the register file. |
+| `Context.Exit` | Returns the last native exit identifier. |
 | exit | Native code writes `Exit` and `Trap`, then `BLR`s the stub at `OffsetStub`. **An exit is a call**: the stub saves the register file, `LR → PC`, `SP → NSP`, and returns to Go; `Resume` is that call returning, so code that exits keeps its own LR in a frame like around any call. |
 | `arm64.Ctx` (X26) | Holds the `*Context` while native code runs; pinned, never written by native code. X16/X17 are scratch for the exit protocol; X18/X28 are never touched. |
 

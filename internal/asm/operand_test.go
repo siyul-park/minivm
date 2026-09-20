@@ -29,6 +29,10 @@ func TestMem(t *testing.T) {
 	require.Equal(t, asm.MemOperand{Base: base, Offset: 8}, asm.Mem(base, 8))
 }
 
+func TestSlots(t *testing.T) {
+	require.Equal(t, asm.SlotsOperand{}, asm.Slots())
+}
+
 func TestVRegOperand_String(t *testing.T) {
 	require.Equal(t, "vr1", asm.Virtual(asm.NewVReg(1, asm.RegTypeInt, asm.Width64)).String())
 }
@@ -50,4 +54,8 @@ func TestMemOperand_String(t *testing.T) {
 
 	require.Equal(t, "[x1]", asm.Mem(base, 0).String())
 	require.Equal(t, "[x1, #8]", asm.Mem(base, 8).String())
+}
+
+func TestSlotsOperand_String(t *testing.T) {
+	require.Equal(t, "#slots", asm.Slots().String())
 }
