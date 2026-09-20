@@ -135,8 +135,8 @@ const (
 	SpaceUpval
 )
 
-// OverflowsI64 reports operations that can exceed the boxed i64 payload.
-func OverflowsI64(code instr.Opcode) bool {
+// CanOverflowI64 reports opcodes that can exceed the boxed i64 payload.
+func CanOverflowI64(code instr.Opcode) bool {
 	switch code {
 	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_U,
 		instr.I64_DIV_S, instr.I64_DIV_U:

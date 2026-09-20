@@ -15,21 +15,21 @@ type emitter struct {
 	module    bool
 	base      int
 
-	subst map[ssa.Value]ssa.Value
-	ops   [][]ssa.Operation
-	terms []ssa.Terminator
-	uses  map[ssa.Value]int
-	born  map[ssa.Value]int
-	homed map[ssa.Value]bool
-	home  map[ssa.Value]int
+	subst   map[ssa.Value]ssa.Value
+	ops     [][]ssa.Operation
+	terms   []ssa.Terminator
+	uses    map[ssa.Value]int
+	defined map[ssa.Value]int
+	homed   map[ssa.Value]bool
+	home    map[ssa.Value]int
 
-	added  []types.Type
+	locals []types.Type
 	code   []instr.Instruction
 	begin  int
 	starts []int
 	fixes  []branchFix
 	stack  []ssa.Value
-	blame  ssa.Value
+	needed ssa.Value
 }
 
 type branchFix struct {
@@ -38,7 +38,7 @@ type branchFix struct {
 	block   int
 }
 
-var slots = [...]struct{ read, write instr.Opcode }{
+var spaceOps = [...]struct{ read, write instr.Opcode }{
 	ssa.SpaceLocal:  {instr.LOCAL_GET, instr.LOCAL_SET},
 	ssa.SpaceGlobal: {instr.GLOBAL_GET, instr.GLOBAL_SET},
 	ssa.SpaceUpval:  {instr.UPVAL_GET, instr.UPVAL_SET},
@@ -56,31 +56,31 @@ func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byt
 		}
 		if e.walk() {
 			code, ok := e.link()
-			return code, e.added, ok
+			return code, e.locals, ok
 		}
-		if e.blame == ssa.NoValue || e.homed[e.blame] {
+		if e.needed == ssa.NoValue || e.homed[e.needed] {
 			return nil, nil, false
 		}
-		e.homed[e.blame] = true
+		e.homed[e.needed] = true
 	}
 	return nil, nil, false
 }
 
 func (e *emitter) collect() bool {
-	e.subst, e.uses, e.born, e.homed = map[ssa.Value]ssa.Value{}, map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
+	e.subst, e.uses, e.defined, e.homed = map[ssa.Value]ssa.Value{}, map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
 
 	for id := range e.function.Len() {
 		currentBlock := e.function.Block(id)
 		for _, p := range currentBlock.Params {
-			e.born[p] = id
+			e.defined[p] = id
 		}
-		for _, operation := range currentBlock.Ops {
+		for _, operation := range currentBlock.Operations {
 			if !e.accept(id, operation) {
 				return false
 			}
 		}
-		term := currentBlock.Term
+		term := currentBlock.Terminator
 		term.Args = e.values(term.Args)
 		if len(term.Edges) > 0 {
 			edges := make([]ssa.Edge, len(term.Edges))
@@ -120,7 +120,7 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 		}
 	case ssa.OpConst:
 	case ssa.OpLoad, ssa.OpStore:
-		if operation.Slot.Base != 0 || int(operation.Slot.Space) >= len(slots) {
+		if operation.Slot.Base != 0 || int(operation.Slot.Space) >= len(spaceOps) {
 			return false
 		}
 	default:
@@ -128,7 +128,7 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 	}
 	operation.Args = e.values(operation.Args)
 	for _, v := range operation.Results {
-		e.born[v] = id
+		e.defined[v] = id
 	}
 	e.ops[id] = append(e.ops[id], operation)
 	return true
@@ -137,7 +137,7 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 func (e *emitter) count(id int, values []ssa.Value) {
 	for _, v := range values {
 		e.uses[v]++
-		if e.born[v] != id {
+		if e.defined[v] != id {
 			e.homed[v] = true
 		}
 	}
@@ -160,7 +160,7 @@ func (e *emitter) homeParams() {
 }
 
 func (e *emitter) assignHomes() bool {
-	e.home, e.added = map[ssa.Value]int{}, nil
+	e.home, e.locals = map[ssa.Value]int{}, nil
 	values := make([]ssa.Value, 0, len(e.homed))
 	for v := range e.homed {
 		values = append(values, v)
@@ -174,18 +174,18 @@ func (e *emitter) assignHomes() bool {
 		if !ok {
 			return false
 		}
-		slot := e.base + len(e.added)
+		slot := e.base + len(e.locals)
 		if slot > math.MaxUint8 {
 			return false
 		}
 		e.home[v] = slot
-		e.added = append(e.added, t)
+		e.locals = append(e.locals, t)
 	}
 	return true
 }
 
 func (e *emitter) walk() bool {
-	e.code, e.fixes, e.blame = nil, nil, ssa.NoValue
+	e.code, e.fixes, e.needed = nil, nil, ssa.NoValue
 	e.starts = make([]int, e.function.Len())
 	for id := range e.function.Len() {
 		e.starts[id], e.begin = len(e.code), len(e.code)
@@ -235,9 +235,9 @@ func (e *emitter) perform(operation ssa.Operation) bool {
 		}
 		e.write(inst)
 	case ssa.OpLoad:
-		e.write(instr.New(slots[operation.Slot.Space].read, uint64(operation.Slot.Index)))
+		e.write(instr.New(spaceOps[operation.Slot.Space].read, uint64(operation.Slot.Index)))
 	case ssa.OpStore:
-		e.write(instr.New(slots[operation.Slot.Space].write, uint64(operation.Slot.Index)))
+		e.write(instr.New(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index)))
 	default:
 		e.write(instr.New(operation.Code))
 	}
@@ -293,7 +293,7 @@ func (e *emitter) loadArgs(args []ssa.Value) bool {
 	for _, v := range args[at:] {
 		slot, ok := e.home[v]
 		if !ok {
-			e.blame = v
+			e.needed = v
 			return false
 		}
 		e.write(instr.New(instr.LOCAL_GET, uint64(slot)))
@@ -307,7 +307,7 @@ func (e *emitter) carry(args []ssa.Value) bool {
 		return false
 	}
 	if len(e.stack) != len(args) {
-		e.blame = e.stack[0]
+		e.needed = e.stack[0]
 		return false
 	}
 	return true
@@ -320,7 +320,7 @@ func (e *emitter) results(results []ssa.Value) bool {
 		if !e.homed[v] && e.uses[v] > 0 {
 			for _, under := range results[:i] {
 				if e.homed[under] || e.uses[under] == 0 {
-					e.blame = v
+					e.needed = v
 					return false
 				}
 			}

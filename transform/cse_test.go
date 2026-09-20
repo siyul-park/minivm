@@ -23,7 +23,7 @@ func TestNewCSEPass(t *testing.T) {
 func TestCSEPass_Run(t *testing.T) {
 	t.Run("collapses a repeated pure computation within one block", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
 		first, second := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{first}})
@@ -44,7 +44,7 @@ func TestCSEPass_Run(t *testing.T) {
 
 	t.Run("collapses a computation a dominated block repeats", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, next := b.Block(), b.Block()
+		entry, next := b.AddBlock(), b.AddBlock()
 		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{first}})
@@ -67,7 +67,7 @@ func TestCSEPass_Run(t *testing.T) {
 
 	t.Run("does not collapse a computation two sibling arms repeat independently", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
+		entry, left, right, join := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
 		cond := b.Param(entry, ssa.TypeI1)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
@@ -92,7 +92,7 @@ func TestCSEPass_Run(t *testing.T) {
 
 	t.Run("collapses a repeated constant across blocks", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, next := b.Block(), b.Block()
+		entry, next := b.AddBlock(), b.AddBlock()
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{first}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: next}}})
@@ -111,7 +111,7 @@ func TestCSEPass_Run(t *testing.T) {
 
 	t.Run("redirects a deopt frame's reference when the value it names collapses into an earlier one", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, next := b.Block(), b.Block()
+		entry, next := b.AddBlock(), b.AddBlock()
 		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{first}})

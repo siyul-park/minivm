@@ -22,7 +22,7 @@ func deduplicate(function *ssa.Function, key func(*ssa.Function, ssa.Operation) 
 		}
 
 		var pushed []string
-		for _, operation := range currentBlock.Ops {
+		for _, operation := range currentBlock.Operations {
 			operation = rebuilder.operation(operation)
 			if k, ok := key(function, operation); ok {
 				if rep, seen := table[k]; seen {
@@ -40,7 +40,7 @@ func deduplicate(function *ssa.Function, key func(*ssa.Function, ssa.Operation) 
 			}
 			rebuilder.builder.Add(id, rebuilder.define(function, operation))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 
 		for _, c := range children[block] {
 			walk(c)

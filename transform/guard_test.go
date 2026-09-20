@@ -22,7 +22,7 @@ func TestNewGuardPass(t *testing.T) {
 func TestGuardPass_Run(t *testing.T) {
 	t.Run("collapses a repeated shape guard over the same operand", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		array := b.Param(entry, ssa.TypeRef)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -46,7 +46,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 	t.Run("does not collapse guards admitting different shapes", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		array := b.Param(entry, ssa.TypeRef)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -68,7 +68,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 	t.Run("collapses a repeated kind guard narrowing to the same kind", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		dyn := b.Param(entry, ssa.TypeRef)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -90,7 +90,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 	t.Run("does not collapse kind guards narrowing to different kinds", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		dyn := b.Param(entry, ssa.TypeRef)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -112,7 +112,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 	t.Run("collapses a repeated value guard specializing to the same observed value", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		value, observed := b.Param(entry, ssa.TypeI32), b.Value(ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{observed}})
@@ -135,7 +135,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 	t.Run("collapses a repeated bounds guard, which has no result to redirect", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		index, length := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -155,7 +155,7 @@ func TestGuardPass_Run(t *testing.T) {
 
 	t.Run("preserves a deopt frame's own values while eliminating a redundant guard sharing its state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		array, extra := b.Param(entry, ssa.TypeRef), b.Param(entry, ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: extra}}}}, Results: []ssa.Value{state}})

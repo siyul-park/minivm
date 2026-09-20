@@ -13,10 +13,10 @@ type Function struct {
 type Block struct {
 	// Params are values passed by predecessor edges.
 	Params []Value
-	// Ops are the block operations.
-	Ops []Operation
-	// Term is the block terminator.
-	Term Terminator
+	// Operations are the block instructions.
+	Operations []Operation
+	// Terminator ends the block.
+	Terminator Terminator
 }
 
 // Name returns the function name.
@@ -29,13 +29,13 @@ func (f *Function) Len() int {
 	return len(f.blocks)
 }
 
-// Succ returns block successors in edge order.
-func (f *Function) Succ(block int) []int {
+// Successors returns block successors in edge order.
+func (f *Function) Successors(block int) []int {
 	return f.succs[block]
 }
 
-// Pred returns blocks that reach block.
-func (f *Function) Pred(block int) []int {
+// Predecessors returns blocks that reach block.
+func (f *Function) Predecessors(block int) []int {
 	return f.preds[block]
 }
 

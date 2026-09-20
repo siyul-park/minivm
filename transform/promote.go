@@ -37,7 +37,7 @@ func (p *PromotePass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserv
 func promotable(function *ssa.Function) map[int]ssa.Type {
 	localTypes, stored, blocked := map[int]ssa.Type{}, map[int]bool{}, map[int]bool{}
 	for b := range function.Len() {
-		for _, operation := range function.Block(b).Ops {
+		for _, operation := range function.Block(b).Operations {
 			var held ssa.Value
 			switch operation.Op {
 			case ssa.OpExec:
@@ -77,7 +77,7 @@ func promotable(function *ssa.Function) map[int]ssa.Type {
 }
 
 func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function, bool) {
-	if len(function.Pred(0)) > 0 {
+	if len(function.Predecessors(0)) > 0 {
 		if len(function.Block(0).Params) > 0 {
 			return nil, false
 		}
@@ -112,7 +112,7 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 			}
 		}
 
-		for _, operation := range currentBlock.Ops {
+		for _, operation := range currentBlock.Operations {
 			operation = rebuilder.operation(operation)
 			switch {
 			case operation.Op == ssa.OpLoad && isPromoted(localTypes, operation.Slot):
@@ -128,8 +128,8 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 			rebuilder.builder.Add(id, rebuilder.define(function, operation))
 		}
 
-		term := rebuilder.terminator(currentBlock.Term)
-		for i, edge := range currentBlock.Term.Edges {
+		term := rebuilder.terminator(currentBlock.Terminator)
+		for i, edge := range currentBlock.Terminator.Edges {
 			for _, index := range params[edge.Block] {
 				term.Edges[i].Args = append(term.Edges[i].Args, reaching[index])
 			}
@@ -147,17 +147,17 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 
 func prependEntry(function *ssa.Function) *ssa.Function {
 	rebuilder := newRebuilder(function)
-	first := rebuilder.builder.Block()
+	first := rebuilder.builder.AddBlock()
 	for _, block := range reversePostorder(function) {
 		id := rebuilder.block(block)
 		currentBlock := function.Block(block)
 		for _, param := range currentBlock.Params {
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
-		for _, operation := range currentBlock.Ops {
+		for _, operation := range currentBlock.Operations {
 			rebuilder.builder.Add(id, rebuilder.define(function, rebuilder.operation(operation)))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 	}
 	rebuilder.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: rebuilder.block(0)}}})
 	return rebuilder.builder.Build()
@@ -166,7 +166,7 @@ func prependEntry(function *ssa.Function) *ssa.Function {
 func placements(function *ssa.Function, dominance *graph.Dominance, localTypes map[int]ssa.Type, indexes []int) [][]int {
 	stored := map[int][]int{}
 	for block := range function.Len() {
-		for _, operation := range function.Block(block).Ops {
+		for _, operation := range function.Block(block).Operations {
 			if operation.Op != ssa.OpStore || !isPromoted(localTypes, operation.Slot) {
 				continue
 			}

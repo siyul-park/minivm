@@ -14,7 +14,7 @@ import (
 func TestFormat(t *testing.T) {
 	t.Run("prints a loop over a guarded array", func(t *testing.T) {
 		b := ssa.New("sum")
-		entry, header, body, done := b.Block(), b.Block(), b.Block(), b.Block()
+		entry, header, body, done := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 
 		state := b.Value(ssa.TypeState)
 		array := b.Value(ssa.TypeRef)
@@ -77,7 +77,7 @@ func TestFormat(t *testing.T) {
 
 	t.Run("marks the stack entries a deopt frame owns", func(t *testing.T) {
 		b := ssa.New("own")
-		entry := b.Block()
+		entry := b.AddBlock()
 		array := b.Value(ssa.TypeRef)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
@@ -99,7 +99,7 @@ func TestFormat(t *testing.T) {
 
 	t.Run("names the local slots a deopt frame is written back with", func(t *testing.T) {
 		b := ssa.New("promoted")
-		entry := b.Block()
+		entry := b.AddBlock()
 		counter := b.Value(ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{counter}})
@@ -119,7 +119,7 @@ func TestFormat(t *testing.T) {
 
 	t.Run("prints every other operation form", func(t *testing.T) {
 		b := ssa.New("forms")
-		entry, stop, give, end := b.Block(), b.Block(), b.Block(), b.Block()
+		entry, stop, give, end := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 
 		state := b.Value(ssa.TypeState)
 		callee := b.Value(ssa.TypeRef)

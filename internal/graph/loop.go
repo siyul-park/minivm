@@ -7,7 +7,7 @@ func LoopHeaders(g Graph, d *Dominance) []int {
 	seen := make(map[int]bool)
 	var out []int
 	for b := 0; b < g.Len(); b++ {
-		for _, s := range g.Succ(b) {
+		for _, s := range g.Successors(b) {
 			if !seen[s] && d.Dominates(s, b) {
 				seen[s] = true
 				out = append(out, s)

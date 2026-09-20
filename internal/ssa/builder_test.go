@@ -18,7 +18,7 @@ func TestNew(t *testing.T) {
 func TestBuilder_Block(t *testing.T) {
 	t.Run("numbers blocks from the entry upward", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, second := b.Block(), b.Block()
+		entry, second := b.AddBlock(), b.AddBlock()
 		require.Equal(t, 0, entry)
 		require.Equal(t, 1, second)
 
@@ -31,7 +31,7 @@ func TestBuilder_Block(t *testing.T) {
 func TestBuilder_Param(t *testing.T) {
 	t.Run("appends parameters in order", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		first := b.Param(entry, ssa.TypeI32)
 		second := b.Param(entry, ssa.TypeRef)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
@@ -60,7 +60,7 @@ func TestBuilder_Type(t *testing.T) {
 	t.Run("reports the type a value was reserved with", func(t *testing.T) {
 		b := ssa.New("f")
 		value := b.Value(ssa.TypeF32)
-		param := b.Param(b.Block(), ssa.TypeRef)
+		param := b.Param(b.AddBlock(), ssa.TypeRef)
 		require.Equal(t, ssa.TypeF32, b.Type(value))
 		require.Equal(t, ssa.TypeRef, b.Type(param))
 	})
@@ -75,7 +75,7 @@ func TestBuilder_Type(t *testing.T) {
 func TestBuilder_Add(t *testing.T) {
 	t.Run("appends instructions in order", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		one := b.Value(ssa.TypeI32)
 		doubled := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
@@ -91,7 +91,7 @@ func TestBuilder_Add(t *testing.T) {
 func TestBuilder_Term(t *testing.T) {
 	t.Run("replaces the terminator already set", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 		require.Equal(t, "func f\nblk0: ()\n\treturn\n", ssa.Format(b.Build()))
@@ -101,22 +101,22 @@ func TestBuilder_Term(t *testing.T) {
 func TestBuilder_Build(t *testing.T) {
 	t.Run("resolves successors and predecessors", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, join := b.Block(), b.Block()
+		entry, join := b.AddBlock(), b.AddBlock()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
 		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
 
 		f := b.Build()
-		require.Equal(t, []int{join}, f.Succ(entry))
-		require.Equal(t, []int{entry}, f.Pred(join))
+		require.Equal(t, []int{join}, f.Successors(entry))
+		require.Equal(t, []int{entry}, f.Predecessors(join))
 	})
 
 	t.Run("hands over its storage and starts over", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 
 		built := b.Build()
-		next := b.Block()
+		next := b.AddBlock()
 		b.Term(next, ssa.Terminator{Op: ssa.OpReturn})
 
 		require.Equal(t, "func f\nblk0: ()\n\tcomplete\n", ssa.Format(built))

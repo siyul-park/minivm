@@ -33,7 +33,7 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved,
 		for _, param := range currentBlock.Params {
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
-		for _, operation := range currentBlock.Ops {
+		for _, operation := range currentBlock.Operations {
 			operation = rebuilder.operation(operation)
 			if operation.Op == ssa.OpExec && operation.Code.IsPure() {
 				if next, ok := p.fold(rebuilder, id, function, constants, computed, operation); ok {
@@ -56,7 +56,7 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved,
 				}
 			}
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 	}
 
 	if !changed {

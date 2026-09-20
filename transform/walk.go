@@ -122,7 +122,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 			}
 			return ssa.Terminator{Op: ssa.OpBranch, Args: args}, true
 		case instr.RETURN:
-			if len(w.stack) < w.resultCount() {
+			if len(w.stack) < w.activation.resultCount() {
 				return ssa.Terminator{}, false
 			}
 			return w.leave(), true
@@ -593,7 +593,7 @@ func (w *walker) complete() ssa.Terminator {
 }
 
 func (w *walker) leave() ssa.Terminator {
-	n := w.resultCount()
+	n := w.activation.resultCount()
 	if n > len(w.stack) {
 		n = len(w.stack)
 	}
@@ -641,8 +641,4 @@ func (w *walker) guard(at int, shape ssa.Shape) {
 		Results: []ssa.Value{value},
 	})
 	w.stack[at].value = value
-}
-
-func (w *walker) resultCount() int {
-	return w.activation.resultCount()
 }

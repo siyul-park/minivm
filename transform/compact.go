@@ -9,18 +9,18 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// DeduplicatePass compacts duplicate constants and types.
-type DeduplicatePass struct{}
+// CompactPass removes unused and duplicate constants and types.
+type CompactPass struct{}
 
-var _ pass.Pass[*program.Program] = (*DeduplicatePass)(nil)
+var _ pass.Pass[*program.Program] = (*CompactPass)(nil)
 
-// NewDeduplicatePass returns the pass.
-func NewDeduplicatePass() *DeduplicatePass {
-	return &DeduplicatePass{}
+// NewCompactPass returns the pass.
+func NewCompactPass() *CompactPass {
+	return &CompactPass{}
 }
 
-// Run compacts constants and types in one program.
-func (p *DeduplicatePass) Run(_ *pass.Manager, program *program.Program) (pass.Preserved, error) {
+// Run compacts a program's constant and type pools.
+func (p *CompactPass) Run(_ *pass.Manager, program *program.Program) (pass.Preserved, error) {
 	codes := [][]byte{program.Code}
 	for _, v := range program.Constants {
 		if function, ok := v.(*types.Function); ok {
@@ -51,8 +51,8 @@ func (p *DeduplicatePass) Run(_ *pass.Manager, program *program.Program) (pass.P
 		}
 	}
 
-	constIndex, constSize := deduplicateValues(constants, constUsed)
-	typeIndex, typesSize := deduplicateTypes(typs, typeUsed)
+	constIndex, constSize := compactValues(constants, constUsed)
+	typeIndex, typesSize := compactTypes(typs, typeUsed)
 
 	for i, v := range constIndex {
 		if v >= 0 {
@@ -100,7 +100,7 @@ func (p *DeduplicatePass) Run(_ *pass.Manager, program *program.Program) (pass.P
 	return pass.PreserveNone(), nil
 }
 
-func deduplicateValues(items []types.Value, used []bool) ([]int, int) {
+func compactValues(items []types.Value, used []bool) ([]int, int) {
 	index := make([]int, len(items))
 	seen := make(map[types.Value]int, len(items))
 	size := 0
@@ -125,7 +125,7 @@ func deduplicateValues(items []types.Value, used []bool) ([]int, int) {
 	return index, size
 }
 
-func deduplicateTypes(items []types.Type, used []bool) ([]int, int) {
+func compactTypes(items []types.Type, used []bool) ([]int, int) {
 	index := make([]int, len(items))
 	for i := range index {
 		index[i] = -1

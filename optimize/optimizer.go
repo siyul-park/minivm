@@ -37,14 +37,14 @@ func New(level Level) *Optimizer {
 	}
 
 	pass.Register(o.manager, analysis.NewBlocksAnalysis())
-	for _, p := range o.transforms() {
+	for _, p := range o.passes() {
 		o.pipeline.Add(p)
 	}
 
 	return o
 }
 
-// Optimize rewrites prog in place and returns it.
+// Optimize runs the configured passes in place and returns prog.
 func (o *Optimizer) Optimize(prog *program.Program) (*program.Program, error) {
 	return o.pipeline.Run(o.manager, prog)
 }
@@ -59,24 +59,24 @@ func (o *Optimizer) Add(p pass.Pass[*program.Program]) {
 	o.pipeline.Add(p)
 }
 
-func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
+func (o *Optimizer) passes() []pass.Pass[*program.Program] {
 	switch o.level {
 	case O1:
-		return route(transform.NewFoldPass(), transform.NewDCEPass())
+		return compose(transform.NewFoldPass(), transform.NewDCEPass())
 	case O2:
-		return route(transform.NewFoldPass(), transform.NewCSEPass(), transform.NewGuardPass(), transform.NewDCEPass())
+		return compose(transform.NewFoldPass(), transform.NewCSEPass(), transform.NewGuardPass(), transform.NewDCEPass())
 	case O3:
-		return route(transform.NewFoldPass(), transform.NewPromotePass(), transform.NewForwardPass(),
+		return compose(transform.NewFoldPass(), transform.NewPromotePass(), transform.NewForwardPass(),
 			transform.NewCSEPass(), transform.NewGuardPass(), transform.NewHoistPass(), transform.NewDCEPass())
 	default:
 		return nil
 	}
 }
 
-func route(passes ...pass.Pass[*ssa.Function]) []pass.Pass[*program.Program] {
+func compose(passes ...pass.Pass[*ssa.Function]) []pass.Pass[*program.Program] {
 	pipeline := pass.NewPipeline[*ssa.Function]()
 	for _, p := range passes {
 		pipeline.Add(p)
 	}
-	return []pass.Pass[*program.Program]{transform.NewSSAPass(pipeline), transform.NewDeduplicatePass()}
+	return []pass.Pass[*program.Program]{transform.NewSSAPass(pipeline), transform.NewCompactPass()}
 }

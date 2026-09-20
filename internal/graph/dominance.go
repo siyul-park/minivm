@@ -21,7 +21,7 @@ func Frontier(g Graph, d *Dominance) [][]int {
 	frontier := make([][]int, g.Len())
 	for b := range g.Len() {
 		idom := d.IDom(b)
-		preds := g.Pred(b)
+		preds := g.Predecessors(b)
 		if b != 0 && (idom < 0 || len(preds) < 2) {
 			continue
 		}
@@ -58,7 +58,7 @@ func NewDominance(g Graph) *Dominance {
 		changed = false
 		for _, b := range order[1:] {
 			pick := -1
-			for _, p := range g.Pred(b) {
+			for _, p := range g.Predecessors(b) {
 				if idom[p] == -1 {
 					continue
 				}
@@ -139,7 +139,7 @@ func reversePostorder(g Graph) (rpoNum []int, order []int) {
 	visited[0] = true
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
-		succ := g.Succ(top.node)
+		succ := g.Successors(top.node)
 		if top.next < len(succ) {
 			s := succ[top.next]
 			top.next++

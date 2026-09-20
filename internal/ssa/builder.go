@@ -13,8 +13,8 @@ func New(name string) *Builder {
 	return &Builder{name: name, types: make([]Type, 1)}
 }
 
-// Block appends an empty block and returns its id.
-func (b *Builder) Block() int {
+// AddBlock appends an empty block and returns its id.
+func (b *Builder) AddBlock() int {
 	b.blocks = append(b.blocks, Block{})
 	return len(b.blocks) - 1
 }
@@ -42,12 +42,12 @@ func (b *Builder) Type(v Value) Type {
 
 // Add appends operation to block.
 func (b *Builder) Add(block int, operation Operation) {
-	b.blocks[block].Ops = append(b.blocks[block].Ops, operation)
+	b.blocks[block].Operations = append(b.blocks[block].Operations, operation)
 }
 
 // Term sets the terminator for block.
 func (b *Builder) Term(block int, term Terminator) {
-	b.blocks[block].Term = term
+	b.blocks[block].Terminator = term
 }
 
 // Build returns the function and resets the builder.
@@ -61,7 +61,7 @@ func (b *Builder) Build() *Function {
 	}
 	b.types, b.blocks = make([]Type, 1), nil
 	for id, block := range f.blocks {
-		for _, edge := range block.Term.Edges {
+		for _, edge := range block.Terminator.Edges {
 			if edge.Block < 0 || edge.Block >= len(f.blocks) {
 				continue
 			}

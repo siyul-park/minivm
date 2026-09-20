@@ -101,7 +101,7 @@ func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][
 
 func (f facts) transfer(activation activation, s span, in []fact) ([]fact, bool) {
 	b := ssa.New("")
-	block := b.Block()
+	block := b.AddBlock()
 	stack := make([]operand, len(in))
 	for i, e := range in {
 		t, ok := ssaType(e.kind)
@@ -189,7 +189,7 @@ func (f facts) build(entry activation, spans []span, states [][]fact, root int) 
 	}
 	b := ssa.New(fmt.Sprintf("%d:%d", entry.address, spans[root].start))
 	for _, id := range order {
-		ids[id] = b.Block()
+		ids[id] = b.AddBlock()
 	}
 
 	for _, id := range order {

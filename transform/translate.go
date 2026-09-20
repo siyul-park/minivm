@@ -36,7 +36,8 @@ type Object struct {
 // ErrEntry reports an entry offset that does not start a basic block.
 var ErrEntry = errors.New("entry starts no block")
 
-// Translate converts one bytecode function to SSA.
+// Translate converts one bytecode function from entry to SSA.
+// It returns ErrEntry for a non-block entry and nil when translation is unsupported.
 func Translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
 	if function == nil {
 		return nil, nil
@@ -46,7 +47,7 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 		return nil, err
 	}
 	for id := 0; id < f.Len(); id++ {
-		if f.Block(id).Term.Op == ssa.OpSuspend {
+		if f.Block(id).Terminator.Op == ssa.OpSuspend {
 			return nil, nil
 		}
 	}
@@ -104,6 +105,6 @@ func hasCall(code []byte) bool {
 	return false
 }
 
-func (o Objects) function(address int) *types.Function {
-	return o[address].Function
+func (o Objects) function(reference int) *types.Function {
+	return o[reference].Function
 }

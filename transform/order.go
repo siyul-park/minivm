@@ -15,7 +15,7 @@ func reversePostorder(function *ssa.Function) []int {
 	visited[0] = true
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
-		succ := function.Succ(top.block)
+		succ := function.Successors(top.block)
 		if top.next < len(succ) {
 			s := succ[top.next]
 			top.next++

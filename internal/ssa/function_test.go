@@ -14,7 +14,7 @@ var _ graph.Graph = (*ssa.Function)(nil)
 func TestFunction_Name(t *testing.T) {
 	t.Run("returns the name given to New", func(t *testing.T) {
 		b := ssa.New("gcd")
-		entry := b.Block()
+		entry := b.AddBlock()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		require.Equal(t, "gcd", b.Build().Name())
 	})
@@ -23,7 +23,7 @@ func TestFunction_Name(t *testing.T) {
 func TestFunction_Len(t *testing.T) {
 	t.Run("counts the blocks built", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		require.Equal(t, 1, b.Build().Len())
 	})
@@ -33,10 +33,10 @@ func TestFunction_Len(t *testing.T) {
 	})
 }
 
-func TestFunction_Succ(t *testing.T) {
+func TestFunction_Successors(t *testing.T) {
 	t.Run("lists the blocks a terminator reaches in edge order", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
+		entry, left, right, join := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 		cond := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
@@ -45,29 +45,29 @@ func TestFunction_Succ(t *testing.T) {
 		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
 
 		f := b.Build()
-		require.Equal(t, []int{left, right}, f.Succ(entry))
-		require.Equal(t, []int{join}, f.Succ(left))
-		require.Empty(t, f.Succ(join))
+		require.Equal(t, []int{left, right}, f.Successors(entry))
+		require.Equal(t, []int{join}, f.Successors(left))
+		require.Empty(t, f.Successors(join))
 	})
 }
 
-func TestFunction_Pred(t *testing.T) {
+func TestFunction_Predecessors(t *testing.T) {
 	t.Run("names each incoming block once", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, join := b.Block(), b.Block()
+		entry, join := b.AddBlock(), b.AddBlock()
 		cond := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
 		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
 
 		f := b.Build()
-		require.Empty(t, f.Pred(entry))
-		require.Equal(t, []int{entry}, f.Pred(join))
+		require.Empty(t, f.Predecessors(entry))
+		require.Equal(t, []int{entry}, f.Predecessors(join))
 	})
 
 	t.Run("serves the dominance and loop-header algorithms", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, header, done := b.Block(), b.Block(), b.Block()
+		entry, header, done := b.AddBlock(), b.AddBlock(), b.AddBlock()
 		cond := b.Value(ssa.TypeI32)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
 		b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
@@ -85,21 +85,21 @@ func TestFunction_Pred(t *testing.T) {
 func TestFunction_Block(t *testing.T) {
 	t.Run("returns the block at an id", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		param := b.Param(entry, ssa.TypeI32)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
 
 		block := b.Build().Block(entry)
 		require.Equal(t, []ssa.Value{param}, block.Params)
-		require.Empty(t, block.Ops)
-		require.Equal(t, ssa.OpReturn, block.Term.Op)
+		require.Empty(t, block.Operations)
+		require.Equal(t, ssa.OpReturn, block.Terminator.Op)
 	})
 }
 
 func TestFunction_Type(t *testing.T) {
 	t.Run("returns the type a value was reserved with", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		v := b.Value(ssa.TypeF64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxF64(1.5), Results: []ssa.Value{v}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
@@ -108,7 +108,7 @@ func TestFunction_Type(t *testing.T) {
 
 	t.Run("returns the invalid type for a value it does not hold", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 
 		f := b.Build()

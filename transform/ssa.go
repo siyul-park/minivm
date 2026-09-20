@@ -10,7 +10,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// SSAPass translates functions to SSA, runs a pipeline, and emits bytecode.
+// SSAPass translates, optimizes, and re-emits expressible functions.
 type SSAPass struct {
 	pipeline *pass.Pipeline[*ssa.Function]
 }
@@ -29,7 +29,7 @@ func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 	return &SSAPass{pipeline: pipeline}
 }
 
-// Run applies the SSA round trip to a program.
+// Run applies the SSA round trip and leaves unsupported or failed functions unchanged.
 func (p *SSAPass) Run(manager *pass.Manager, program *program.Program) (pass.Preserved, error) {
 	constants := newPool(program)
 
@@ -70,13 +70,13 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	if _, err := p.pipeline.Run(manager, f); err != nil {
 		return false, err
 	}
-	code, added, ok := emit(f, constants, address == 0, len(function.Declared()))
-	if !ok || (len(added) == 0 && slices.Equal(code, function.Code)) {
+	code, locals, ok := emit(f, constants, address == 0, len(function.Declared()))
+	if !ok || (len(locals) == 0 && slices.Equal(code, function.Code)) {
 		return false, nil
 	}
 	function.Code = code
-	if len(added) > 0 {
-		function.Locals = append(slices.Clone(function.Locals), added...)
+	if len(locals) > 0 {
+		function.Locals = append(slices.Clone(function.Locals), locals...)
 	}
 	return true, nil
 }

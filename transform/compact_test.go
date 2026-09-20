@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewDeduplicatePass(t *testing.T) {
-	require.NotNil(t, transform.NewDeduplicatePass())
+func TestNewCompactPass(t *testing.T) {
+	require.NotNil(t, transform.NewCompactPass())
 }
 
-func TestDeduplicatePass_Run(t *testing.T) {
+func TestCompactPass_Run(t *testing.T) {
 	tests := []struct {
 		name     string
 		program  *program.Program
@@ -99,7 +99,7 @@ func TestDeduplicatePass_Run(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			actual := tt.program
-			_, err := transform.NewDeduplicatePass().Run(m, actual)
+			_, err := transform.NewCompactPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -118,7 +118,7 @@ func TestDeduplicatePass_Run(t *testing.T) {
 		want, err := before.Pop()
 		require.NoError(t, err)
 
-		_, err = transform.NewDeduplicatePass().Run(pass.NewManager(), prog)
+		_, err = transform.NewCompactPass().Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1))
 		defer after.Close()

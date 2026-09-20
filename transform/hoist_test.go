@@ -61,7 +61,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.True(t, hasCode(fn.Block(l.body).Ops, instr.I32_ADD))
+		require.True(t, hasCode(fn.Block(l.body).Operations, instr.I32_ADD))
 	})
 
 	t.Run("does not hoist a heap read a loop's own heap write could invalidate", func(t *testing.T) {
@@ -79,7 +79,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.True(t, hasCode(fn.Block(l.body).Ops, instr.ARRAY_LEN))
+		require.True(t, hasCode(fn.Block(l.body).Operations, instr.ARRAY_LEN))
 	})
 
 	t.Run("does not hoist a loop-invariant division that could fault on a zero divisor", func(t *testing.T) {
@@ -97,12 +97,12 @@ func TestHoistPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.True(t, hasCode(fn.Block(l.body).Ops, instr.I32_DIV_S))
+		require.True(t, hasCode(fn.Block(l.body).Operations, instr.I32_DIV_S))
 	})
 
 	t.Run("does not hoist out of a loop with no suitable preheader", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, left, right, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
+		entry, left, right, header, body, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 
 		pick := b.Value(ssa.TypeI1)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI1(true), Results: []ssa.Value{pick}})
@@ -180,7 +180,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 	t.Run("cascades a doubly loop-invariant operation out of a nested loop in one run", func(t *testing.T) {
 		b := ssa.New("f")
-		pre, outer, mid, inner, innerBody, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
+		pre, outer, mid, inner, innerBody, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 
 		x, y := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
@@ -234,7 +234,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 	t.Run("is correct on a function carrying no loop at all", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		x := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{x}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
@@ -251,7 +251,7 @@ func TestHoistPass_Run(t *testing.T) {
 }
 func newCountedLoop() *countedLoop {
 	b := ssa.New("f")
-	l := &countedLoop{b: b, pre: b.Block(), header: b.Block(), body: b.Block(), exit: b.Block()}
+	l := &countedLoop{b: b, pre: b.AddBlock(), header: b.AddBlock(), body: b.AddBlock(), exit: b.AddBlock()}
 
 	l.bound = b.Value(ssa.TypeI32)
 	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{l.bound}})

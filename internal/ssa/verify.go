@@ -45,18 +45,18 @@ func Verify(function *Function) error {
 		if err := validateParameters(function, id); err != nil {
 			return fmt.Errorf("blk%d: %w", id, err)
 		}
-		for i, operation := range block.Ops {
-			if err := checkOperation(function, sites, operation); err != nil {
+		for i, operation := range block.Operations {
+			if err := validateOperation(function, sites, operation); err != nil {
 				return fmt.Errorf("blk%d operation %d: %w", id, i, err)
 			}
 			if err := validateUses(function, sites, dominance, position{id, i}, operationUses(operation)); err != nil {
 				return fmt.Errorf("blk%d operation %d: %w", id, i, err)
 			}
 		}
-		if err := validateTerminator(function, sites, block.Term); err != nil {
+		if err := validateTerminator(function, sites, block.Terminator); err != nil {
 			return fmt.Errorf("blk%d term: %w", id, err)
 		}
-		if err := validateUses(function, sites, dominance, position{id, len(block.Ops)}, terminatorUses(block.Term)); err != nil {
+		if err := validateUses(function, sites, dominance, position{id, len(block.Operations)}, terminatorUses(block.Terminator)); err != nil {
 			return fmt.Errorf("blk%d term: %w", id, err)
 		}
 	}
@@ -84,7 +84,7 @@ func validateDefinitions(function *Function) ([]position, error) {
 				return nil, err
 			}
 		}
-		for i, operation := range block.Ops {
+		for i, operation := range block.Operations {
 			for _, v := range operation.Results {
 				if err := claim(v, position{id, i}); err != nil {
 					return nil, err
@@ -103,7 +103,7 @@ func validateDefinitions(function *Function) ([]position, error) {
 func validateParameters(function *Function, block int) error {
 	want := function.blocks[block].Params
 	for _, pred := range function.preds[block] {
-		for _, edge := range function.blocks[pred].Term.Edges {
+		for _, edge := range function.blocks[pred].Terminator.Edges {
 			if edge.Block != block {
 				continue
 			}
@@ -120,13 +120,13 @@ func validateParameters(function *Function, block int) error {
 	return nil
 }
 
-func checkOperation(function *Function, sites []position, o Operation) error {
+func validateOperation(function *Function, sites []position, o Operation) error {
 	args, results := len(o.Args), len(o.Results)
 	deopts := false
 	switch o.Op {
 	case OpConst, OpLoad:
 		if args != 0 || results != 1 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 	case OpExec:
 		if err := validateOpcode(function, o); err != nil {
@@ -135,22 +135,22 @@ func checkOperation(function *Function, sites []position, o Operation) error {
 		deopts = true
 	case OpStore:
 		if args != 1 || results != 0 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardKind, OpGuardShape:
 		if args != 1 || results != 1 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardBounds:
 		if args != 2 || results != 0 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardValue:
 		if args != 2 || results != 1 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 		if !isConstant(function, sites, o.Args[1]) {
 			return fmt.Errorf("%w: %s admits v%d, which is no observation", ErrForm, o.name(), o.Args[1])
@@ -158,12 +158,12 @@ func checkOperation(function *Function, sites []position, o Operation) error {
 		deopts = true
 	case OpRetain, OpRelease:
 		if args != 1 || results != 0 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 		deopts = o.Op == OpRelease
 	case OpState:
 		if args != 0 || results != 1 {
-			return countError(o.name(), args, results)
+			return arityError(o.name(), args, results)
 		}
 		if len(o.Frames) == 0 {
 			return fmt.Errorf("%w: %s carries no frame", ErrState, o.name())
@@ -202,12 +202,12 @@ func validateOpcode(function *Function, o Operation) error {
 	operationType := instr.TypeOf(o.Code)
 	if operationType.Pop == nil && operationType.Push == nil {
 		if o.Code.Writes(instr.Frame) && len(o.Args) == 0 {
-			return countError(o.name(), len(o.Args), len(o.Results))
+			return arityError(o.name(), len(o.Args), len(o.Results))
 		}
 		return nil
 	}
 	if len(o.Args) != len(operationType.Pop) || len(o.Results) != len(operationType.Push) {
-		return countError(o.name(), len(o.Args), len(o.Results))
+		return arityError(o.name(), len(o.Args), len(o.Results))
 	}
 	for i, want := range operationType.Pop {
 		if got := function.Type(o.Args[len(o.Args)-1-i]); !accepts(got, want) {
@@ -267,27 +267,27 @@ func validateTerminator(function *Function, sites []position, t Terminator) erro
 	switch t.Op {
 	case OpJump:
 		if args != 0 || edges != 1 {
-			return countError(t.Op.String(), args, edges)
+			return arityError(t.Op.String(), args, edges)
 		}
 	case OpBranch:
 		if args != 1 || edges != 2 {
-			return countError(t.Op.String(), args, edges)
+			return arityError(t.Op.String(), args, edges)
 		}
 	case OpTable:
 		if args != 1 || edges == 0 {
-			return countError(t.Op.String(), args, edges)
+			return arityError(t.Op.String(), args, edges)
 		}
 	case OpReturn:
 		if edges != 0 {
-			return countError(t.Op.String(), args, edges)
+			return arityError(t.Op.String(), args, edges)
 		}
 	case OpComplete:
 		if edges != 0 {
-			return countError(t.Op.String(), args, edges)
+			return arityError(t.Op.String(), args, edges)
 		}
 	case OpExit, OpSuspend:
 		if args != 0 || edges != 0 {
-			return countError(t.Op.String(), args, edges)
+			return arityError(t.Op.String(), args, edges)
 		}
 		deopts = true
 	default:
@@ -319,10 +319,10 @@ func stateOperation(function *Function, sites []position, v Value, name string, 
 		return Operation{}, fmt.Errorf("%w: %s resumes into v%d", ErrState, name, v)
 	}
 	def := sites[v]
-	if def.index < 0 || function.blocks[def.block].Ops[def.index].Op != OpState {
+	if def.index < 0 || function.blocks[def.block].Operations[def.index].Op != OpState {
 		return Operation{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
 	}
-	return function.blocks[def.block].Ops[def.index], nil
+	return function.blocks[def.block].Operations[def.index], nil
 }
 
 func isConstant(function *Function, sites []position, v Value) bool {
@@ -330,7 +330,7 @@ func isConstant(function *Function, sites []position, v Value) bool {
 		return false
 	}
 	def := sites[v]
-	return def.index >= 0 && function.blocks[def.block].Ops[def.index].Op == OpConst
+	return def.index >= 0 && function.blocks[def.block].Operations[def.index].Op == OpConst
 }
 
 func validateUses(function *Function, sites []position, dominance *graph.Dominance, at position, values []Value) error {
@@ -390,6 +390,6 @@ func representation(t Type) Type {
 	return t
 }
 
-func countError(name string, in, out int) error {
+func arityError(name string, in, out int) error {
 	return fmt.Errorf("%w: %s takes %d and yields %d", ErrForm, name, in, out)
 }

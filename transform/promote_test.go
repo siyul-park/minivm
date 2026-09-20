@@ -37,16 +37,16 @@ func TestPromotePass_Run(t *testing.T) {
 		counter := fn.Block(header).Params[0]
 		require.Equal(t, ssa.TypeI32, fn.Type(counter))
 
-		body, advanced := findBlock(fn, func(blk ssa.Block) bool { return hasCode(blk.Ops, instr.I32_ADD) })
+		body, advanced := findBlock(fn, func(blk ssa.Block) bool { return hasCode(blk.Operations, instr.I32_ADD) })
 		require.NotEqual(t, -1, body)
 		var next ssa.Value
-		for _, op := range advanced.Ops {
+		for _, op := range advanced.Operations {
 			if op.Op == ssa.OpExec && op.Code == instr.I32_ADD {
 				next = op.Results[0]
 				require.Equal(t, []ssa.Value{counter, op.Args[1]}, op.Args)
 			}
 		}
-		require.Equal(t, []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}, advanced.Term.Edges)
+		require.Equal(t, []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}, advanced.Terminator.Edges)
 	})
 
 	t.Run("state a deopt with the value the promoted slot held there", func(t *testing.T) {
@@ -58,7 +58,7 @@ func TestPromotePass_Run(t *testing.T) {
 		header, _ := findBlock(fn, func(blk ssa.Block) bool { return len(blk.Params) == 1 })
 		counter := fn.Block(header).Params[0]
 
-		_, body := findBlock(fn, func(blk ssa.Block) bool { return hasCode(blk.Ops, instr.I32_ADD) })
+		_, body := findBlock(fn, func(blk ssa.Block) bool { return hasCode(blk.Operations, instr.I32_ADD) })
 		state, ok := deoptStateOf(body)
 		require.True(t, ok)
 		require.Equal(t, []ssa.Frame{{Address: 1, IP: 9, Locals: []ssa.Local{{Index: 0, Value: counter}}}}, state.Frames)
@@ -66,13 +66,13 @@ func TestPromotePass_Run(t *testing.T) {
 		entry := fn.Block(0)
 		state, ok = deoptStateOf(entry)
 		require.True(t, ok)
-		require.Equal(t, []ssa.Frame{{Address: 1, IP: 1, Locals: []ssa.Local{{Index: 0, Value: entry.Ops[0].Results[0]}}}}, state.Frames)
-		require.Equal(t, ssa.OpLoad, entry.Ops[0].Op)
+		require.Equal(t, []ssa.Frame{{Address: 1, IP: 1, Locals: []ssa.Local{{Index: 0, Value: entry.Operations[0].Results[0]}}}}, state.Frames)
+		require.Equal(t, ssa.OpLoad, entry.Operations[0].Op)
 	})
 
 	t.Run("gives an entry that is its own loop header a block to load in", func(t *testing.T) {
 		b := ssa.New("f")
-		header, exit := b.Block(), b.Block()
+		header, exit := b.AddBlock(), b.AddBlock()
 		held := b.Value(ssa.TypeI32)
 		b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
 		one := b.Value(ssa.TypeI32)
@@ -95,16 +95,16 @@ func TestPromotePass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 
 		require.Equal(t, 3, fn.Len())
-		require.Empty(t, fn.Pred(0))
-		require.Equal(t, ssa.OpLoad, fn.Block(0).Ops[0].Op)
-		require.Equal(t, ssa.OpJump, fn.Block(0).Term.Op)
+		require.Empty(t, fn.Predecessors(0))
+		require.Equal(t, ssa.OpLoad, fn.Block(0).Operations[0].Op)
+		require.Equal(t, ssa.OpJump, fn.Block(0).Terminator.Op)
 		require.Equal(t, 1, countOperations(fn, ssa.OpLoad))
 		require.Zero(t, countOperations(fn, ssa.OpStore))
 	})
 
 	t.Run("leaves a slot alone when nothing stores it", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		held := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
@@ -120,7 +120,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when its accesses disagree on a type", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
@@ -139,7 +139,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when it holds a reference", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		stored := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxedNull, Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
@@ -158,7 +158,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when it belongs to an inlined frame", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0, Base: 4}, stored)
@@ -177,7 +177,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when it is not a local", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Space: ssa.SpaceGlobal}, stored)
@@ -196,7 +196,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("declines a function that hands a local opcode to the interpreter", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.Block()
+		entry := b.AddBlock()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
@@ -218,7 +218,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("declines a function whose entry both takes operands and is a loop header", func(t *testing.T) {
 		b := ssa.New("f")
-		header, exit := b.Block(), b.Block()
+		header, exit := b.AddBlock(), b.AddBlock()
 		seed := b.Param(header, ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
 		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
@@ -242,7 +242,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 func slotFunction() *ssa.Function {
 	b := ssa.New("f")
-	entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+	entry, header, body, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
 
 	zero := b.Value(ssa.TypeI32)
 	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
@@ -290,7 +290,7 @@ func findBlock(function *ssa.Function, predicate func(ssa.Block) bool) (int, ssa
 }
 
 func deoptStateOf(block ssa.Block) (ssa.Operation, bool) {
-	for _, op := range block.Ops {
+	for _, op := range block.Operations {
 		if op.Op == ssa.OpState {
 			return op, true
 		}
@@ -301,7 +301,7 @@ func deoptStateOf(block ssa.Block) (ssa.Operation, bool) {
 func countOperations(function *ssa.Function, want ssa.Op) int {
 	n := 0
 	for id := range function.Len() {
-		for _, op := range function.Block(id).Ops {
+		for _, op := range function.Block(id).Operations {
 			if op.Op == want {
 				n++
 			}

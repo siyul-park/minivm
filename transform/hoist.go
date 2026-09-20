@@ -48,7 +48,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 		for _, v := range currentBlock.Params {
 			paramOf[v] = b
 		}
-		for i, operation := range currentBlock.Ops {
+		for i, operation := range currentBlock.Operations {
 			for _, r := range operation.Results {
 				defSite[r] = operationSite{b, i}
 			}
@@ -83,7 +83,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 			if !body[b] {
 				continue
 			}
-			ops := function.Block(b).Ops
+			ops := function.Block(b).Operations
 			for i, operation := range ops {
 				s := operationSite{b, i}
 				if !body[current(s)] {
@@ -119,11 +119,11 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 		for _, v := range currentBlock.Params {
 			rebuilder.alias(v, rebuilder.builder.Param(id, function.Type(v)))
 		}
-		for i, operation := range currentBlock.Ops {
+		for i, operation := range currentBlock.Operations {
 			target := rebuilder.block(current(operationSite{b, i}))
 			rebuilder.builder.Add(target, rebuilder.define(function, rebuilder.operation(operation)))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 	}
 	next := rebuilder.builder.Build()
 	*function = *next
@@ -135,7 +135,7 @@ func isHoistable(operation ssa.Operation) bool {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		return operation.Code.IsPure() && isSpeculatable(operation.Code) && !ssa.OverflowsI64(operation.Code)
+		return operation.Code.IsPure() && isSpeculatable(operation.Code) && !ssa.CanOverflowI64(operation.Code)
 	default:
 		return false
 	}
@@ -154,7 +154,7 @@ func isSpeculatable(code instr.Opcode) bool {
 func loopBody(function *ssa.Function, dominance *graph.Dominance, header int) map[int]bool {
 	body := map[int]bool{header: true}
 	var stack []int
-	for _, p := range function.Pred(header) {
+	for _, p := range function.Predecessors(header) {
 		if dominance.Dominates(header, p) && !body[p] {
 			body[p] = true
 			stack = append(stack, p)
@@ -163,7 +163,7 @@ func loopBody(function *ssa.Function, dominance *graph.Dominance, header int) ma
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		for _, p := range function.Pred(n) {
+		for _, p := range function.Predecessors(n) {
 			if !body[p] {
 				body[p] = true
 				stack = append(stack, p)
@@ -175,7 +175,7 @@ func loopBody(function *ssa.Function, dominance *graph.Dominance, header int) ma
 
 func preheader(function *ssa.Function, body map[int]bool, header int) (int, bool) {
 	found, ok := -1, false
-	for _, p := range function.Pred(header) {
+	for _, p := range function.Predecessors(header) {
 		if body[p] {
 			continue
 		}

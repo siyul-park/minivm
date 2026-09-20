@@ -20,10 +20,10 @@ func Format(function *Function) string {
 			fmt.Fprintf(&sb, " <-- (%s)", strings.Join(names, ", "))
 		}
 		sb.WriteString("\n")
-		for _, o := range block.Ops {
+		for _, o := range block.Operations {
 			fmt.Fprintf(&sb, "\t%s\n", operationText(function, o))
 		}
-		fmt.Fprintf(&sb, "\t%s\n", terminatorText(function, block.Term))
+		fmt.Fprintf(&sb, "\t%s\n", terminatorText(function, block.Terminator))
 	}
 	return sb.String()
 }

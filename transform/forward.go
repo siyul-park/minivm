@@ -14,7 +14,7 @@ type ForwardPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*ForwardPass)(nil)
 
-var spaces = [...]instr.Effect{
+var effects = [...]instr.Effect{
 	ssa.SpaceLocal:  instr.Local,
 	ssa.SpaceGlobal: instr.Global,
 	ssa.SpaceUpval:  instr.Upval,
@@ -39,11 +39,11 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserv
 		for _, param := range currentBlock.Params {
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
-		if len(function.Pred(block)) != 1 {
+		if len(function.Predecessors(block)) != 1 {
 			clear(held)
 		}
 
-		for _, operation := range currentBlock.Ops {
+		for _, operation := range currentBlock.Operations {
 			operation = rebuilder.operation(operation)
 			switch operation.Op {
 			case ssa.OpLoad:
@@ -63,7 +63,7 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserv
 			}
 			rebuilder.builder.Add(id, rebuilder.define(function, operation))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 
 		for _, child := range children[block] {
 			walk(child, maps.Clone(held))
@@ -80,7 +80,7 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserv
 
 func invalidate(held map[ssa.Slot]ssa.Value, code instr.Opcode) {
 	for slot := range held {
-		if code.Writes(spaces[slot.Space]) {
+		if code.Writes(effects[slot.Space]) {
 			delete(held, slot)
 		}
 	}

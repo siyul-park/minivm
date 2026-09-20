@@ -33,14 +33,14 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, 
 		for _, param := range currentBlock.Params {
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
-		for i, operation := range currentBlock.Ops {
+		for i, operation := range currentBlock.Operations {
 			if !live[operationSite{block, i}] {
 				changed = true
 				continue
 			}
 			rebuilder.builder.Add(id, rebuilder.define(function, rebuilder.operation(operation)))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Term))
+		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 	}
 
 	if !changed {
@@ -54,7 +54,7 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, 
 func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
 	defs := map[ssa.Value]operationSite{}
 	for _, b := range blocks {
-		for i, operation := range function.Block(b).Ops {
+		for i, operation := range function.Block(b).Operations {
 			for _, r := range operation.Results {
 				defs[r] = operationSite{b, i}
 			}
@@ -89,20 +89,20 @@ func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
 
 	for _, b := range blocks {
 		currentBlock := function.Block(b)
-		for i, operation := range currentBlock.Ops {
+		for i, operation := range currentBlock.Operations {
 			if isEffectful(operation) {
 				mark(operationSite{b, i}, operation)
 			}
 		}
-		for _, a := range currentBlock.Term.Args {
+		for _, a := range currentBlock.Terminator.Args {
 			push(a)
 		}
-		for _, e := range currentBlock.Term.Edges {
+		for _, e := range currentBlock.Terminator.Edges {
 			for _, a := range e.Args {
 				push(a)
 			}
 		}
-		push(currentBlock.Term.State)
+		push(currentBlock.Terminator.State)
 	}
 
 	for len(queue) > 0 {
@@ -112,7 +112,7 @@ func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
 		if !ok {
 			continue
 		}
-		mark(s, function.Block(s.block).Ops[s.index])
+		mark(s, function.Block(s.block).Operations[s.index])
 	}
 	return live
 }
