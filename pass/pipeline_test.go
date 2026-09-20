@@ -45,6 +45,78 @@ func TestPipeline_Run(t *testing.T) {
 		require.Equal(t, []string{"a", "b"}, log)
 	})
 
+	t.Run("invalidates analyses when a pass does not preserve them", func(t *testing.T) {
+		calls := 0
+		m := pass.NewManager()
+		pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
+			calls++
+			return len(prog.Code), nil
+		}))
+		prog := program.New(nil)
+		_, err := pass.GetResult[int](m, prog)
+		require.NoError(t, err)
+
+		pl := pass.NewPipeline[*program.Program]()
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
+			return false, nil
+		}))
+
+		_, err = pl.Run(m, prog)
+		require.NoError(t, err)
+		_, err = pass.GetResult[int](m, prog)
+
+		require.NoError(t, err)
+		require.Equal(t, 2, calls)
+	})
+
+	t.Run("keeps analyses when a pass preserves them", func(t *testing.T) {
+		calls := 0
+		m := pass.NewManager()
+		pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
+			calls++
+			return len(prog.Code), nil
+		}))
+		prog := program.New(nil)
+		_, err := pass.GetResult[int](m, prog)
+		require.NoError(t, err)
+
+		pl := pass.NewPipeline[*program.Program]()
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
+			return true, nil
+		}))
+
+		_, err = pl.Run(m, prog)
+		require.NoError(t, err)
+		_, err = pass.GetResult[int](m, prog)
+
+		require.NoError(t, err)
+		require.Equal(t, 1, calls)
+	})
+
+	t.Run("invalidates analyses on error", func(t *testing.T) {
+		calls := 0
+		m := pass.NewManager()
+		pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
+			calls++
+			return len(prog.Code), nil
+		}))
+		prog := program.New(nil)
+		_, err := pass.GetResult[int](m, prog)
+		require.NoError(t, err)
+
+		pl := pass.NewPipeline[*program.Program]()
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
+			return true, errors.New("fail")
+		}))
+
+		_, err = pl.Run(m, prog)
+		require.EqualError(t, err, "fail")
+		_, err = pass.GetResult[int](m, prog)
+
+		require.NoError(t, err)
+		require.Equal(t, 2, calls)
+	})
+
 	t.Run("stops on error", func(t *testing.T) {
 		want := errors.New("fail")
 		var log []string

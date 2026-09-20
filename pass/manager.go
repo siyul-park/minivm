@@ -7,7 +7,7 @@ import (
 )
 
 // Manager lazily runs analyses and caches their results per IR unit, keyed by
-// result type and unit identity. It mirrors LLVM's AnalysisManager.
+// result type and unit identity.
 type Manager struct {
 	analyses map[reflect.Type]func(*Manager, any) (any, error)
 	cache    map[cacheKey]any
@@ -57,8 +57,7 @@ func NewManager() *Manager {
 	}
 }
 
-// Invalidate drops cached results unless all analyses survived the transform.
-func (m *Manager) Invalidate(preserved bool) {
+func (m *Manager) invalidate(preserved bool) {
 	if !preserved {
 		clear(m.cache)
 	}
