@@ -42,7 +42,7 @@ func TestHoistPass_Run(t *testing.T) {
 		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
 		sum := l.b.Value(ssa.TypeI32)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(l.b, l.pre, instr.I32_ADD), Results: []ssa.Value{sum}})
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
@@ -66,7 +66,7 @@ func TestHoistPass_Run(t *testing.T) {
 		// doubled reads the header's own param directly, so it can never be
 		// invariant no matter what else the loop looks like.
 		doubled := l.b.Value(ssa.TypeI32)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.counter}, Results: []ssa.Value{doubled}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.counter}, State: deoptState(l.b, l.pre, instr.I32_ADD), Results: []ssa.Value{doubled}})
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -81,7 +81,7 @@ func TestHoistPass_Run(t *testing.T) {
 		l := newCountedLoop()
 		array := l.b.Param(l.pre, ssa.TypeRef)
 		length := l.b.Value(ssa.TypeI32)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, Results: []ssa.Value{length}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, State: deoptState(l.b, l.pre, instr.ARRAY_LEN), Results: []ssa.Value{length}})
 		state := l.b.Value(ssa.TypeState)
 		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
 		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{array, l.one, length}, State: state})
@@ -138,15 +138,15 @@ func TestHoistPass_Run(t *testing.T) {
 		cond := b.Value(ssa.TypeI1)
 		bound := b.Value(ssa.TypeI32)
 		b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{bound}})
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, Results: []ssa.Value{cond}})
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: deoptState(b, entry, instr.I32_LT_S), Results: []ssa.Value{cond}})
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
 		sum := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, x}, Results: []ssa.Value{sum}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, x}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum}})
 		next := b.Value(ssa.TypeI32)
 		one := b.Value(ssa.TypeI32)
 		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, Results: []ssa.Value{next}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{next}})
 		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
 
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})
@@ -170,13 +170,13 @@ func TestHoistPass_Run(t *testing.T) {
 		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
 
 		sum := l.b.Value(ssa.TypeI32)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(l.b, l.pre, instr.I32_ADD), Results: []ssa.Value{sum}})
 		state := l.b.Value(ssa.TypeState)
 		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, IP: 4}}, Results: []ssa.Value{state}})
 		guarded := l.b.Value(ssa.TypeRef)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Itab: 7}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guarded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 7}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guarded}})
 		length := l.b.Value(ssa.TypeI32)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guarded}, Results: []ssa.Value{length}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guarded}, State: deoptState(l.b, l.pre, instr.ARRAY_LEN), Results: []ssa.Value{length}})
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -217,25 +217,25 @@ func TestHoistPass_Run(t *testing.T) {
 
 		oc := b.Param(outer, ssa.TypeI32)
 		ocond := b.Value(ssa.TypeI1)
-		b.Add(outer, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{oc, bound}, Results: []ssa.Value{ocond}})
+		b.Add(outer, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{oc, bound}, State: deoptState(b, pre, instr.I32_LT_S), Results: []ssa.Value{ocond}})
 		b.Term(outer, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{ocond}, Edges: []ssa.Edge{{Block: mid}, {Block: exit}}})
 
 		b.Term(mid, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner, Args: []ssa.Value{zero}}}})
 
 		ic := b.Param(inner, ssa.TypeI32)
 		icond := b.Value(ssa.TypeI1)
-		b.Add(inner, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{ic, bound}, Results: []ssa.Value{icond}})
+		b.Add(inner, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{ic, bound}, State: deoptState(b, pre, instr.I32_LT_S), Results: []ssa.Value{icond}})
 		outerNext := b.Value(ssa.TypeI32)
-		b.Add(inner, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{oc, one}, Results: []ssa.Value{outerNext}})
+		b.Add(inner, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{oc, one}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{outerNext}})
 		b.Term(inner, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{icond}, Edges: []ssa.Edge{
 			{Block: innerBody},
 			{Block: outer, Args: []ssa.Value{outerNext}},
 		}})
 
 		sum := b.Value(ssa.TypeI32)
-		b.Add(innerBody, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Add(innerBody, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{sum}})
 		innerNext := b.Value(ssa.TypeI32)
-		b.Add(innerBody, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{ic, one}, Results: []ssa.Value{innerNext}})
+		b.Add(innerBody, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{ic, one}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{innerNext}})
 		b.Term(innerBody, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner, Args: []ssa.Value{innerNext}}}})
 
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{oc}})
@@ -295,7 +295,7 @@ func newCountedLoop() *countedLoop {
 
 	l.counter = b.Param(l.header, ssa.TypeI32)
 	l.cond = b.Value(ssa.TypeI1)
-	b.Add(l.header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{l.counter, l.bound}, Results: []ssa.Value{l.cond}})
+	b.Add(l.header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{l.counter, l.bound}, State: deoptState(l.b, l.pre, instr.I32_LT_S), Results: []ssa.Value{l.cond}})
 	b.Term(l.header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{l.cond}, Edges: []ssa.Edge{{Block: l.body}, {Block: l.exit}}})
 
 	b.Term(l.exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{l.counter}})
@@ -306,7 +306,7 @@ func newCountedLoop() *countedLoop {
 // the loop's own back edge. Call it after adding every other body operation.
 func (l *countedLoop) close() *ssa.Function {
 	next := l.b.Value(ssa.TypeI32)
-	l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.one}, Results: []ssa.Value{next}})
+	l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.one}, State: deoptState(l.b, l.pre, instr.I32_ADD), Results: []ssa.Value{next}})
 	l.b.Term(l.body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{next}}}})
 	return l.b.Build()
 }

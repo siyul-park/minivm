@@ -70,15 +70,6 @@ const (
 	backingUpval                 // deferred to a closure upval slot
 )
 
-// values names the SSA value each operand holds.
-func values(stack []operand) []ssa.Value {
-	out := make([]ssa.Value, len(stack))
-	for i, o := range stack {
-		out[i] = o.value
-	}
-	return out
-}
-
 // deoptOperands states what a deopt is handed: each value, and whether that
 // stack entry carries the reference count the interpreter adopts. Only a
 // reference backed by the stack copy itself does; every other backing defers
@@ -99,14 +90,15 @@ func deoptOperands(stack []operand) []ssa.Operand {
 //
 // A span the fixpoint never reaches is left without a state rather than
 // refused: it is dead code, and build simply does not emit it.
-func (f facts) resolve(entry frame, spans []span) ([][]fact, bool) {
+func (f facts) resolve(entry frame, spans []span, root int, in []fact) ([][]fact, bool) {
 	if len(entry.fn.Handlers) > 0 {
 		return nil, false
 	}
 	states := make([][]fact, len(spans))
 	seen := make([]bool, len(spans))
-	seen[0] = true
-	work := []int{0}
+	seen[root] = true
+	states[root] = in
+	work := []int{root}
 	for len(work) > 0 {
 		id := work[len(work)-1]
 		work = work[:len(work)-1]
@@ -197,6 +189,16 @@ func (f *fact) merge(src fact) (bool, bool) {
 	return changed, true
 }
 
+func owned(in []fact) []fact {
+	out := append([]fact(nil), in...)
+	for i := range out {
+		if out[i].kind == types.KindRef {
+			out[i].backing, out[i].offset = backingStack, 0
+		}
+	}
+	return out
+}
+
 // holds reads what a slot's declared type states about the value in it.
 func holds(t types.Type) fact {
 	if t == nil {
@@ -223,16 +225,16 @@ func (fr frame) returns() int {
 	return len(fr.fn.Typ.Returns)
 }
 
-// build emits every span reachable from the entry, entry first, and returns
+// build emits every span reachable from the entry, root first, and returns
 // the assembled function, or nil when a span's operands or successors cannot
 // be represented.
-func (f facts) build(entry frame, spans []span, states [][]fact) *ssa.Function {
-	order := reach(spans)
+func (f facts) build(entry frame, spans []span, states [][]fact, root int) *ssa.Function {
+	order := reach(spans, root)
 	ids := make([]int, len(spans))
 	for i := range ids {
 		ids[i] = -1
 	}
-	b := ssa.New(fmt.Sprintf("%d:%d", entry.addr, spans[0].start))
+	b := ssa.New(fmt.Sprintf("%d:%d", entry.addr, spans[root].start))
 	for _, id := range order {
 		ids[id] = b.Block()
 	}

@@ -24,13 +24,10 @@ import (
 // OpConst, which the frontend never expresses as an OpExec: an OpLoad reads
 // mutable interpreter storage, and whether a store to that storage intervened
 // is ForwardPass's question, not this one's - run it first and a repeated read
-// is already one value here. A pure OpExec can carry deopt State (see
-// ssa.OverflowsI64's five arithmetic opcodes), so cseKey/number do merge two
-// dominance-related occurrences with different State, discarding the
-// dominated one's. That is sound because a boxability guard's exit is a
-// total TrapFallback to threaded execution, never a bridge resumed back into
-// native code, so either occurrence's State resumes the rest of the program
-// threaded the same way.
+// is already one value here. Every OpExec carries State; cseKey/number may
+// merge dominance-related pure operations with different states because the
+// retained operation produces the same value and is the one that remains at
+// the program point where native execution can leave.
 type CSEPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*CSEPass)(nil)

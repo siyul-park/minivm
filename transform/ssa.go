@@ -92,7 +92,7 @@ func (p *SSAPass) rewrite(m *pass.Manager, consts *pool, addr int, fn *types.Fun
 	if !expressible(fn.Code) {
 		return false, nil
 	}
-	f, err := Translate(consts.module(), addr, fn)
+	f, err := Translate(consts.module(), addr, fn, 0)
 	if err != nil || f == nil {
 		return false, err
 	}

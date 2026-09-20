@@ -15,7 +15,7 @@ import (
 // instr's effect model, not a value's own use count, decides what survives
 // regardless of it: an OpExec that reads or writes anything (op.Code is not
 // IsPure()), an OpStore, a guard of any of the four kinds, a retain, a
-// release, or a bridge runs for what it does, not for what it returns, so
+// release, or a an interpreter operation runs for what it does, not for what it returns, so
 // none of them is ever pruned even with zero uses of its result. From those
 // roots, liveness runs backward through every value an operation reads - its
 // arguments, an OpState's own frame stacks and promoted locals, and the state
@@ -152,7 +152,7 @@ func liveOps(fn *ssa.Function, blocks []int) map[site]bool {
 func effectful(op ssa.Operation) bool {
 	switch op.Op {
 	case ssa.OpStore, ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardBounds, ssa.OpGuardValue,
-		ssa.OpRetain, ssa.OpRelease, ssa.OpBridge:
+		ssa.OpRetain, ssa.OpRelease:
 		return true
 	case ssa.OpExec:
 		return !op.Code.IsPure()

@@ -30,9 +30,9 @@ func TestPassOrder(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
 		sum1 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum1}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum1}})
 		sum2 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum2}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum2}})
 
 		unused := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(99), Results: []ssa.Value{unused}})
@@ -40,9 +40,9 @@ func TestPassOrder(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Itab: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Itab: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
 
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum1, sum2, second}})
 		fn := b.Build()
@@ -95,7 +95,7 @@ func TestPassOrder(t *testing.T) {
 
 		counter := b.Param(header, ssa.TypeI32)
 		cond := b.Value(ssa.TypeI1)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, Results: []ssa.Value{cond}})
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: deoptState(b, pre, instr.I32_LT_S), Results: []ssa.Value{cond}})
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
 		// sum is loop-invariant (x and y both come from pre) and eligible to
@@ -107,17 +107,17 @@ func TestPassOrder(t *testing.T) {
 		// the hoisted addition survives DCEPass rather than being swept as
 		// dead code regardless of where it sits.
 		sum := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{sum}})
 		state := b.Value(ssa.TypeState)
 		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
 		guardA := b.Value(ssa.TypeRef)
-		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Itab: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardA}})
+		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardA}})
 		guardB := b.Value(ssa.TypeRef)
-		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Itab: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardB}})
+		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 4}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardB}})
 		length := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guardB}, Results: []ssa.Value{length}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guardB}, State: deoptState(b, pre, instr.ARRAY_LEN), Results: []ssa.Value{length}})
 		next := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, sum}, Results: []ssa.Value{next}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, sum}, State: deoptState(b, pre, instr.I32_ADD), Results: []ssa.Value{next}})
 		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
 
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})

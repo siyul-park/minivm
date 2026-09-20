@@ -33,13 +33,17 @@ type Slot struct {
 
 // Shape is the speculated container fact one heap operation is compiled
 // against: a guard admits only this shape, and the access lowered after it
-// loads through it. Itab is the concrete heap type identity, Typ the struct
-// type pointer a struct carries, and Host the Go kind a *HostStruct field
-// converts through - a host field's width and signedness are not implied by
-// its VM type, since int16, int32, and uint32 all reach the guest as i32.
-// Host is reflect.Invalid for every container that is not a host view.
+// loads through it. Tag is an opaque identity of the container shape a guard
+// admits: two guards with equal Tag admit the same shape, and nothing reads
+// more into the value. The translator derives it from an array's element kind
+// or from a struct; a tier that guards against observed heap types will carry
+// the type's identity here. Typ is the struct type pointer a struct carries,
+// and Host the Go kind a *HostStruct field converts through - a host field's
+// width and signedness are not implied by its VM type, since int16, int32, and
+// uint32 all reach the guest as i32. Host is reflect.Invalid for every
+// container that is not a host view.
 type Shape struct {
-	Itab uintptr
+	Tag  uintptr
 	Typ  uintptr
 	Host reflect.Kind
 }
@@ -101,7 +105,7 @@ type Operand struct {
 // carry meaning; the rest stay zero.
 type Operation struct {
 	Op Op
-	// Code is the bytecode operation an OpExec or OpBridge performs. Its
+	// Code is the bytecode operation an OpExec performs. Its
 	// instr.Type states the operation's stack effect, and Args holds what it
 	// pops in the reverse of that order, bottom of the stack first - so a
 	// call's callee, which it pops first, is the last of them.
@@ -112,8 +116,11 @@ type Operation struct {
 	Frames []Frame
 
 	Args []Value
-	// State is the interpreter state this operation deoptimizes into, or
-	// NoValue when it cannot deoptimize.
+	// State is the interpreter state this operation resumes into when it leaves
+	// native execution: for an OpExec, the state at its own instruction's start,
+	// which is what a bridge hands
+	// the interpreter and what a deopt rebuilds; NoValue only on an operation
+	// that never leaves.
 	State   Value
 	Results []Value
 }
@@ -168,10 +175,6 @@ const (
 	OpGuardValue
 	OpRetain
 	OpRelease
-	// OpBridge hands Code to the interpreter and resumes here with its
-	// results. It is productive continuation, not a give-up: unlike OpExit
-	// the operations after it still run natively.
-	OpBridge
 	// OpState materializes the interpreter frame chain a deopt resumes into.
 	OpState
 
@@ -223,24 +226,6 @@ func OverflowsI64(code instr.Opcode) bool {
 	}
 }
 
-// Divides reports whether code can fault on a zero divisor, so its result
-// needs a guard before it runs even though nothing about the value it
-// produces can overflow the boxed payload the way OverflowsI64 names. It is
-// a fact about the opcode's own fallibility, not about the boxed
-// representation, which is why it names both widths and both div and rem:
-// every one of them shares the interpreter's own divide-by-zero panic (see
-// interp/threaded.go's I32_DIV_S and I64_DIV_S handlers), regardless of
-// whether OverflowsI64 also names it for a second reason.
-func Divides(code instr.Opcode) bool {
-	switch code {
-	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
-		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-		return true
-	default:
-		return false
-	}
-}
-
 func (o Op) String() string {
 	switch o {
 	case OpConst:
@@ -263,8 +248,6 @@ func (o Op) String() string {
 		return "retain"
 	case OpRelease:
 		return "release"
-	case OpBridge:
-		return "bridge"
 	case OpState:
 		return "state"
 	case OpJump:
@@ -305,8 +288,6 @@ func (o Operation) name() string {
 	switch o.Op {
 	case OpExec:
 		return instr.TypeOf(o.Code).Mnemonic
-	case OpBridge:
-		return o.Op.String() + " " + instr.TypeOf(o.Code).Mnemonic
 	default:
 		return o.Op.String()
 	}

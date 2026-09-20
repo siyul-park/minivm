@@ -23,7 +23,7 @@ import (
 // what happens in between can invalidate it:
 //
 //   - an OpStore to the same slot, which is the whole point of the slot;
-//   - an OpExec or an OpBridge whose opcode instr's effect model says writes
+//   - an OpExec whose opcode instr's effect model says writes
 //     the slot's storage, which is where a call comes in - it writes Global
 //     and Upval but never the caller's Local, so a call ends a global's
 //     availability and leaves a local's alone;
@@ -90,7 +90,7 @@ func (p *ForwardPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, er
 				continue
 			case ssa.OpStore:
 				delete(held, op.Slot)
-			case ssa.OpExec, ssa.OpBridge:
+			case ssa.OpExec:
 				invalidate(held, op.Code)
 			}
 			rb.b.Add(id, rb.define(fn, op))

@@ -25,9 +25,8 @@ import (
 // into a value with no ownership mark to carry it - see
 // docs/jit-internals.md, Reference Ownership); it belongs to the entry frame
 // (Slot.Base is zero - an inlined callee's local has no single deopt-stable
-// frame to write back into); the function bridges no local opcode to the
-// interpreter (a bridge reads the frame as a whole); and something stores
-// it (a never-stored slot already has one definition, itself, so promoting
+// frame to write back into); and something stores it (a never-stored slot
+// already has one definition, itself, so promoting
 // it only adds a live range with nothing to save).
 //
 // A promoted local is no longer where the interpreter looks for it, so every
@@ -76,7 +75,7 @@ func promotable(fn *ssa.Function) map[int]ssa.Type {
 		for _, op := range fn.Block(b).Ops {
 			var held ssa.Value
 			switch op.Op {
-			case ssa.OpExec, ssa.OpBridge:
+			case ssa.OpExec:
 				if op.Code.Reads(instr.Local) || op.Code.Writes(instr.Local) {
 					return nil
 				}

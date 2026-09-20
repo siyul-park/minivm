@@ -28,7 +28,7 @@ func TestFoldPass_Run(t *testing.T) {
 		x, y, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
@@ -42,7 +42,7 @@ func TestFoldPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 		after := ssa.Format(fn)
 		require.NotContains(t, after, "i32.add")
-		require.Contains(t, after, "v3:i32 = const 5")
+		require.Contains(t, after, "v4:i32 = const 5")
 		require.Equal(t, sum, ssa.Value(3))
 	})
 
@@ -52,7 +52,7 @@ func TestFoldPass_Run(t *testing.T) {
 		param := b.Param(entry, ssa.TypeI32)
 		one, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{param, one}, Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{param, one}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
 		fn := b.Build()
 		before := ssa.Format(fn)
@@ -70,7 +70,7 @@ func TestFoldPass_Run(t *testing.T) {
 		x, zero, quotient := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, zero}, Results: []ssa.Value{quotient}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, zero}, State: deoptState(b, entry, instr.I32_DIV_S), Results: []ssa.Value{quotient}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{quotient}})
 		fn := b.Build()
 
@@ -106,7 +106,7 @@ func TestFoldPass_Run(t *testing.T) {
 		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{sum}})
 		// sum has no other use; it is only live because a deopt frame names it.
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: sum}}}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
@@ -118,8 +118,8 @@ func TestFoldPass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, pass.PreserveNone(), preserved)
 		require.NoError(t, ssa.Verify(fn))
-		require.Contains(t, ssa.Format(fn), "stack=[v3]")
-		require.Contains(t, ssa.Format(fn), "v3:i32 = const 5")
+		require.Contains(t, ssa.Format(fn), "stack=[v4]")
+		require.Contains(t, ssa.Format(fn), "v4:i32 = const 5")
 	})
 
 	identities := []struct {
@@ -188,7 +188,7 @@ func TestFoldPass_Run(t *testing.T) {
 		x, right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{right}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, right}, State: deoptState(b, entry, instr.I32_ADD), Results: []ssa.Value{result}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
@@ -245,7 +245,7 @@ func TestFoldPass_Run(t *testing.T) {
 		x := b.Param(entry, ssa.TypeI32)
 		right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(8), Results: []ssa.Value{right}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, right}, Results: []ssa.Value{result}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, right}, State: deoptState(b, entry, instr.I32_DIV_S), Results: []ssa.Value{result}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 		fn := b.Build()
 
@@ -381,15 +381,10 @@ func TestFoldPass_Run(t *testing.T) {
 	}
 }
 
-// deoptState gives code the ssa.NoValue verify.go admits for most opcodes, or
-// a fresh, otherwise-empty OpState for one ssa.OverflowsI64 or ssa.Divides
-// names, which can overflow the boxed 49-bit payload or fault on a zero
-// divisor and so always resumes into one (see verify.go's operation and
-// frontend/walk.go's exec).
+// deoptState gives one operation a dominating interpreter state.
+
 func deoptState(b *ssa.Builder, block int, code instr.Opcode) ssa.Value {
-	if !ssa.OverflowsI64(code) && !ssa.Divides(code) {
-		return ssa.NoValue
-	}
+	_ = code
 	state := b.Value(ssa.TypeState)
 	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
 	return state

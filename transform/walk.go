@@ -152,8 +152,8 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 		}
 		ip += inst.Width()
 	}
-	// A span that leaves anywhere continues there: the next block's, or the one
-	// a bridge resumes into. Otherwise the code has run out, which ends module
+	// A span that leaves anywhere continues at its successor. Otherwise the
+	// code has run out, which ends module
 	// code by advancing past it and ends a function by returning.
 	if len(s.succs) > 0 {
 		return ssa.Terminator{Op: ssa.OpJump}, true
@@ -293,7 +293,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 			return false
 		}
 		if op == instr.ARRAY_GET {
-			w.guard(len(w.stack)-2, ssa.Shape{Itab: tok})
+			w.guard(len(w.stack)-2, ssa.Shape{Tag: tok})
 		}
 		return w.exec(op, 2, []fact{{kind: kind}})
 	case instr.ARRAY_SET:
@@ -308,7 +308,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if !ok {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Itab: tok})
+		w.guard(len(w.stack)-3, ssa.Shape{Tag: tok})
 		return w.exec(op, 3, nil)
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
@@ -328,7 +328,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if len(w.stack) < 3 {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Itab: shapeStruct})
+		w.guard(len(w.stack)-3, ssa.Shape{Tag: shapeStruct})
 		return w.exec(op, 3, nil)
 	case instr.REF_CAST:
 		// A successful cast validates the operand's declared type in place and
@@ -399,7 +399,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 			return w.exec(op, 1+count*2, []fact{{kind: types.KindRef}})
 		case instr.ARRAY_APPEND:
 			// The array below the values is never popped, so it survives - as a
-			// fresh operand, because the bridge handed the old one away.
+			// fresh operand, because the interpreter handed the old one away.
 			return w.exec(op, 2+count, []fact{{kind: types.KindRef}})
 		default:
 			return w.exec(op, 1+count, []fact{{kind: types.KindRef}})
@@ -464,7 +464,7 @@ func (w *walk) field(container, index fact) (types.Kind, ssa.Shape, bool) {
 	if record == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
-	return record.Fields[index.val].Kind, ssa.Shape{Itab: shapeStruct, Typ: uintptr(unsafe.Pointer(record))}, true
+	return record.Fields[index.val].Kind, ssa.Shape{Tag: shapeStruct, Typ: uintptr(unsafe.Pointer(record))}, true
 }
 
 // record resolves the struct type a container carries: the one its declared
@@ -619,21 +619,22 @@ func (w *walk) constant(boxed types.Boxed, out fact) bool {
 }
 
 // exec performs op over the top pops operands, leaving results in their place.
-// An opcode the backend cannot lower bridges instead, running in the interpreter
-// and resuming here.
+// Every OpExec carries the interpreter state at its instruction start.
 //
-// Ownership follows what the operation does with a reference: one it hands to
-// storage that outlives the operand - a container it stores into, a callee, the
-// interpreter's own flushed stack - is owned first and never released here; one
-// it merely reads is released when this stack copy is what owned it. A produced
-// reference is owned, which is what a retained element or a returned value is.
+// Ownership invariants:
+//  1. State.Frames[0].Stack is the operand stack at the instruction's start
+//     (w.pre); each entry is Owned iff the native copy holds its own count.
+//  2. An OpExec borrows its arguments; owned arguments it consumed are released
+//     after it by explicit OpRelease. A frame-writing operation lets the callee
+//     adopt every stack entry after the stack was made owned.
+//  3. A ref result of an OpExec is owned (backingStack).
 func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	if len(w.stack) < pops {
 		return false
 	}
 	// instr states a fixed arity for array.new that only approximates its real
 	// one, so the arguments follow what it declares and the operands beyond them
-	// reach the interpreter through the deopt state a bridge always carries.
+	// reach the interpreter through the deopt state its interpreter state carries.
 	effect := instr.TypeOf(op)
 	named := pops
 	if effect.Pop != nil || effect.Push != nil {
@@ -661,12 +662,11 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 		out[i] = w.b.Value(t)
 	}
 
-	bridged := bridgeable(op)
 	adopted := 0
 	switch {
-	case bridged || op.Writes(instr.Frame):
-		// The flushed operand stack is what a bridge and a call hand over, and
-		// whoever receives it adopts every reference on it.
+	case op.Writes(instr.Frame):
+		// A call hands its operands to the callee, which adopts every reference
+		// on the flushed stack.
 		w.adopt()
 		adopted = pops
 	case op.Reads(instr.Heap) && op.Writes(instr.Heap):
@@ -680,22 +680,7 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 	consumed := append([]operand(nil), w.stack[len(w.stack)-pops:]...)
 	w.stack = w.stack[:len(w.stack)-pops]
 
-	kind := ssa.OpExec
-	if bridged {
-		kind = ssa.OpBridge
-	}
-	operation := ssa.Operation{Op: kind, Code: op, Args: args, Results: out}
-	// ssa.OverflowsI64 names the opcodes that can carry a result past the
-	// boxed 49-bit payload (see its own doc comment for which and why), and
-	// ssa.Divides names the ones that can fault on a zero divisor instead.
-	// Both guard through this same state - w.pre as of this instruction's own
-	// start (see begin/deopt) - so the flush is both operands, still
-	// unpopped, boxing normally on the cold path since each is already
-	// proven in range by its own producer.
-	if bridged || op.Writes(instr.Frame) || (op.Reads(instr.Heap) && op.Writes(instr.Heap)) ||
-		ssa.OverflowsI64(op) || ssa.Divides(op) {
-		operation.State = w.deopt()
-	}
+	operation := ssa.Operation{Op: ssa.OpExec, Code: op, Args: args, State: w.deopt(), Results: out}
 	w.b.Add(w.block, operation)
 
 	for i, r := range results {
@@ -713,7 +698,11 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 // it finds there.
 func (w *walk) complete() ssa.Terminator {
 	w.adopt()
-	return ssa.Terminator{Op: ssa.OpComplete, Args: values(w.stack)}
+	args := make([]ssa.Value, len(w.stack))
+	for i, o := range w.stack {
+		args[i] = o.value
+	}
+	return ssa.Terminator{Op: ssa.OpComplete, Args: args}
 }
 
 // leave ends the function with the results its type declares. A borrowed one is

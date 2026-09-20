@@ -161,7 +161,7 @@ func (e *emitter) take(id int, op ssa.Operation) bool {
 		return true
 	case ssa.OpGuardBounds, ssa.OpRetain, ssa.OpRelease, ssa.OpState:
 		return true
-	case ssa.OpExec, ssa.OpBridge:
+	case ssa.OpExec:
 		// An opcode with an immediate operand cannot be written back: the IR
 		// resolves what that operand meant and keeps no way to spell the
 		// operand itself again.

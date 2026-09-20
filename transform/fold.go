@@ -61,7 +61,7 @@ func (p *FoldPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error
 			case ssa.OpConst:
 				consts[op.Results[0]] = op.Const
 				computed[op.Results[0]] = true
-			case ssa.OpExec, ssa.OpBridge:
+			case ssa.OpExec:
 				// A value an opcode computed carries the representation its
 				// static type names; one read out of a slot need not (see
 				// fold).
@@ -123,17 +123,7 @@ func (p *FoldPass) fold(rb *rebuilder, id int, fn *ssa.Function, consts map[ssa.
 	shift := rb.b.Value(rb.b.Type(op.Args[1]))
 	rb.b.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{shift}})
 	consts[shift] = amount
-	// op.State was DIV_U's own guard against a zero divisor (ssa.Divides), a
-	// fault a fixed, already-nonzero shift amount cannot repeat, so it does
-	// not carry over uncritically: it survives only when the shift itself
-	// still needs one, per ssa.OverflowsI64 - true of I64_SHR_U, whose
-	// operand can still leave the boxed range, and false of I32_SHR_U, which
-	// never can.
-	state := op.State
-	if !ssa.OverflowsI64(code) {
-		state = ssa.NoValue
-	}
-	return ssa.Operation{Op: op.Op, Code: code, Args: []ssa.Value{op.Args[0], shift}, State: state, Results: op.Results}, true
+	return ssa.Operation{Op: op.Op, Code: code, Args: []ssa.Value{op.Args[0], shift}, State: op.State, Results: op.Results}, true
 }
 
 // identity reports whether code hands back its left argument unchanged when

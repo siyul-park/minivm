@@ -1,6 +1,9 @@
 package transform
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
@@ -43,11 +46,13 @@ type Object struct {
 // suspension ends execution at its own opcode while the threaded
 // continuation runs past it, so a translation covering only the prefix up to
 // it is not the whole function this returns.
-func Translate(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
+var ErrEntry = errors.New("entry starts no block")
+
+func Translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function, error) {
 	if fn == nil {
 		return nil, nil
 	}
-	f, err := translate(m, addr, fn)
+	f, err := translate(m, addr, fn, entry)
 	if err != nil || f == nil {
 		return nil, err
 	}
@@ -59,11 +64,11 @@ func Translate(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
 	return f, nil
 }
 
-// translate lays out fn's spans, resolves the operand facts every one of them
-// is entered with, and emits the blocks reachable from the entry. A span
+// translate lays out the whole fn, resolves the operand facts every span is
+// entered with, and emits the blocks reachable from entry. A span
 // nothing reaches is dead code and is simply left out, which is what a
 // caller optimizing a whole function wants.
-func translate(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
+func translate(m Module, addr int, fn *types.Function, entry int) (*ssa.Function, error) {
 	if len(fn.Code) == 0 {
 		return nil, nil
 	}
@@ -78,16 +83,29 @@ func translate(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
 	if err != nil {
 		return nil, err
 	}
-	spans := split(fn.Code, blocks)
+	spans, at := split(fn.Code, blocks)
+	root, ok := at[entry]
+	if !ok {
+		return nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
+	}
 	if spans[0].start != 0 {
 		return nil, nil
 	}
-	entry := frame{fn: fn, addr: addr, slots: fn.Declared()}
-	states, ok := f.resolve(entry, spans)
+	fr := frame{fn: fn, addr: addr, slots: fn.Declared()}
+	states, ok := f.resolve(fr, spans, 0, nil)
 	if !ok {
 		return nil, nil
 	}
-	return f.build(entry, spans, states), nil
+	if root != 0 {
+		if states[root] == nil {
+			return nil, nil
+		}
+		states, ok = f.resolve(fr, spans, root, owned(states[root]))
+		if !ok {
+			return nil, nil
+		}
+	}
+	return f.build(fr, spans, states, root), nil
 }
 
 // calls reports whether code enters another function.

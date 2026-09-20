@@ -98,8 +98,8 @@ func slot(s Slot) string {
 // against, omitting every fact it does not carry.
 func shape(s Shape) string {
 	var sb strings.Builder
-	if s.Itab != 0 {
-		fmt.Fprintf(&sb, " itab 0x%x", s.Itab)
+	if s.Tag != 0 {
+		fmt.Fprintf(&sb, " tag 0x%x", s.Tag)
 	}
 	if s.Typ != 0 {
 		fmt.Fprintf(&sb, " type 0x%x", s.Typ)

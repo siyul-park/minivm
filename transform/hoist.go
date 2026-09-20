@@ -21,9 +21,9 @@ import (
 // Heap-touching OpExec and so never bypasses the retain/release accounting
 // that restriction protected.
 //
-// Eligibility is OpConst or a pure OpExec (instr.Opcode.IsPure()) that is
-// also speculatable (see speculatable) and carries no deopt State (see
-// hoistable). Excluding every OpLoad, OpStore, and Heap-touching OpExec
+// Eligibility is OpConst or a pure, speculatable OpExec (see speculatable)
+// whose native lowering cannot exit through a representation guard.
+// Excluding every OpLoad, OpStore, and Heap-touching OpExec
 // refuses a heap read a loop's own write could invalidate with no alias
 // analysis at all - not because this pass proved the specific loop has no
 // such write, but because it never asks.
@@ -162,22 +162,15 @@ func (p *HoistPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, erro
 
 // hoistable reports whether op may ever move: an OpConst, which reads
 // nothing, or an OpExec whose opcode both IsPure() (no Reads, no Writes -
-// see instr.Opcode.IsPure) and is speculatable (never faults regardless of
-// its operands). The leading op.State check is not redundant with either:
-// ssa.OverflowsI64's five arithmetic opcodes are both IsPure() and
-// speculatable yet always carry deopt State, so without this check one of
-// them would hoist into a preheader that can run on a zero-trip-count path
-// and exit its boxability guard with a Frame snapshot from before the loop
-// ever entered its body.
+// see instr.Opcode.IsPure()) and is speculatable (never faults regardless of
+// its operands), and whose native lowering has no representation guard that
+// could exit on a zero-trip-count path (ssa.OverflowsI64).
 func hoistable(op ssa.Operation) bool {
-	if op.State != ssa.NoValue {
-		return false
-	}
 	switch op.Op {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		return op.Code.IsPure() && speculatable(op.Code)
+		return op.Code.IsPure() && speculatable(op.Code) && !ssa.OverflowsI64(op.Code)
 	default:
 		return false
 	}

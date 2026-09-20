@@ -43,6 +43,7 @@ Nesting: while a state is suspended, `Enter` starts below the suspended frames (
 Instruction-cache maintenance for published code is user-mode ARM64 (`DC CVAU`/`IC IVAU`) in `icache_arm64.s`; no cgo is involved.
 
 ## Planned rebuild
+`transform.Translate` translates a whole function from one entry — ip 0 or a loop header — and gives every `OpExec` the interpreter state at its own instruction, so which operations a backend lowers and which it bridges is the backend's decision alone.
 
 The rebuild targets one compiler pipeline:
 

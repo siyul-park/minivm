@@ -138,11 +138,9 @@ func params(f *Function, block int) error {
 // operation admits. An operation the bytecode names is checked against that
 // opcode's own stack effect; the rest are the shapes the IR itself defines.
 //
-// An operation resumes into an interpreter state exactly when control can leave
-// it: a bridge runs in the interpreter, an opcode that enters a function runs
-// code that can leave, and every overwrite of a slot or of heap contents
-// releases the reference it replaced. The replaced value decides that, not the
-// stored one, so the test is the storage written and never the operand's type.
+// An OpExec always carries an interpreter state because the backend may leave
+// native execution for that operation. Frame and heap overwrites still require
+// the same state because their replaced reference must be accounted for.
 func operation(f *Function, sites []site, o Operation) error {
 	args, results := len(o.Args), len(o.Results)
 	deopts := false
@@ -151,20 +149,11 @@ func operation(f *Function, sites []site, o Operation) error {
 		if args != 0 || results != 1 {
 			return counted(o.name(), args, results)
 		}
-	case OpExec, OpBridge:
+	case OpExec:
 		if err := performs(f, o); err != nil {
 			return err
 		}
-		// OverflowsI64 names the opcodes that can overflow the boxed 49-bit
-		// payload, and Divides the ones that can fault on a zero divisor
-		// instead (see each one's own doc comment). Every one of them guards
-		// its own arm64 lowering and exits through this operation's own
-		// state rather than the arithmetic's producing an
-		// interpreter-visible effect the way a bridge or a frame/heap write
-		// does (see frontend/walk.go's exec).
-		deopts = o.Op == OpBridge || o.Code.Writes(instr.Frame) ||
-			(o.Code.Reads(instr.Heap) && o.Code.Writes(instr.Heap)) ||
-			OverflowsI64(o.Code) || Divides(o.Code)
+		deopts = true
 	case OpStore:
 		if args != 1 || results != 0 {
 			return counted(o.name(), args, results)
@@ -271,7 +260,7 @@ func performs(f *Function, o Operation) error {
 // opcode is one of those and never an Operation: an operation the block carries
 // on past cannot be one that ends the block, and a return, a branch, and a tail
 // call each already have a terminator of their own. A throw is not one of them
-// - it leaves through the interpreter, as the bridge performing it does.
+// - it leaves through the interpreter, through its own interpreter state.
 func leaves(op instr.Opcode) bool {
 	switch op {
 	case instr.BR, instr.BR_IF, instr.BR_TABLE, instr.RETURN, instr.RETURN_CALL:

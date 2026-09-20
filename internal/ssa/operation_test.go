@@ -20,7 +20,6 @@ func TestOp_String(t *testing.T) {
 			ssa.OpGuardValue:  "guard.value",
 			ssa.OpRetain:      "retain",
 			ssa.OpRelease:     "release",
-			ssa.OpBridge:      "bridge",
 			ssa.OpState:       "state",
 			ssa.OpJump:        "jump",
 			ssa.OpBranch:      "br",
