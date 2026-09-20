@@ -18,7 +18,7 @@ The minimum Go version is the version declared in `go.mod`.
 
 ## Build
 
-Platform mechanics stay behind build constraints in `internal/asm` (`icache_darwin_arm64.go`, `memory.go`, `memory_stub.go`); normal builds `MUST NOT` need manual tags.
+Platform mechanics stay behind build constraints in `internal/asm` (`enter_arm64.s`, `icache_arm64.s`, `memory.go`, `memory_stub.go`); normal builds `MUST NOT` need manual tags or cgo.
 
 ## Ownership
 

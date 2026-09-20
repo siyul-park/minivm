@@ -35,8 +35,12 @@ var (
 	X29 = asm.NewPReg(29, asm.RegTypeInt, asm.Width64) // FP (Frame Pointer)
 	X30 = asm.NewPReg(30, asm.RegTypeInt, asm.Width64) // LR (Link Register)
 
-	FP  = X29
-	LR  = X30
+	FP = X29
+	LR = X30
+	// Ctx holds the *asm.Context for as long as native code runs. The
+	// trampoline in internal/asm hands it over in this register and reads
+	// it back here on every exit, so native code never writes it.
+	Ctx = X26
 	XZR = asm.NewPReg(31, asm.RegTypeInt, asm.Width64)
 	// SP shares register id 31 with XZR. In data-processing instructions
 	// field 31 reads as the zero register; in add/subtract-immediate and

@@ -11,8 +11,8 @@ import (
 // into a fresh mapping and seals it executable before publication. Installs
 // serialize, while published mappings remain immutable and executable.
 //
-// Free must not run until every Callable installed in the Buffer is idle and
-// no longer needed.
+// Free must not run while any code installed in the Buffer can still run or
+// be entered.
 type Buffer struct {
 	maps   []memory
 	mem    memory

@@ -23,7 +23,7 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `internal/codegen` | generated threaded handlers and fusion |
 | `internal/graph` | CFG analysis |
 | `internal/ssa` | SSA IR and verification |
-| `internal/asm` | machine IR, encoding, linking, executable memory |
+| `internal/asm` | machine IR, encoding, linking, executable memory, native runtime contract |
 | `internal/asm/arm64` | ARM64 encoding |
 | `pass` | pass lifecycle, pipelines, analysis cache |
 | `analysis` | reusable read-only facts |
