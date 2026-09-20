@@ -43,7 +43,7 @@ jobs:
     needs: check
     # Coverage runs on ARM64 so architecture-specific executable-memory and
     # encoder paths are reachable. The native rebuild is tracked separately.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -69,7 +69,7 @@ jobs:
   benchmark:
     needs: check
     name: Benchmark Report
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7

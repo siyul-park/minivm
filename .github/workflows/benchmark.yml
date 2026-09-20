@@ -11,7 +11,7 @@ permissions:
 jobs:
   canonical:
     name: Repeated Canonical Suite
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -30,7 +30,7 @@ jobs:
 
   comparison:
     name: External Runtime Comparison
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
