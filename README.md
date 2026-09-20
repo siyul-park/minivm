@@ -13,7 +13,7 @@ Run dynamic logic inside your Go application without giving up control over perf
 
 - **Bounded execution** — limit stack, heap, call depth, fuel, hooks, and context.
 - **Direct host integration** — call Go through typed, reflection-free host functions.
-- **Adaptive performance** — start in a threaded interpreter and promote hot ARM64 functions and loops to native code.
+- **Explicit execution** — use the threaded interpreter with bounded resources and controlled host integration.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -52,7 +52,7 @@ minivm keeps the execution model explicit: bytecode in, controlled runtime, type
 | Host integration | Typed `HostFunction` calls plus `Marshal` and `Unmarshal` for ordinary Go values |
 | Resource control | Stack, heap, frame, fuel, context, hook, and debugger controls |
 | Fast baseline | Closure-threaded dispatch with low steady-state allocation on core workloads |
-| Hot-path acceleration | Adaptive ARM64 trace JIT for supported functions and loops |
+| Execution baseline | Threaded interpreter with explicit resource controls |
 | Safe admission | Static bytecode verification before execution |
 
 ### Built for
@@ -85,7 +85,7 @@ See [Host Integration](docs/host-integration.md) for marshaling, host objects, a
 
 ## Performance
 
-The threaded interpreter is the baseline; supported hot functions and loops can promote to ARM64 native code. Current measurements, benchmark tiers, fixture inventory, methodology, and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
+The threaded interpreter is the current execution baseline. The native rebuild is planned; current measurements and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
 
 ## Runtime Tooling
 
@@ -115,7 +115,6 @@ vm := interp.New(prog,
     interp.WithHeap(512),
     interp.WithFrame(256),
     interp.WithFuel(10_000),
-    interp.WithThreshold(4096),
     interp.WithTick(128),
 )
 ```text
@@ -125,12 +124,10 @@ Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instructio
 ## Architecture
 
 ```text
-Program -> verifier / optimizer -> threaded interpreter -> ARM64 trace JIT
-                                   |                    |
-                                   +-- always valid ----+-- hot paths only
+Program -> verifier / optimizer -> threaded interpreter
 ```text
 
-The threaded interpreter is the complete execution engine. The trace JIT is an adaptive acceleration layer: supported hot paths compile to native ARM64 code, while every unsupported or cold path continues in the interpreter.
+The threaded interpreter is the complete current execution engine. Native compilation is a planned rebuild and is not part of the current runtime.
 
 The instruction set is WebAssembly-inspired but intentionally custom. It uses one-byte opcodes with fixed-width or length-prefixed operands.
 
@@ -146,11 +143,11 @@ The instruction set is WebAssembly-inspired but intentionally custom. It uses on
 | Threaded interpreter | ✅ Available |
 | Static bytecode verifier | ✅ Available |
 | AOT optimizer (`O1`-`O3`) | ✅ Available |
-| ARM64 trace JIT | ✅ Available |
+| ARM64 native rebuild | ⬜ Planned |
 | Debugger and profiler | ✅ Available |
-| x86-64 JIT | 🔲 Not implemented |
+| x86-64 native backend | 🔲 Not implemented |
 
-The x86-64 assembler package currently provides a non-emitting placeholder. See the [Roadmap](docs/roadmap.md) for current priorities.
+The x86-64 assembler backend is not present. See the [Roadmap](docs/roadmap.md) for current priorities.
 
 ## Documentation
 

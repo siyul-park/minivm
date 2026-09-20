@@ -12,7 +12,7 @@ Generated producer-consumer fusion for threaded execution.
 | generation | `internal/codegen/generate.go`, `threader.go` |
 | validation | `internal/codegen/validate.go` |
 | runtime handlers | `interp/threaded.go` |
-| ARM64 fusion | `internal/jit/arm64/` |
+| ARM64 fusion | `interp/` |
 
 ## Model
 
@@ -53,7 +53,7 @@ Exact mode disables fusion. Runtime guards retain bounds, segmentation, type, an
 
 ## JIT
 
-Threaded fusion is not a cross-backend registry. ARM64 fusion `MUST` stay in `internal/jit/arm64` beside the lowering it composes.
+Threaded fusion remains in the interpreter. Native fusion can be reconsidered as part of the planned rebuild.
 
 ## Ownership
 

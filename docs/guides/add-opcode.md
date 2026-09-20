@@ -14,7 +14,7 @@ End-to-end checklist.
 | threaded lowering | `internal/codegen/` |
 | fusion patterns | `internal/codegen/pattern.go` |
 | generated handlers | `interp/threaded.go` |
-| ARM64 lowering | `internal/jit/arm64/` |
+| ARM64 encoding | `internal/asm/arm64/` |
 | tests | `interp/*_test.go`, owner tests |
 | reference | `instruction-set.md` |
 
@@ -90,7 +90,7 @@ make check-generated
 make check-tidy check-fmt vet
 ```
 
-With JIT changes, it `MUST` run the relevant ARM64 tests/benchmarks on ARM64.
+With the native rebuild, the agent MUST run the relevant ARM64 tests/benchmarks on ARM64.
 
 ## Related
 

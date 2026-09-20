@@ -1,6 +1,6 @@
 # Agent Instructions
 
-`minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; ARM64 JIT is an optimization with threaded fallback.
+`minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; native compilation is a planned optimization rebuild.
 
 ## Precedence
 
@@ -21,7 +21,7 @@
 2. The agent `MUST` run `git status --short` before editing; it `MUST NOT` modify files unrelated to the task, and it `MUST NOT` stage, commit, amend, push, or create a PR unless the user explicitly requested it.
 3. The agent `MUST` implement the smallest complete change that satisfies the contract. It `MUST NOT` add speculative abstractions, wrappers, aliases, shims, duplicate policy, or future-only extension points.
 4. Every changed symbol `MUST` have one clear owner, one boundary, one purpose, and one name that expresses its role or contract.
-5. One behavior `MUST` have one implementation. JIT policy `MUST` stay in `internal/jit`; target mechanics `MUST` stay in target packages (`internal/asm/<arch>`, `internal/jit/<arch>`).
+5. One behavior `MUST` have one implementation. Native compilation policy, when present, `MUST` stay in its compiler owner; target mechanics `MUST` stay in target packages.
 6. Generated files `MUST NOT` be edited directly; the agent `MUST` change them only through their generator and `MUST` run `make generate` and `make check-generated`.
 7. The agent `MUST` keep one canonical owner per topic. Canonical topic docs `MUST` describe supported/current state; guides `MUST` describe procedures; plans and audits `MAY` preserve history or future work. The agent `MUST NOT` duplicate a contract owned elsewhere; it `MUST` link to the owner instead.
 8. A non-trivial structural change (package/type boundary, ownership, lifecycle, control flow, abstraction, public contract, or performance-sensitive structure) `MUST` apply `docs/refactoring.md` until the simplification fixed point is reached.
@@ -66,7 +66,7 @@ For each task type, the agent `MUST` read the listed owners before implementing 
 |---|---|---|---|
 | Opcode | `instruction-set.md`, `guides/add-opcode.md` | `instr/`, `internal/codegen/` | `go test ./instr ./internal/codegen ./interp` |
 | Runtime / memory | `architecture.md`, `memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
-| JIT / ARM64 | `jit-internals.md`, `value-representation.md` | `internal/jit/`, `internal/journal/`, `internal/asm/` | `go test ./internal/... ./interp` |
+| Native / ARM64 | `jit-internals.md`, `jit-lessons.md`, `value-representation.md` | `internal/asm/`, `transform/` | `go test ./internal/... ./transform` |
 | Optimization | `pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/`, `internal/ssa/transform/` | package tests |
 | Verification | `verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
 | Debug / profile | `debugging.md`, `profile.md` | `debug/`, `interp/`, `prof/` | package tests |

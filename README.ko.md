@@ -13,7 +13,7 @@
 
 - **제한된 실행** — 스택, 힙, 호출 깊이, fuel, hook, context를 제어합니다.
 - **직접적인 호스트 연동** — 타입이 지정된 리플렉션 없는 함수로 Go를 호출합니다.
-- **적응형 성능** — 스레디드 인터프리터로 시작해 핫 ARM64 함수와 루프를 네이티브 코드로 승격합니다.
+- **명확한 실행 모델** — 스레디드 인터프리터를 기준으로 자원과 호스트 연동을 제어합니다.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -52,7 +52,7 @@ minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 통
 | 호스트 연동 | 타입이 지정된 `HostFunction`과 일반 Go 값용 `Marshal`, `Unmarshal` |
 | 자원 제어 | 스택, 힙, 프레임, fuel, context, hook, 디버거 제어 |
 | 빠른 기본 실행 | 핵심 워크로드에서 낮은 정상 상태 할당을 유지하는 클로저 기반 스레디드 디스패치 |
-| 핫 경로 가속 | 지원되는 함수와 루프를 위한 적응형 ARM64 트레이스 JIT |
+| 실행 기준 | 명시적인 자원 제어를 갖는 스레디드 인터프리터 |
 | 안전한 실행 허용 | 실행 전 정적 바이트코드 검증 |
 
 ### 활용 분야
@@ -85,7 +85,7 @@ lookup := interp.NewHostFunction(
 
 ## 성능
 
-스레디드 인터프리터가 기본 실행 계층이며, 지원되는 핫 함수와 루프는 ARM64 네이티브 코드로 승격될 수 있습니다. 현재 측정값, 벤치마크 계층, fixture 목록, 측정 방법, 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
+스레디드 인터프리터가 현재 실행 기준입니다. 네이티브 재구축은 계획 상태이며, 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
 
 ## 런타임 도구
 
@@ -115,7 +115,6 @@ vm := interp.New(prog,
     interp.WithHeap(512),
     interp.WithFrame(256),
     interp.WithFuel(10_000),
-    interp.WithThreshold(4096),
     interp.WithTick(128),
 )
 ```text
@@ -125,12 +124,10 @@ vm := interp.New(prog,
 ## 아키텍처
 
 ```text
-Program -> verifier / optimizer -> threaded interpreter -> ARM64 trace JIT
-                                   |                    |
-                                   +-- 항상 실행 가능 --+-- 핫 경로만
+Program -> verifier / optimizer -> threaded interpreter
 ```text
 
-스레디드 인터프리터가 완전한 실행 엔진입니다. 트레이스 JIT는 적응형 가속 계층으로, 지원되는 핫 경로는 네이티브 ARM64 코드로 컴파일하고 지원하지 않거나 콜드 상태인 모든 경로는 인터프리터에서 계속 실행합니다.
+스레디드 인터프리터가 현재 완전한 실행 엔진입니다. 네이티브 컴파일은 계획된 재구축이며 현재 런타임에는 포함되지 않습니다.
 
 명령어 셋은 WebAssembly를 참고했지만 의도적으로 독자 설계했습니다. 1바이트 opcode와 고정 폭 또는 길이 접두사 피연산자를 사용합니다.
 
@@ -146,11 +143,11 @@ Program -> verifier / optimizer -> threaded interpreter -> ARM64 trace JIT
 | 스레디드 인터프리터 | ✅ 사용 가능 |
 | 정적 바이트코드 검증기 | ✅ 사용 가능 |
 | AOT 최적화 (`O1`-`O3`) | ✅ 사용 가능 |
-| ARM64 트레이스 JIT | ✅ 사용 가능 |
+| ARM64 네이티브 재구축 | ⬜ 계획 |
 | 디버거와 프로파일러 | ✅ 사용 가능 |
-| x86-64 JIT | 🔲 미구현 |
+| x86-64 네이티브 백엔드 | 🔲 미구현 |
 
-x86-64 어셈블러 패키지는 현재 코드를 내보내지 않는 placeholder입니다. 현재 우선순위는 [로드맵](docs/roadmap.md)을 참고하세요.
+x86-64 어셈블러 백엔드는 아직 없습니다. 현재 우선순위는 [로드맵](docs/roadmap.md)을 참고하세요.
 
 ## 문서
 

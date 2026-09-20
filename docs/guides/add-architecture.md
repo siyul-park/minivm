@@ -1,91 +1,68 @@
-# Add a JIT Architecture
+# Add an Architecture
 
-Checklist for a new native backend.
+Checklist for adding architecture-specific executable-memory and encoding support.
 
-`jit-internals.md` owns runtime contracts; this guide owns integration order.
+`compatibility.md` owns platform support; `instruction-set.md` owns opcode status; `jit-internals.md` owns the planned native rebuild.
 
 ## Ownership
 
 | Concern | Owner |
 |---|---|
-| machine interfaces | `internal/asm/` |
-| reference backend | `internal/asm/arm64/`, `internal/jit/arm64/` |
-| arch selection | `interp/jit_arm64.go`, `interp/jit_stub.go` |
-| JIT driver | `internal/jit/` |
-| frame journal | `internal/journal/` |
-| trace recording | `interp/trace.go` |
+| machine encoding | `internal/asm/` |
+| reference encoder | `internal/asm/arm64/` |
+| executable memory | `internal/asm/` |
+| platform selection | `internal/asm/` build-tagged files |
+| future native lowering | JIT rebuild |
 | platform support | `compatibility.md` |
 
-`internal/jit` `MUST NOT` import an architecture package.
+An architecture package MUST expose one concrete constructor when its behavior is consumed by another package.
 
 ## Machine Layer
 
-The agent `MUST` create `internal/asm/<arch>/` for register IDs, encoder, ABI bridge, callable adapter, and optional spill frame.
+The agent MUST create `internal/asm/<arch>/` for register IDs, instruction encoding, and branch relaxation. It MUST keep executable-memory ownership in `internal/asm/` rather than duplicating allocation or publication logic per architecture.
 
-Callable adapter `MUST`:
+Encoders MUST accept the architecture-neutral instruction representation and MUST NOT own runtime state, interpreter frames, or compiler policy.
 
-1. receive `&i.journal[0]` as `ctx`;
-2. pass `ctx` in the first integer argument register;
-3. preserve allocator-selected callee-saved registers;
-4. call native code and return to Go.
+## Native Layer
 
-Native traces use the journal, not a VM argument/return ABI. `Arch.Frame()` returns `nil` without spill support; otherwise the agent `MUST` keep spill state private.
+Native compilation is planned, not current. The future native layer MUST keep target lowering separate from the encoder and MUST use the runtime contract defined during the JIT rebuild.
 
-## JIT Layer
-
-The agent `MUST` create `internal/jit/<arch>/` with target lowering and `MUST` keep one exported constructor. The constructor `MUST` return the concrete target type.
-
-The target `MUST` own both its architecture selection and native lowering so `jit.New(target)` cannot combine different architectures. It implements `jit.Target`; the architecture-neutral compiler owns no target mechanics.
-
-Lowering `MUST` return `false` before mutating state on unsupported opcode, kind, or heap shape. Guards `MUST` materialize live symbolic state.
-
-Before returning to Go, lowering `MUST` commit `journal.CellSP`, `journal.CellNextIP`, and frame records. It `MUST` preserve return, call, frame, stack, ref, host, and write-barrier contracts.
-
-The agent `MUST` use the ARM64 scratch layout:
-
-| Slot | Value |
-|---|---|
-| `scratchStack` | `&i.stack[0]` |
-| `scratchGlobals` | `&i.globals[0]` |
-| `scratchBP` | frame base |
-| `scratchSP` | interpreter SP |
-| `scratchCtrl` | `&i.journal[0]` |
-
-The agent `MUST` add `interp/jit_<arch>.go` for selection. It `MUST` extend `jit_stub.go` only when another real backend needs to carve out its architecture.
+A future lowering MUST return the concrete target type from one exported constructor and MUST keep unsupported operations on the threaded execution path until an explicit bridge contract exists.
 
 ## Platform
 
-The agent `MUST` update `compatibility.md` with GOOS/GOARCH, CGO, executable-memory, instruction-cache, and build-tag requirements. Normal builds `MUST NOT` need manual tags.
+The agent MUST update `compatibility.md` with GOOS/GOARCH, CGO, executable-memory, instruction-cache, and build-tag requirements. Normal builds MUST NOT need manual tags.
 
 ## Coverage
 
-The agent `MUST` start with low-risk paths in this order:
+The agent MUST start with low-risk paths in this order:
 
-1. `NOP`, `DROP`, `DUP`, `SWAP`
-2. constants and `CONST_GET`
-3. numeric arithmetic/comparison
-4. numeric conversions
-5. locals/globals
-6. branches
-7. entry `RETURN`
-8. RC-neutral refs
+1. register and instruction encoding;
+2. constants and simple data movement;
+3. arithmetic and comparison encodings;
+4. numeric conversions;
+5. memory operands;
+6. branches and relaxation;
+7. executable-memory publication;
+8. architecture-specific runtime entry when the native rebuild exists.
 
-The agent `MUST` add calls, ref-counted stores, heap access, loops, and suspension only after core lowering is stable.
+The agent MUST add native lowering, host interaction, calls, heap access, loops, and suspension only after the core runtime contract is stable.
 
 ## Validation
 
-The agent `MUST` run:
+The agent MUST run:
 
 ```bash
-go test ./internal/asm/<arch>/... ./internal/jit/<arch>/... ./interp/...
+go test ./internal/asm/<arch>/...
 GOOS=linux GOARCH=<arch> go build ./...
+GOOS=linux GOARCH=<arch> go test -exec=true ./...
 ```
 
-A hot arithmetic workload `MUST` emit native code; the agent `MUST` verify with the existing JIT emission metric.
+When the native rebuild exists, the agent MUST also run its architecture-specific lowering tests and benchmark gates.
 
 ## Related
 
-- `jit-internals.md`
 - `compatibility.md`
 - `instruction-set.md`
+- `jit-internals.md`
 - `testing.md`

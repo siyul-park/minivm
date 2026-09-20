@@ -52,7 +52,7 @@ Coverage measures reachability, not quality. When behavior already exists and no
 |---|---|
 | Public | exported behavior, errors, lifecycle |
 | Runtime | opcode behavior, traps, ownership |
-| Parity | threaded vs optimized/fused/JIT behavior |
+| Parity | threaded vs optimized/fused/native behavior where present |
 | Frontend | acceptance, plan/SSA shape, `ssa.Verify` |
 | Backend | layout, bindings, moves, metadata, bridge/deopt points |
 | Golden | exact native instruction stream for a specified input shape |
@@ -62,7 +62,7 @@ Coverage measures reachability, not quality. When behavior already exists and no
 
 ## Native / JIT
 
-Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points. Interpreter tests `MUST` prove threaded/native parity through public results, errors, ownership, and execution.
+Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points when a native backend exists. Interpreter tests `MUST` prove threaded parity through public results, errors, ownership, and execution; native parity becomes applicable when the rebuild exists.
 
 ARM64 goldens are the native instruction specification: the agent `MUST` define expected instructions independently of the emitter, `MUST` build the input shape explicitly, `MUST` fix the expected stream first and then build the assembler, and `MUST` assert the complete stream and relevant metadata.
 

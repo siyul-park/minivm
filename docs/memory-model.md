@@ -28,7 +28,7 @@ trial []int
 work  []int
 ```
 
-Native/JIT paths `MUST` preserve threaded ownership totals.
+Future native paths MUST preserve the threaded ownership totals.
 
 ## Ownership
 

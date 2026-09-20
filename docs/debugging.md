@@ -15,7 +15,7 @@ Bytecode-level debugger for `interp.Run`.
 
 Debugger provides breakpoints, stepping, function/IP inspection, frames, operand stack, locals, globals, constants, and heap lookup.
 
-`WithDebugger` sets `WithTick(1)` and `WithThreshold(-1)`: JIT and fusion are disabled and execution stops at bytecode boundaries.
+`WithDebugger` sets `WithTick(1)` and execution stops at bytecode boundaries.
 
 ## Setup
 

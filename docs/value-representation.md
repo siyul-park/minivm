@@ -10,7 +10,7 @@ Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may u
 | Kinds | `instr/kind.go` |
 | Runtime types | `types/type.go` |
 | Host conversion | `interp/codec.go`, `encode.go`, `decode.go` |
-| Native representation | `internal/jit/arm64/` |
+| Planned native representation | JIT rebuild |
 
 ## Boxed Layout
 

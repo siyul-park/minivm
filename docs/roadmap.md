@@ -8,7 +8,7 @@ Topic docs own current contracts; this document `MUST NOT` override them.
 
 - simple embedding
 - bounded execution
-- threaded/JIT semantic parity
+- threaded semantic parity; native rebuild planned
 - measured performance
 - small public APIs
 - simple equivalent implementations
@@ -20,21 +20,13 @@ Topic docs own current contracts; this document `MUST NOT` override them.
 | P0 | Runtime boundaries | Keep verification, execution, ownership, and fallback contracts explicit. |
 | P1 | Host integration | Improve registration, conversion, errors, and examples. |
 | P1 | Benchmarks | Measure host calls, heap objects, maps, strings, coroutines, and mixed workloads. |
-| P1 | ARM64 JIT | Expand coverage only with correctness and benchmark evidence. |
+| P1 | Native rebuild | Rebuild native execution only with correctness and benchmark evidence. |
 | P2 | Execution policy | Keep cancellation, fuel, heap limits, and frame limits consistent. |
 | P2 | Other architectures | Add a backend only with target demand and evidence. |
 
-## JIT Expansion
+## Native Rebuild
 
-Every native path `MUST` have:
-
-1. threaded semantics and verifier coverage;
-2. explicit fallback;
-3. matching ownership;
-4. success, guard-failure, and fallback tests;
-5. reproducible benchmark evidence.
-
-The agent `SHOULD` prefer one guarded native path over duplicated interpreter semantics. It `MUST` fall back before unsupported behavior executes.
+The native rebuild `MUST` preserve threaded semantics, explicit ownership, test-first evidence, and reproducible benchmark evidence before any native path is supported.
 
 ## Docs
 

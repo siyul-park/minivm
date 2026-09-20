@@ -96,7 +96,7 @@ Stops occur before the displayed instruction. The displayed IP is the next byte 
 
 ## Precision
 
-`.debug` disables JIT and uses `WithTick(1)` through `interp.WithDebugger`, preserving bytecode boundaries.
+`.debug` uses `WithTick(1)` through `interp.WithDebugger`, preserving bytecode boundaries.
 
 ## Branches
 

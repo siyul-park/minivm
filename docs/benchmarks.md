@@ -4,7 +4,7 @@ Comparisons here are tier-matched.
 
 This document owns performance evidence; `testing.md` owns test contracts.
 
-minivm `threaded` is a bytecode interpreter and is compared against interpreters, while `default` and `jit` promote hot code to native and are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
+minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `default` or `jit` were measured with the previous native tier before its removal (2026-09) and are kept as historical reference until the rebuild re-measures them; they are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
 
 | Kernel | `default` | `threaded` | Wazero |
 |---|---:|---:|---:|
@@ -18,10 +18,9 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 
 | Tier | Control | Meaning |
 |---|---|---|
-| Interpreter | minivm `threaded` | `WithThreshold(-1)`. Generated threaded execution, JIT disabled. |
+| Interpreter | minivm `threaded` | Generated threaded execution. |
 | Interpreter | CPython, Tengo, GopherLua, Goja, gpython, Yaegi | Bytecode or AST interpreters with no native code generation. |
-| Native | minivm `default` | Default adaptive execution; hot entries promote to the native tier. |
-| Native | minivm `jit` | `WithThreshold(0)`. Compile on the first hot event. |
+| Native | minivm `default` / `jit` | Historical rows from the removed native tier; no current mode produces them. |
 | Native | Wazero | WebAssembly runtime using its optimizing compiler backend on arm64. |
 | Reference | Native Go | The same kernel written directly in Go. A lower bound, not a peer. |
 
@@ -294,10 +293,10 @@ These measure the cost of a public operation itself. Unlike the workload tables 
 |---|---|---:|---:|---:|
 | `New` | Empty | 4,133 | 35,290 | 28 |
 | `New` | Program | 4,376 | 35,368 | 31 |
-| `New` | JITEnabled | 4,584 | 35,368 | 31 |
+| `New` | default | pending rebuild comparison | — | — |
 | `Reset` | Scalar | 47.19 | 0 | 0 |
 | `Reset` | Heap | 84.72 | 8 | 1 |
-| `Reset` | JITState | **38.87** | 0 | 0 |
+| `Reset` | threaded state | pending rebuild comparison | — | — |
 | `Push` | Scalar | 21.87 | 0 | 0 |
 | `Push` | Reference | 100.5 | 16 | 1 |
 | `Pop` | — | 18.70 | 0 | 0 |
@@ -308,7 +307,7 @@ These measure the cost of a public operation itself. Unlike the workload tables 
 | `Release` | — | 20.38 | 0 | 0 |
 | `Pool.Get` | Uncontended | 30.64 | 0 | 0 |
 | `Pool.Get` | Miss | 3.270 µs | 35,144 | 25 |
-| `Pool.Get` | SharedJITMiss | 15.464 µs | 44,760 | 284 |
+| `Pool.Get` | Uncontended | pending rebuild comparison | — | — |
 | `Pool.Get` | ParallelRoundTrip | 327.0 ns | 1 | 0 |
 | `Pool.Put` | Uncontended | 136.3 ns | 0 | 0 |
 | `StructGetLocalFusion` | — | 227.112 ms | 221,640 | 33 |
@@ -333,7 +332,7 @@ The `Traceable.Refs` benchmarks append into a caller-owned destination slice. Ev
 
 Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode program, not the latency of a single opcode. Setup, reset, and result validation stay outside the timer.
 
-| Operation | Threaded | Fused | JITWarm | B/op | allocs/op |
+| Operation | Threaded | Fused | pending-native | B/op | allocs/op |
 |---|---:|---:|---:|---:|---:|
 | `i32.const_nop_returns_i32` | 16.60 ns | 16.82 ns | 23.05 ns | 0 | 0 |
 | `i32.const_i32.const_drop_returns_i32` | 20.64 ns | 20.09 ns | 21.94 ns | 0 | 0 |
@@ -408,7 +407,7 @@ go test -tags=compare -run='^$' -bench='^(BenchmarkControl|BenchmarkMemory|Bench
 
 | Location | Responsibility |
 |---|---|
-| `interp/*_test.go` | interpreter and JIT benchmarks |
+| `interp/*_test.go` | interpreter benchmarks; native benchmarks return with the rebuild |
 | `types/*_test.go` | reference traversal benchmarks |
 | `benchmarks/` | runtime-neutral workloads and external comparisons |
 

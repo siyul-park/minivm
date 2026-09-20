@@ -4,22 +4,13 @@ Applied naming/vocabulary reference.
 
 `coding-patterns.md` is normative; this document records domain vocabulary that `SHOULD` remain consistent across JIT packages.
 
-## JIT Vocabulary
+## Current Vocabulary
 
-| Symbol | Role |
-|---|---|
-| `jit.Compiler` | JIT driver |
-| `jit.Plan` | native plan |
-| `jit.Anchor` | native entry location |
-| `jit.IsBridgeable` | bridge eligibility |
-| `backend.Compiler` | SSA→machine compilation state |
-| `backend.Machine` | target capability/lowering seam |
-| `backend.Deopt` | native→interpreter state metadata |
-| `backend.Bridge` | native resume point |
-| `arm64.emitter` | ARM64 lowering state |
-| `compile.Queue` | compile admission/scheduling |
-| `compile.Store` | published code ownership |
-| `tier.Watchdog` | native retirement verdict |
+Current implementation vocabulary is owned by package docs. The rows below are historical/rebuild terms and MUST NOT be used to describe current symbols.
+
+## Rebuild Vocabulary
+
+The native rebuild is planned. Future compiler, backend, and target packages MUST define terminology in their owner docs before implementation.
 
 ## Ownership Vocabulary
 
@@ -27,13 +18,10 @@ Applied naming/vocabulary reference.
 |---|---|
 | `instr` | opcode/ISA |
 | `internal/ssa` | IR/dataflow |
-| `internal/jit` | JIT-neutral planning |
-| `internal/jit/frontend` | translation/planning facts |
-| `internal/jit/backend` | lowering state/metadata |
-| `internal/jit/<arch>` | target mechanics |
-| `internal/journal` | native/interpreter ABI |
-| `internal/jit/compile` | compilation lifecycle |
-| `internal/jit/tier` | tiering policy |
+| `internal/asm` | machine encoding/executable memory |
+| `transform` | bytecode/SSA translation and rewrite |
+| `interp` | runtime execution |
+| `prof` | execution sampling |
 
 Naming rules, symbol-removal review, ownership checks, and simplification checks are owned by `coding-patterns.md` and `refactoring.md`.
 
