@@ -50,7 +50,7 @@ func TestSSAPass_Run(t *testing.T) {
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
-			if preserved == pass.PreserveNone() {
+			if !preserved {
 				rewritten++
 			}
 
@@ -73,7 +73,7 @@ func TestSSAPass_Run(t *testing.T) {
 			preserved, err := transform.NewSSAPass(pipeline()).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
-			if preserved == pass.PreserveNone() {
+			if !preserved {
 				rewritten++
 			}
 
@@ -249,10 +249,10 @@ func TestSSAPass_Run(t *testing.T) {
 		for _, tc := range []struct {
 			name    string
 			pad     int
-			expects pass.Preserved
+			expects bool
 		}{
-			{name: "within reach", pad: 32748, expects: pass.PreserveNone()},
-			{name: "out of reach", pad: 32751, expects: pass.PreserveAll()}} {
+			{name: "within reach", pad: 32748, expects: false},
+			{name: "out of reach", pad: 32751, expects: true}} {
 			input := program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(spanningFunction(t, tc.pad)))
 			require.NoError(t, program.Verify(input))
@@ -263,7 +263,7 @@ func TestSSAPass_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.expects, preserved)
 			require.NoError(t, program.Verify(input))
-			if preserved == pass.PreserveAll() {
+			if preserved {
 				require.Equal(t, before, input.String())
 			}
 
@@ -280,7 +280,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), input)
 			require.NoError(t, err)
-			require.Equal(t, pass.PreserveAll(), preserved)
+			require.True(t, preserved)
 			require.Equal(t, before, input.String())
 		}
 	})

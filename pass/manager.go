@@ -57,9 +57,9 @@ func NewManager() *Manager {
 	}
 }
 
-// Invalidate drops cached results unless the transform preserved everything.
-func (m *Manager) Invalidate(p Preserved) {
-	if !p.all {
+// Invalidate drops cached results unless all analyses survived the transform.
+func (m *Manager) Invalidate(preserved bool) {
+	if !preserved {
 		clear(m.cache)
 	}
 }

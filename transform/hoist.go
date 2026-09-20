@@ -20,11 +20,11 @@ func NewHoistPass() *HoistPass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	dominance := graph.NewDominance(function)
 	headers := graph.LoopHeaders(function, dominance)
 	if len(headers) == 0 {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 
 	bodies := make(map[int]map[int]bool, len(headers))
@@ -109,7 +109,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 	}
 
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 
 	rebuilder := newRebuilder(function)
@@ -127,7 +127,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 	}
 	next := rebuilder.builder.Build()
 	*function = *next
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func isHoistable(operation ssa.Operation) bool {

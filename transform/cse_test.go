@@ -35,7 +35,7 @@ func TestCSEPass_Run(t *testing.T) {
 		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Equal(t, 1, strings.Count(out, "i32.add"))
@@ -58,7 +58,7 @@ func TestCSEPass_Run(t *testing.T) {
 		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Equal(t, 1, strings.Count(out, "i32.add"))
@@ -85,7 +85,7 @@ func TestCSEPass_Run(t *testing.T) {
 		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "i32.add"))
 	})
@@ -104,7 +104,7 @@ func TestCSEPass_Run(t *testing.T) {
 		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "const 7"))
 	})
@@ -126,7 +126,7 @@ func TestCSEPass_Run(t *testing.T) {
 		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "i32.add"))
 		require.Contains(t, ssa.Format(fn), "stack=[v4]")

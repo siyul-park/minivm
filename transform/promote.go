@@ -21,17 +21,17 @@ func NewPromotePass() *PromotePass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *PromotePass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *PromotePass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	slots := promotable(function)
 	if len(slots) == 0 {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	next, ok := promote(function, slots)
 	if !ok {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	*function = *next
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func promotable(function *ssa.Function) map[int]ssa.Type {

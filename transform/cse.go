@@ -18,13 +18,13 @@ func NewCSEPass() *CSEPass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *CSEPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *CSEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	next, changed := deduplicate(function, cseKey)
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	*function = *next
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func cseKey(_ *ssa.Function, operation ssa.Operation) (string, bool) {

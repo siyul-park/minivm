@@ -33,7 +33,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, "func f\nblk0: ()\n\tv1:i32 = const 1\n\treturn v1\n", ssa.Format(fn))
 	})
@@ -51,7 +51,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "array.len")
 	})
@@ -69,7 +69,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, fn.Len())
 	})
@@ -89,7 +89,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Contains(t, out, "i32.add")
@@ -110,7 +110,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, "func f\nblk0: ()\n\tv1:ref = const 3\n\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[v1 owned]}\n\texit state v2\n", ssa.Format(fn))
 	})
@@ -127,7 +127,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.NotContains(t, ssa.Format(fn), "state")
 	})
@@ -151,7 +151,7 @@ func TestDCEPass_Run(t *testing.T) {
 		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "const 0")
 	})

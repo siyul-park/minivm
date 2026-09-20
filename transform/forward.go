@@ -26,7 +26,7 @@ func NewForwardPass() *ForwardPass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	children := graph.NewDominance(function).Children()
 
 	rebuilder := newRebuilder(function)
@@ -72,10 +72,10 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserv
 	walk(0, map[ssa.Slot]ssa.Value{})
 
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	*function = *rebuilder.builder.Build()
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func invalidate(held map[ssa.Slot]ssa.Value, code instr.Opcode) {

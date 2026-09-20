@@ -10,7 +10,7 @@ transform IR → mutation
 pipeline   ordered transforms + invalidation
 ```
 
-`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses `MUST NOT` mutate IR. Transforms `MUST` report preserved analyses through `pass.Preserved`.
+`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses `MUST NOT` mutate IR. Transforms `MUST` return `true` when all cached analyses survive and `false` when they must be invalidated.
 
 ## Layers
 

@@ -30,13 +30,13 @@ func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 }
 
 // Run applies the SSA round trip and leaves unsupported or failed functions unchanged.
-func (p *SSAPass) Run(manager *pass.Manager, program *program.Program) (pass.Preserved, error) {
+func (p *SSAPass) Run(manager *pass.Manager, program *program.Program) (bool, error) {
 	constants := newPool(program)
 
 	root := &types.Function{Typ: &types.FunctionType{}, Locals: program.Locals, Code: program.Code, Handlers: program.Handlers}
 	changed, err := p.roundtrip(manager, constants, 0, root)
 	if err != nil {
-		return pass.PreserveNone(), err
+		return false, err
 	}
 	if changed {
 		program.Code, program.Locals = root.Code, root.Locals
@@ -48,15 +48,15 @@ func (p *SSAPass) Run(manager *pass.Manager, program *program.Program) (pass.Pre
 		}
 		done, err := p.roundtrip(manager, constants, i+1, function)
 		if err != nil {
-			return pass.PreserveNone(), err
+			return false, err
 		}
 		changed = changed || done
 	}
 
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int, function *types.Function) (bool, error) {

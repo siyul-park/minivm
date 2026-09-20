@@ -18,13 +18,13 @@ func NewGuardPass() *GuardPass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *GuardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *GuardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	next, changed := deduplicate(function, guardKey)
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	*function = *next
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func guardKey(function *ssa.Function, operation ssa.Operation) (string, bool) {

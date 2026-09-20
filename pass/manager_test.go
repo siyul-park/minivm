@@ -118,7 +118,7 @@ func TestManager_Invalidate(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		_, err := pass.GetResult[int](m, prog)
 		require.NoError(t, err)
-		m.Invalidate(pass.PreserveNone())
+		m.Invalidate(false)
 		_, err = pass.GetResult[int](m, prog)
 		require.NoError(t, err)
 
@@ -136,7 +136,7 @@ func TestManager_Invalidate(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		_, err := pass.GetResult[int](m, prog)
 		require.NoError(t, err)
-		m.Invalidate(pass.PreserveAll())
+		m.Invalidate(true)
 		_, err = pass.GetResult[int](m, prog)
 		require.NoError(t, err)
 

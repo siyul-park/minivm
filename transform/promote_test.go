@@ -26,7 +26,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 
 		require.Equal(t, 1, countOperations(fn, ssa.OpLoad))
@@ -114,7 +114,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -133,7 +133,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -152,7 +152,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -171,7 +171,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -190,7 +190,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -212,7 +212,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -235,7 +235,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 }

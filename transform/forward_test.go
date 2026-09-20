@@ -37,7 +37,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, "func f\nblk0: ()\n\tv1:i32 = load local[0]\n\treturn v1, v1\n", ssa.Format(fn))
 	})
@@ -56,7 +56,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
@@ -76,7 +76,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 
@@ -95,7 +95,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
@@ -119,7 +119,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Equal(t, 2, strings.Count(out, "load global[0]"))
@@ -148,7 +148,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 }

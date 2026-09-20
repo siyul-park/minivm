@@ -23,7 +23,7 @@ func NewFoldPass() *FoldPass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	constants := map[ssa.Value]types.Boxed{}
 	computed := map[ssa.Value]bool{}
 	rebuilder := newRebuilder(function)
@@ -62,10 +62,10 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved,
 	}
 
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	*function = *rebuilder.builder.Build()
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func (p *FoldPass) fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {

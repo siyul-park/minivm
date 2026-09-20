@@ -42,7 +42,7 @@ func TestHoistPass_Run(t *testing.T) {
 		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		after := ssa.Format(fn)
 		require.NotEqual(t, before, after)
@@ -142,7 +142,7 @@ func TestHoistPass_Run(t *testing.T) {
 		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -167,7 +167,7 @@ func TestHoistPass_Run(t *testing.T) {
 		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 
 		out := ssa.Format(fn)
@@ -224,7 +224,7 @@ func TestHoistPass_Run(t *testing.T) {
 		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 
 		out := ssa.Format(fn)
@@ -245,7 +245,7 @@ func TestHoistPass_Run(t *testing.T) {
 		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 }

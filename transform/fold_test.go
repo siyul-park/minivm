@@ -38,7 +38,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		after := ssa.Format(fn)
 		require.NotContains(t, after, "i32.add")
@@ -46,7 +46,7 @@ func TestFoldPass_Run(t *testing.T) {
 		require.Equal(t, sum, ssa.Value(3))
 	})
 
-	t.Run("reports PreserveAll and leaves the function untouched when nothing folds", func(t *testing.T) {
+	t.Run("leaves the function untouched when nothing folds", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.AddBlock()
 		param := b.Param(entry, ssa.TypeI32)
@@ -60,7 +60,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
@@ -77,7 +77,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Contains(t, ssa.Format(fn), "i32.div_s")
 	})
 
@@ -95,7 +95,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Contains(t, ssa.Format(fn), "i64.mul")
 	})
 
@@ -114,7 +114,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "stack=[v4]")
 		require.Contains(t, ssa.Format(fn), "v4:i32 = const 5")
@@ -194,7 +194,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Contains(t, ssa.Format(fn), "i32.add")
 	})
 
@@ -227,7 +227,7 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Contains(t, ssa.Format(fn), "i32.div_s")
 	})
 
@@ -596,7 +596,7 @@ func identity(t *testing.T, code instr.Opcode, valueType ssa.Type, constant type
 	preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 	require.NoError(t, err)
-	require.Equal(t, pass.PreserveNone(), preserved)
+	require.False(t, preserved)
 	require.NoError(t, ssa.Verify(fn))
 	out := ssa.Format(fn)
 	require.NotContains(t, out, instr.TypeOf(code).Mnemonic)
@@ -620,7 +620,7 @@ func shift(t *testing.T, code instr.Opcode, valueType ssa.Type, constant types.B
 	preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 	require.NoError(t, err)
-	require.Equal(t, pass.PreserveNone(), preserved)
+	require.False(t, preserved)
 	require.NoError(t, ssa.Verify(fn))
 	out := ssa.Format(fn)
 	require.NotContains(t, out, instr.TypeOf(code).Mnemonic)
@@ -646,7 +646,7 @@ func fold(t *testing.T, code instr.Opcode, boxes []types.Boxed, want types.Boxed
 	preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 	require.NoError(t, err)
-	require.Equal(t, pass.PreserveNone(), preserved)
+	require.False(t, preserved)
 	require.NoError(t, ssa.Verify(fn))
 	ops := fn.Block(entry).Operations
 	require.Equal(t, want, ops[len(ops)-1].Const)

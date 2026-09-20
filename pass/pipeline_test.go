@@ -16,9 +16,9 @@ func TestNewPipeline(t *testing.T) {
 func TestPipeline_Add(t *testing.T) {
 	var log []string
 	pipeline := pass.NewPipeline[*program.Program]()
-	pipeline.Add(runner[*program.Program, pass.Preserved](func(*pass.Manager, *program.Program) (pass.Preserved, error) {
+	pipeline.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
 		log = append(log, "added")
-		return pass.PreserveAll(), nil
+		return true, nil
 	}))
 	_, err := pipeline.Run(pass.NewManager(), program.New(nil))
 	require.NoError(t, err)
@@ -29,13 +29,13 @@ func TestPipeline_Run(t *testing.T) {
 	t.Run("runs passes in order", func(t *testing.T) {
 		var log []string
 		pl := pass.NewPipeline[*program.Program]()
-		pl.Add(runner[*program.Program, pass.Preserved](func(*pass.Manager, *program.Program) (pass.Preserved, error) {
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
 			log = append(log, "a")
-			return pass.PreserveAll(), nil
+			return true, nil
 		}))
-		pl.Add(runner[*program.Program, pass.Preserved](func(*pass.Manager, *program.Program) (pass.Preserved, error) {
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
 			log = append(log, "b")
-			return pass.PreserveAll(), nil
+			return true, nil
 		}))
 
 		prog := program.New(nil)
@@ -49,13 +49,13 @@ func TestPipeline_Run(t *testing.T) {
 		want := errors.New("fail")
 		var log []string
 		pl := pass.NewPipeline[*program.Program]()
-		pl.Add(runner[*program.Program, pass.Preserved](func(*pass.Manager, *program.Program) (pass.Preserved, error) {
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
 			log = append(log, "a")
-			return pass.PreserveAll(), want
+			return true, want
 		}))
-		pl.Add(runner[*program.Program, pass.Preserved](func(*pass.Manager, *program.Program) (pass.Preserved, error) {
+		pl.Add(runner[*program.Program, bool](func(*pass.Manager, *program.Program) (bool, error) {
 			log = append(log, "b")
-			return pass.PreserveAll(), nil
+			return true, nil
 		}))
 
 		_, err := pl.Run(pass.NewManager(), program.New(nil))

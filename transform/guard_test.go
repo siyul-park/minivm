@@ -37,7 +37,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Equal(t, 1, strings.Count(out, "guard.shape"))
@@ -61,7 +61,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "guard.shape"))
 	})
@@ -83,7 +83,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "guard.kind"))
 	})
@@ -105,7 +105,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "guard.kind"))
 	})
@@ -128,7 +128,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "guard.value"))
 	})
@@ -148,7 +148,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "guard.bounds"))
 	})
@@ -170,7 +170,7 @@ func TestGuardPass_Run(t *testing.T) {
 		preserved, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "stack=[v2]")
 	})

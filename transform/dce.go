@@ -22,7 +22,7 @@ func NewDCEPass() *DCEPass {
 }
 
 // Run applies the pass to one SSA function.
-func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
+func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	blocks := graph.ReversePostorder(function)
 	live := liveness(function, blocks)
 
@@ -45,11 +45,11 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, 
 	}
 
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 	next := rebuilder.builder.Build()
 	*function = *next
-	return pass.PreserveNone(), nil
+	return false, nil
 }
 
 func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
