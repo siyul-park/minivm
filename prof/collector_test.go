@@ -30,7 +30,7 @@ func TestCollector_Metric(t *testing.T) {
 	_, ok = collector.Metric("missing")
 	require.False(t, ok)
 
-	labels := []prof.Label{{Key: "mode", Value: "jit"}, {Key: "phase", Value: "run"}}
+	labels := []prof.Label{{Key: "mode", Value: "profile"}, {Key: "phase", Value: "run"}}
 	collector.AddMetric("labeled", 3, labels...)
 	value, ok = collector.Metric("labeled", labels...)
 	require.True(t, ok)
@@ -59,7 +59,7 @@ func TestCollector_Metrics(t *testing.T) {
 
 	t.Run("custom labels are owned by each snapshot", func(t *testing.T) {
 		collector := prof.NewCollector()
-		labels := []prof.Label{{Key: "mode", Value: "jit"}}
+		labels := []prof.Label{{Key: "mode", Value: "profile"}}
 		collector.AddMetric("custom", 2, labels...)
 		labels[0].Value = "caller"
 		first := collector.Metrics()
@@ -70,31 +70,12 @@ func TestCollector_Metrics(t *testing.T) {
 				first[i].Value = 99
 			}
 		}
-		require.Contains(t, second, prof.Metric{Name: "custom", Value: 2, Labels: []prof.Label{{Key: "mode", Value: "jit"}}})
+		require.Contains(t, second, prof.Metric{Name: "custom", Value: 2, Labels: []prof.Label{{Key: "mode", Value: "profile"}}})
 		require.Equal(t, second, collector.Metrics())
-		collector.AddMetric("custom", 3, prof.Label{Key: "mode", Value: "jit"})
-		require.Equal(t, float64(5), collector.Value("custom", prof.Label{Key: "mode", Value: "jit"}))
+		collector.AddMetric("custom", 3, prof.Label{Key: "mode", Value: "profile"})
+		require.Equal(t, float64(5), collector.Value("custom", prof.Label{Key: "mode", Value: "profile"}))
 	})
 
-	t.Run("jit metrics", func(t *testing.T) {
-		c := prof.NewCollector()
-		c.RecordCapture(1, 2, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
-		c.RecordCompile(1, 2, prof.TriggerHot, prof.FrontendTrace, prof.CompileOutcomeEmitted, prof.CompileReasonNone)
-		c.RegisterYield(1, 2, prof.EntryStart, prof.FrontendTrace).Inc()
-
-		first := c.Metrics()
-		require.Equal(t, first, c.Metrics())
-		names := make([]string, len(first))
-		for index, metric := range first {
-			names[index] = metric.Name
-		}
-		require.Equal(t, []string{
-			"vm_samples_total",
-			"vm_jit_trace_captures_total",
-			"vm_jit_compiles_total",
-			"vm_jit_native_yields_total",
-		}, names)
-	})
 }
 
 func TestCollector_Add(t *testing.T) {
@@ -110,11 +91,11 @@ func TestCollector_Add(t *testing.T) {
 
 func TestCollector_AddMetric(t *testing.T) {
 	collector := prof.NewCollector()
-	collector.AddMetric("custom", 2, prof.Label{Key: "mode", Value: "jit"})
-	collector.AddMetric("custom", 3, prof.Label{Key: "mode", Value: "jit"})
-	require.Equal(t, float64(5), collector.Value("custom", prof.Label{Key: "mode", Value: "jit"}))
+	collector.AddMetric("custom", 2, prof.Label{Key: "mode", Value: "profile"})
+	collector.AddMetric("custom", 3, prof.Label{Key: "mode", Value: "profile"})
+	require.Equal(t, float64(5), collector.Value("custom", prof.Label{Key: "mode", Value: "profile"}))
 
-	first := prof.Label{Key: "mode", Value: "jit"}
+	first := prof.Label{Key: "mode", Value: "profile"}
 	second := prof.Label{Key: "phase", Value: "run"}
 	collector.AddMetric("ordered", 2, first, second)
 	collector.AddMetric("ordered", 3, first, second)

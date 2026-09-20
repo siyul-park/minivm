@@ -52,18 +52,14 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_ADD),
 					instr.New(instr.DROP),
 					instr.New(instr.I32_CONST, 5),
-					instr.New(instr.RETURN),
-				).MustBuild(),
-			),
-		)
+					instr.New(instr.RETURN)).MustBuild()))
 
 		optimized, err := optimize.New(optimize.O1).Optimize(prog)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 		require.Equal(t, instr.Format(instr.Marshal([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.RETURN),
-		})), instr.Format(optimized.Constants[0].(*types.Function).Code))
+			instr.New(instr.RETURN)})), instr.Format(optimized.Constants[0].(*types.Function).Code))
 
 		vm := interp.New(optimized)
 		defer vm.Close()
@@ -79,13 +75,11 @@ func TestOptimizer_Optimize(t *testing.T) {
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 20),
 				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
+				instr.New(instr.CALL)},
 			program.WithConstants(
 				types.NewFunctionBuilder(&types.FunctionType{
 					Params:  []types.Type{types.TypeI64},
-					Returns: []types.Type{types.TypeI64},
-				}).Emit(
+					Returns: []types.Type{types.TypeI64}}).Emit(
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LT_S),
@@ -103,10 +97,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_ADD),
 					instr.New(instr.RETURN),
 					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN),
-				).MustBuild(),
-			),
-		)
+					instr.New(instr.RETURN)).MustBuild()))
 		_, err := o.Optimize(prog)
 		require.NoError(t, err)
 	})
@@ -117,13 +108,11 @@ func TestOptimizer_Optimize(t *testing.T) {
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 20),
 				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
+				instr.New(instr.CALL)},
 			program.WithConstants(
 				types.NewFunctionBuilder(&types.FunctionType{
 					Params:  []types.Type{types.TypeI64},
-					Returns: []types.Type{types.TypeI64},
-				}).Emit(
+					Returns: []types.Type{types.TypeI64}}).Emit(
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LT_S),
@@ -141,10 +130,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_ADD),
 					instr.New(instr.RETURN),
 					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN),
-				).MustBuild(),
-			),
-		)
+					instr.New(instr.RETURN)).MustBuild()))
 		_, err := o.Optimize(prog)
 		require.NoError(t, err)
 	})
@@ -176,13 +162,11 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_CONST, 4),
 					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-				},
+					instr.New(instr.CALL)},
 				program.WithConstants(
 					types.NewFunctionBuilder(&types.FunctionType{
 						Params:  []types.Type{types.TypeI32, types.TypeI32},
-						Returns: []types.Type{types.TypeI32},
-					}).Emit(
+						Returns: []types.Type{types.TypeI32}}).Emit(
 						instr.New(instr.LOCAL_GET, 0),
 						instr.New(instr.LOCAL_GET, 1),
 						instr.New(instr.I32_ADD),
@@ -190,10 +174,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 						instr.New(instr.LOCAL_GET, 1),
 						instr.New(instr.I32_ADD),
 						instr.New(instr.I32_ADD),
-						instr.New(instr.RETURN),
-					).MustBuild(),
-				),
-			)
+						instr.New(instr.RETURN)).MustBuild()))
 		}
 
 		before := build()
@@ -222,8 +203,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32, types.TypeI32},
-				Returns: []types.Type{types.TypeI32},
-			})
+				Returns: []types.Type{types.TypeI32}})
 			l := fb.Label()
 			fb.Emit(
 				instr.New(instr.LOCAL_GET, 0),
@@ -235,8 +215,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 				instr.New(instr.I32_ADD),
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.I32_GT_S),
-			)
+				instr.New(instr.I32_GT_S))
 			fb.BrIf(l)
 			fb.Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
 			fb.Bind(l)
@@ -247,10 +226,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_CONST, 4),
 					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-				},
-				program.WithConstants(fb.MustBuild()),
-			)
+					instr.New(instr.CALL)},
+				program.WithConstants(fb.MustBuild()))
 		}
 
 		before := build()
@@ -276,8 +253,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32, types.TypeI32},
-				Returns: []types.Type{types.TypeI32},
-			})
+				Returns: []types.Type{types.TypeI32}})
 			then, merge := fb.Label(), fb.Label()
 			fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_GT_S))
 			fb.BrIf(then)
@@ -293,10 +269,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_CONST, 4),
 					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-				},
-				program.WithConstants(fb.MustBuild()),
-			)
+					instr.New(instr.CALL)},
+				program.WithConstants(fb.MustBuild()))
 		}
 
 		before := build()
@@ -329,8 +303,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32, types.TypeI32},
-				Returns: []types.Type{types.TypeI32},
-			})
+				Returns: []types.Type{types.TypeI32}})
 			start, end, catch := fb.Label(), fb.Label(), fb.Label()
 			fb.Bind(start)
 			fb.Emit(
@@ -340,8 +313,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.LOCAL_GET, 1),
 				instr.New(instr.I32_ADD),
-				instr.New(instr.I32_ADD),
-			)
+				instr.New(instr.I32_ADD))
 			fb.Bind(end)
 			fb.Emit(instr.New(instr.RETURN))
 			fb.Bind(catch)
@@ -356,11 +328,9 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_CONST, 4),
 					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-				},
+					instr.New(instr.CALL)},
 				program.WithConstants(fb.MustBuild()),
-				program.WithTypes(types.NewArrayType(types.TypeI32)),
-			)
+				program.WithTypes(types.NewArrayType(types.TypeI32)))
 		}
 
 		before := build()
@@ -390,9 +360,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 20),
 			instr.New(instr.I32_CONST, 22),
-			instr.New(instr.I32_ADD),
-		})
-		original := interp.New(prog, interp.WithThreshold(-1))
+			instr.New(instr.I32_ADD)})
+		original := interp.New(prog)
 		defer original.Close()
 		require.NoError(t, original.Run(context.Background()))
 		var want []types.Value
@@ -404,7 +373,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 
 		optimized, err := optimize.New(optimize.O3).Optimize(prog)
 		require.NoError(t, err)
-		got := interp.New(optimized, interp.WithThreshold(-1))
+		got := interp.New(optimized)
 		defer got.Close()
 		require.NoError(t, got.Run(context.Background()))
 		var values []types.Value
@@ -421,9 +390,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.BR_IF, 5),
 			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 7),
-		})
-		original := interp.New(prog, interp.WithThreshold(-1))
+			instr.New(instr.I32_CONST, 7)})
+		original := interp.New(prog)
 		defer original.Close()
 		require.NoError(t, original.Run(context.Background()))
 		var want []types.Value
@@ -435,7 +403,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 
 		optimized, err := optimize.New(optimize.O3).Optimize(prog)
 		require.NoError(t, err)
-		got := interp.New(optimized, interp.WithThreshold(-1))
+		got := interp.New(optimized)
 		defer got.Close()
 		require.NoError(t, got.Run(context.Background()))
 		var values []types.Value
@@ -451,9 +419,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.ARRAY_GET),
-		}, program.WithConstants(types.TypedArray[int32]{10, 20, 30}))
-		original := interp.New(prog, interp.WithThreshold(-1))
+			instr.New(instr.ARRAY_GET)}, program.WithConstants(types.TypedArray[int32]{10, 20, 30}))
+		original := interp.New(prog)
 		defer original.Close()
 		require.NoError(t, original.Run(context.Background()))
 		var want []types.Value
@@ -465,7 +432,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 
 		optimized, err := optimize.New(optimize.O3).Optimize(prog)
 		require.NoError(t, err)
-		got := interp.New(optimized, interp.WithThreshold(-1))
+		got := interp.New(optimized)
 		defer got.Close()
 		require.NoError(t, got.Run(context.Background()))
 		var values []types.Value
@@ -494,8 +461,7 @@ func TestOptimizer_Add(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),
 		instr.New(instr.I32_CONST, 2),
-		instr.New(instr.I32_ADD),
-	})
+		instr.New(instr.I32_ADD)})
 	before := prog.String()
 
 	got, err := o.Optimize(prog)

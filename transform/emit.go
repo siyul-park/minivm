@@ -170,8 +170,9 @@ func (e *emitter) take(id int, op ssa.Operation) bool {
 		}
 	case ssa.OpConst:
 	case ssa.OpLoad, ssa.OpStore:
-		// A local of a frame the translation inlined counts from that frame's
-		// own floor, which no LOCAL_* operand can name.
+		// A LOCAL_* operand names a slot from the function's own floor; a
+		// nonzero base counts from some other frame's, which no such operand
+		// can name.
 		if op.Slot.Base != 0 || int(op.Slot.Space) >= len(slots) {
 			return false
 		}

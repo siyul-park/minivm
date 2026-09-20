@@ -24,18 +24,16 @@ func FuzzOptimizerParity(f *testing.F) {
 			instr.I32_MUL,
 			instr.I32_XOR,
 			instr.I32_EQ,
-			instr.I32_LT_S,
-		}
+			instr.I32_LT_S}
 		op := ops[int(operation)%len(ops)]
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, uint64(uint32(left))),
 			instr.New(instr.I32_CONST, uint64(uint32(right))),
-			instr.New(op),
-		})
+			instr.New(op)})
 		require.NoError(t, program.Verify(prog))
 
 		run := func(prog *program.Program) types.Value {
-			vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+			vm := interp.New(prog, interp.WithTick(1))
 			defer vm.Close()
 			require.NoError(t, vm.Run(context.Background()))
 			value, err := vm.Pop()

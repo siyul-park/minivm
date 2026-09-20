@@ -66,9 +66,7 @@ func TestKernels(t *testing.T) {
 		name string
 		opts []interp.Option
 	}{
-		{name: "default"},
-		{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
-		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
+		{name: "threaded"},
 	}
 	for _, kernel := range kernels {
 		for _, mode := range modes {
@@ -92,21 +90,14 @@ func TestKernels(t *testing.T) {
 func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
 	b.Helper()
 	modes := []struct {
-		name      string
-		threshold []int
+		name string
+		opts []interp.Option
 	}{
-		{name: "default"},
-		{name: "threaded", threshold: []int{-1}},
-		{name: "jit", threshold: []int{0}},
+		{name: "threaded"},
 	}
 	for _, mode := range modes {
 		b.Run(mode.name, func(b *testing.B) {
-			var vm *interp.Interpreter
-			if len(mode.threshold) == 0 {
-				vm = interp.New(prog)
-			} else {
-				vm = interp.New(prog, interp.WithThreshold(mode.threshold[0]))
-			}
+			vm := interp.New(prog, mode.opts...)
 			defer vm.Close()
 			ctx := context.Background()
 

@@ -19,8 +19,7 @@ func TestCoroutineReferences(t *testing.T) {
 	t.Run("keeps closure captures live without duplicate collector edges", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeAny},
-			Returns: []types.Type{types.TypeI32},
-		}).Captures(types.TypeAny).Emit(
+			Returns: []types.Type{types.TypeI32}}).Captures(types.TypeAny).Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.UPVAL_GET, 0),
 			instr.New(instr.I32_CONST, 30),
@@ -31,8 +30,7 @@ func TestCoroutineReferences(t *testing.T) {
 			instr.New(instr.SWAP),
 			instr.New(instr.REF_GET),
 			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
-		).MustBuild()
+			instr.New(instr.RETURN)).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10),
 			instr.New(instr.REF_NEW),
@@ -47,8 +45,7 @@ func TestCoroutineReferences(t *testing.T) {
 			instr.New(instr.CORO_VALUE),
 			instr.New(instr.REF_GET),
 			instr.New(instr.RESUME),
-			instr.New(instr.CORO_VALUE),
-		}, program.WithConstants(fn))
+			instr.New(instr.CORO_VALUE)}, program.WithConstants(fn))
 		collected := false
 		var callableStoreErr error
 		var coroutineStoreErr error
@@ -57,7 +54,6 @@ func TestCoroutineReferences(t *testing.T) {
 			interp.WithHeap(8),
 			interp.WithHeapLimit(8),
 			interp.WithTick(1),
-			interp.WithThreshold(-1),
 			interp.WithHook(func(vm *interp.Interpreter) error {
 				if collected || vm.IP() != 19 {
 					return nil
@@ -99,8 +95,7 @@ func TestCoroutineReferences(t *testing.T) {
 					return err
 				}
 				return vm.Release(pressure)
-			}),
-		)
+			}))
 		defer vm.Close()
 
 		require.NoError(t, vm.Run(context.Background()))
@@ -125,17 +120,15 @@ func TestCoroutineReferences(t *testing.T) {
 				instr.New(instr.YIELD),
 				instr.New(instr.DROP),
 				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.RETURN_CALL),
-			).
+				instr.New(instr.RETURN_CALL)).
 			MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 			instr.New(instr.REF_NULL),
 			instr.New(instr.RESUME),
-			instr.New(instr.CORO_VALUE),
-		}, program.WithConstants(fn, tail))
-		vm := interp.New(prog, interp.WithThreshold(-1))
+			instr.New(instr.CORO_VALUE)}, program.WithConstants(fn, tail))
+		vm := interp.New(prog)
 		defer vm.Close()
 
 		require.NoError(t, vm.Run(context.Background()))
@@ -149,8 +142,7 @@ func TestCoroutineReferences(t *testing.T) {
 			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
 			func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(42)}, nil
-			},
-		)
+			})
 		fn := types.NewFunctionBuilder(nil).
 			Returns(types.TypeI32).
 			Emit(
@@ -158,17 +150,15 @@ func TestCoroutineReferences(t *testing.T) {
 				instr.New(instr.YIELD),
 				instr.New(instr.DROP),
 				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.RETURN_CALL),
-			).
+				instr.New(instr.RETURN_CALL)).
 			MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 			instr.New(instr.REF_NULL),
 			instr.New(instr.RESUME),
-			instr.New(instr.CORO_VALUE),
-		}, program.WithConstants(fn, tail))
-		vm := interp.New(prog, interp.WithThreshold(-1))
+			instr.New(instr.CORO_VALUE)}, program.WithConstants(fn, tail))
+		vm := interp.New(prog)
 		defer vm.Close()
 
 		require.NoError(t, vm.Run(context.Background()))
@@ -188,8 +178,7 @@ func TestCoroutineReferences(t *testing.T) {
 				instr.New(instr.REF_NEW),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.REF_NEW),
-				instr.New(instr.RETURN),
-			).
+				instr.New(instr.RETURN)).
 			MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
@@ -207,13 +196,10 @@ func TestCoroutineReferences(t *testing.T) {
 			instr.New(instr.I32_CONST, 4),
 			instr.New(instr.REF_NEW),
 			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.REF_NEW),
-		}, program.WithConstants(fn))
+			instr.New(instr.REF_NEW)}, program.WithConstants(fn))
 		vm := interp.New(prog,
 			interp.WithHeap(5),
-			interp.WithHeapLimit(5),
-			interp.WithThreshold(-1),
-		)
+			interp.WithHeapLimit(5))
 		defer vm.Close()
 
 		require.NoError(t, vm.Run(context.Background()))

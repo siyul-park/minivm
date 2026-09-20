@@ -63,8 +63,7 @@ func TestEncoder_Marshal(t *testing.T) {
 			reflect.TypeFor[int32](), types.TypeI32,
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				return types.I32(*(*int32)(p) + 100), nil
-			})),
-	)
+			})))
 
 	got, err := r.Marshal(i, encodeCelsius(3))
 	require.NoError(t, err)

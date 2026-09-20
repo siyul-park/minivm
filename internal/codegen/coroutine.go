@@ -74,7 +74,7 @@ func resume() jen.Code {
 				jen.Id("i").Dot("fr").Dot("ip").Op("++"),
 				jen.Id("i").Dot("fp").Op("++"),
 				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Id("f")),
-				frameEntered())),
+			)),
 				jen.Case(jen.Id("types").Dot("Iterator")).Block(jen.Block(jen.List(jen.Id("iter")).Op(":=").List(jen.Id("co")),
 					jen.List(jen.Id("in")).Op(":=").List(jen.Id("in")),
 					jen.If(jen.Id("iter").Dot("Done").Call()).Block(jen.Id("panic").Call(jen.Id("ErrCoroutineDone"))),

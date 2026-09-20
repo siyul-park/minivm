@@ -12,9 +12,8 @@ import (
 // HoistPass moves a side-effect-free, non-trapping operation out of a natural
 // loop and into its preheader when every argument it reads is defined
 // outside the loop (or was itself just hoisted): textbook loop-invariant
-// code motion, the dominance-based pass docs/jit-internals.md's "No hoist,
-// no carry" paragraph anticipates. It generalizes internal/jit's old
-// traceplan.go hoistable to any *ssa.Function: that mechanism's
+// code motion, the dominance-based pass the loop-invariant design notes anticipate. It generalizes the old
+// trace-plan hoistable rule to any *ssa.Function: that mechanism's
 // one-container-per-loop and MaxHoistSlot limits were a trace-compiled
 // loop's register-budget and ARM64-encoding artifacts, not IR-level hazards
 // this pass has to honor, and its "no ref arrays" restriction does not carry

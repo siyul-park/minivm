@@ -1,18 +1,18 @@
-package frontend
+package transform
 
 import (
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/jit"
 )
 
 // span is one straight-line run of bytecode that becomes one SSA block. A
-// basic block is one span, or one more for every opcode it bridges: the
-// interpreter re-enters natively at the instruction after a bridged opcode, and
-// a point a backend can be entered at is a block of its own. A suspension
-// point ends its span the same way, except nothing resumes natively after it:
-// the interpreter performs the real suspend and continues threaded, so the
-// span carries no successor and the blocks after it are not emitted.
+// basic block is one span, or one more for every opcode it bridges: an
+// opcode with no operation of its own runs in the interpreter, which resumes
+// translation at the instruction after it, and a point translation resumes
+// at is a block of its own. A suspension point ends its span the same way,
+// except nothing resumes after it: the interpreter performs the real suspend
+// and continues threaded, so the span carries no successor and the blocks
+// after it are not emitted.
 //
 // Control and dataflow are not the same successors. An opcode that leaves the
 // function - a throw, an unreachable - is followed by the bytecode after it,
@@ -43,7 +43,7 @@ func split(code []byte, blocks []*analysis.BasicBlock) []span {
 		for ip := block.Start; ip < block.End; {
 			inst := instr.Instruction(code[ip:])
 			ip += inst.Width()
-			if jit.Bridgeable(inst.Opcode()) {
+			if bridgeable(inst.Opcode()) {
 				spans = append(spans, span{start: start, end: ip})
 				start = ip
 			}
@@ -56,12 +56,11 @@ func split(code []byte, blocks []*analysis.BasicBlock) []span {
 		spans = append(spans, span{start: start, end: block.End})
 	}
 	// A block ending on a bridge leaves an empty span at its end, which shares
-	// its start with the next block's first span. The later one wins, exactly
-	// as the plan's anchor map resolves the same collision, and the empty span
-	// stays reachable through the bridge that precedes it. A suspension leaves
-	// the same shape, except the empty span is reached only through flow - the
-	// threaded continuation - never through succs, so no successor is emitted
-	// for it.
+	// its start with the next block's first span. The later one wins, and the
+	// empty span stays reachable through the bridge that precedes it. A
+	// suspension leaves the same shape, except the empty span is reached only
+	// through flow - the threaded continuation - never through succs, so no
+	// successor is emitted for it.
 	at := make(map[int]int, len(spans))
 	for i, s := range spans {
 		at[s.start] = i
@@ -161,49 +160,31 @@ func targets(ips []int, at map[int]int) []int {
 	return out
 }
 
-// enter returns the span a root anchors at. A zero IP is the function or
-// module entry, which an already installed entry does not rebuild; every other
-// IP must name a loop header, because those are the only points a live frame
-// re-enters native code at.
-func enter(spans []span, ip int, installed bool) (int, bool) {
-	if ip == 0 {
-		return 0, !installed && spans[0].start == 0
-	}
-	for id, s := range spans {
-		if s.start == ip && header(spans, id) {
-			return id, true
-		}
-	}
-	return 0, false
-}
-
-// header reports whether a backward edge targets a span, which makes it one of
-// this function's loop headers. A span at IP zero is never one, because the
-// entry root already owns that anchor.
-func header(spans []span, id int) bool {
-	if spans[id].start <= 0 {
+// bridgeable reports whether op has no operation of its own: performing it
+// runs in the interpreter, and translation resumes at the instruction after
+// it rather than continuing through it.
+func bridgeable(op instr.Opcode) bool {
+	switch op {
+	case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.ARRAY_SLICE, instr.ARRAY_DELETE,
+		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+		instr.MAP_NEW, instr.MAP_NEW_DEFAULT, instr.MAP_DELETE, instr.MAP_CLEAR,
+		instr.REF_NEW, instr.REF_SET, instr.CLOSURE_NEW, instr.STRING_NEW_UTF32,
+		instr.STRING_ENCODE_UTF32, instr.STRING_ITER,
+		instr.MAP_LEN, instr.MAP_GET, instr.MAP_LOOKUP, instr.MAP_KEYS, instr.MAP_ITER,
+		instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET,
+		instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW,
+		instr.REF_TEST, instr.REF_CAST:
+		return true
+	default:
 		return false
 	}
-	for _, s := range spans {
-		if spans[id].start >= s.start {
-			continue
-		}
-		for _, succ := range s.succs {
-			if succ == id {
-				return true
-			}
-		}
-	}
-	return false
 }
 
-// reach returns the spans control enters from root, root first. A backend
-// emits every block a function holds, so a header keeps only what it reaches
-// rather than re-emitting the whole function once per header.
-func reach(spans []span, root int) []int {
+// reach returns the spans control enters from the entry span, entry first.
+func reach(spans []span) []int {
 	seen := make([]bool, len(spans))
-	seen[root] = true
-	order := []int{root}
+	seen[0] = true
+	order := []int{0}
 	for n := 0; n < len(order); n++ {
 		for _, succ := range spans[order[n]].succs {
 			if !seen[succ] {

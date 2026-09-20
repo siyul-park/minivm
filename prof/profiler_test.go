@@ -35,7 +35,7 @@ func TestProfiler_Flush(t *testing.T) {
 	t.Run("custom metrics survive collector reuse", func(t *testing.T) {
 		local := prof.NewCollector()
 		profiler := prof.New()
-		label := prof.Label{Key: "mode", Value: "jit"}
+		label := prof.Label{Key: "mode", Value: "profile"}
 		local.AddMetric("custom", 2, label)
 		local.AddMetric("first", 7)
 		profiler.Flush(local)
@@ -121,7 +121,7 @@ func TestProfiler_Metric(t *testing.T) {
 func TestProfiler_Metrics(t *testing.T) {
 	local := prof.NewCollector()
 	local.Add(0, 0, byte(instr.I32_CONST))
-	labels := []prof.Label{{Key: "mode", Value: "jit"}}
+	labels := []prof.Label{{Key: "mode", Value: "profile"}}
 	local.AddMetric("custom", 2, labels...)
 	profiler := prof.New()
 	profiler.Flush(local)

@@ -20,7 +20,7 @@ func TestDebugger_Hook(t *testing.T) {
 	dbg := debug.NewDebugger()
 	id := dbg.Break(0, 0)
 	vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)}),
-		interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+		interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -33,7 +33,7 @@ func TestDebugger_Stop(t *testing.T) {
 	require.Zero(t, dbg.Stop())
 	id := dbg.Break(0, 0)
 	vm := interp.New(program.New([]instr.Instruction{instr.New(instr.NOP)}),
-		interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+		interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -44,7 +44,7 @@ func TestDebugger_Reset(t *testing.T) {
 	dbg := debug.NewDebugger()
 	id := dbg.Break(0, 1)
 	prog := program.New([]instr.Instruction{instr.New(instr.NOP), instr.New(instr.NOP)})
-	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	dbg.Step()
@@ -72,7 +72,7 @@ func TestDebugger_Continue(t *testing.T) {
 	dbg.Continue()
 	dbg.Break(0, 0)
 	vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)}),
-		interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+		interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -85,14 +85,12 @@ func TestDebugger_Continue(t *testing.T) {
 
 func TestDebugger_Step(t *testing.T) {
 	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-	).MustBuild()
+		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP),
-	}, program.WithConstants(callee))
+		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
 	dbg := debug.NewDebugger()
 	dbg.Break(0, 3)
-	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -106,14 +104,12 @@ func TestDebugger_Step(t *testing.T) {
 func TestDebugger_Next(t *testing.T) {
 	debug.NewDebugger().Next()
 	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-	).MustBuild()
+		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP),
-	}, program.WithConstants(callee))
+		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
 	dbg := debug.NewDebugger()
 	dbg.Break(0, 3)
-	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -128,14 +124,12 @@ func TestDebugger_Next(t *testing.T) {
 func TestDebugger_Finish(t *testing.T) {
 	debug.NewDebugger().Finish()
 	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-	).MustBuild()
+		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP),
-	}, program.WithConstants(callee))
+		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
 	dbg := debug.NewDebugger()
 	dbg.Break(0, 3)
-	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -155,8 +149,7 @@ func TestDebugger_Break(t *testing.T) {
 	require.NotEqual(t, first, second)
 	require.Equal(t, []debug.Breakpoint{
 		{ID: first, Func: 0, IP: 1, Enabled: true},
-		{ID: second, Func: 2, IP: 3, Enabled: true},
-	}, dbg.Breakpoints())
+		{ID: second, Func: 2, IP: 3, Enabled: true}}, dbg.Breakpoints())
 }
 
 func TestDebugger_BreakIf(t *testing.T) {
@@ -164,8 +157,7 @@ func TestDebugger_BreakIf(t *testing.T) {
 		dbg := debug.NewDebugger()
 		id := dbg.BreakIf(0, 5, func(vm *interp.Interpreter) bool { return vm.Len() == 1 })
 		vm := interp.New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.DROP),
-		}), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+			instr.New(instr.I32_CONST, 7), instr.New(instr.DROP)}), interp.WithHook(dbg.Hook), interp.WithTick(1))
 		defer vm.Close()
 
 		require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -177,8 +169,7 @@ func TestDebugger_BreakIf(t *testing.T) {
 		dbg := debug.NewDebugger()
 		dbg.BreakIf(0, 5, func(*interp.Interpreter) bool { return false })
 		vm := interp.New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.DROP),
-		}), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+			instr.New(instr.I32_CONST, 7), instr.New(instr.DROP)}), interp.WithHook(dbg.Hook), interp.WithTick(1))
 		defer vm.Close()
 
 		require.NoError(t, vm.Run(context.Background()))
@@ -210,8 +201,7 @@ func TestDebugger_Breakpoints(t *testing.T) {
 	breakpoints := dbg.Breakpoints()
 	require.Equal(t, []debug.Breakpoint{
 		{ID: first, Func: 0, IP: 0, Enabled: true},
-		{ID: second, Func: 0, IP: 1, Enabled: true},
-	}, breakpoints)
+		{ID: second, Func: 0, IP: 1, Enabled: true}}, breakpoints)
 
 	breakpoints[0].Enabled = false
 	require.True(t, dbg.Breakpoints()[0].Enabled)

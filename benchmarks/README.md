@@ -56,15 +56,7 @@ Two programs use minipy host builtins that minivm has no opcode for. Both are tr
 
 ## Modes
 
-Every canonical kernel defines the same three minivm sub-benchmarks:
-
-| Mode | Configuration | Boundary |
-|---|---|---|
-| `default` | no explicit interpreter options | standard adaptive runtime policy |
-| `threaded` | `WithThreshold(-1)` | JIT disabled; pure threaded execution |
-| `jit` | `WithThreshold(0)` | eager profiling/compilation policy |
-
-Only the threshold changes between modes. `jit` does not assert that native code was emitted or entered; benchmarks that claim warmed native execution must prove that state separately with profiler metrics.
+Every canonical kernel defines one minivm sub-benchmark, `threaded`: the generated threaded interpreter with no options. A native mode returns with the JIT rebuild (`docs/jit-internals.md`).
 
 With the `compare` build tag, each kernel also adds the applicable external runtimes: native Go, wazero, Tengo, gopher-lua, Goja, gpython, CPython, and Yaegi. A runtime whose script is empty is skipped, so a kernel declares only the comparisons that answer a question about it; the ported minipy kernels declare `native`, `cpython`, and `gpython`, and wazero is omitted when no equivalent canonical WASM fixture exists.
 

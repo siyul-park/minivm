@@ -20,8 +20,7 @@ func TestNewHostFunction(t *testing.T) {
 	t.Run("constructor", func(t *testing.T) {
 		typ := &types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}
+			Returns: []types.Type{types.TypeI32}}
 		fn := interp.NewHostFunction(typ, func(_ *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return []types.Boxed{types.BoxI32(params[0].I32() * 2)}, nil
 		})
@@ -38,8 +37,7 @@ func TestNewHostFunction(t *testing.T) {
 			Typ: typ,
 			Fn: func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(7)}, nil
-			},
-		}
+			}}
 
 		require.Same(t, typ, fn.Typ)
 		got, err := fn.Fn(nil, nil)

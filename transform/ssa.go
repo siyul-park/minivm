@@ -4,8 +4,6 @@ import (
 	"slices"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/jit"
-	"github.com/siyul-park/minivm/internal/jit/frontend"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
@@ -13,18 +11,17 @@ import (
 )
 
 // SSAPass rewrites every function a program holds through SSA: it translates
-// the function with the same frontend a compile uses, runs the SSA pipeline it
-// was built with over the result, and writes the outcome back out as bytecode.
-// It is the route by which one implementation of folding, dead-code
-// elimination, and common-subexpression elimination serves both an
-// ahead-of-time optimizer and a compiler, instead of each keeping its own.
+// the function to SSA, runs the pipeline it was built with over the result,
+// and writes the outcome back out as bytecode. It is the route by which one
+// implementation of folding, dead-code elimination, and common-subexpression
+// elimination serves the ahead-of-time optimizer.
 //
 // A function it cannot take the whole way round comes back untouched. The
-// frontend declines what bytecode alone cannot resolve, the emitter declines
-// what SSA cannot be written back as, and either answer leaves the function
-// exactly as it was, which is what docs/coding-patterns.md §7.1 requires of any
-// pass that moves bytecode offsets: a rewrite that cannot preserve every
-// position-sensitive structure leaves the function alone.
+// translation declines what bytecode alone cannot resolve, the emitter
+// declines what SSA cannot be written back as, and either answer leaves the
+// function exactly as it was, which is what docs/coding-patterns.md §7.1
+// requires of any pass that moves bytecode offsets: a rewrite that cannot
+// preserve every position-sensitive structure leaves the function alone.
 type SSAPass struct {
 	pipeline *pass.Pipeline[*ssa.Function]
 }
@@ -43,7 +40,7 @@ type SSAPass struct {
 type pool struct {
 	prog    *program.Program
 	boxed   []types.Boxed
-	objects jit.Objects
+	objects Objects
 	at      map[types.Boxed]int
 }
 
@@ -95,7 +92,7 @@ func (p *SSAPass) rewrite(m *pass.Manager, consts *pool, addr int, fn *types.Fun
 	if !expressible(fn.Code) {
 		return false, nil
 	}
-	f, err := frontend.Body(consts.module(), addr, fn)
+	f, err := Translate(consts.module(), addr, fn)
 	if err != nil || f == nil {
 		return false, err
 	}
@@ -117,7 +114,7 @@ func newPool(prog *program.Program) *pool {
 	p := &pool{
 		prog:    prog,
 		boxed:   make([]types.Boxed, len(prog.Constants)),
-		objects: jit.Objects{},
+		objects: Objects{},
 		at:      map[types.Boxed]int{},
 	}
 	for i, v := range prog.Constants {
@@ -136,8 +133,8 @@ func newPool(prog *program.Program) *pool {
 
 // module returns the evidence a translation resolves kinds, shapes, and call
 // targets against.
-func (p *pool) module() frontend.Module {
-	return frontend.Module{
+func (p *pool) module() Module {
+	return Module{
 		Constants: p.boxed,
 		Globals:   types.Kinds(p.prog.Globals),
 		Objects:   p.objects,
@@ -205,17 +202,14 @@ func box(v types.Value) (types.Boxed, bool) {
 }
 
 // resolved reads off a constant the facts a translation asks of the cell it
-// would live in, mirroring what a compile resolves from the running heap.
-func resolved(v types.Value) jit.Object {
+// names.
+func resolved(v types.Value) Object {
 	switch v := v.(type) {
 	case *types.Function:
-		return jit.Object{Fn: v}
+		return Object{Fn: v}
 	case *types.Struct:
-		return jit.Object{Typ: v.Typ}
-	case types.TypedArray[bool], types.TypedArray[int8], types.TypedArray[int32],
-		types.TypedArray[int64], types.TypedArray[float32], types.TypedArray[float64]:
-		return jit.Object{Array: jit.Itab(v)}
+		return Object{Typ: v.Typ}
 	default:
-		return jit.Object{}
+		return Object{}
 	}
 }

@@ -17,14 +17,14 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
-func (m memory) executable() error {
+func executable(m memory) error {
 	if len(m) == 0 {
 		return nil
 	}
 	return fmt.Errorf("%w: unsupported platform %s/%s", ErrMprotectFailed, runtime.GOOS, runtime.GOARCH)
 }
 
-func (m memory) free() error {
+func freeMemory(m memory) error {
 	if len(m) == 0 {
 		return nil
 	}

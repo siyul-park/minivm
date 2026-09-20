@@ -3,53 +3,78 @@ package arm64
 import "github.com/siyul-park/minivm/internal/asm"
 
 type arch struct {
-	registers asm.RegInfo
-	encoder   *Encoder
-	abi       abi
-	frame     frame
+	encoder *Encoder
 }
 
 var _ asm.Arch = arch{}
 var _ asm.Relaxer = arch{}
 
-// New returns the ARM64 assembler architecture. The encoder, ABI, and frame
-// are stateless and reusable.
+// New returns the ARM64 assembler architecture.
 func New() arch {
-	return arch{
-		registers: asm.NewRegInfo(
-			31, 32,
-			// Registers the Go ARM64 runtime owns and the native body must
-			// never clobber: X18 (platform), X27 (REGTMP), X28 (g), X29
-			// (FP), X30 (LR). X19-X25 are callee-saved under AAPCS64 and
-			// preserved by the invoke trampoline, so the allocator may use
-			// them under pressure. X26 is frame's own spill-frame base
-			// (see frame.go): reserved rather than scratch so Pin rejects
-			// it, since a vreg pinned there would have every spill store
-			// and reload overwrite the base the others address through.
-			[]uint8{18, 26, 27, 28, 29, 30},
-			// D8-D15 are callee-saved under AAPCS64; native code does not
-			// save them, so keep them out of the float pool.
-			[]uint8{8, 9, 10, 11, 12, 13, 14, 15},
-			// X10-X14: pinned VM context registers. X0-X1: internal
-			// native return registers. X15: pinned native call-depth
-			// register. Pinning can claim them explicitly; auto-allocation
-			// cannot.
-			[]uint8{0, 1, 10, 11, 12, 13, 14, 15},
-		),
-		encoder: NewEncoder(),
-		abi:     abi{},
-		frame:   frame{},
-	}
+	return arch{encoder: NewEncoder()}
 }
-
-// Registers returns the target register set.
-func (a arch) Registers() asm.RegInfo { return a.registers }
 
 // Encoder returns the target instruction encoder.
 func (a arch) Encoder() asm.Encoder { return a.encoder }
 
-// ABI returns the target call-boundary policy.
-func (a arch) ABI() asm.ABI { return a.abi }
+// skipDisp is the fixed forward byte displacement the inverted skip
+// branch Relax emits uses to jump over the single unconditional B that
+// follows it. Branch offsets are relative to the branch instruction
+// itself, so clearing one 4-byte instruction needs +8.
+const skipDisp = 8
 
-// Frame returns the target spill-frame policy.
-func (a arch) Frame() asm.Frame { return a.frame }
+// invertOp maps a branch opcode to its inverted sense. Inverting the
+// condition lets Relax skip over an unconditional B to the original target.
+var invertOp = map[Op]Op{
+	OpCBZ: OpCBNZ, OpCBNZ: OpCBZ,
+	OpBEQ: OpBNE, OpBNE: OpBEQ,
+	OpBCS: OpBCC, OpBCC: OpBCS,
+	OpBMI: OpBPL, OpBPL: OpBMI,
+	OpBVS: OpBVC, OpBVC: OpBVS,
+	OpBHI: OpBLS, OpBLS: OpBHI,
+	OpBGE: OpBLT, OpBLT: OpBGE,
+	OpBGT: OpBLE, OpBLE: OpBGT,
+}
+
+// Relax implements asm.Relaxer for arm64. For B.cond and CBZ/CBNZ label
+// branches whose imm19 field (+-1MB) does not fit disp, it rewrites the
+// branch into an inverted-condition branch that skips over an
+// unconditional B to the original target:
+//
+//	B.<inv-cond> +8   ; skip the B below when the original condition is false
+//	B   <target>      ; imm26, +-128MB
+//
+// Each replacement is constructed to already be in range, so a branch
+// relaxes at most once.
+func (a arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) {
+	op := Op(inst.Op)
+	inv, ok := invertOp[op]
+	if !ok {
+		return nil, false
+	}
+	if checkBranchOffset(op, disp, 19) == nil {
+		return nil, false
+	}
+
+	lbl, ok := inst.Src2.(asm.LabelOperand)
+	if !ok {
+		return nil, false
+	}
+
+	// Forward targets move by the same four bytes as the inserted B, so their
+	// displacement is unchanged. Backward targets stay fixed while the B moves
+	// four bytes forward.
+	bDisp := disp
+	if disp < 0 {
+		bDisp -= 4
+	}
+	if checkBranchOffset(OpB, bDisp, 26) != nil {
+		return nil, false
+	}
+
+	skip := asm.Instruction{Op: uint16(inv), Src2: asm.Imm(skipDisp)}
+	if op == OpCBZ || op == OpCBNZ {
+		skip.Src1 = inst.Src1
+	}
+	return []asm.Instruction{skip, BLabel(lbl.ID)}, true
+}

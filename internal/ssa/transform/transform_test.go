@@ -14,7 +14,7 @@ import (
 )
 
 // TestPassOrder composes this package's passes into a caller-owned
-// pipeline, exactly as internal/jit or a future bytecode-to-SSA route would,
+// pipeline, exactly as a compiler pipeline or a future bytecode-to-SSA route would,
 // and asserts the ordering fact this package itself no longer enforces:
 // CSEPass must run before GuardPass, because a guard's operand is only
 // recognizably equal to an earlier guard's once CSEPass has unified the

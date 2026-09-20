@@ -6,22 +6,16 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/program"
 )
 
 // Pool hands out Interpreter instances bound to a shared Program for use across
 // goroutines. Each Interpreter owns its runtime state; callers must borrow one
-// per goroutine via Get/Put or Run. Compile coordination and published JIT
-// code are shared through the pool's queue and store, and that queue serves
-// every claimed build on its own worker, so a borrower keeps executing while
-// its compile runs.
+// per goroutine via Get/Put or Run.
 type Pool struct {
-	prog  *program.Program
-	queue *compile.Queue
-	store *compile.Store
-	opts  []Option
-	size  int
+	prog *program.Program
+	opts []Option
+	size int
 
 	idle chan *Interpreter
 	live atomic.Int64
@@ -34,24 +28,16 @@ var ErrPoolClosed = errors.New("pool closed")
 
 // NewPool builds a pool that lends up to size Interpreters constructed from
 // prog with opts. size <= 0 is normalized to 1. Interpreters are created lazily
-// on Get; NewPool itself does not allocate JIT memory.
+// on Get.
 func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
 	if size <= 0 {
 		size = 1
 	}
-	queue := compile.New(len(prog.Constants)+1, compile.WithAsync())
-	store := compile.NewStore()
-	tracer := newTracer()
-	all := make([]Option, 0, len(opts)+3)
-	all = append(all, opts...)
-	all = append(all, withQueue(queue), withStore(store), withTracer(tracer))
 	return &Pool{
-		prog:  prog,
-		queue: queue,
-		store: store,
-		opts:  all,
-		size:  size,
-		idle:  make(chan *Interpreter, size),
+		prog: prog,
+		opts: append([]Option(nil), opts...),
+		size: size,
+		idle: make(chan *Interpreter, size),
 	}
 }
 
@@ -83,13 +69,11 @@ func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 }
 
 // Put returns i to the pool after resetting its runtime state. If the pool is
-// closed or already holds size idle Interpreters, i is closed instead so its
-// JIT buffer is released.
+// closed or already holds size idle Interpreters, i is closed instead.
 func (p *Pool) Put(i *Interpreter) {
 	if i == nil {
 		return
 	}
-	i.flush()
 	i.Reset()
 
 	p.mu.RLock()
@@ -110,12 +94,6 @@ func (p *Pool) Put(i *Interpreter) {
 // Close releases every idle Interpreter and prevents further Get/Put. Outstanding
 // Interpreters are closed on their next Put. Close is idempotent; errors from
 // individual Interpreter closures are aggregated via errors.Join.
-//
-// The worker is stopped first, and stopping it finishes every build already
-// handed to it, so nothing is still compiling or publishing by the time a
-// holder detaches and the executable buffers are freed. An outstanding
-// Interpreter keeps compiling for itself afterwards, inline on its own
-// goroutine, and its own Close waits for whatever it still has in flight.
 func (p *Pool) Close() error {
 	p.mu.Lock()
 	if p.closed {
@@ -126,17 +104,12 @@ func (p *Pool) Close() error {
 	close(p.idle)
 	p.mu.Unlock()
 
-	p.queue.Close()
-
 	var errs []error
 	for i := range p.idle {
 		if err := i.Close(); err != nil {
 			errs = append(errs, err)
 		}
 		p.live.Add(-1)
-	}
-	if err := p.store.Close(); err != nil {
-		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

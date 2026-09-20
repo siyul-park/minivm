@@ -90,9 +90,9 @@ var (
 	typeVMMarshaler   = reflect.TypeFor[VMMarshaler]()
 	typeVMUnmarshaler = reflect.TypeFor[VMUnmarshaler]()
 
-	// natives are the VM runtime types a Go value may hold directly. They
+	// runtimeTypes are VM types a Go value may hold directly. They
 	// bypass structural compilation and pass through as themselves.
-	natives = map[reflect.Type]types.Type{
+	runtimeTypes = map[reflect.Type]types.Type{
 		reflect.TypeFor[types.I32]():    types.TypeI32,
 		reflect.TypeFor[types.I64]():    types.TypeI64,
 		reflect.TypeFor[types.F32]():    types.TypeF32,
@@ -404,9 +404,9 @@ func (p *conversion) converting() bool {
 	return true
 }
 
-// native resolves a Go type that already holds a VM value.
+// runtime resolves a Go type that already holds a VM value.
 func (p *conversion) native() bool {
-	vm, ok := natives[p.typ]
+	vm, ok := runtimeTypes[p.typ]
 	if !ok {
 		if !p.typ.Implements(typeValue) {
 			return false

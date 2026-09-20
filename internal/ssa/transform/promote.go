@@ -35,7 +35,7 @@ import (
 // value that slot must be written back with. Naming the value in the state
 // is cheaper than leaving a store in front of every deoptimizing operation,
 // which would put one back in front of every guard, store, and call; it is
-// what internal/jit/arm64's commitCarried already does for a carried
+// what a native backend already does for a carried
 // register on the paths that hand control back.
 //
 // The entry block loads each promoted slot once, since that is what the

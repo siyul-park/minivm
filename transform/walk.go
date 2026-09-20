@@ -1,10 +1,9 @@
-package frontend
+package transform
 
 import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
@@ -15,28 +14,110 @@ import (
 // the facts it leaves behind, the build keeps the block it filled.
 type walk struct {
 	facts
-	b      *ssa.Builder
-	block  int
-	frames []frame
-	stack  []operand
-
-	// seen is what a recording observed about the instruction being
-	// translated: the container shape it ran against, the address the call it
-	// performed entered, and the value it produced. It stays zero for a plan
-	// built from bytecode alone, which resolves the same facts from constants
-	// and declared types instead.
-	seen jit.Step
+	b     *ssa.Builder
+	block int
+	fr    frame
+	stack []operand
 
 	ip    int
 	pre   []operand
 	state ssa.Value
 }
 
+// Guard identities the translation admits a heap cell through: one per
+// concrete array element kind, plus one for any struct. Bytecode emission
+// erases every guard it meets (see emit.go), so these exist only to tell two
+// guards over different containers apart from two guards over the same one
+// within the SSA a pass over one function sees; the concrete value carries no
+// meaning past that.
+const (
+	shapeArrayI1 uintptr = iota + 1
+	shapeArrayI8
+	shapeArrayI32
+	shapeArrayI64
+	shapeArrayF32
+	shapeArrayF64
+	shapeArrayRef
+	shapeStruct
+)
+
 // run fills the block with s and returns the terminator it ends on, carrying no
 // edges: which blocks those name is the caller's to resolve, because a span
 // knows its successors only as spans.
+func (w *walk) adopt() {
+	for i := range w.stack {
+		w.own(i)
+	}
+}
+
+func (w *walk) detach(from backing, offset int) {
+	for i := range w.stack {
+		if w.stack[i].backing == from && w.stack[i].offset == offset {
+			w.own(i)
+		}
+	}
+}
+
+func (w *walk) own(at int) {
+	o := &w.stack[at]
+	if o.kind != types.KindRef || o.backing == backingStack {
+		return
+	}
+	w.retain(o.value)
+	o.backing, o.offset = backingStack, 0
+	if at < len(w.pre) {
+		w.pre[at] = *o
+		w.state = ssa.NoValue
+	}
+}
+
+func (w *walk) retain(value ssa.Value) {
+	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
+}
+
+func (w *walk) release(o operand) {
+	if o.kind != types.KindRef || o.backing != backingStack {
+		return
+	}
+	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
+}
+
+func (w *walk) dup() bool {
+	if len(w.stack) == 0 {
+		return false
+	}
+	top := w.stack[len(w.stack)-1]
+	if top.kind == types.KindRef && top.backing == backingStack {
+		w.retain(top.value)
+	}
+	w.stack = append(w.stack, top)
+	return true
+}
+
+func (w *walk) begin(ip int) {
+	w.ip, w.state = ip, ssa.NoValue
+	w.pre = append(w.pre[:0], w.stack...)
+}
+
+func (w *walk) deopt() ssa.Value {
+	if w.state != ssa.NoValue {
+		return w.state
+	}
+	w.state = w.b.Value(ssa.TypeState)
+	w.b.Add(w.block, ssa.Operation{
+		Op:      ssa.OpState,
+		Frames:  []ssa.Frame{{Addr: w.fr.addr, IP: w.ip, Returns: w.fr.returns(), Stack: deoptOperands(w.pre)}},
+		Results: []ssa.Value{w.state},
+	})
+	return w.state
+}
+
+func (w *walk) push(value ssa.Value, out fact) {
+	w.stack = append(w.stack, operand{value: value, fact: out})
+}
+
 func (w *walk) run(s span) (ssa.Terminator, bool) {
-	code := w.frame().fn.Code
+	code := w.fr.fn.Code
 	for ip := s.start; ip < s.end; {
 		inst := instr.Instruction(code[ip:])
 		w.begin(ip)
@@ -61,15 +142,9 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 		case instr.RETURN_CALL:
 			return w.tail(ip)
 		case instr.YIELD, instr.RESUME:
-			// A suspension ends native execution at the opcode itself: the
+			// A suspension ends execution at the opcode itself: the
 			// interpreter performs the real suspend and resumes threaded, so
-			// the span carries no successor (see span.suspend). Only the frame
-			// that owns the coroutine suspends; an inlined frame reaching one
-			// is refused, because no journal deopt rebuilds a suspended
-			// callee.
-			if len(w.frames) > 1 {
-				return ssa.Terminator{}, false
-			}
+			// the span carries no successor (see span.suspend).
 			return w.suspend(ip), true
 		}
 		if !w.perform(inst) {
@@ -83,7 +158,7 @@ func (w *walk) run(s span) (ssa.Terminator, bool) {
 	if len(s.succs) > 0 {
 		return ssa.Terminator{Op: ssa.OpJump}, true
 	}
-	if w.frame().addr == 0 {
+	if w.fr.addr == 0 {
 		return w.complete(), true
 	}
 	return w.leave(), true
@@ -106,7 +181,7 @@ func (w *walk) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
 	for i := range w.stack {
 		owned, borrowed := false, false
 		for _, succ := range s.succs {
-			if states[succ][i].backing == jit.BackingStack {
+			if states[succ][i].backing == backingStack {
 				owned = true
 			} else {
 				borrowed = true
@@ -128,38 +203,6 @@ func (w *walk) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
 		edges[i] = ssa.Edge{Block: ids[succ], Args: args}
 	}
 	return edges, true
-}
-
-// join hands this block's operands to a successor whose parameters are already
-// fixed. A reference the successor holds owned is owned here first; one it
-// expects to borrow from storage this path owns cannot be handed over at all,
-// so the recording is left unplanned rather than retained on a path that never
-// releases it. Every other fact is a speculation the successor was laid out
-// against and reads its parameters through, so a path that does not carry it
-// cannot enter there either: unlike a fixpoint over a control-flow graph, a
-// recording is laid out once and has no join to widen at.
-func (w *walk) join(params []operand) ([]ssa.Value, bool) {
-	if len(params) != len(w.stack) {
-		return nil, false
-	}
-	args := make([]ssa.Value, len(w.stack))
-	for i := range w.stack {
-		want := params[i].fact
-		if want.kind == types.KindRef && want.backing == jit.BackingStack {
-			w.own(i)
-		}
-		got := w.stack[i].fact
-		if got.kind != types.KindRef {
-			// Only a reference derives a count from where it was loaded, so
-			// where a scalar came from is no reason to refuse the edge.
-			want.backing, want.offset = got.backing, got.offset
-		}
-		if changed, ok := want.merge(got); !ok || changed {
-			return nil, false
-		}
-		args[i] = w.stack[i].value
-	}
-	return args, true
 }
 
 // perform translates one instruction. The cases below are the opcodes whose
@@ -245,27 +288,27 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if len(w.stack) < 2 {
 			return false
 		}
-		shape, ok := w.elem(w.stack[len(w.stack)-2].fact)
+		kind, tok, ok := w.elem(w.stack[len(w.stack)-2].fact)
 		if !ok {
 			return false
 		}
 		if op == instr.ARRAY_GET {
-			w.guard(len(w.stack)-2, ssa.Shape{Itab: shape.Itab})
+			w.guard(len(w.stack)-2, ssa.Shape{Itab: tok})
 		}
-		return w.exec(op, 2, []fact{{kind: shape.Kind}})
+		return w.exec(op, 2, []fact{{kind: kind}})
 	case instr.ARRAY_SET:
 		// The element shape comes from the value's own kind rather than from
 		// the container, unlike ARRAY_GET: a write has no result to type, so
-		// what it needs from the guard is only that the container's runtime
-		// shape agrees with what the value being stored already is.
+		// what it needs from the guard is only that the container's shape
+		// agrees with what the value being stored already is.
 		if len(w.stack) < 3 {
 			return false
 		}
-		shape, ok := jit.ElemShapeByKind(w.stack[len(w.stack)-1].kind)
-		if !ok || (w.seen.Shape.Itab != 0 && w.seen.Shape.Itab != shape.Itab) {
+		tok, ok := elemToken(w.stack[len(w.stack)-1].kind)
+		if !ok {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Itab: shape.Itab})
+		w.guard(len(w.stack)-3, ssa.Shape{Itab: tok})
 		return w.exec(op, 3, nil)
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
@@ -281,15 +324,11 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		// Unlike STRUCT_GET, a write needs no field kind resolved ahead of
 		// time: the store's runtime kind check is against the value's own
 		// already-known SSA kind, so the guard only needs a struct shape to
-		// admit - the specific type, when one is known, narrows it further.
+		// admit.
 		if len(w.stack) < 3 {
 			return false
 		}
-		shape := ssa.Shape{Itab: jit.HeapStruct}
-		if w.seen.Shape.Itab != 0 {
-			shape = ssa.Shape{Itab: w.seen.Shape.Itab, Typ: w.seen.Shape.Typ, Host: w.seen.Shape.Field}
-		}
-		w.guard(len(w.stack)-3, shape)
+		w.guard(len(w.stack)-3, ssa.Shape{Itab: shapeStruct})
 		return w.exec(op, 3, nil)
 	case instr.REF_CAST:
 		// A successful cast validates the operand's declared type in place and
@@ -327,7 +366,7 @@ func (w *walk) perform(inst instr.Instruction) bool {
 		if !capture.refKnown || capture.ref <= 0 {
 			return false
 		}
-		target := w.objects.Function(capture.ref)
+		target := w.objects.function(capture.ref)
 		if target == nil {
 			return false
 		}
@@ -381,46 +420,55 @@ func (w *walk) perform(inst instr.Instruction) bool {
 	return w.exec(op, len(effect.Pop), results)
 }
 
-// elem resolves the element shape one array access is compiled against: the
-// container a recording observed, the cell the snapshot resolved for a known
-// container, or the operand's declared array type, which answers only in a
-// call-free function. All three are hints the shape guard verifies before any
+// elemToken resolves the guard identity one array element kind is stored
+// under.
+func elemToken(kind types.Kind) (uintptr, bool) {
+	switch kind {
+	case types.KindI1:
+		return shapeArrayI1, true
+	case types.KindI8:
+		return shapeArrayI8, true
+	case types.KindI32:
+		return shapeArrayI32, true
+	case types.KindI64:
+		return shapeArrayI64, true
+	case types.KindF32:
+		return shapeArrayF32, true
+	case types.KindF64:
+		return shapeArrayF64, true
+	case types.KindRef:
+		return shapeArrayRef, true
+	default:
+		return 0, false
+	}
+}
+
+// elem resolves the element kind and guard identity one array access is
+// compiled against: the operand's declared array type, which answers only in
+// a call-free function. It is a hint the shape guard verifies before any
 // access, so a slot declared as an array that currently holds null or a
 // differently shaped array deopts instead of being read.
-func (w *walk) elem(array fact) (jit.ElemShape, bool) {
-	if shape, ok := jit.ElemShapeByItab(w.seen.Shape.Itab); ok {
-		return shape, true
+func (w *walk) elem(array fact) (types.Kind, uintptr, bool) {
+	if !w.declared || array.atyp == nil || array.atyp.ElemKind == instr.KindAny {
+		return 0, 0, false
 	}
-	if array.refKnown && array.ref > 0 {
-		return jit.ElemShapeByItab(w.objects[array.ref].Array)
-	}
-	if w.declared && array.atyp != nil && array.atyp.ElemKind != instr.KindAny {
-		return jit.ElemShapeByKind(array.atyp.ElemKind)
-	}
-	return jit.ElemShape{}, false
+	tok, ok := elemToken(array.atyp.ElemKind)
+	return array.atyp.ElemKind, tok, ok
 }
 
 // field resolves a struct field's kind and the shape the access reading it is
-// admitted through: the field a recording observed, or the one a container
-// carrying a struct type answers for a known in-bounds constant index.
+// admitted through: the one a container carrying a struct type answers for a
+// known in-bounds constant index.
 func (w *walk) field(container, index fact) (types.Kind, ssa.Shape, bool) {
-	if w.seen.Shape.Itab != 0 {
-		kind := w.seen.Seen.Kind()
-		if _, ok := typ(kind); !ok {
-			return 0, ssa.Shape{}, false
-		}
-		return kind, ssa.Shape{Itab: w.seen.Shape.Itab, Typ: w.seen.Shape.Typ, Host: w.seen.Shape.Field}, true
-	}
 	record := w.record(container)
 	if record == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
-	return record.Fields[index.val].Kind, ssa.Shape{Itab: jit.HeapStruct, Typ: uintptr(unsafe.Pointer(record))}, true
+	return record.Fields[index.val].Kind, ssa.Shape{Itab: shapeStruct, Typ: uintptr(unsafe.Pointer(record))}, true
 }
 
 // record resolves the struct type a container carries: the one its declared
-// type or a ref.cast states, or the one the snapshot recorded for a constant
-// cell.
+// type or a ref.cast states, or the one a constant cell was resolved to carry.
 func (w *walk) record(container fact) *types.StructType {
 	if container.styp != nil {
 		return container.styp
@@ -433,45 +481,24 @@ func (w *walk) record(container fact) *types.StructType {
 
 // callee resolves the function a call enters and pins its operand to the
 // reference naming it, answering with the address that function is published
-// at. A constant operand already names one; a recorded operand is a runtime
-// value, so a guard admitting only the reference the recording observed is what
-// makes it a compile-time fact. Everything reading the operand after that -
-// this walk, and a lowering resolving the call's target - reads a value that
-// certainly holds that reference, which is the one question a static call and a
-// speculated one both answer through.
+// at. Everything reading the operand after that - this walk, and a lowering
+// resolving the call's target - reads a value that certainly holds that
+// reference.
 //
-// The reference is the whole answer, so a call whose operand names anything the
-// snapshot does not resolve to a function is left unplanned: a host function, a
-// coroutine, and a closure allocated at runtime all name no function here.
+// The reference is the whole answer, so a call whose operand names anything
+// this translation does not resolve to a function is left unplanned: a host
+// function, a coroutine, and a closure allocated at runtime all name no
+// function here.
 func (w *walk) callee(at int) (int, *types.Function) {
 	o := w.stack[at]
-	ref, observed := o.ref, false
-	if !o.refKnown {
-		if o.kind != types.KindRef || w.seen.Seen.Kind() != types.KindRef {
-			return 0, nil
-		}
-		ref, observed = w.seen.Seen.Ref(), true
-	}
-	if ref <= 0 {
+	if !o.refKnown || o.ref <= 0 {
 		return 0, nil
 	}
-	target := w.objects.Function(ref)
+	target := w.objects.function(o.ref)
 	if target == nil || target.Typ == nil {
 		return 0, nil
 	}
-	if observed {
-		want := w.b.Value(ssa.TypeRef)
-		w.b.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(ref), Results: []ssa.Value{want}})
-		value := w.b.Value(ssa.TypeRef)
-		w.b.Add(w.block, ssa.Operation{
-			Op:      ssa.OpGuardValue,
-			Args:    []ssa.Value{o.value, want},
-			State:   w.deopt(),
-			Results: []ssa.Value{value},
-		})
-		w.stack[at].value = value
-	}
-	return ref, target
+	return o.ref, target
 }
 
 // load pushes what a slot holds. A ref takes no retain and records the slot its
@@ -535,11 +562,10 @@ func (w *walk) store(space ssa.Space, index int) bool {
 }
 
 // addressed resolves the storage a slot opcode names and what is known about
-// the value in it. A local belongs to the innermost frame, so its deferred
-// reference count is named by the absolute slot an inlined frame's own local
-// sits at, which is what keeps two frames' local zero apart.
+// the value in it. A local's deferred reference count is named by its own
+// slot index.
 func (w *walk) addressed(space ssa.Space, index int) (ssa.Slot, fact, bool) {
-	fr := w.frame()
+	fr := w.fr
 	slot := ssa.Slot{Space: space, Index: index}
 	var out fact
 	switch space {
@@ -547,27 +573,26 @@ func (w *walk) addressed(space ssa.Space, index int) (ssa.Slot, fact, bool) {
 		if index >= len(fr.slots) {
 			return slot, out, false
 		}
-		slot.Base = fr.base
 		out = holds(fr.slots[index])
-		out.backing, out.offset = jit.BackingLocal, fr.base+index
+		out.backing, out.offset = backingLocal, index
 	case ssa.SpaceUpval:
 		if index >= len(fr.fn.Captures) {
 			return slot, out, false
 		}
 		out = holds(fr.fn.Captures[index])
-		out.backing, out.offset = jit.BackingUpval, index
+		out.backing, out.offset = backingUpval, index
 	default:
 		if index >= len(w.globals) {
 			return slot, out, false
 		}
-		out = fact{kind: w.globals[index], backing: jit.BackingGlobal, offset: index}
+		out = fact{kind: w.globals[index], backing: backingGlobal, offset: index}
 	}
 	return slot, out, true
 }
 
 // pool pushes a constant. A ref constant is an ownership-neutral marker whose
 // retain stays with the pool, and the reference it carries is what resolves the
-// container it accesses or the function it calls without a recorded trace.
+// container it accesses or the function it calls.
 func (w *walk) pool(index int) bool {
 	if index >= len(w.constants) {
 		return false
@@ -575,7 +600,7 @@ func (w *walk) pool(index int) bool {
 	boxed := w.constants[index]
 	out := fact{kind: boxed.Kind()}
 	if out.kind == types.KindRef {
-		out.backing = jit.BackingConst
+		out.backing = backingConst
 		out.ref, out.refKnown = boxed.Ref(), true
 	}
 	return w.constant(boxed, out)
@@ -636,7 +661,7 @@ func (w *walk) exec(op instr.Opcode, pops int, results []fact) bool {
 		out[i] = w.b.Value(t)
 	}
 
-	bridged := jit.Bridgeable(op)
+	bridged := bridgeable(op)
 	adopted := 0
 	switch {
 	case bridged || op.Writes(instr.Frame):
@@ -706,17 +731,11 @@ func (w *walk) leave() ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args}
 }
 
-// tail ends the function on a tail call, which retires this frame and enters
-// another one at the same stack floor. No operation of this IR states that and
-// no edge of this graph leads there - the frame the block was translated in is
-// gone, and the results the new activation hands back are its own - so native
-// execution ends here and the interpreter performs the call from the operand
-// stack the exit hands it.
-//
-// The callee is still resolved, though nothing lowers it: jit.StaticPlan
-// refuses a function holding a call whose target the snapshot does not name or
-// whose arguments are not on the stack, and this frontend plans no root that
-// plan does not.
+// tail ends the function on a tail call, which retires this frame. No
+// operation of this IR states that and no edge of this graph leads there - the
+// frame the block was translated in is gone, and the results the new
+// activation hands back are its own - so execution ends here and the
+// interpreter performs the call from the operand stack the exit hands it.
 func (w *walk) tail(ip int) (ssa.Terminator, bool) {
 	if len(w.stack) == 0 {
 		return ssa.Terminator{}, false
@@ -728,105 +747,19 @@ func (w *walk) tail(ip int) (ssa.Terminator, bool) {
 	return w.exit(ip), true
 }
 
-// enter inlines one call: the callee reference is consumed, the arguments
-// under it become the new frame's parameters, its remaining locals start
-// cleared, and the caller records where it resumes once the frame returns.
-//
-// Only a callee whose every slot is scalar inlines. A fresh frame sits over
-// whatever words the frame that last occupied that stack region left behind,
-// and a slot write is a release of what it replaces, so filling a reference
-// slot would drop a count this frame never took. Captures stay out for a
-// second reason: an inlined frame reaches its upvalues through the closure
-// reference it was called with, which a Slot cannot name.
-func (w *walk) enter(addr, resume int, target *types.Function) bool {
-	if target.Typ == nil || len(target.Captures) > 0 {
-		return false
-	}
-	slots := target.Declared()
-	params := len(target.Typ.Params)
-	if len(w.stack) < params+1 {
-		return false
-	}
-	for _, kind := range types.Kinds(slots) {
-		switch kind {
-		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
-		default:
-			return false
-		}
-	}
-
-	w.release(w.stack[len(w.stack)-1])
-	w.stack = w.stack[:len(w.stack)-1]
-	caller := w.frame()
-	caller.ip = resume
-	base := caller.base + len(caller.slots) + (len(w.stack) - caller.origin) - params
-	// The arguments move into the new frame before it becomes the innermost
-	// one, so a deopt among them still resumes at the call in the caller, with
-	// the operands the call started with.
-	for i := params - 1; i >= 0; i-- {
-		w.b.Add(w.block, ssa.Operation{
-			Op:    ssa.OpStore,
-			Slot:  ssa.Slot{Space: ssa.SpaceLocal, Base: base, Index: i},
-			Args:  []ssa.Value{w.stack[len(w.stack)-1].value},
-			State: w.deopt(),
-		})
-		w.stack = w.stack[:len(w.stack)-1]
-	}
-	for i := params; i < len(slots); i++ {
-		kind := slots[i].Kind()
-		zero := w.b.Value(ssa.TypeOf(kind))
-		w.b.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: types.Zero(kind), Results: []ssa.Value{zero}})
-		w.b.Add(w.block, ssa.Operation{
-			Op:    ssa.OpStore,
-			Slot:  ssa.Slot{Space: ssa.SpaceLocal, Base: base, Index: i},
-			Args:  []ssa.Value{zero},
-			State: w.deopt(),
-		})
-	}
-	after := -1
-	w.frames = append(w.frames, frame{
-		fn: target, addr: addr, slots: slots,
-		base: base, origin: len(w.stack), after: &after,
-	})
-	return true
-}
-
-// stitch closes an inlined frame: its results move onto the caller's operand
-// stack, owned first because the caller adopts what it is handed, and every
-// operand the retiring frame leaves under them is released. The frame holds no
-// reference slot to release with it, which is what enter admits.
-func (w *walk) stitch() bool {
-	fr := w.frame()
-	n := fr.returns()
-	if len(w.stack)-fr.origin < n {
-		return false
-	}
-	for i := len(w.stack) - n; i < len(w.stack); i++ {
-		w.own(i)
-	}
-	results := append([]operand(nil), w.stack[len(w.stack)-n:]...)
-	for _, o := range w.stack[fr.origin : len(w.stack)-n] {
-		w.release(o)
-	}
-	w.stack = append(w.stack[:fr.origin], results...)
-	w.frames = w.frames[:len(w.frames)-1]
-	return true
-}
-
-// exit abandons native execution, resuming the interpreter at ip in the
-// innermost frame. The interpreter adopts the operand stack it is handed, so
-// every reference still borrowed from storage is owned first.
+// exit abandons execution, resuming the interpreter at ip. The interpreter
+// adopts the operand stack it is handed, so every reference still borrowed
+// from storage is owned first.
 func (w *walk) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
 	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
 }
 
-// suspend ends native execution on a suspension point, resuming the
-// interpreter at the opcode's own IP in the frame that owns the coroutine.
-// Like exit it hands the interpreter an adopted operand stack; unlike exit the
-// threaded continuation runs past the opcode, so the span after it is planned
-// for facts but never emitted (see span.suspend).
+// suspend ends execution on a suspension point, resuming the interpreter at
+// the opcode's own IP. Like exit it hands the interpreter an adopted operand
+// stack; unlike exit the threaded continuation runs past the opcode, so the
+// span after it is planned for facts but never emitted (see span.suspend).
 func (w *walk) suspend(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
@@ -852,135 +785,7 @@ func (w *walk) guard(at int, shape ssa.Shape) {
 	w.stack[at].value = value
 }
 
-// adopt owns every live reference before control leaves native code with the
-// operand stack flushed: the interpreter and a callee both adopt what they find
-// there, and would otherwise release a reference this frame never retained.
-func (w *walk) adopt() {
-	for i := range w.stack {
-		w.own(i)
-	}
-}
-
-// detach owns every operand still borrowed from the slot about to be
-// overwritten. A borrowed operand left alone would keep pointing at a slot whose
-// content no longer matches what it observed.
-func (w *walk) detach(from jit.Backing, offset int) {
-	for i := range w.stack {
-		if w.stack[i].backing == from && w.stack[i].offset == offset {
-			w.own(i)
-		}
-	}
-}
-
-// own takes the retain that moves a borrowed reference's ownership onto the
-// operand stack. What is known about the value survives: only where its count
-// lives has changed. The retain lands on the snapshot a deopt from this
-// instruction resumes with as well, because that is the same stack entry and
-// the count the interpreter will release when it adopts it: every own runs
-// before its instruction pops or pushes, so at names one entry in both.
-//
-// A state already materialized stays as it was and stops being this
-// instruction's: it was emitted before the retain and resumes into a stack that
-// did not hold it yet, which is exactly what its cold path retains. Everything
-// after the retain resumes into a stack that does, so the next deopt
-// materializes that one.
-func (w *walk) own(at int) {
-	o := &w.stack[at]
-	if o.kind != types.KindRef || o.backing == jit.BackingStack {
-		return
-	}
-	w.retain(o.value)
-	o.backing, o.offset = jit.BackingStack, 0
-	if at < len(w.pre) {
-		w.pre[at] = *o
-		w.state = ssa.NoValue
-	}
-}
-
-// retain adds the reference count a new owner holds.
-func (w *walk) retain(value ssa.Value) {
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
-}
-
-// release drops the count an operand owned, and does nothing for one that
-// borrowed it from storage still holding its own.
-func (w *walk) release(o operand) {
-	if o.kind != types.KindRef || o.backing != jit.BackingStack {
-		return
-	}
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
-}
-
-// dup pushes a second copy of the top operand: an owned one takes a retain of
-// its own, because two stack copies release twice, while a still-borrowed one
-// shares the same deferred count without taking one. LOCAL_TEE and GLOBAL_TEE
-// reuse this to produce the operand that survives their store (see perform):
-// own and detach then give it its own count exactly as they would a second
-// DUP'd copy, so the store never has to reason about a surviving value itself.
-func (w *walk) dup() bool {
-	if len(w.stack) == 0 {
-		return false
-	}
-	top := w.stack[len(w.stack)-1]
-	if top.kind == types.KindRef && top.backing == jit.BackingStack {
-		w.retain(top.value)
-	}
-	w.stack = append(w.stack, top)
-	return true
-}
-
-// begin starts one instruction, recording the operands a deopt from it resumes
-// with. They are the operands before it ran, because that is where the
-// interpreter picks the opcode up, and each keeps the ownership it holds when
-// the state materializes (see own).
-func (w *walk) begin(ip int) {
-	w.ip, w.state = ip, ssa.NoValue
-	w.pre = append(w.pre[:0], w.stack...)
-}
-
-// deopt materializes the interpreter state the current instruction resumes
-// into. One instruction needs at most one for as long as the operands it
-// resumes with hold still, so a guard and the access it admits share it unless
-// a retain between them changed what the stack owns (see own).
-func (w *walk) deopt() ssa.Value {
-	if w.state != ssa.NoValue {
-		return w.state
-	}
-	frames := make([]ssa.Frame, len(w.frames))
-	for i, fr := range w.frames {
-		stack := w.pre[fr.origin:]
-		ip := fr.ip
-		if i+1 < len(w.frames) {
-			stack = w.pre[fr.origin:w.frames[i+1].origin]
-		} else {
-			ip = w.ip
-		}
-		frames[i] = ssa.Frame{Addr: fr.addr, Base: fr.base, IP: ip, Returns: fr.returns(), Stack: operands(stack)}
-	}
-	w.state = w.b.Value(ssa.TypeState)
-	w.b.Add(w.block, ssa.Operation{Op: ssa.OpState, Frames: frames, Results: []ssa.Value{w.state}})
-	return w.state
-}
-
-// push adds one operand.
-func (w *walk) push(value ssa.Value, out fact) {
-	w.stack = append(w.stack, operand{value: value, fact: out})
-}
-
-// frame is the activation being translated, the innermost one.
-func (w *walk) frame() *frame {
-	return &w.frames[len(w.frames)-1]
-}
-
-// returns is how many results the innermost frame hands back.
+// returns is how many results the function this walk translates hands back.
 func (w *walk) returns() int {
-	return w.frame().returns()
-}
-
-// returns is how many results the function this frame runs hands back.
-func (fr frame) returns() int {
-	if fr.fn.Typ == nil {
-		return 0
-	}
-	return len(fr.fn.Typ.Returns)
+	return w.fr.returns()
 }

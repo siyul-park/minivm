@@ -3,6 +3,8 @@ package prof
 import (
 	"slices"
 	"strconv"
+
+	"github.com/siyul-park/minivm/instr"
 )
 
 // Collector records execution samples and named metrics.
@@ -11,7 +13,6 @@ type Collector struct {
 	funcs   []samples
 	ops     [256]uint64
 	metrics []Metric
-	jit     jitMetrics
 }
 
 type samples struct {
@@ -75,7 +76,6 @@ func (c *Collector) Metrics() []Metric {
 		metric.Labels = append([]Label(nil), metric.Labels...)
 		out = append(out, metric)
 	}
-	out = c.jit.appendMetrics(out)
 	return out
 }
 
@@ -162,7 +162,6 @@ func (c *Collector) merge(o *Collector) {
 	for _, m := range o.metrics {
 		c.AddMetric(m.Name, m.Value, m.Labels...)
 	}
-	c.jit.merge(&o.jit)
 }
 
 // grow ensures index fn and index ip within c.funcs[fn].ips are addressable,
@@ -199,5 +198,11 @@ func (c *Collector) reset() {
 	clear(c.ops[:])
 	clear(c.metrics)
 	c.metrics = c.metrics[:0]
-	c.jit.reset()
+}
+
+func opcodeLabel(code byte) string {
+	if typ := instr.TypeOf(instr.Opcode(code)); typ.Mnemonic != "" {
+		return typ.Mnemonic
+	}
+	return "0x" + strconv.FormatInt(int64(code), 16)
 }
