@@ -37,7 +37,7 @@ var (
 
 	FP = X29
 	LR = X30
-	// Ctx holds the *asm.Context for as long as native code runs. The
+	// Ctx holds the *asm.State for as long as native code runs. The
 	// trampoline in internal/asm hands it over in this register and reads
 	// it back here on every exit, so native code never writes it.
 	Ctx = X26

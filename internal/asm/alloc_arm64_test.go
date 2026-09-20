@@ -10,7 +10,7 @@ import (
 
 func TestAssembler_Build_arm64(t *testing.T) {
 	t.Run("runs a value spilled across an exit", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		a := asm.New(arm64.New())
 		a.Emit(
@@ -19,10 +19,12 @@ func TestAssembler_Build_arm64(t *testing.T) {
 			slots(arm64.OpSUBI),
 			arm64.MOVI(vint(0), 42),
 		)
-		a.Emit(exit(1, asm.TrapBridge)...)
+		a.Emit(exit()...)
 		a.Emit(
-			arm64.ADDI(vint(1), vint(0), 1),
-			arm64.STR(vint(1), arm64.Ctx, reg(0)),
+			arm64.ADDI(arm64.X0, vint(0), 1),
+		)
+		a.Emit(exit()...)
+		a.Emit(
 			slots(arm64.OpADDI),
 			arm64.LDR(arm64.LR, arm64.SP, 8),
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
@@ -36,8 +38,9 @@ func TestAssembler_Build_arm64(t *testing.T) {
 		addr, err := asm.Link(buffer, code)
 		require.NoError(t, err)
 
-		require.Equal(t, asm.TrapBridge, asm.Enter(addr, ctx))
-		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(43), ctx.Reg(arm64.X0))
+		require.True(t, asm.Enter(addr, &s))
+		require.True(t, asm.Resume(&s))
+		require.Equal(t, uint64(43), s.Reg(arm64.X0))
+		require.False(t, asm.Resume(&s))
 	})
 }

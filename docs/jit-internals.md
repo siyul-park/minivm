@@ -15,25 +15,26 @@ The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimiz
 | Threaded execution | `interp/` |
 | SSA IR | `internal/ssa/` |
 | Bytecode to SSA and SSA passes | `transform/` |
-| Machine encoding, executable memory, runtime contract | `internal/asm/` |
+| Machine encoding, executable memory, native execution | `internal/asm/` |
 | ARM64 encoding | `internal/asm/arm64/` |
+| Native runtime contract | `internal/jit/` |
 | Profiling | `prof/` |
 
 ## Runtime contract
 
-`internal/asm` owns how native code is entered and how it reports back. Native code runs on a Go-allocated native stack owned by an `asm.Context`, never on the goroutine stack, so a native activation can be suspended, worked on from Go, and resumed.
+`internal/asm` owns the machine: how native code is entered, suspended, and resumed. `internal/jit` owns the policy: why native code left and what the interpreter does about it. Native code runs on a Go-allocated native stack owned by an `asm.State`, never on the goroutine stack, so a native activation can be suspended, worked on from Go, and resumed.
 
 | Symbol | Contract |
 |---|---|
-| `Context` | Owns the native stack and activation state: native SP, PC, trap, exit identifier, and saved registers. Go accesses saved registers through `Reg`/`SetReg`; mutable state stays behind the owner. Native code writes only scalar state; no Go pointer is stored on the native stack. |
-| `Enter(code, ctx)` | Switches to the context-owned native stack and calls `code`. Returns `TrapReturn` when the activation returns; any other trap leaves it suspended. |
-| `Resume(ctx)` | Continues the suspended activation: restores the saved register file, `SP = NSP`, `LR = PC`, and returns into it. |
-| `Context.Reg` / `SetReg` | Read or replace one saved register value from the Go side. These are the public ownership boundary for the register file. |
-| `Context.Exit` | Returns the last native exit identifier. |
-| exit | Native code writes `Exit` and `Trap`, then `BLR`s the stub at `OffsetStub`. **An exit is a call**: the stub saves the register file, `LR → PC`, `SP → NSP`, and returns to Go; `Resume` is that call returning, so code that exits keeps its own LR in a frame like around any call. |
-| `arm64.Ctx` (X26) | Holds the `*Context` while native code runs; pinned, never written by native code. X16/X17 are scratch for the exit protocol; X18/X28 are never touched. |
+| `asm.State` | The machine state: the native stack, the Go registers saved while native code runs, and the native SP, PC, and register file at the last exit. Go reads and replaces saved registers through `Reg`/`SetReg`. Native code writes only scalar state; no Go pointer is stored on the native stack. |
+| `asm.Enter(code, s)` / `asm.Resume(s)` | Switch to the native stack and call `code`, or continue the suspended activation (restore the register file, `SP = NSP`, `LR = PC`). Both report whether the activation is suspended at an exit rather than returned. |
+| exit | Native code `BLR`s the stub at `asm.OffsetStub`. **An exit is a call**: the stub saves the register file, `LR → PC`, `SP → NSP`, and returns to Go; `Resume` is that call returning, so code that exits keeps its own LR in a frame like around any call. |
+| `arm64.Ctx` (X26) | Holds the `*asm.State` while native code runs; pinned, never written by native code. X16/X17 are scratch for the exit protocol; X18/X28 are never touched. |
+| `jit.Context` | Embeds `asm.State` as its first field — the pinned register names both — and adds what native code writes before an exit: the `Trap` and the exit identifier, at `jit.OffsetTrap`/`jit.OffsetExit`. `Exit()` reads the identifier; what it names is the code publisher's to say. |
+| `jit.Trap` | `TrapReturn` (the activation returned; nothing to resume), `TrapDeopt` (abandon; the interpreter rebuilds state), `TrapBridge` (suspend; the interpreter acts, then resumes). |
+| `jit.Enter(code, ctx)` / `jit.Resume(ctx)` | `asm.Enter`/`asm.Resume` on the context's state, reporting the `Trap`: `TrapReturn` when the activation returned, else what native code wrote. |
 
-Nesting: while a context is suspended, `Enter` starts below the suspended frames (`NSP` is the exit SP) and the inner return restores `NSP`. Async preemption cannot land in native code, so native loops MUST reach a Go safepoint through a bridge within bounded time (a back-edge budget, added with the lowering).
+Nesting: while a state is suspended, `Enter` starts below the suspended frames (`NSP` is the exit SP) and the inner return restores `NSP`. Async preemption cannot land in native code, so native loops MUST reach a Go safepoint through a bridge within bounded time (a back-edge budget, added with the lowering).
 
 ### Register allocation
 

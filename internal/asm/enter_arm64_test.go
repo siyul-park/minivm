@@ -2,6 +2,7 @@ package asm_test
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/siyul-park/minivm/internal/asm"
@@ -24,21 +25,14 @@ func frame(body ...asm.Instruction) []asm.Instruction {
 	)
 }
 
-// exit is the native side of the exit protocol: write the exit id and the
-// trap, then call the stub the context names.
-func exit(id int64, trap asm.Trap) []asm.Instruction {
+// exit is the native side of the exit protocol: call the stub the state
+// names.
+func exit() []asm.Instruction {
 	return []asm.Instruction{
-		arm64.MOVI(arm64.X16, id),
-		arm64.STR(arm64.X16, arm64.Ctx, int16(asm.OffsetExit)),
-		arm64.MOVI(arm64.X16, int64(trap)),
-		arm64.STR(arm64.X16, arm64.Ctx, int16(asm.OffsetTrap)),
 		arm64.LDR(arm64.X16, arm64.Ctx, int16(asm.OffsetStub)),
 		arm64.BLR(arm64.X16),
 	}
 }
-
-// reg is the offset of Xi's slot in Context.regs.
-func reg(i int) int16 { return int16(asm.OffsetRegs) + int16(i)*8 }
 
 func link(t *testing.T, insts ...asm.Instruction) uintptr {
 	t.Helper()
@@ -56,54 +50,49 @@ func link(t *testing.T, insts ...asm.Instruction) uintptr {
 
 func TestEnter(t *testing.T) {
 	t.Run("returns when the code returns", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		code := link(t, arm64.RET())
 
-		require.Equal(t, asm.TrapReturn, asm.Enter(code, ctx))
+		require.False(t, asm.Enter(code, &s))
 	})
 
 	t.Run("keeps the native stack pointer aligned", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
-		code := link(t,
-			arm64.ADDI(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, reg(0)),
-			arm64.RET(),
-		)
+		code := link(t, frame(slices.Concat([]asm.Instruction{arm64.ADDI(arm64.X0, arm64.SP, 16)}, exit())...)...)
 
-		require.Equal(t, asm.TrapReturn, asm.Enter(code, ctx))
-		stack := ctx.Reg(arm64.X0)
+		require.True(t, asm.Enter(code, &s))
+		require.False(t, asm.Resume(&s))
+		stack := s.Reg(arm64.X0)
 		require.NotZero(t, stack)
 		require.Zero(t, stack%16)
 	})
 
 	t.Run("handles a small stack allocation", func(t *testing.T) {
-		ctx, err := asm.NewContext(8)
+		s, err := asm.NewState(8)
 		require.NoError(t, err)
 
-		require.Equal(t, asm.TrapReturn, asm.Enter(link(t, frame()...), ctx))
+		require.False(t, asm.Enter(link(t, frame()...), &s))
 	})
 
 	t.Run("suspends at an exit", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
-		code := link(t, frame(append([]asm.Instruction{arm64.MOVI(arm64.X0, 42)}, exit(7, asm.TrapBridge)...)...)...)
+		code := link(t, frame(slices.Concat([]asm.Instruction{arm64.MOVI(arm64.X0, 42)}, exit())...)...)
 
-		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
-		require.Equal(t, uint64(7), ctx.Exit())
-		require.Equal(t, uint64(42), ctx.Reg(arm64.X0))
+		require.True(t, asm.Enter(code, &s))
+		require.Equal(t, uint64(42), s.Reg(arm64.X0))
 	})
 
 	t.Run("nests below a suspended activation", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
-		outer := link(t, frame(append(append([]asm.Instruction{
-			arm64.MOVI(arm64.X0, 1),
-			arm64.STR(arm64.X0, arm64.SP, 0),
-		}, exit(1, asm.TrapBridge)...),
-			arm64.LDR(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, reg(0)),
+		outer := link(t, frame(slices.Concat(
+			[]asm.Instruction{arm64.MOVI(arm64.X0, 1), arm64.STR(arm64.X0, arm64.SP, 0)},
+			exit(),
+			[]asm.Instruction{arm64.LDR(arm64.X0, arm64.SP, 0)},
+			exit(),
 		)...)...)
 		inner := link(t,
 			arm64.MOVI(arm64.X1, 2),
@@ -113,30 +102,34 @@ func TestEnter(t *testing.T) {
 			arm64.RET(),
 		)
 
-		require.Equal(t, asm.TrapBridge, asm.Enter(outer, ctx))
-		require.Equal(t, asm.TrapReturn, asm.Enter(inner, ctx))
-		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(1), ctx.Reg(arm64.X0))
+		require.True(t, asm.Enter(outer, &s))
+		require.False(t, asm.Enter(inner, &s))
+		require.True(t, asm.Resume(&s))
+		require.Equal(t, uint64(1), s.Reg(arm64.X0))
+		require.False(t, asm.Resume(&s))
 	})
 }
 
 func TestResume(t *testing.T) {
 	t.Run("continues with the registers Go set", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
-		code := link(t, frame(append(append([]asm.Instruction{arm64.MOVI(arm64.X0, 42)}, exit(1, asm.TrapBridge)...),
-			arm64.ADDI(arm64.X0, arm64.X0, 1),
-			arm64.STR(arm64.X0, arm64.Ctx, reg(0)),
+		code := link(t, frame(slices.Concat(
+			[]asm.Instruction{arm64.MOVI(arm64.X0, 42)},
+			exit(),
+			[]asm.Instruction{arm64.ADDI(arm64.X0, arm64.X0, 1)},
+			exit(),
 		)...)...)
 
-		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
-		ctx.SetReg(arm64.X0, 100)
-		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(101), ctx.Reg(arm64.X0))
+		require.True(t, asm.Enter(code, &s))
+		s.SetReg(arm64.X0, 100)
+		require.True(t, asm.Resume(&s))
+		require.Equal(t, uint64(101), s.Reg(arm64.X0))
+		require.False(t, asm.Resume(&s))
 	})
 
 	t.Run("restores every saved register", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		fregs := arm64.New().Registers(asm.RegTypeFloat)
 		require.Len(t, fregs, 32)
@@ -152,57 +145,46 @@ func TestResume(t *testing.T) {
 		for i := range 32 {
 			insts = append(insts, arm64.MOVI(arm64.X16, int64(i)+100), arm64.FMOV(fregs[i], arm64.X16))
 		}
-		insts = append(insts, exit(1, asm.TrapBridge)...)
-		insts = append(insts, exit(2, asm.TrapBridge)...)
+		insts = append(insts, exit()...)
+		insts = append(insts, exit()...)
 		code := link(t, frame(insts...)...)
 
-		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
+		require.True(t, asm.Enter(code, &s))
 		for _, r := range saved {
-			require.Equal(t, uint64(r.ID())+1, ctx.Reg(r), r.String())
-			ctx.SetReg(r, uint64(r.ID())+1000)
+			require.Equal(t, uint64(r.ID())+1, s.Reg(r), r.String())
+			s.SetReg(r, uint64(r.ID())+1000)
 		}
 		for i := range 32 {
-			require.Equal(t, uint64(i)+100, ctx.Reg(fregs[i]), fregs[i].String())
-			ctx.SetReg(fregs[i], uint64(i)+2000)
+			require.Equal(t, uint64(i)+100, s.Reg(fregs[i]), fregs[i].String())
+			s.SetReg(fregs[i], uint64(i)+2000)
 		}
-		require.Equal(t, asm.TrapBridge, asm.Resume(ctx))
-		require.Equal(t, uint64(2), ctx.Exit())
+		require.True(t, asm.Resume(&s))
 		for _, r := range saved {
-			require.Equal(t, uint64(r.ID())+1000, ctx.Reg(r), r.String())
+			require.Equal(t, uint64(r.ID())+1000, s.Reg(r), r.String())
 		}
 		for i := range 32 {
-			require.Equal(t, uint64(i)+2000, ctx.Reg(fregs[i]), fregs[i].String())
+			require.Equal(t, uint64(i)+2000, s.Reg(fregs[i]), fregs[i].String())
 		}
-		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
+		require.False(t, asm.Resume(&s))
 	})
 
 	t.Run("survives Go stack growth and collection while suspended", func(t *testing.T) {
-		ctx, err := asm.NewContext(4096)
+		s, err := asm.NewState(4096)
 		require.NoError(t, err)
-		code := link(t, frame(append(append([]asm.Instruction{
-			arm64.MOVI(arm64.X0, 3),
-			arm64.STR(arm64.X0, arm64.SP, 0),
-		}, exit(1, asm.TrapBridge)...),
-			arm64.LDR(arm64.X1, arm64.SP, 0),
-			arm64.ADD(arm64.X0, arm64.X0, arm64.X1),
-			arm64.STR(arm64.X0, arm64.Ctx, reg(0)),
+		code := link(t, frame(slices.Concat(
+			[]asm.Instruction{arm64.MOVI(arm64.X0, 3), arm64.STR(arm64.X0, arm64.SP, 0)},
+			exit(),
+			[]asm.Instruction{arm64.LDR(arm64.X1, arm64.SP, 0), arm64.ADD(arm64.X0, arm64.X0, arm64.X1)},
+			exit(),
 		)...)...)
 
-		require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
+		require.True(t, asm.Enter(code, &s))
 		require.Equal(t, 1<<16, grow(1<<16))
 		runtime.GC()
-		require.Equal(t, asm.TrapReturn, asm.Resume(ctx))
-		require.Equal(t, uint64(6), ctx.Reg(arm64.X0))
+		require.True(t, asm.Resume(&s))
+		require.Equal(t, uint64(6), s.Reg(arm64.X0))
+		require.False(t, asm.Resume(&s))
 	})
-}
-
-func TestContext_Exit(t *testing.T) {
-	ctx, err := asm.NewContext(4096)
-	require.NoError(t, err)
-	code := link(t, frame(exit(7, asm.TrapBridge)...)...)
-
-	require.Equal(t, asm.TrapBridge, asm.Enter(code, ctx))
-	require.Equal(t, uint64(7), ctx.Exit())
 }
 
 func grow(n int) int {
