@@ -513,10 +513,16 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// -----------------------------------------------------------------------
 
 	case OpLDR, OpLDRB, OpLDRSB, OpLDRH, OpLDRSH, OpLDRSW:
+		if op == OpLDR && isFloat(inst.Dst) {
+			return e.encodeLoad(0xBD400000, 0xFD400000, 4, 8, inst)
+		}
 		ld := loadOpcodes[op]
 		return e.encodeLoad(ld.op32, ld.op64, ld.scale32, ld.scale64, inst)
 
 	case OpSTR, OpSTRB, OpSTRH, OpSTRW:
+		if op == OpSTR && isFloat(inst.Src1) {
+			return e.encodeStore(0xFD000000, 8, inst)
+		}
 		st := storeOpcodes[op]
 		return e.encodeStore(st.base, st.scale, inst)
 
@@ -1033,14 +1039,24 @@ func (e *Encoder) encodeLoad(op32, op64 uint32, scale32, scale64 int64, inst asm
 }
 
 // encodeStore emits an unsigned-offset store, scaling the byte offset by the
-// access size.
+// access size. A Width32 float source stores a single word: STR St is STR Dt
+// with size 10 instead of 11, and the offset scales by 4.
 func (e *Encoder) encodeStore(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
 	src, base, offset, err := e.decodeStrOp(inst)
 	if err != nil {
 		return nil, err
 	}
+	if src.Type() == asm.RegTypeFloat && src.Width() == asm.Width32 {
+		op, scale = op&^(1<<30), 4
+	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(src)), nil
+}
+
+// isFloat reports whether op names a float register.
+func isFloat(op asm.Operand) bool {
+	r, ok := op.(asm.PRegOperand)
+	return ok && r.Reg.Type() == asm.RegTypeFloat
 }
 
 // encodeFloatBinary emits a 3-register scalar float op (FADD/FSUB/FMUL/FDIV),

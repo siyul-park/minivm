@@ -3,6 +3,8 @@ package asm
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // Label identifies a position in the emitted instruction stream. Labels are
@@ -22,11 +24,13 @@ type Assembler struct {
 	insts   []Instruction
 	labels  map[Label]int
 	nextLbl Label
+	locs    map[VReg]Loc
 }
 
 var (
-	ErrUnallocated     = errors.New("unallocated register")
-	ErrUnresolvedLabel = errors.New("unresolved label")
+	ErrUnallocated          = errors.New("unallocated register")
+	ErrUnresolvedLabel      = errors.New("unresolved label")
+	ErrNoRegistersAvailable = errors.New("no registers available")
 )
 
 // New constructs an Assembler targeting the given architecture.
@@ -54,21 +58,55 @@ func (a *Assembler) Emit(insts ...Instruction) {
 	a.insts = append(a.insts, insts...)
 }
 
-// Build finalizes the instruction list into machine code. Every operand
-// must already be a physical register, label, immediate, or memory operand
-// rooted at one; virtual registers are not allocated.
+// Build finalizes the instruction list into machine code. When the
+// architecture is a Frame, every virtual register is allocated first and
+// every Slots operand becomes the spill area's size; otherwise a virtual
+// register is ErrUnallocated.
 func (a *Assembler) Build() ([]byte, error) {
 	if a.arch == nil {
 		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
 	}
-	for _, inst := range a.insts {
-		for _, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
-			if err := validate(op); err != nil {
+	insts, labels, slots := slices.Clone(a.insts), maps.Clone(a.labels), 0
+	if frame, ok := a.arch.(Frame); ok && virtual(insts) {
+		alloc := newAllocator(frame, insts, labels)
+		var err error
+		if insts, labels, err = alloc.allocate(); err != nil {
+			return nil, err
+		}
+		a.locs, slots = alloc.locs, alloc.slots
+	}
+	size := int64((slots*8 + 15) &^ 15)
+	for i, inst := range insts {
+		ops := [4]*Operand{&inst.Dst, &inst.Src1, &inst.Src2, &inst.Src3}
+		for _, op := range ops {
+			if _, ok := (*op).(SlotsOperand); ok {
+				*op = Imm(size)
+			}
+			if err := validate(*op); err != nil {
 				return nil, err
 			}
 		}
+		insts[i] = inst
 	}
-	return a.encode(a.insts, a.labels)
+	return a.encode(insts, labels)
+}
+
+// Loc reports where a virtual register of the rows Build allocated lives.
+func (a *Assembler) Loc(v VReg) (Loc, bool) {
+	loc, ok := a.locs[v]
+	return loc, ok
+}
+
+// virtual reports whether any row names a virtual register.
+func virtual(insts []Instruction) bool {
+	for _, inst := range insts {
+		for _, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
+			if _, ok := register(op).(VReg); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func validate(op Operand) error {
