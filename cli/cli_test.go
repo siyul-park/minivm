@@ -27,8 +27,7 @@ func TestWithFS(t *testing.T) {
 	// overrides Root's filesystem does `run` succeed here.
 	const path = "virtual/main.vm"
 	fsys := mapWriteFS{MapFS: fstest.MapFS{
-		path: &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000007\n")},
-	}}
+		path: &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000007\n")}}}
 
 	out := bytes.NewBuffer(nil)
 	root := cli.Root(cli.WithFS(fsys))

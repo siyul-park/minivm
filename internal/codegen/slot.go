@@ -3,7 +3,6 @@ package codegen
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/dave/jennifer/jen"
 	"github.com/siyul-park/minivm/instr"
@@ -32,7 +31,7 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 		slot:  slot,
 		width: width(op),
 		raw:   name,
-		boxed: boxedTemp(name),
+		boxed: fmt.Sprintf("r%d", slot),
 		index: fmt.Sprintf("i%d", slot),
 		// addr names a runtime local-slot address temp declared inside the
 		// closure body (LOCAL_GET only; see (loader).read). It uses a
@@ -277,13 +276,13 @@ func (l loader) literal(result *value, current step) error {
 	return nil
 }
 
-func (l loader) finish(result value, current step, indexed bool) (value, error) {
+func (l loader) finish(result value, current step, ok bool) (value, error) {
 	if current.kind != instr.KindAny && !current.boxed && !current.commit && result.raw == nil {
 		result.raw = jen.Id(l.raw)
 		result.body = append(result.body, jen.Id(l.raw).Op(":=").Add(borrow(current.kind, result.boxed)))
 	}
 
-	if indexed {
+	if ok {
 		retain := current.kind == instr.KindAny || current.kind.Repr() == instr.KindI64 || current.kind.Repr() == instr.KindRef
 		result.push = materialize(result, retain, l.width)
 		return result, nil
@@ -314,34 +313,34 @@ func (l loader) finish(result value, current step, indexed bool) (value, error) 
 }
 
 func load(current step, slot, offset int, label string, standalone bool) (value, error) {
-	loader := newLoader(current.op, slot, offset, label, standalone)
-	result := value{op: current.op, head: current.op, boxed: jen.Id(loader.boxed)}
+	l := newLoader(current.op, slot, offset, label, standalone)
+	result := value{op: current.op, head: current.op, boxed: jen.Id(l.boxed)}
 	// A source only needs stack room when it pushes on its own. Fused into a
 	// consumer it stays in a temporary, and the consumer checks the room its
 	// own net push needs.
 	result.room = true
 
-	_, _, indexed := slotInfo(current.op)
-	loader.decode(&result, current.op)
-	if standalone && (indexed || current.op == instr.CONST_GET) {
-		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(loader.width))
+	_, _, ok := slotInfo(current.op)
+	l.decode(&result, current.op)
+	if standalone && (ok || current.op == instr.CONST_GET) {
+		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(l.width))
 	}
 
 	var err error
 	switch current.op {
 	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
-		err = loader.read(&result, current)
+		err = l.read(&result, current)
 	case instr.CONST_GET:
-		err = loader.constant(&result, current)
+		err = l.constant(&result, current)
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
-		err = loader.literal(&result, current)
+		err = l.literal(&result, current)
 	default:
 		err = fmt.Errorf("unsupported source opcode %s", instr.TypeOf(current.op).Mnemonic)
 	}
 	if err != nil {
 		return value{}, err
 	}
-	return loader.finish(result, current, indexed)
+	return l.finish(result, current, ok)
 }
 
 func slotInfo(op instr.Opcode) (field, method string, ok bool) {
@@ -498,10 +497,6 @@ func immediate(kind instr.Kind, at jen.Code) jen.Code {
 	}
 }
 
-func boxedTemp(raw string) string {
-	return "r" + strings.TrimPrefix(raw, "v")
-}
-
 func localStore(state *state, current step) (value, error) {
 	if state.standalone {
 		return value{op: current.op, head: current.op, handler: localSet()}, nil
@@ -543,8 +538,8 @@ func localSet() jen.Code {
 			jen.If(jen.Id("addr").Op(">=").Add(jen.Id("i").Dot("sp"))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.List(jen.Id("old")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("addr"))),
-			jen.If(jen.Id("old").Op("!=").Add(jen.Id("val"))).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("old"))),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("addr"))).Op("=").List(jen.Id("val")),
+			jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }
@@ -580,8 +575,8 @@ func globalSet() jen.Code {
 			jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("i").Dot("globals")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.List(jen.Id("old")).Op(":=").List(jen.Id("i").Dot("globals").Index(jen.Id("idx"))),
-			jen.If(jen.Id("old").Op("!=").Add(jen.Id("val"))).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("old"))),
 			jen.List(jen.Id("i").Dot("globals").Index(jen.Id("idx"))).Op("=").List(jen.Id("val")),
+			jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
@@ -615,8 +610,8 @@ func upvalSet() jen.Code {
 			jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("i").Dot("fr").Dot("upvals")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.List(jen.Id("old")).Op(":=").List(jen.Id("i").Dot("fr").Dot("upvals").Index(jen.Id("idx"))),
-			jen.If(jen.Id("old").Op("!=").Add(jen.Id("val"))).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("old"))),
 			jen.List(jen.Id("i").Dot("fr").Dot("upvals").Index(jen.Id("idx"))).Op("=").List(jen.Id("val")),
+			jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }

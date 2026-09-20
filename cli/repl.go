@@ -28,7 +28,7 @@ type REPL struct {
 	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
 	constants []types.Value
 	types     []types.Type
-	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
+	debugger  *debug.Debugger
 }
 
 const prompt = "> "
@@ -111,11 +111,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, ".") {
-			done, err := r.command(ctx, scanner, line)
-			if err != nil {
-				return err
-			}
-			if done {
+			if r.command(ctx, scanner, line) {
 				return nil
 			}
 			continue
@@ -138,14 +134,14 @@ func (r *REPL) Run(ctx context.Context) error {
 	}
 }
 
-func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string) (bool, error) {
+func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string) bool {
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	arg = strings.TrimSpace(arg)
 
 	switch strings.ToLower(cmd) {
 	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
-		return true, nil
+		return true
 	case ".reset":
 		r.clear()
 		fmt.Fprintln(r.out, "reset.")
@@ -198,7 +194,7 @@ func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string)
 	default:
 		fmt.Fprintf(r.out, "unknown command: %s (type '.help' for help)\n", line)
 	}
-	return false, nil
+	return false
 }
 
 func (r *REPL) exec(ctx context.Context, inst instr.Instruction) error {
@@ -376,11 +372,10 @@ func (r *REPL) showProfile(metrics []prof.Metric) {
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
 	if len(p.functions) > 0 {
 		fmt.Fprintln(out, "hot functions (top 10):")
-		fmt.Fprintln(out, "func\tsamples\ttotal%\tnative-entries\tnative-exits\texit%")
+		fmt.Fprintln(out, "func\tsamples\ttotal%")
 		for _, function := range p.functions {
-			fmt.Fprintf(out, "%d\t%d\t%s\t%d\t%d\t%s\n",
+			fmt.Fprintf(out, "%d\t%d\t%s\n",
 				function.fn, function.samples, formatPercent(function.samples, p.total),
-				function.nativeEntries, function.nativeExits, formatPercent(function.nativeExits, function.nativeEntries),
 			)
 		}
 	}
@@ -390,11 +385,10 @@ func (r *REPL) showProfile(metrics []prof.Metric) {
 			continue
 		}
 		fmt.Fprintf(out, "hot ips for func %d (top 10):\n", function.fn)
-		fmt.Fprintln(out, "ip\tsamples\tfunc%\tnative-kind\temits\tentries\texits")
+		fmt.Fprintln(out, "ip\tsamples\tfunc%")
 		for _, ip := range function.ips {
-			fmt.Fprintf(out, "%04d\t%d\t%s\t%s\t%d\t%d\t%d\n",
+			fmt.Fprintf(out, "%04d\t%d\t%s\n",
 				ip.offset, ip.samples, formatPercent(ip.samples, function.samples),
-				ip.kind, ip.emits, ip.entries, ip.exits,
 			)
 		}
 	}
@@ -405,45 +399,6 @@ func (r *REPL) showProfile(metrics []prof.Metric) {
 		for _, opcode := range p.opcodes {
 			fmt.Fprintf(out, "%s\t%d\t%s\n", opcode.name, opcode.samples, formatPercent(opcode.samples, p.total))
 		}
-	}
-
-	if p.jit.empty() {
-		return
-	}
-	fmt.Fprintln(out, "jit summary:")
-	fmt.Fprintln(out, "attempts\temits\terrors\tbytes\tnative-entries\tnative-exits\tnative-yields")
-	fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
-		p.jit.summary.attempts,
-		p.jit.summary.emits,
-		p.jit.summary.errors,
-		p.jit.summary.bytes,
-		p.jit.summary.entries,
-		p.jit.summary.exits,
-		p.jit.summary.yields,
-	)
-
-	fmt.Fprintln(out, "jit entries:")
-	fmt.Fprintln(out, "func\tip\tkind\tfrontend\temits\tbytes\tentries\texits\texit%")
-	for _, entry := range p.jit.entries {
-		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\n",
-			entry.fn, entry.ip, entry.kind, entry.frontend,
-			entry.emits, entry.bytes, entry.entries, entry.exits, formatPercent(entry.exits, entry.entries),
-		)
-	}
-
-	fmt.Fprintln(out, "jit exit reasons:")
-	fmt.Fprintln(out, "func\tip\treason\topcode\tcount\tentry%")
-	for _, exit := range p.jit.exits {
-		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\t%s\n",
-			exit.fn, exit.ip, exit.reason, exit.opcode,
-			exit.count, formatPercent(exit.count, exit.entries),
-		)
-	}
-
-	fmt.Fprintln(out, "jit misses:")
-	fmt.Fprintln(out, "func\tip\tphase\treason\tcount")
-	for _, miss := range p.jit.misses {
-		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\n", miss.fn, miss.ip, miss.phase, miss.reason, miss.count)
 	}
 }
 
@@ -462,14 +417,10 @@ func (r *REPL) breakpoint(spec string) error {
 }
 
 func (r *REPL) clearBreakpoint(arg string) error {
-	if arg == "" {
-		return fmt.Errorf("usage: .clear <id>")
-	}
-	id, err := parseInt(arg)
+	id, err := r.breakpointID(arg, "usage: .clear <id>")
 	if err != nil {
-		return fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+		return err
 	}
-	r.ensureDebugger()
 	if !r.debugger.Clear(id) {
 		return fmt.Errorf("breakpoint %d not found", id)
 	}
@@ -478,18 +429,14 @@ func (r *REPL) clearBreakpoint(arg string) error {
 }
 
 func (r *REPL) enableBreakpoint(arg string, on bool) error {
-	if arg == "" {
-		verb := "enable"
-		if !on {
-			verb = "disable"
-		}
-		return fmt.Errorf("usage: .%s <id>", verb)
+	verb := "enable"
+	if !on {
+		verb = "disable"
 	}
-	id, err := parseInt(arg)
+	id, err := r.breakpointID(arg, "usage: ."+verb+" <id>")
 	if err != nil {
-		return fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+		return err
 	}
-	r.ensureDebugger()
 	if !r.debugger.Enable(id, on) {
 		return fmt.Errorf("breakpoint %d not found", id)
 	}
@@ -501,30 +448,39 @@ func (r *REPL) enableBreakpoint(arg string, on bool) error {
 	return nil
 }
 
+// breakpointID resolves a breakpoint id argument, ensuring the debugger
+// exists for the lookup the caller performs next.
+func (r *REPL) breakpointID(arg, usage string) (int, error) {
+	if arg == "" {
+		return 0, errors.New(usage)
+	}
+	id, err := parseInt(arg)
+	if err != nil {
+		return 0, fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+	}
+	r.ensureDebugger()
+	return id, nil
+}
+
 func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
 	if len(r.instrs) == 0 {
 		fmt.Fprintln(r.out, "(empty)")
 		return nil
 	}
 
-	dbg := debug.NewDebugger()
-	if r.debugger != nil {
-		for _, bp := range r.debugger.Breakpoints() {
-			if bp.Enabled {
-				dbg.Break(bp.Func, bp.IP)
-			}
-		}
-	}
+	r.ensureDebugger()
+	dbg := r.debugger
+	dbg.Reset()
 	dbg.Step()
 
-	vm := interp.New(r.build(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	vm := interp.New(r.build(), interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	for {
 		err := vm.Run(ctx)
 		if errors.Is(err, debug.ErrStopped) {
 			r.showStop(dbg.Stop(), vm)
-			done, loopErr := r.debugLoop(ctx, scanner, vm, dbg)
+			done, loopErr := r.debugLoop(scanner, vm, dbg)
 			if loopErr != nil {
 				return loopErr
 			}
@@ -543,7 +499,7 @@ func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
 	return nil
 }
 
-func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp.Interpreter, dbg *debug.Debugger) (done bool, err error) {
+func (r *REPL) debugLoop(scanner *bufio.Scanner, vm *interp.Interpreter, dbg *debug.Debugger) (done bool, err error) {
 	for {
 		fmt.Fprint(r.out, debugPrompt)
 		if !scanner.Scan() {
@@ -582,31 +538,17 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 				r.printErr(fmt.Errorf("usage: break <ip> or break <fn>:<ip>"))
 				continue
 			}
-			fn, ip, perr := parseBreakSpec(arg)
-			if perr != nil {
-				r.printErr(perr)
-				continue
+			if err := r.breakpoint(arg); err != nil {
+				r.printErr(err)
 			}
-			r.ensureDebugger()
-			rid := r.debugger.Break(fn, ip)
-			dbg.Break(fn, ip)
-			fmt.Fprintf(r.out, "breakpoint %d set at func=%d ip=%d\n", rid, fn, ip)
 		case "clear":
 			if arg == "" {
 				r.printErr(fmt.Errorf("usage: clear <id>"))
 				continue
 			}
-			id, perr := parseInt(arg)
-			if perr != nil {
-				r.printErr(fmt.Errorf("invalid breakpoint id %q: %w", arg, perr))
-				continue
+			if err := r.clearBreakpoint(arg); err != nil {
+				r.printErr(err)
 			}
-			r.ensureDebugger()
-			if !r.debugger.Clear(id) {
-				r.printErr(fmt.Errorf("breakpoint %d not found", id))
-				continue
-			}
-			fmt.Fprintf(r.out, "breakpoint %d cleared\n", id)
 		case "quit", "exit", "q":
 			return true, nil
 		case "":
@@ -619,11 +561,10 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 }
 
 func (r *REPL) showBreakpoints() {
-	if r.debugger == nil {
-		fmt.Fprintln(r.out, "no breakpoints")
-		return
+	var bps []debug.Breakpoint
+	if r.debugger != nil {
+		bps = r.debugger.Breakpoints()
 	}
-	bps := r.debugger.Breakpoints()
 	if len(bps) == 0 {
 		fmt.Fprintln(r.out, "no breakpoints")
 		return

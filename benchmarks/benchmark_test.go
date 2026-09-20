@@ -32,24 +32,72 @@ type benchmarkScripts struct {
 
 var benchmarkCompare = func(*testing.B, benchmarkComparison, int32) {}
 
+func TestKernels(t *testing.T) {
+	branch, branchWant := branchTree(37, 96)
+	kernels := []struct {
+		name string
+		prog *program.Program
+		want int32
+	}{
+		{"IterativeFib", iterativeFib(30), 832040},
+		{"Sieve", sieve(256), 54},
+		{"RecursiveFib20", recursiveFib(20), 6765},
+		{"RecursiveFib35", recursiveFib(35), 9227465},
+		{"IndirectRecursiveFib", indirectRecursiveFib(20), 6765},
+		{"TailSum", tailSum(1000), 500500},
+		{"TailPingPong", tailPingPong(1000), 500500},
+		{"ClosureCounter", closureCounter(128), 128},
+		{"NQueens", nqueens(7), 40},
+		{"Fannkuch", fannkuch(6), fannkuchReference(6)},
+		{"TypedArraySum", typedArraySum(256), 32896},
+		{"AllocationGraph", allocationGraph(128), 128},
+		{"PermutationFlips", permutationFlips(24, 64), 1472},
+		{"StructTreeWalk", structTreeWalk(9), 1023},
+		{"BinaryTrees", binaryTrees(4, 6), binaryTreesReference(4, 6)},
+		{"SortStress", sortStress(128, 2), sortStressReference(128, 2)},
+		{"StringBuild", stringBuild(512), stringBuildReference(512)},
+		{"BranchTree", branch, branchWant},
+		{"NBody", nbody(100), nbodyReference(100)},
+		{"SpectralNorm", spectralnorm(24, 2), spectralnormReference(24, 2)},
+		{"Mandelbrot", mandelbrot(16, 16, 50), mandelbrotReference(16, 16, 50)},
+		{"MatMul", matmul(16), matmulReference(16)},
+	}
+	modes := []struct {
+		name string
+		opts []interp.Option
+	}{
+		{name: "threaded"},
+	}
+	for _, kernel := range kernels {
+		for _, mode := range modes {
+			name, prog, want, opts := kernel.name+"/"+mode.name, kernel.prog, kernel.want, mode.opts
+			t.Run(name, func(t *testing.T) {
+				require.NoError(t, program.Verify(prog))
+				vm := interp.New(prog, opts...)
+				defer vm.Close()
+				for range 2 {
+					require.NoError(t, vm.Run(t.Context()))
+					value, err := vm.PopBoxed()
+					require.NoError(t, err)
+					require.Equal(t, types.BoxI32(want), value)
+					vm.Reset()
+				}
+			})
+		}
+	}
+}
+
 func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
 	b.Helper()
 	modes := []struct {
-		name      string
-		threshold []int
+		name string
+		opts []interp.Option
 	}{
-		{name: "default"},
-		{name: "threaded", threshold: []int{-1}},
-		{name: "jit", threshold: []int{0}},
+		{name: "threaded"},
 	}
 	for _, mode := range modes {
 		b.Run(mode.name, func(b *testing.B) {
-			var vm *interp.Interpreter
-			if len(mode.threshold) == 0 {
-				vm = interp.New(prog)
-			} else {
-				vm = interp.New(prog, interp.WithThreshold(mode.threshold[0]))
-			}
+			vm := interp.New(prog, mode.opts...)
 			defer vm.Close()
 			ctx := context.Background()
 

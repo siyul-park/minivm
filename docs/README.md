@@ -1,65 +1,61 @@
 # Documentation Index
 
-This directory uses a single-owner model. Each topic owns one area of behavior; other documents should link here when readers need more detail instead of repeating the same explanation.
+Each topic has one canonical owner. This document owns the topic-to-document map.
 
-## Reading Guide
+## Terminology
 
-| Need | Read |
+Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`) for agent requirements and `MUST NOT` use bare imperatives (`keep`, `do not`, `prefer`, `skip`) where a keyword applies. Sentences without a keyword are informative and `MUST NOT` be treated as requirements.
+
+| Topic | Document |
 |---|---|
-| Package boundaries and execution flow | `architecture.md` |
-| Opcode semantics, stack effects, and JIT status | `instruction-set.md` |
-| Static bytecode validation | `verification.md` |
-| Value layout and boxed values | `value-representation.md` |
-| Heap ownership, reference counting, GC | `memory-model.md` |
-| Trace JIT internals | `jit-internals.md` |
-| Threaded and ARM64 opcode fusion | `fusion.md` |
-| Profiling and JIT counters | `profile.md` |
-| Pass manager and optimizer levels | `pass-system.md` |
-| Host functions and marshaling | `host-integration.md` |
-| Platform and backend support | `compatibility.md` |
-| Testing contracts and ownership | `testing.md` |
-| Benchmark results and methodology | `benchmarks.md` |
-| Debugger API | `debugging.md` |
-| Current priorities | `roadmap.md` |
-| Normative Go coding specification | `coding-patterns.md` |
-| Applied symbol naming decisions | `symbol-naming-audit.md` |
-| Adding an opcode | `guides/add-opcode.md` |
-| Adding a JIT backend | `guides/add-architecture.md` |
-| REPL usage | `guides/repl.md` |
+| architecture | `architecture.md` |
+| opcode semantics/status | `instruction-set.md` |
+| bytecode verification | `verification.md` |
+| value representation | `value-representation.md` |
+| memory/ownership | `memory-model.md` |
+| JIT | `jit-internals.md` |
+| JIT rebuild history | `jit-lessons.md` |
+| threaded fusion | `fusion.md` |
+| profiling/hotness | `profile.md` |
+| optimization passes | `pass-system.md` |
+| host integration | `host-integration.md` |
+| platform support | `compatibility.md` |
+| testing/validation | `testing.md` |
+| structural review/simplification | `refactoring.md` |
+| benchmarks | `benchmarks.md` |
+| debugging | `debugging.md` |
+| roadmap | `roadmap.md` |
+| Go code design | `coding-patterns.md` |
+| applied naming vocabulary | `symbol-naming-audit.md` |
 
-## Document Ownership
+## Guides
 
-Keep detailed explanations in the document that owns the topic. Other documents should summarize briefly and link only when the reader is likely to need the full version.
+Guides define procedures over topic contracts:
 
-- Put opcode behavior and per-backend JIT status in `instruction-set.md`.
-- Put heap ownership and RC rules in `memory-model.md`.
-- Put boxed value layout and kind rules in `value-representation.md`.
-- Put JIT implementation contracts in `jit-internals.md`.
-- Put generated opcode-fusion rules and backend coverage in `fusion.md`.
-- Put test ownership and completeness status in `testing.md`.
-- Put benchmark numbers in `benchmarks.md`.
-- Put host conversion details in `host-integration.md`.
-- Put platform support in `compatibility.md`.
+- `guides/add-opcode.md`
+- `guides/add-architecture.md`
+- `guides/repl.md`
 
-## Standard Shape
+A guide `MUST` describe change order and validation only. The contract it operates on `MUST` stay in its owner topic doc; a guide `MUST NOT` duplicate that contract and `MUST` link to the owner instead.
 
-Long-lived topic docs should generally use:
+## Style
 
-1. title and one-line purpose
-2. `When to Read`
-3. `Source of Truth` when code paths matter
-4. topic-specific reference content
-5. `Maintenance Notes`
-6. `Related Docs`
+Every topic and guide document `MUST`:
 
-Guides may use task-oriented steps instead.
+- use H1 for the document subject and unnumbered H2 headings;
+- place one scope sentence directly below H1;
+- use an `Ownership` section for canonical owner maps where ownership applies;
+- end with a `Related` section;
+- label every fenced code block with its language;
+- keep one blank line between prose, lists, tables, and code blocks.
 
-## Style Rules
+## Document Roles
 
-- Use standard technical terms over project-specific slang.
-- Keep wording direct and general.
-- Prefer short paragraphs and tables for reference material.
-- Avoid repeating the same explanation across documents.
-- Link only where it improves navigation.
-- Keep examples current with code.
-- Use `minivm` consistently for the project name.
+- A canonical topic doc `MUST` describe supported/current behavior. It `MUST NOT` describe removed behavior as current and `MUST NOT` duplicate a contract owned elsewhere.
+- `roadmap.md` `MUST` own priorities only; it `MUST NOT` override topic contracts.
+- `plans/` and `superpowers/` contain dated plans, audits, and design records. They `MAY` preserve history and future work, but they `MUST NOT` own current behavior.
+- `AGENTS.md` owns repository workflow. Topic docs own current behavior and contracts; roadmap owns priorities.
+
+## Related
+
+- `AGENTS.md` — terminology, precedence, workflow

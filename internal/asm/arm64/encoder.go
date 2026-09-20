@@ -8,10 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
-// ---------------------------------------------------------------------------
-// Encoder
-// ---------------------------------------------------------------------------
-
+// Encoder emits ARM64 machine encodings.
 type Encoder struct{}
 
 // ---------------------------------------------------------------------------
@@ -51,15 +48,19 @@ var condCode = map[Op]uint32{
 	OpBLE: 0xD, // LE  Z==1 || N!=V
 }
 
-// extendOpcodes maps each sign/zero-extend opcode to its SBFM/UBFM base word
-// and imms field (the source width minus one).
-var extendOpcodes = map[Op]struct{ base, imms uint32 }{
-	OpSXTB: {0x93400000, 7},
-	OpSXTH: {0x93400000, 15},
-	OpSXTW: {0x93400000, 31},
-	OpUXTB: {0xD3400000, 7},
-	OpUXTH: {0xD3400000, 15},
-	OpUXTW: {0xD3400000, 31},
+// extendOpcodes maps each sign/zero-extend opcode to its 32- and 64-bit
+// SBFM/UBFM base words, picked by the destination's declared width, and the
+// imms field (the source width minus one). SXTW and UXTW widen a 32-bit
+// source into a 64-bit destination by definition - there is no same-width
+// form - so their two base words are identical and dst is expected to stay
+// Width64 wherever they are used.
+var extendOpcodes = map[Op]struct{ op32, op64, imms uint32 }{
+	OpSXTB: {0x13000000, 0x93400000, 7},
+	OpSXTH: {0x13000000, 0x93400000, 15},
+	OpSXTW: {0x93400000, 0x93400000, 31},
+	OpUXTB: {0x53000000, 0xD3400000, 7},
+	OpUXTH: {0x53000000, 0xD3400000, 15},
+	OpUXTW: {0xD3400000, 0xD3400000, 31},
 }
 
 // floatUnaryOpcodes maps each scalar float unary opcode to its single- and
@@ -143,18 +144,30 @@ var moveOpcodes = map[Op]struct{ op32, op64 uint32 }{
 	OpMOVN: {0x12800000, 0x92800000},
 }
 
-// loadOpcodes maps each unsigned-offset load opcode to its base word and the
-// access size that scales the byte offset.
+// loadOpcodes maps each unsigned-offset load opcode to its 32- and 64-bit
+// base words, picked by the destination's declared width, and the access
+// size (in bytes) that scales the byte offset at each width.
+//
+// LDR genuinely differs by width: a Width32 destination reads a 4-byte word
+// and zero-extends it, a Width64 destination reads the full 8 bytes. LDRB and
+// LDRH have no such choice - a byte or halfword load is one instruction
+// regardless of how wide the caller declared its destination, so both
+// widths share one base word and one scale. LDRSB, LDRSH, and LDRSW pick
+// between a 32-bit and a 64-bit sign-extending form (LDRSW has no 32-bit
+// form - sign-extending 32 into 32 is a no-op - so both entries repeat the
+// only encoding that exists); the access size they read from memory does
+// not change with the destination width, only the field a Wd write leaves
+// zero above bit 31 does.
 var loadOpcodes = map[Op]struct {
-	base  uint32
-	scale int64
+	op32, op64       uint32
+	scale32, scale64 int64
 }{
-	OpLDR:   {0xF9400000, 8},
-	OpLDRB:  {0x39400000, 1},
-	OpLDRSB: {0x39800000, 1},
-	OpLDRH:  {0x79400000, 2},
-	OpLDRSH: {0x79800000, 2},
-	OpLDRSW: {0xB9800000, 4},
+	OpLDR:   {0xB9400000, 0xF9400000, 4, 8},
+	OpLDRB:  {0x39400000, 0x39400000, 1, 1},
+	OpLDRSB: {0x39C00000, 0x39800000, 1, 1},
+	OpLDRH:  {0x79400000, 0x79400000, 2, 2},
+	OpLDRSH: {0x79C00000, 0x79800000, 2, 2},
+	OpLDRSW: {0xB9800000, 0xB9800000, 4, 4},
 }
 
 // storeOpcodes maps each unsigned-offset store opcode to its base word and the
@@ -202,8 +215,10 @@ var floatTernaryOpcodes = map[Op]struct{ single, double uint32 }{
 	OpFNMSUB: {0x1F208000, 0x1F608000},
 }
 
+// NewEncoder returns an ARM64 instruction encoder.
 func NewEncoder() *Encoder { return &Encoder{} }
 
+// Encode converts one architecture-neutral instruction to ARM64 machine code.
 func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	op := Op(inst.Op)
 	switch op {
@@ -390,7 +405,11 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		ext := extendOpcodes[op]
-		return enc(ext.base | ext.imms<<10 | reg(n)<<5 | reg(d)), nil
+		base := ext.op64
+		if d.Width() == asm.Width32 {
+			base = ext.op32
+		}
+		return enc(base | ext.imms<<10 | reg(n)<<5 | reg(d)), nil
 
 	// -----------------------------------------------------------------------
 	// TST
@@ -495,7 +514,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 
 	case OpLDR, OpLDRB, OpLDRSB, OpLDRH, OpLDRSH, OpLDRSW:
 		ld := loadOpcodes[op]
-		return e.encodeLoad(ld.base, ld.scale, inst)
+		return e.encodeLoad(ld.op32, ld.op64, ld.scale32, ld.scale64, inst)
 
 	case OpSTR, OpSTRB, OpSTRH, OpSTRW:
 		st := storeOpcodes[op]
@@ -997,12 +1016,17 @@ func (e *Encoder) encodeCompareImm(op uint32, inst asm.Instruction) ([]byte, err
 	return enc(base | (uint32(imm)&0xFFF)<<10 | reg(n)<<5), nil
 }
 
-// encodeLoad emits an unsigned-offset load, scaling the byte offset by the
-// access size.
-func (e *Encoder) encodeLoad(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
+// encodeLoad emits an unsigned-offset load, picking the 32- or 64-bit form
+// by the destination's declared width and scaling the byte offset by that
+// form's own access size.
+func (e *Encoder) encodeLoad(op32, op64 uint32, scale32, scale64 int64, inst asm.Instruction) ([]byte, error) {
 	dst, base, offset, err := e.decodeMemOp(inst)
 	if err != nil {
 		return nil, err
+	}
+	op, scale := op64, scale64
+	if dst.Width() == asm.Width32 {
+		op, scale = op32, scale32
 	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(dst)), nil
@@ -1494,21 +1518,12 @@ func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 			continue
 		}
 
-		// Encode N, immr, imms.
-		// N  = 1 if esize==64, else 0
+		// Encode immr, imms.
 		// immr = rotation amount (6 bits)
-		// imms encodes element size and number of ones:
-		//   imms = NOT(esize) | (ones-1)  — the upper bits encode the element size
-		var N uint32
-		if esize == 64 {
-			N = 1
-		}
+		// imms = NOT(esize) within 6 bits, then ones-1 in the low bits:
+		// esize=2 → imms[5:1]=11111 ... esize=64 → imms[5:1]=11110
 		immrVal := uint32(ro) & 0x3F
-		// imms[5:0]: 0b0xxxxx where x encodes (esize, ones)
-		// Standard encoding: imms = ~(esize) truncated to 6 bits, then OR ones-1
-		immsVal := (^uint32(esize)&0x3F)&^(uint32(esize)-1) | uint32(ones-1)
-		_ = N // N is packed into bit 22 of the instruction by the caller as the "N" field
-		// For 64-bit logical immediates N=1 is handled by the caller OR'ing 1<<22.
+		immsVal := ((^uint32(esize-1)&0x3F)<<1)&0x3E | uint32(ones-1)
 		return immrVal, immsVal, true
 	}
 	return 0, 0, false

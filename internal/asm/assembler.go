@@ -12,42 +12,29 @@ import (
 type Label int
 
 // Assembler emits target-architecture instructions into a single-shot
-// buffer. Allocate vregs with Reg, declare labels with Label/Bind, pin
-// vregs to specific pregs with Pin, append instructions with Emit, and
+// buffer. Append instructions with Emit, declare labels with Label/Bind, and
 // finalize with Build.
 //
 // Each Assembler builds exactly one machine-code block. Reuse is not
 // supported — discard after Build returns.
 type Assembler struct {
-	arch     Arch
-	insts    []Instruction
-	pins     map[int32]PReg
-	labels   map[Label]int
-	nextVReg int32
-	nextLbl  Label
-	err      error
+	arch    Arch
+	insts   []Instruction
+	labels  map[Label]int
+	nextLbl Label
 }
 
 var (
-	ErrConflictingPin  = errors.New("conflicting pin")
+	ErrUnallocated     = errors.New("unallocated register")
 	ErrUnresolvedLabel = errors.New("unresolved label")
 )
 
 // New constructs an Assembler targeting the given architecture.
 func New(arch Arch) *Assembler {
-	a := &Assembler{
+	return &Assembler{
 		arch:   arch,
-		pins:   make(map[int32]PReg),
 		labels: make(map[Label]int),
 	}
-	return a
-}
-
-// Reg allocates a fresh virtual register of the given type and width.
-func (a *Assembler) Reg(typ RegType, w RegWidth) VReg {
-	r := NewVReg(a.nextVReg, typ, w)
-	a.nextVReg++
-	return r
 }
 
 // Label reserves a label identifier. Anchor it later with Bind.
@@ -62,57 +49,39 @@ func (a *Assembler) Bind(id Label) {
 	a.labels[id] = len(a.insts)
 }
 
-// Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
-// conflicting Pin records an error returned from Build.
-func (a *Assembler) Pin(v VReg, preg PReg) error {
-	if a.arch == nil {
-		return a.fail(fmt.Errorf("%w: nil architecture", ErrInvalidArgs))
-	}
-	if v.ID() < 0 || v.ID() >= a.nextVReg || v.Type() != preg.Type() || !a.arch.Registers().valid(preg) {
-		return a.fail(fmt.Errorf("%w: pin %v to %v", ErrInvalidOperand, v, preg))
-	}
-	if existing, ok := a.pins[v.ID()]; ok && (existing.ID() != preg.ID() || existing.Type() != preg.Type()) {
-		err := fmt.Errorf("%w: %v already pinned to %v, got %v",
-			ErrConflictingPin, v, existing, preg)
-		return a.fail(err)
-	}
-	a.pins[v.ID()] = preg
-	return nil
-}
-
 // Emit appends one or more instructions.
 func (a *Assembler) Emit(insts ...Instruction) {
 	a.insts = append(a.insts, insts...)
 }
 
-// Build finalizes the instruction list into machine code: it rewrites
-// operands from virtual to physical registers, relaxes out-of-range label
-// branches, and encodes every instruction with its label references
-// resolved.
+// Build finalizes the instruction list into machine code. Every operand
+// must already be a physical register, label, immediate, or memory operand
+// rooted at one; virtual registers are not allocated.
 func (a *Assembler) Build() ([]byte, error) {
-	if a.err != nil {
-		return nil, a.err
-	}
 	if a.arch == nil {
 		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
 	}
-
-	rw, err := newRewriter(a.arch, a.insts, a.pins, int(a.nextVReg))
-	if err != nil {
-		return nil, err
+	for _, inst := range a.insts {
+		for _, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
+			if err := validate(op); err != nil {
+				return nil, err
+			}
+		}
 	}
-	insts, labels, err := rw.run(a.insts, a.labels)
-	if err != nil {
-		return nil, err
-	}
-	return a.encode(insts, labels)
+	return a.encode(a.insts, a.labels)
 }
 
-func (a *Assembler) fail(err error) error {
-	if a.err == nil {
-		a.err = err
+func validate(op Operand) error {
+	switch op := op.(type) {
+	case nil, PRegOperand, ImmOperand, LabelOperand:
+		return nil
+	case VRegOperand:
+		return fmt.Errorf("%w: %v", ErrUnallocated, op.Reg)
+	case MemOperand:
+		return validate(op.Base)
+	default:
+		return fmt.Errorf("%w: %T", ErrInvalidOperand, op)
 	}
-	return err
 }
 
 // encode turns phys-allocated instructions into the final byte stream.
@@ -150,10 +119,6 @@ func (a *Assembler) draft(insts []Instruction) ([][]byte, []int, error) {
 	offsets := make([]int, len(insts)+1)
 
 	for i, inst := range insts {
-		if inst.Op == OpPseudoUse {
-			offsets[i+1] = offsets[i]
-			continue
-		}
 		if _, ok := inst.Src2.(LabelOperand); ok {
 			inst.Src2 = Imm(0)
 		}

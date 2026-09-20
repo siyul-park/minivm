@@ -82,6 +82,24 @@ func Run() int32 { return run(%d) }`, n),
 	}, want)
 }
 
+func BenchmarkCall_TailSum(b *testing.B) {
+	const n int32 = 1000
+	want := tailSumReference(n)
+	prog := tailSum(n)
+	require.NoError(b, program.Verify(prog))
+
+	benchmarkVM(b, prog, types.BoxI32(want))
+}
+
+func BenchmarkCall_TailPingPong(b *testing.B) {
+	const n int32 = 1000
+	want := tailSumReference(n)
+	prog := tailPingPong(n)
+	require.NoError(b, program.Verify(prog))
+
+	benchmarkVM(b, prog, types.BoxI32(want))
+}
+
 func BenchmarkCall_ClosureCounter(b *testing.B) {
 	const count = 128
 	want := int32(count)
@@ -289,6 +307,94 @@ func(i32, any) i32
 
 func indirectRecursiveFib(n int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(indirectRecursiveFibListing, n))
+}
+
+// tailSumListing accumulates 1..n through a tail call to itself, the one tail
+// shape a plan lowers as a native loop back to its own entry rather than a new
+// activation.
+const tailSumListing = `
+.constants
+func(i32, i32) i32
+	local.get 0
+	i32.const 0
+	i32.eq
+	br_if base
+	local.get 0
+	i32.const 1
+	i32.sub
+	local.get 1
+	local.get 0
+	i32.add
+	const.get 0
+	return_call
+	base:
+	local.get 1
+	return
+.code
+	i32.const %d
+	i32.const 0
+	const.get 0
+	call
+`
+
+func tailSum(n int32) *program.Program {
+	return mustParseProgram(fmt.Sprintf(tailSumListing, n))
+}
+
+// tailPingPongListing accumulates the same sum through two functions that tail
+// call each other, so every tail call morphs the running activation into
+// another function instead of re-entering this one.
+const tailPingPongListing = `
+.constants
+func(i32, i32) i32
+	local.get 0
+	i32.const 0
+	i32.eq
+	br_if base
+	local.get 0
+	i32.const 1
+	i32.sub
+	local.get 1
+	local.get 0
+	i32.add
+	const.get 1
+	return_call
+	base:
+	local.get 1
+	return
+func(i32, i32) i32
+	local.get 0
+	i32.const 0
+	i32.eq
+	br_if base
+	local.get 0
+	i32.const 1
+	i32.sub
+	local.get 1
+	local.get 0
+	i32.add
+	const.get 0
+	return_call
+	base:
+	local.get 1
+	return
+.code
+	i32.const %d
+	i32.const 0
+	const.get 0
+	call
+`
+
+func tailPingPong(n int32) *program.Program {
+	return mustParseProgram(fmt.Sprintf(tailPingPongListing, n))
+}
+
+func tailSumReference(n int32) int32 {
+	sum := int32(0)
+	for value := n; value > 0; value-- {
+		sum += value
+	}
+	return sum
 }
 
 // closureCounter builds a closure over one i32 upvalue that increments and

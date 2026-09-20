@@ -96,6 +96,7 @@ func TestInstructionFactories(t *testing.T) {
 		{name: "BL", op: arm64.OpBL, inst: arm64.BL(1)},
 		{name: "BR", op: arm64.OpBR, inst: arm64.BR(arm64.X0)},
 		{name: "BLR", op: arm64.OpBLR, inst: arm64.BLR(arm64.X0)},
+		{name: "RET", op: arm64.OpRET, inst: arm64.RET()},
 		{name: "BLabel", op: arm64.OpB, inst: arm64.BLabel(asm.Label(1))},
 		{name: "BLLabel", op: arm64.OpBL, inst: arm64.BLLabel(asm.Label(1))},
 		{name: "CBNZ", op: arm64.OpCBNZ, inst: arm64.CBNZ(arm64.X0, 1)},

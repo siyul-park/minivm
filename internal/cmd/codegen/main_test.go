@@ -17,15 +17,18 @@ func TestRun(t *testing.T) {
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
 
-	temp := t.TempDir()
-	command := exec.CommandContext(t.Context(), binary)
-	command.Dir = temp
-	output, err = command.CombinedOutput()
-	require.NoError(t, err, string(output))
-	require.Equal(t, "interp/threaded.go\n", string(output))
+	var golden []byte
+	t.Run("generates threaded output by default", func(t *testing.T) {
+		temp := t.TempDir()
+		command := exec.CommandContext(t.Context(), binary)
+		command.Dir = temp
+		output, err := command.CombinedOutput()
+		require.NoError(t, err)
+		require.Equal(t, "interp/threaded.go\n", string(output))
 
-	golden, err := os.ReadFile(filepath.Join(temp, "interp", "threaded.go"))
-	require.NoError(t, err)
+		golden, err = os.ReadFile(filepath.Join(temp, "interp", "threaded.go"))
+		require.NoError(t, err)
+	})
 
 	cases := []struct {
 		name     string
@@ -71,7 +74,7 @@ func TestRun(t *testing.T) {
 				require.Error(t, err)
 				require.Contains(t, string(output), tc.contains)
 			} else {
-				require.NoError(t, err, string(output))
+				require.NoError(t, err)
 				require.Empty(t, output)
 			}
 			if tc.after != nil {

@@ -32,6 +32,23 @@ func TestRegister(t *testing.T) {
 }
 
 func TestGetResult(t *testing.T) {
+	t.Run("caches a nil interface result", func(t *testing.T) {
+		calls := 0
+		m := pass.NewManager()
+		pass.Register(m, runner[int, any](func(*pass.Manager, int) (any, error) {
+			calls++
+			return nil, nil
+		}))
+
+		first, err := pass.GetResult[any](m, 1)
+		require.NoError(t, err)
+		require.Nil(t, first)
+		second, err := pass.GetResult[any](m, 1)
+		require.NoError(t, err)
+		require.Nil(t, second)
+		require.Equal(t, 1, calls)
+	})
+
 	t.Run("computes and caches", func(t *testing.T) {
 		calls := 0
 		m := pass.NewManager()
@@ -65,6 +82,27 @@ func TestGetResult(t *testing.T) {
 
 		_, err := pass.GetResult[int](m, program.New(nil))
 		require.ErrorIs(t, err, want)
+	})
+
+	t.Run("does not cache a failing run", func(t *testing.T) {
+		want := errors.New("fail")
+		calls := 0
+		m := pass.NewManager()
+		pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
+			calls++
+			if calls == 1 {
+				return 0, want
+			}
+			return len(prog.Code), nil
+		}))
+
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		_, err := pass.GetResult[int](m, prog)
+		require.ErrorIs(t, err, want)
+		got, err := pass.GetResult[int](m, prog)
+		require.NoError(t, err)
+		require.Equal(t, 1, got)
+		require.Equal(t, 2, calls)
 	})
 }
 

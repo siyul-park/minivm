@@ -32,8 +32,7 @@ func TestErrorCode(t *testing.T) {
 		{err: interp.ErrHeapExhausted, want: interp.TrapCodeHeapExhausted},
 		{err: interp.ErrCoroutineDone, want: interp.TrapCodeCoroutineDone},
 		{err: interp.ErrUncaughtException, want: interp.TrapCodeUncaughtException},
-		{err: errors.New("host"), want: interp.TrapCodeHostError},
-	}
+		{err: errors.New("host"), want: interp.TrapCodeHostError}}
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.err), func(t *testing.T) {
 			require.Equal(t, tt.want, interp.ErrorCode(tt.err))
@@ -59,12 +58,8 @@ func TestRuntimeError_Error(t *testing.T) {
 				Err: interp.ErrDivideByZero,
 				Frames: []interp.FrameInfo{
 					{Func: 2, IP: 7},
-					{Func: 1, IP: 3},
-				},
-			},
-			want: "divide by zero: fn=2 ip=7 <- fn=1 ip=3",
-		},
-	}
+					{Func: 1, IP: 3}}},
+			want: "divide by zero: fn=2 ip=7 <- fn=1 ip=3"}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, tt.err.Error())

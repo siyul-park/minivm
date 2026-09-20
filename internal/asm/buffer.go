@@ -45,14 +45,14 @@ func (b *Buffer) Free() error {
 	maps := b.maps
 	kept := b.maps[:0]
 	for _, m := range b.maps {
-		if freeErr := m.free(); freeErr != nil {
+		if freeErr := freeMemory(m); freeErr != nil {
 			err = errors.Join(err, freeErr)
 			kept = append(kept, m)
 		}
 	}
 	clear(maps[len(kept):])
 	b.maps = kept
-	if freeErr := b.mem.free(); freeErr != nil {
+	if freeErr := freeMemory(b.mem); freeErr != nil {
 		err = errors.Join(err, freeErr)
 	} else {
 		b.mem = nil
@@ -82,9 +82,9 @@ func (b *Buffer) install(code []byte) (unsafe.Pointer, error) {
 	}
 
 	copy(mem, code)
-	if err := mem.executable(); err != nil {
+	if err := executable(mem); err != nil {
 		if replace {
-			if freeErr := mem.free(); freeErr != nil {
+			if freeErr := freeMemory(mem); freeErr != nil {
 				b.maps = append(b.maps, mem)
 				err = errors.Join(err, freeErr)
 			}
@@ -94,7 +94,7 @@ func (b *Buffer) install(code []byte) (unsafe.Pointer, error) {
 	if replace {
 		if b.sealed {
 			b.maps = append(b.maps, b.mem)
-		} else if err := b.mem.free(); err != nil {
+		} else if err := freeMemory(b.mem); err != nil {
 			b.maps = append(b.maps, b.mem)
 		}
 		b.mem = mem

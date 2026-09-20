@@ -11,13 +11,11 @@ import (
 
 // Pool hands out Interpreter instances bound to a shared Program for use across
 // goroutines. Each Interpreter owns its runtime state; callers must borrow one
-// per goroutine via Get/Put or Run. JIT code and aggregate profile data are
-// shared through the pool cache.
+// per goroutine via Get/Put or Run.
 type Pool struct {
-	prog  *program.Program
-	cache *cache
-	opts  []Option
-	size  int
+	prog *program.Program
+	opts []Option
+	size int
 
 	idle chan *Interpreter
 	live atomic.Int64
@@ -30,22 +28,16 @@ var ErrPoolClosed = errors.New("pool closed")
 
 // NewPool builds a pool that lends up to size Interpreters constructed from
 // prog with opts. size <= 0 is normalized to 1. Interpreters are created lazily
-// on Get; NewPool itself does not allocate JIT memory.
+// on Get.
 func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
 	if size <= 0 {
 		size = 1
 	}
-	cache := newCache(prog)
-	tracer := newTracer()
-	all := make([]Option, 0, len(opts)+2)
-	all = append(all, opts...)
-	all = append(all, withCache(cache), withTracer(tracer))
 	return &Pool{
-		prog:  prog,
-		cache: cache,
-		opts:  all,
-		size:  size,
-		idle:  make(chan *Interpreter, size),
+		prog: prog,
+		opts: append([]Option(nil), opts...),
+		size: size,
+		idle: make(chan *Interpreter, size),
 	}
 }
 
@@ -77,13 +69,11 @@ func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 }
 
 // Put returns i to the pool after resetting its runtime state. If the pool is
-// closed or already holds size idle Interpreters, i is closed instead so its
-// JIT buffer is released.
+// closed or already holds size idle Interpreters, i is closed instead.
 func (p *Pool) Put(i *Interpreter) {
 	if i == nil {
 		return
 	}
-	i.flush()
 	i.Reset()
 
 	p.mu.RLock()
@@ -120,9 +110,6 @@ func (p *Pool) Close() error {
 			errs = append(errs, err)
 		}
 		p.live.Add(-1)
-	}
-	if err := p.cache.close(); err != nil {
-		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

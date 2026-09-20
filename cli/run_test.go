@@ -24,60 +24,47 @@ func TestNewRunCommand(t *testing.T) {
 		{
 			name: "runs program and prints final stack",
 			files: fstest.MapFS{
-				"add.mvm": &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000002\n0010:\ti32.add\n")},
-			},
+				"add.mvm": &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000002\n0010:\ti32.add\n")}},
 			args:            []string{"add.mvm"},
-			wantOutContains: "3",
-		},
+			wantOutContains: "3"},
 		{
 			name: "empty stack produces no output",
 			files: fstest.MapFS{
-				"nop.mvm": &fstest.MapFile{Data: []byte("0000:\tnop\n")},
-			},
+				"nop.mvm": &fstest.MapFile{Data: []byte("0000:\tnop\n")}},
 			args:         []string{"nop.mvm"},
-			wantOutEmpty: true,
-		},
+			wantOutEmpty: true},
 		{
 			name:            "missing file returns open error",
 			files:           fstest.MapFS{},
 			args:            []string{"missing.mvm"},
 			wantErr:         true,
-			wantErrContains: "open missing.mvm",
-		},
+			wantErrContains: "open missing.mvm"},
 		{
 			name: "parse error propagates",
 			files: fstest.MapFS{
-				"bad.mvm": &fstest.MapFile{Data: []byte("not-an-instruction xyz\n")},
-			},
+				"bad.mvm": &fstest.MapFile{Data: []byte("not-an-instruction xyz\n")}},
 			args:            []string{"bad.mvm"},
 			wantErr:         true,
-			wantErrContains: "parse bad.mvm",
-		},
+			wantErrContains: "parse bad.mvm"},
 		{
 			name: "runtime error propagates",
 			files: fstest.MapFS{
-				"divzero.mvm": &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000000\n0010:\ti32.div_s\n")},
-			},
+				"divzero.mvm": &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000000\n0010:\ti32.div_s\n")}},
 			args:            []string{"divzero.mvm"},
 			wantErr:         true,
-			wantErrContains: "run divzero.mvm",
-		},
+			wantErrContains: "run divzero.mvm"},
 		{
 			name: "verification rejects malformed program",
 			files: fstest.MapFS{
-				"underflow.mvm": &fstest.MapFile{Data: []byte("0000:\tdrop\n")},
-			},
+				"underflow.mvm": &fstest.MapFile{Data: []byte("0000:\tdrop\n")}},
 			args:            []string{"underflow.mvm"},
 			wantErr:         true,
-			wantErrContains: "verify underflow.mvm",
-		},
+			wantErrContains: "verify underflow.mvm"},
 		{
 			name:    "requires exactly one arg",
 			files:   fstest.MapFS{},
 			args:    nil,
-			wantErr: true,
-		},
-	}
+			wantErr: true}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

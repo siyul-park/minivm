@@ -94,6 +94,14 @@ func (d *Debugger) Stop() Stop {
 	return *d.stop
 }
 
+func (d *Debugger) Reset() {
+	d.mode = debugContinue
+	d.stop = nil
+	d.skip = nil
+	d.pauseDepth = 0
+	d.depth = 0
+}
+
 func (d *Debugger) Continue() {
 	d.mode = debugContinue
 	d.resume()
@@ -135,8 +143,7 @@ func (d *Debugger) BreakIf(fn, ip int, cond func(*interp.Interpreter) bool) int 
 }
 
 func (d *Debugger) Clear(id int) bool {
-	d.init()
-	if _, ok := d.breakpoints[id]; !ok {
+	if d.lookup(id) == nil {
 		return false
 	}
 	delete(d.breakpoints, id)
@@ -144,13 +151,17 @@ func (d *Debugger) Clear(id int) bool {
 }
 
 func (d *Debugger) Enable(id int, enabled bool) bool {
-	d.init()
-	bp := d.breakpoints[id]
+	bp := d.lookup(id)
 	if bp == nil {
 		return false
 	}
 	bp.Enabled = enabled
 	return true
+}
+
+func (d *Debugger) lookup(id int) *Breakpoint {
+	d.init()
+	return d.breakpoints[id]
 }
 
 func (d *Debugger) Breakpoints() []Breakpoint {

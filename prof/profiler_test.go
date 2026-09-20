@@ -32,6 +32,29 @@ func TestProfiler_Flush(t *testing.T) {
 		require.Equal(t, float64(1), value)
 	})
 
+	t.Run("custom metrics survive collector reuse", func(t *testing.T) {
+		local := prof.NewCollector()
+		profiler := prof.New()
+		label := prof.Label{Key: "mode", Value: "profile"}
+		local.AddMetric("custom", 2, label)
+		local.AddMetric("first", 7)
+		profiler.Flush(local)
+		require.Equal(t, []prof.Metric{{Name: "vm_samples_total"}}, local.Metrics())
+		snapshot := profiler.Metrics()
+
+		local.AddMetric("custom", 3, label)
+		profiler.Flush(local)
+		profiler.Flush(local)
+		require.Equal(t, []prof.Metric{{Name: "vm_samples_total"}}, local.Metrics())
+		require.Contains(t, snapshot, prof.Metric{Name: "custom", Value: 2, Labels: []prof.Label{label}})
+		value, ok := profiler.Metric("custom", label)
+		require.True(t, ok)
+		require.Equal(t, float64(5), value)
+		value, ok = profiler.Metric("first")
+		require.True(t, ok)
+		require.Equal(t, float64(7), value)
+	})
+
 	t.Run("merges sparse ranges", func(t *testing.T) {
 		local := prof.NewCollector()
 		profiler := prof.New()
@@ -98,7 +121,18 @@ func TestProfiler_Metric(t *testing.T) {
 func TestProfiler_Metrics(t *testing.T) {
 	local := prof.NewCollector()
 	local.Add(0, 0, byte(instr.I32_CONST))
+	labels := []prof.Label{{Key: "mode", Value: "profile"}}
+	local.AddMetric("custom", 2, labels...)
 	profiler := prof.New()
 	profiler.Flush(local)
-	require.Contains(t, profiler.Metrics(), prof.Metric{Name: "vm_samples_total", Value: 1})
+	metrics := profiler.Metrics()
+	require.Contains(t, metrics, prof.Metric{Name: "vm_samples_total", Value: 1})
+	for i := range metrics {
+		if metrics[i].Name == "custom" {
+			metrics[i].Labels[0].Value = "snapshot"
+		}
+	}
+	value, ok := profiler.Metric("custom", labels...)
+	require.True(t, ok)
+	require.Equal(t, float64(2), value)
 }

@@ -130,41 +130,19 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 }
 
 func branchTail(condition jen.Code, consume, advance int, body []jen.Code) []jen.Code {
-	// Choose the handler at threading time. Forward branches retain the plain
-	// path; only backward branches carry a counter.
 	code := append([]jen.Code(nil), body...)
 	if consume > 0 {
 		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
 	}
-	taken := func(backedge bool) []jen.Code {
-		path := []jen.Code{
-			jen.Id("f").Op(":=").Id("i").Dot("fr"),
-			jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
-		}
-		if backedge {
-			path = append(path,
-				jen.Id("hits").Op("++"),
-				jen.If(jen.Id("hits").Op("<").Id("loopWarmup")).Block(jen.Return()),
-				jen.Id("hits").Op("=").Id("skew"),
-				jen.Id("skew").Op("=").Parens(jen.Id("skew").Op("+").Lit(1)).Op("%").Id("loopWarmup"),
-				jen.If(jen.Id("err").Op(":=").Id("c").Dot("backedge").Call(jen.Id("i"), jen.Id("f")), jen.Id("err").Op("!=").Nil()).Block(
-					jen.Panic(jen.Id("err")),
-				),
-			)
-		}
-		return append(path, jen.Return())
+	path := []jen.Code{
+		jen.Id("f").Op(":=").Id("i").Dot("fr"),
+		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
+		jen.Return(),
 	}
-	plain := append([]jen.Code(nil), code...)
-	plain = append(plain, jen.If(condition).Block(taken(false)...), jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
-	back := append([]jen.Code(nil), code...)
-	back = append(back, jen.If(condition).Block(taken(true)...), jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+	code = append(code, jen.If(condition).Block(path...))
+	code = append(code, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	return []jen.Code{
-		jen.If(jen.Id("c").Dot("backedge").Op("!=").Nil().Op("&&").Id("offset").Op("+").Lit(advance).Op("<=").Lit(0)).Block(
-			jen.Id("hits").Op(":=").Lit(0),
-			jen.Id("skew").Op(":=").Lit(0),
-			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(back...)),
-		),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(plain...)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(code...)),
 	}
 }
 

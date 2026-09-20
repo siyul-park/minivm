@@ -14,13 +14,12 @@ func ExampleNew() {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),
 		instr.New(instr.I32_CONST, 2),
-		instr.New(instr.I32_ADD),
-	})
+		instr.New(instr.I32_ADD)})
 	optimized, err := optimize.New(optimize.O1).Optimize(prog)
 	if err != nil {
 		panic(err)
 	}
-	vm := interp.New(optimized, interp.WithThreshold(-1))
+	vm := interp.New(optimized)
 	defer vm.Close()
 
 	if err := vm.Run(context.Background()); err != nil {

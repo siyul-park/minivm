@@ -71,16 +71,10 @@ func (k Kind) Size() int {
 	switch k {
 	case KindI1, KindI8:
 		return 1
-	case KindI32:
+	case KindI32, KindF32, KindRef:
 		return 4
-	case KindI64:
+	case KindI64, KindF64:
 		return 8
-	case KindF32:
-		return 4
-	case KindF64:
-		return 8
-	case KindRef:
-		return 4
 	default:
 		return 0
 	}

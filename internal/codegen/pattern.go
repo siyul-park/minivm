@@ -40,6 +40,11 @@ var families = []family{
 	}, compare: []instr.Opcode{instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE}},
 }
 
+// slotSources lists the slot-read opcodes whose declared type can prove
+// an array.get/struct.get container's shape at threading time: a local slot,
+// a module global, or a closure's captured upvalue.
+var slotSources = []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET}
+
 func (p pattern) width() int {
 	size := 0
 	for _, current := range p {
@@ -275,11 +280,6 @@ func op(code instr.Opcode) pattern {
 func constant[T types.Value]() pattern {
 	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T]()}}
 }
-
-// slotSources lists the slot-read opcodes whose declared type can prove
-// an array.get/struct.get container's shape at threading time: a local slot,
-// a module global, or a closure's captured upvalue.
-var slotSources = []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET}
 
 // typedContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET) whose
 // declared slot type is the concrete array type T, letting a fused consumer

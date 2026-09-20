@@ -20,12 +20,9 @@ func (p *Profiler) Flush(local *Collector) {
 }
 
 func (p *Profiler) Metric(name string, labels ...Label) (float64, bool) {
-	for _, m := range p.Metrics() {
-		if m.Name == name && sameLabels(m.Labels, labels) {
-			return m.Value, true
-		}
-	}
-	return 0, false
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.data.Metric(name, labels...)
 }
 
 func (p *Profiler) Metrics() []Metric {

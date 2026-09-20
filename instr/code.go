@@ -63,7 +63,7 @@ func Format(code []byte) string {
 			sb.WriteString(line)
 			break
 		}
-		if inst.Opcode().IsBranch() {
+		if isBranch(inst.Opcode()) {
 			line += formatBranch(inst, ip, labelAt) + "\n"
 		} else {
 			line += inst.String() + "\n"

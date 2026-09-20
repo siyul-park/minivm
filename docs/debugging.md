@@ -1,153 +1,93 @@
 # Debugging
 
-Bytecode-level debugging for embedders, tests, and tooling built around `interp.Run`.
+Bytecode-level debugger for `interp.Run`.
 
-## When to Read
+`guides/repl.md` owns REPL commands.
 
-Use this document when changing or using `interp.NewDebugger`, `interp.WithDebugger`, breakpoints, stepping, test harnesses around `interp.Run`, bytecode-location inspection, or frame and stack inspection APIs.
+## API
 
-For REPL command usage, see `docs/guides/repl.md`.
-
-## Source of Truth
-
-| Concern | File or API |
+| Concern | Owner |
 |---|---|
-| debugger API | `interp.NewDebugger` |
+| debugger | `interp.NewDebugger` |
 | runtime integration | `interp.WithDebugger` |
-| stop signal | `interp.ErrStopped` |
-| REPL debugger commands | `docs/guides/repl.md` |
+| stop result | `interp.ErrStopped` |
+| REPL commands | `guides/repl.md` |
 
-## Summary
+Debugger provides breakpoints, stepping, function/IP inspection, frames, operand stack, locals, globals, constants, and heap lookup.
 
-The debugger provides exact bytecode-level control over interpreter execution.
-
-Use it for:
-
-- breakpoints
-- step, next, and finish control
-- current function and bytecode location
-- frame inspection
-- operand stack inspection
-- local, global, constant, and heap value inspection
-
-Debugging favors precision over speed. When a debugger is installed, JIT is disabled and execution runs at exact instruction boundaries.
+`WithDebugger` sets `WithTick(1)` and execution stops at bytecode boundaries.
 
 ## Setup
-
-Create a debugger and install it with `interp.WithDebugger`.
 
 ```go
 dbg := interp.NewDebugger()
 dbg.Break(0, 5)
-
 vm := interp.New(prog, interp.WithDebugger(dbg))
 defer vm.Close()
 
 for {
     err := vm.Run(ctx)
     if errors.Is(err, interp.ErrStopped) {
-        stop := dbg.Stop()
-        _ = stop
-
+        _ = dbg.Stop()
         dbg.Continue()
         continue
     }
-    if err != nil {
-        return err
-    }
+    if err != nil { return err }
     break
 }
 ```
-
-`WithDebugger` applies the runtime settings required for exact debugging:
-
-- installs the debugger hook
-- sets `WithTick(1)`
-- disables JIT with `WithThreshold(-1)`
-- preserves exact threaded bytecode instruction boundaries
 
 ## Controls
 
 | Method | Effect |
 |---|---|
-| `Continue()` | Run until breakpoint, runtime error, context cancellation, fuel exhaustion, or program exit |
-| `Step()` | Execute one bytecode instruction, entering calls |
-| `Next()` | Execute one bytecode instruction, stepping over calls |
-| `Finish()` | Run until the current frame returns |
+| `Continue()` | run to breakpoint, error, cancellation, fuel exhaustion, or exit |
+| `Step()` | execute one instruction, entering calls |
+| `Next()` | execute one instruction, stepping over calls |
+| `Finish()` | run to current-frame return |
 
-Stops happen before the current instruction executes.
-
-When execution stops:
-
-- `Run` returns `ErrStopped`
-- `Stop()` returns the current function index, bytecode offset, and breakpoint ID
-- stepping stops use breakpoint ID `0`
+Stops occur before the next instruction executes.
 
 ## Breakpoints
 
-Breakpoints are identified by function index and bytecode offset. Function index `0` is the top-level program.
+Breakpoints use function index and bytecode offset; function `0` is top-level.
 
 ```go
 id := dbg.Break(0, 10)
-
 dbg.Enable(id, false)
 dbg.Enable(id, true)
-
 dbg.Clear(id)
+dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
 ```
 
-Use `BreakIf` for conditional breakpoints.
-
-```go
-dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool {
-    return vm.Len() > 0
-})
-```
-
-`Breakpoints()` returns a sorted snapshot by breakpoint ID. Each breakpoint records its hit count in `Hits`.
+`Breakpoints()` returns a breakpoint-ID-sorted snapshot with hit counts. `Stop()` returns function, IP, and breakpoint ID; step stops use ID `0`.
 
 ## Inspection
 
-Inspect state directly from a stopped interpreter.
-
-| Method | Use |
+| Method | Result |
 |---|---|
-| `Func()` | current function slot; `0` is top-level |
-| `IP()` | current bytecode offset |
-| `Opcode()` | opcode at the current bytecode offset |
+| `Func()` | current function; `0` = top-level |
+| `IP()` | next bytecode offset |
+| `Opcode()` | opcode at `IP()` |
 | `FP()` | active frame count |
-| `Frame(n)` | frame snapshot; `0` is current, `1` is caller |
+| `Frame(n)` | stable frame snapshot; `0` current, `1` caller |
 | `Len()` | operand stack length |
 | `Peek(n)` | operand stack value |
-| `Local(n)` | local slot value |
-| `Global(n)` | global slot value |
-| `Const(n)` | constant value |
-| `Load(addr)` | heap reference lookup |
+| `Local(n)` | local slot |
+| `Global(n)` | global slot |
+| `Const(n)` | constant |
+| `Load(addr)` | heap value |
 
-`Frame(n)` returns a stable snapshot without exposing mutable internal frame state.
+## Precision
 
-## Precision and JIT
+Debugger execution is exact bytecode execution. Optimization paths that hide instruction boundaries are disabled by `WithDebugger`.
 
-Debugging is bytecode-level.
+## Maintenance
 
-Exact stepping requires execution to stop at instruction boundaries, so `WithDebugger` disables JIT and sets tick frequency to one instruction.
+The agent `MUST` keep stop state explicit, bytecode locations stable, mutable interpreter state unexposed, and debugger semantics independent of optimization details.
 
-Normal non-debug execution may still use threaded fusion and JIT optimizations, including NOP run collapsing, call fusion, hot trace compilation, and native loop execution.
+## Related
 
-These optimizations are disabled or bypassed during debugging when they would hide bytecode boundaries.
-
-## Maintenance Notes
-
-When changing debugger behavior:
-
-- keep bytecode precision first
-- keep stop state explicit
-- avoid exposing mutable interpreter internals
-- keep function and IP semantics consistent
-- do not add JIT-specific behavior to the debugger API unless the bytecode-level contract remains clear
-
-## Related Docs
-
-- `docs/guides/repl.md` — `.debug`, breakpoints, and REPL inspection commands
-- `docs/profile.md` — tick behavior and exact sampling
-- `docs/jit-internals.md` — optimized execution paths disabled by debugging
+- `guides/repl.md`
+- `profile.md`
+- `jit-internals.md`

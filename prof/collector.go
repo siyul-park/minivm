@@ -1,6 +1,11 @@
 package prof
 
-import "strconv"
+import (
+	"slices"
+	"strconv"
+
+	"github.com/siyul-park/minivm/instr"
+)
 
 // Collector records execution samples and named metrics.
 type Collector struct {
@@ -8,7 +13,6 @@ type Collector struct {
 	funcs   []samples
 	ops     [256]uint64
 	metrics []Metric
-	jit     jitMetrics
 }
 
 type samples struct {
@@ -27,7 +31,7 @@ func (c *Collector) Value(name string, labels ...Label) float64 {
 
 func (c *Collector) Metric(name string, labels ...Label) (float64, bool) {
 	for _, m := range c.Metrics() {
-		if m.Name == name && sameLabels(m.Labels, labels) {
+		if m.Name == name && slices.Equal(m.Labels, labels) {
 			return m.Value, true
 		}
 	}
@@ -68,8 +72,10 @@ func (c *Collector) Metrics() []Metric {
 			Value:  float64(n),
 		})
 	}
-	out = append(out, c.metrics...)
-	out = c.jit.appendMetrics(out)
+	for _, metric := range c.metrics {
+		metric.Labels = append([]Label(nil), metric.Labels...)
+		out = append(out, metric)
+	}
 	return out
 }
 
@@ -87,7 +93,7 @@ func (c *Collector) Add(fn, ip int, op byte) {
 
 func (c *Collector) AddMetric(name string, value float64, labels ...Label) {
 	for i := range c.metrics {
-		if c.metrics[i].Name == name && sameLabels(c.metrics[i].Labels, labels) {
+		if c.metrics[i].Name == name && slices.Equal(c.metrics[i].Labels, labels) {
 			c.metrics[i].Value += value
 			return
 		}
@@ -156,7 +162,6 @@ func (c *Collector) merge(o *Collector) {
 	for _, m := range o.metrics {
 		c.AddMetric(m.Name, m.Value, m.Labels...)
 	}
-	c.jit.merge(&o.jit)
 }
 
 // grow ensures index fn and index ip within c.funcs[fn].ips are addressable,
@@ -164,24 +169,20 @@ func (c *Collector) merge(o *Collector) {
 // length to exactly what's needed, so callers never scan padded trailing
 // zeros the way a length-doubling grow would leave behind.
 func (c *Collector) grow(fn, ip int) {
-	if need := fn + 1; len(c.funcs) < need {
-		if cap(c.funcs) >= need {
-			c.funcs = c.funcs[:need]
-		} else {
-			funcs := make([]samples, need, max(need, 2*cap(c.funcs)))
-			copy(funcs, c.funcs)
-			c.funcs = funcs
-		}
+	c.funcs = extend(c.funcs, fn+1)
+	c.funcs[fn].ips = extend(c.funcs[fn].ips, ip+1)
+}
+
+func extend[S ~[]E, E any](s S, need int) S {
+	if len(s) >= need {
+		return s
 	}
-	if need := ip + 1; len(c.funcs[fn].ips) < need {
-		if cap(c.funcs[fn].ips) >= need {
-			c.funcs[fn].ips = c.funcs[fn].ips[:need]
-		} else {
-			ips := make([]uint64, need, max(need, 2*cap(c.funcs[fn].ips)))
-			copy(ips, c.funcs[fn].ips)
-			c.funcs[fn].ips = ips
-		}
+	if cap(s) >= need {
+		return s[:need]
 	}
+	grown := make(S, need, max(need, 2*cap(s)))
+	copy(grown, s)
+	return grown
 }
 
 // reset clears every recorded sample while keeping the backing arrays c.funcs
@@ -195,6 +196,13 @@ func (c *Collector) reset() {
 		clear(c.funcs[i].ips)
 	}
 	clear(c.ops[:])
+	clear(c.metrics)
 	c.metrics = c.metrics[:0]
-	c.jit.reset()
+}
+
+func opcodeLabel(code byte) string {
+	if typ := instr.TypeOf(instr.Opcode(code)); typ.Mnemonic != "" {
+		return typ.Mnemonic
+	}
+	return "0x" + strconv.FormatInt(int64(code), 16)
 }

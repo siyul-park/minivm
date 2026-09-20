@@ -9,17 +9,15 @@
 
 ## A compact, embeddable bytecode VM for Go
 
-Run dynamic logic inside your Go application without giving up control over
-performance, resources, or host integration.
+Run dynamic logic inside your Go application without giving up control over performance, resources, or host integration.
 
 - **Bounded execution** — limit stack, heap, call depth, fuel, hooks, and context.
 - **Direct host integration** — call Go through typed, reflection-free host functions.
-- **Adaptive performance** — start in a threaded interpreter and promote hot ARM64
-  functions and loops to native code.
+- **Explicit execution** — use the threaded interpreter with bounded resources and controlled host integration.
 
 ```bash
 go get github.com/siyul-park/minivm
-```
+```bash
 
 > Requires Go 1.26.2+. The VM core uses only the Go standard library.
 
@@ -42,10 +40,9 @@ if err := vm.Run(context.Background()); err != nil {
 }
 
 result, _ := vm.Pop() // types.I32(42)
-```
+```go
 
-minivm keeps the execution model explicit: bytecode in, controlled runtime,
-typed value out.
+minivm keeps the execution model explicit: bytecode in, controlled runtime, typed value out.
 
 ## Why minivm
 
@@ -55,7 +52,7 @@ typed value out.
 | Host integration | Typed `HostFunction` calls plus `Marshal` and `Unmarshal` for ordinary Go values |
 | Resource control | Stack, heap, frame, fuel, context, hook, and debugger controls |
 | Fast baseline | Closure-threaded dispatch with low steady-state allocation on core workloads |
-| Hot-path acceleration | Adaptive ARM64 trace JIT for supported functions and loops |
+| Execution baseline | Threaded interpreter with explicit resource controls |
 | Safe admission | Static bytecode verification before execution |
 
 ### Built for
@@ -80,35 +77,15 @@ lookup := interp.NewHostFunction(
         return []types.Boxed{types.BoxI32(price)}, nil
     },
 )
-```
+```go
 
-Parameters and results stay in typed `[]types.Boxed` values. The direct path does
-not require reflection or `interface{}` boxing.
+Parameters and results stay in typed `[]types.Boxed` values. The direct path does not require reflection or `interface{}` boxing.
 
-See [Host Integration](docs/host-integration.md) for marshaling, host objects, and
-lifetime rules.
+See [Host Integration](docs/host-integration.md) for marshaling, host objects, and lifetime rules.
 
 ## Performance
 
-minivm is designed to be useful before JIT compilation and faster when repeated
-execution makes native traces worthwhile.
-
-Representative medians measured July 15, 2026, on Apple M4 Pro,
-`darwin/arm64`, Go 1.26.2 (`ns/op`, lower is better):
-
-| Runtime | Iterative Fib (30) | Recursive Fib (35) | Sieve (256) | Branch Tree (96) |
-|---|---:|---:|---:|---:|
-| native Go | 8.337 | 20,957,448 | 247.8 | 77.39 |
-| wazero | 49.84 | 46,785,131 | 645.4 | 156.9 |
-| **minivm/default** | **71.83** | **48,426,669** | **5,052** | **228.0** |
-| minivm/threaded | 730.9 | 512,675,498 | 15,385 | 986.4 |
-
-`minivm/default` uses the adaptive ARM64 trace-JIT policy. Results vary by
-workload: unsupported paths remain in the threaded interpreter, and some
-workloads do not benefit from tracing yet.
-
-See [Benchmarks](docs/benchmarks.md) for the full matrix, memory results,
-measurement boundaries, and reproduction commands.
+The threaded interpreter is the current execution baseline. The native rebuild is planned; current measurements and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
 
 ## Runtime Tooling
 
@@ -118,19 +95,17 @@ measurement boundaries, and reproduction commands.
 if err := program.Verify(prog); err != nil {
     log.Fatal(err)
 }
-```
+```go
 
-The verifier rejects malformed control flow, invalid stack behavior, and type
-mismatches before execution. The `run` CLI verifies loaded programs by default.
+The verifier rejects malformed control flow, invalid stack behavior, and type mismatches before execution. The `run` CLI verifies loaded programs by default.
 
 ### Optimize ahead of execution
 
 ```go
 prog, err := optimize.New(optimize.O2).Optimize(prog)
-```
+```go
 
-Optimization levels range from local constant folding and deduplication to
-dead-code elimination and cross-block global value numbering.
+Optimization levels range from local constant folding and deduplication to dead-code elimination and cross-block global value numbering.
 
 ### Control execution
 
@@ -140,28 +115,21 @@ vm := interp.New(prog,
     interp.WithHeap(512),
     interp.WithFrame(256),
     interp.WithFuel(10_000),
-    interp.WithThreshold(4096),
     interp.WithTick(128),
 )
-```
+```text
 
-Use hooks for policy checks and `NewDebugger` with `WithDebugger` for
-instruction-accurate breakpoints and stepping.
+Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instruction-accurate breakpoints and stepping.
 
 ## Architecture
 
 ```text
-Program -> verifier / optimizer -> threaded interpreter -> ARM64 trace JIT
-                                   |                    |
-                                   +-- always valid ----+-- hot paths only
-```
+Program -> verifier / optimizer -> threaded interpreter
+```text
 
-The threaded interpreter is the complete execution engine. The trace JIT is an
-adaptive acceleration layer: supported hot paths compile to native ARM64 code,
-while every unsupported or cold path continues in the interpreter.
+The threaded interpreter is the complete current execution engine. Native compilation is a planned rebuild and is not part of the current runtime.
 
-The instruction set is WebAssembly-inspired but intentionally custom. It uses
-one-byte opcodes with fixed-width or length-prefixed operands.
+The instruction set is WebAssembly-inspired but intentionally custom. It uses one-byte opcodes with fixed-width or length-prefixed operands.
 
 - [Architecture](docs/architecture.md)
 - [Instruction Set](docs/instruction-set.md)
@@ -175,12 +143,11 @@ one-byte opcodes with fixed-width or length-prefixed operands.
 | Threaded interpreter | ✅ Available |
 | Static bytecode verifier | ✅ Available |
 | AOT optimizer (`O1`-`O3`) | ✅ Available |
-| ARM64 trace JIT | ✅ Available |
+| ARM64 native rebuild | ⬜ Planned |
 | Debugger and profiler | ✅ Available |
-| x86-64 JIT | 🔲 Planned |
+| x86-64 native backend | 🔲 Not implemented |
 
-The x86-64 assembler package currently provides a non-emitting placeholder.
-See the [Roadmap](docs/roadmap.md) for current priorities.
+The x86-64 assembler backend is not present. See the [Roadmap](docs/roadmap.md) for current priorities.
 
 ## Documentation
 

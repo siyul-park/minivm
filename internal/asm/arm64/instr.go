@@ -215,64 +215,6 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
-	return newInst(op, regOperand(dst), regOperand(src1), regOperand(src2))
-}
-
-func newReg2(op Op, dst, src asm.Reg) asm.Instruction {
-	return newInst(op, regOperand(dst), regOperand(src))
-}
-
-func newReg1(op Op, reg asm.Reg) asm.Instruction {
-	return newInst(op, nil, regOperand(reg))
-}
-
-func newRegImm(op Op, dst, src asm.Reg, v int64) asm.Instruction {
-	return newInst(op, regOperand(dst), regOperand(src), imm(v))
-}
-
-func newRegImm2(op Op, dst, src asm.Reg, v1, v2 int64) asm.Instruction {
-	return newInst(op, regOperand(dst), regOperand(src), imm(v1), imm(v2))
-}
-
-func newRegMem(op Op, dst, base asm.Reg, offset int64) asm.Instruction {
-	return newInst(op, regOperand(dst), asm.Mem(regOperand(base), offset))
-}
-
-func newMemReg(op Op, src, base asm.Reg, offset int64) asm.Instruction {
-	return newInst(op, asm.Mem(regOperand(base), offset), regOperand(src))
-}
-
-func newCmp(op Op, src1, src2 asm.Reg) asm.Instruction {
-	return newInst(op, nil, regOperand(src1), regOperand(src2))
-}
-
-func newCmpImm(op Op, src asm.Reg, v int64) asm.Instruction {
-	return newInst(op, nil, regOperand(src), imm(v))
-}
-
-func newBranch(op Op, offset int64) asm.Instruction {
-	return newInst(op, nil, nil, imm(offset))
-}
-
-func newInst(op Op, dst asm.Operand, srcs ...asm.Operand) asm.Instruction {
-	var src1, src2, src3 asm.Operand
-	if len(srcs) > 0 {
-		src1 = srcs[0]
-	}
-	if len(srcs) > 1 {
-		src2 = srcs[1]
-	}
-	if len(srcs) > 2 {
-		src3 = srcs[2]
-	}
-	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2, Src3: src3}
-}
-
-// ---------------------------------------------------------------------------
 // Arithmetic
 // ---------------------------------------------------------------------------
 
@@ -718,6 +660,64 @@ func MSR(sysreg uint16, src asm.Reg) asm.Instruction {
 func ISB() asm.Instruction { return newInst(OpISB, nil) }
 func DSB() asm.Instruction { return newInst(OpDSB, nil) }
 func DMB() asm.Instruction { return newInst(OpDMB, nil) }
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
+	return newInst(op, regOperand(dst), regOperand(src1), regOperand(src2))
+}
+
+func newReg2(op Op, dst, src asm.Reg) asm.Instruction {
+	return newInst(op, regOperand(dst), regOperand(src))
+}
+
+func newReg1(op Op, reg asm.Reg) asm.Instruction {
+	return newInst(op, nil, regOperand(reg))
+}
+
+func newRegImm(op Op, dst, src asm.Reg, v int64) asm.Instruction {
+	return newInst(op, regOperand(dst), regOperand(src), imm(v))
+}
+
+func newRegImm2(op Op, dst, src asm.Reg, v1, v2 int64) asm.Instruction {
+	return newInst(op, regOperand(dst), regOperand(src), imm(v1), imm(v2))
+}
+
+func newRegMem(op Op, dst, base asm.Reg, offset int64) asm.Instruction {
+	return newInst(op, regOperand(dst), asm.Mem(regOperand(base), offset))
+}
+
+func newMemReg(op Op, src, base asm.Reg, offset int64) asm.Instruction {
+	return newInst(op, asm.Mem(regOperand(base), offset), regOperand(src))
+}
+
+func newCmp(op Op, src1, src2 asm.Reg) asm.Instruction {
+	return newInst(op, nil, regOperand(src1), regOperand(src2))
+}
+
+func newCmpImm(op Op, src asm.Reg, v int64) asm.Instruction {
+	return newInst(op, nil, regOperand(src), imm(v))
+}
+
+func newBranch(op Op, offset int64) asm.Instruction {
+	return newInst(op, nil, nil, imm(offset))
+}
+
+func newInst(op Op, dst asm.Operand, srcs ...asm.Operand) asm.Instruction {
+	var src1, src2, src3 asm.Operand
+	if len(srcs) > 0 {
+		src1 = srcs[0]
+	}
+	if len(srcs) > 1 {
+		src2 = srcs[1]
+	}
+	if len(srcs) > 2 {
+		src3 = srcs[2]
+	}
+	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2, Src3: src3}
+}
 
 func regOperand(reg asm.Reg) asm.Operand {
 	switch r := reg.(type) {

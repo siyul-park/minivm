@@ -17,8 +17,7 @@ import (
 // replacement B would be out of range is rejected so Build falls back to
 // ErrBranchOutOfRange.
 func TestArch_Relax(t *testing.T) {
-	relaxer, ok := arm64.New().(asm.Relaxer)
-	require.True(t, ok)
+	relaxer := arm64.New()
 
 	label := asm.Label(7)
 	target := asm.LabelOperand{ID: label}
@@ -46,12 +45,12 @@ func TestArch_Relax(t *testing.T) {
 		}
 		for _, pair := range pairs {
 			repl, relaxed := relaxer.Relax(arm64.BCondLabel(pair[0], label), 1<<20)
-			require.True(t, relaxed, pair[0])
-			require.Len(t, repl, 2, pair[0])
-			require.Equal(t, uint16(pair[1]), repl[0].Op, pair[0])
-			require.Equal(t, skip, repl[0].Src2, pair[0])
-			require.Equal(t, uint16(arm64.OpB), repl[1].Op, pair[0])
-			require.Equal(t, target, repl[1].Src2, pair[0])
+			require.True(t, relaxed)
+			require.Len(t, repl, 2)
+			require.Equal(t, uint16(pair[1]), repl[0].Op)
+			require.Equal(t, skip, repl[0].Src2)
+			require.Equal(t, uint16(arm64.OpB), repl[1].Op)
+			require.Equal(t, target, repl[1].Src2)
 		}
 	})
 

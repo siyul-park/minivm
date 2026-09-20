@@ -22,13 +22,6 @@ type labelTable struct {
 	refLine map[string]int
 }
 
-// namedFixup pairs a pending branch fixup with the source line that
-// referenced it, for error reporting only; it parallels Builder.fixups.
-type namedFixup struct {
-	label Label
-	line  int
-}
-
 // branchRef is one symbolic operand of a placeholder branch instruction,
 // awaiting resolution to the label's byte offset.
 type branchRef struct {
@@ -129,8 +122,13 @@ func ParseU32(code []byte, offset int) int {
 // with the line number for context.
 func ParseAll(r io.Reader) ([]Instruction, error) {
 	b := NewBuilder()
-	lt := newLabelTable(b)
-	var refs []namedFixup
+	lt := &labelTable{
+		b:       b,
+		byName:  map[string]Label{},
+		defLine: map[string]int{},
+		refLine: map[string]int{},
+	}
+	var lines []int
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
@@ -154,7 +152,7 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 			return nil, fmt.Errorf("line %d: unknown mnemonic: %q", line, fields[0])
 		}
 
-		if op.IsBranch() {
+		if isBranch(op) {
 			inst, brefs, err := parseBranch(op, fields[0], fields[1:], lt, line)
 			if err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)
@@ -163,7 +161,7 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 			b.instrs = append(b.instrs, inst)
 			for _, br := range brefs {
 				b.fixups = append(b.fixups, fixup{branch: idx, operand: br.operand, label: br.label})
-				refs = append(refs, namedFixup{label: br.label, line: line})
+				lines = append(lines, line)
 			}
 			continue
 		}
@@ -185,7 +183,7 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 
 	instrs, err := b.Assemble()
 	if err != nil {
-		return nil, describeAssembleErr(b, lt, refs, err)
+		return nil, lt.describe(lines, err)
 	}
 	return instrs, nil
 }
@@ -271,26 +269,6 @@ func isLabelIdent(s string) bool {
 	return true
 }
 
-func newLabelTable(b *Builder) *labelTable {
-	return &labelTable{
-		b:       b,
-		byName:  map[string]Label{},
-		defLine: map[string]int{},
-		refLine: map[string]int{},
-	}
-}
-
-// get returns name's label handle, allocating one on first mention.
-func (lt *labelTable) get(name string) Label {
-	if l, ok := lt.byName[name]; ok {
-		return l
-	}
-	l := lt.b.Label()
-	lt.byName[name] = l
-	lt.names = append(lt.names, name)
-	return l
-}
-
 // define binds name to the next instruction Builder emits, failing if an
 // earlier line already defined it.
 func (lt *labelTable) define(name string, line int) error {
@@ -311,9 +289,15 @@ func (lt *labelTable) reference(name string, line int) Label {
 	return lt.get(name)
 }
 
-// name returns the identifier a label handle was created from.
-func (lt *labelTable) name(l Label) string {
-	return lt.names[int(l)]
+// get returns name's label handle, allocating one on first mention.
+func (lt *labelTable) get(name string) Label {
+	if l, ok := lt.byName[name]; ok {
+		return l
+	}
+	l := lt.b.Label()
+	lt.byName[name] = l
+	lt.names = append(lt.names, name)
+	return l
 }
 
 // parseBranch parses the operand fields of a br/br_if/br_table line. Each
@@ -378,16 +362,10 @@ func parseBranch(op Opcode, mnemonic string, fields []string, lt *labelTable, li
 	}
 }
 
-// isNumericToken reports whether tok looks like the start of a numeric
-// literal (as parseOperand accepts) rather than a label identifier.
-func isNumericToken(tok string) bool {
-	return tok != "" && (tok[0] == '-' || (tok[0] >= '0' && tok[0] <= '9'))
-}
-
 // parseBranchOperand parses one branch operand token, returning either its
 // resolved numeric value or a pending label reference.
 func parseBranchOperand(tok string, lt *labelTable, line int) (uint64, *Label, error) {
-	if isNumericToken(tok) {
+	if tok != "" && (tok[0] == '-' || (tok[0] >= '0' && tok[0] <= '9')) {
 		v, err := parseOperand(tok, 2)
 		if err != nil {
 			return 0, nil, err
@@ -401,10 +379,8 @@ func parseBranchOperand(tok string, lt *labelTable, line int) (uint64, *Label, e
 	return 0, &l, nil
 }
 
-// describeAssembleErr replaces a Builder.Assemble failure, which names an
-// unresolved label only by its opaque handle, with one naming the
-// identifier and the line ParseAll could not resolve.
-func describeAssembleErr(b *Builder, lt *labelTable, refs []namedFixup, err error) error {
+func (lt *labelTable) describe(lines []int, err error) error {
+	b := lt.b
 	switch {
 	case errors.Is(err, ErrUnboundLabel):
 		for _, name := range lt.names {
@@ -422,9 +398,9 @@ func describeAssembleErr(b *Builder, lt *labelTable, refs []namedFixup, err erro
 			if target < 0 {
 				continue
 			}
-			offset := pos[target] - (pos[fx.branch] + b.instrs[fx.branch].Width())
+			offset := pos[target] - pos[fx.branch+1]
 			if offset < math.MinInt16 || offset > math.MaxInt16 {
-				return fmt.Errorf("line %d: %w: %q", refs[i].line, ErrOffsetRange, lt.name(fx.label))
+				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[int(fx.label)])
 			}
 		}
 	}

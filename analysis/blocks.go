@@ -23,22 +23,9 @@ var ErrInvalidJump = errors.New("invalid jump")
 
 var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BlocksAnalysis)(nil)
 
-func NewBlocksAnalysis() *BlocksAnalysis {
-	return &BlocksAnalysis{}
-}
-
 // Blocks builds the control-flow blocks for fn.
 func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
-	mark := func(ip, target int) error {
-		if target < 0 || target > len(fn.Code) {
-			return invalidJumpError(ip, target)
-		}
-		if target < len(fn.Code) {
-			offsets = append(offsets, target)
-		}
-		return nil
-	}
 	for ip := 0; ip < len(fn.Code); {
 		inst := instr.Instruction(fn.Code[ip:])
 		next := ip + inst.Width()
@@ -49,8 +36,11 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 			}
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
 			for _, offset := range instr.Targets(fn.Code, ip) {
-				if err := mark(ip, offset); err != nil {
-					return nil, err
+				if offset < 0 || offset > len(fn.Code) {
+					return nil, invalidJumpError(ip, offset)
+				}
+				if offset < len(fn.Code) {
+					offsets = append(offsets, offset)
 				}
 			}
 			if inst.Opcode() != instr.BR_TABLE && next < len(fn.Code) {
@@ -88,15 +78,15 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	}
 
 	indexByStart := make(map[int]int, len(blocks))
-	for idx, block := range blocks {
-		indexByStart[block.Start] = idx
+	for j, block := range blocks {
+		indexByStart[block.Start] = j
 	}
 
-	for j, blk := range blocks {
-		ip := blk.Start
-		for ip < blk.End {
+	for j, block := range blocks {
+		ip := block.Start
+		for ip < block.End {
 			inst := instr.Instruction(fn.Code[ip:])
-			if ip+inst.Width() >= blk.End {
+			if ip+inst.Width() >= block.End {
 				break
 			}
 			ip += inst.Width()
@@ -115,23 +105,25 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 				}
 			}
 			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
-				blk.Succs = append(blk.Succs, j+1)
-				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
+				link(blocks, indexByStart, j, blocks[j+1].Start)
 			}
 		default:
 			if j+1 < len(blocks) {
-				blk.Succs = append(blk.Succs, j+1)
-				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
+				link(blocks, indexByStart, j, blocks[j+1].Start)
 			}
 		}
 	}
-	for _, b := range blocks {
-		slices.Sort(b.Succs)
-		b.Succs = slices.Compact(b.Succs)
-		slices.Sort(b.Preds)
-		b.Preds = slices.Compact(b.Preds)
+	for _, block := range blocks {
+		slices.Sort(block.Succs)
+		block.Succs = slices.Compact(block.Succs)
+		slices.Sort(block.Preds)
+		block.Preds = slices.Compact(block.Preds)
 	}
 	return blocks, nil
+}
+
+func NewBlocksAnalysis() *BlocksAnalysis {
+	return &BlocksAnalysis{}
 }
 
 func (p *BlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {

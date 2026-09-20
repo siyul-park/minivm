@@ -882,7 +882,7 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 // sortStressListing builds the sortstress kernel. minivm has no sort opcode,
 // so the sort is written directly in bytecode as an insertion sort over the
 // i32 array: it is a simple, obviously-correct in-place algorithm and the
-// least code among the alternatives, keeping the kernel a measure of VM
+// least code among the options, keeping the kernel a measure of VM
 // dispatch rather than of an algorithm choice. The LCG state overflows i32
 // (s*1103515245 can reach ~2.4e18), so make_list (constant 0; params: 0=n,
 // 1=seed; result and local 2=xs are []i32; locals 3=s(i64),4=i) keeps s in

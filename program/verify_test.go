@@ -41,7 +41,7 @@ func TestVerify(t *testing.T) {
 			if typ.Pop != nil || typ.Push != nil {
 				continue
 			}
-			require.NotEmpty(t, policies[op], "%s has neither a fixed stack effect nor an explicit verifier policy", typ.Mnemonic)
+			require.NotEmpty(t, policies[op])
 		}
 	})
 	t.Run("valid/arithmetic", func(t *testing.T) {

@@ -116,11 +116,11 @@ func (b *Builder) Assemble() ([]Instruction, error) {
 	}
 
 	for _, fx := range b.fixups {
-		target := b.labels[fx.label]
-		if target < 0 {
-			return nil, fmt.Errorf("%w: %d", ErrUnboundLabel, fx.label)
+		target, err := b.resolve(pos, fx.label)
+		if err != nil {
+			return nil, err
 		}
-		offset := pos[target] - (pos[fx.branch] + b.instrs[fx.branch].Width())
+		offset := target - pos[fx.branch+1]
 		if offset < math.MinInt16 || offset > math.MaxInt16 {
 			return nil, fmt.Errorf("%w: %d", ErrOffsetRange, offset)
 		}

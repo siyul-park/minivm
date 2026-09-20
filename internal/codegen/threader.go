@@ -23,8 +23,6 @@ func threaderType(file *jen.File) {
 		jen.Id("code").Index().Byte(),
 		jen.Id("ip").Int(),
 		jen.Id("exact").Bool(),
-		jen.Id("entry").Func().Params(jen.Op("*").Id("Interpreter")),
-		jen.Id("backedge").Func().Params(jen.Op("*").Id("Interpreter"), jen.Op("*").Id("frame")).Error(),
 	)
 }
 

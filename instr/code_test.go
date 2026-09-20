@@ -10,7 +10,11 @@ import (
 func TestMarshal(t *testing.T) {
 	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
 	code := instr.Marshal(insts)
-	require.Len(t, code, 11)
+	require.Equal(t, []byte{
+		byte(instr.I32_CONST), 1, 0, 0, 0,
+		byte(instr.I32_CONST), 2, 0, 0, 0,
+		byte(instr.I32_ADD),
+	}, code)
 }
 
 func TestTargets(t *testing.T) {

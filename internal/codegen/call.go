@@ -71,7 +71,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 		}
 		functionBody = append(functionBody, replaceFrame(
 			target{code: jen.Id("code"), addr: jen.Id("code"), upvals: jen.Id("upvals"), ref: jen.Id("ref")},
-			1, true, 1, "inlineTail2",
+			1, true, 1,
 		)...)
 		function = []jen.Code{jen.Block(functionBody...)}
 
@@ -85,7 +85,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 		}
 		closureBody = append(closureBody, replaceFrame(
 			target{code: jen.Id("code"), addr: jen.Id("code"), upvals: jen.Id("upvals"), ref: jen.Id("ref")},
-			1, true, 1, "inlineTail3",
+			1, true, 1,
 		)...)
 		closure = []jen.Code{
 			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")),
@@ -214,16 +214,8 @@ func pushFrame(callee target, targetSlots int, releaseTarget bool, advance int, 
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 		jen.Id("i").Dot("fp").Op("++"),
 		jen.Id("i").Dot("fr").Op("=").Id("f"),
-		frameEntered(),
 	)
 	return body
-}
-
-// frameEntered emits the callee-entry hook after the new frame becomes current.
-func frameEntered() jen.Code {
-	return jen.If(jen.Id("i").Dot("trigger").Op("!=").Lit(0)).Block(
-		jen.Id("c").Dot("entry").Call(jen.Id("i")),
-	)
 }
 
 func reuseFrame(callee target, typ, locals jen.Code, advance int) []jen.Code {
@@ -232,11 +224,11 @@ func reuseFrame(callee target, typ, locals jen.Code, advance int) []jen.Code {
 		jen.Id("returns").Op(":=").Len(jen.Add(typ).Dot("Returns")),
 		jen.Id("locals").Op(":=").Add(locals),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(replaceFrame(callee, 0, false, advance, "")...)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(replaceFrame(callee, 0, false, advance)...)),
 	}
 }
 
-func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance int, label string) []jen.Code {
+func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance int) []jen.Code {
 	if targetSlots == 1 {
 		body := []jen.Code{
 			jen.If(jen.Id("i").Dot("sp").Op("<=").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -260,7 +252,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 				jen.Id("i").Dot("fp").Op("++"),
 				jen.Id("i").Dot("fr").Op("=").Id("f"),
-				jen.Goto().Id(label),
+				jen.Return(),
 			),
 			jen.Id("f").Op("=").Id("i").Dot("fr"),
 			jen.Id("base").Op("=").Id("f").Dot("bp"),
@@ -283,8 +275,6 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.Id("f").Dot("returns").Op("=").Id("returns"),
 			jen.Id("f").Dot("release").Op("=").Add(jen.Lit(releaseTarget)),
 			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
-			jen.Id(label).Op(":").Add(jen.Null()),
-			frameEntered(),
 		}
 		return body
 	}
@@ -310,7 +300,6 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 			jen.Id("i").Dot("fp").Op("++"),
 			jen.Id("i").Dot("fr").Op("=").Id("f"),
-			frameEntered(),
 			jen.Return(),
 		),
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
@@ -333,7 +322,6 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 		jen.Id("f").Dot("returns").Op("=").Id("returns"),
 		jen.Id("f").Dot("release").Op("=").False(),
 		jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
-		frameEntered(),
 	)
 	return body
 }

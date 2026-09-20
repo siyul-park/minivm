@@ -32,7 +32,7 @@ func FuzzParseType(f *testing.F) {
 		}
 		roundTrip, err := types.Parse(typ.String())
 		require.NoError(t, err)
-		require.True(t, typ.Equals(roundTrip), "type %q formatted as %q", value, typ.String())
+		require.True(t, typ.Equals(roundTrip))
 	})
 }
 

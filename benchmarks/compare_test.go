@@ -276,10 +276,10 @@ func benchmarkCPython(b *testing.B, source string, want int32) {
 	b.ResetTimer()
 	err = cmd.Run()
 	b.StopTimer()
-	require.NoError(b, err, "cpython stderr: %s", stderr.String())
+	require.NoError(b, err)
 
 	elapsed, err := strconv.ParseInt(strings.TrimSpace(stdout.String()), 10, 64)
-	require.NoError(b, err, "cpython stdout %q stderr: %s", stdout.String(), stderr.String())
+	require.NoError(b, err)
 	b.ReportMetric(float64(elapsed)/float64(b.N), "ns/op")
 }
 

@@ -82,11 +82,10 @@ func (b *Builder) Const(v types.Value) int {
 	if typ == nil {
 		return -1
 	}
-	comparable := typ.Comparable()
-	if comparable {
+	if typ.Comparable() {
 		for idx, existing := range b.constants {
-			typ := reflect.TypeOf(existing)
-			if typ == nil || !typ.Comparable() {
+			etype := reflect.TypeOf(existing)
+			if etype == nil || !etype.Comparable() {
 				continue
 			}
 			if existing == v {

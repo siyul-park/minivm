@@ -15,7 +15,7 @@ func ExampleNewDebugger() {
 	debugger := debug.NewDebugger()
 	debugger.Break(0, 0)
 	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
-	vm := interp.New(prog, interp.WithHook(debugger.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+	vm := interp.New(prog, interp.WithHook(debugger.Hook), interp.WithTick(1))
 	defer vm.Close()
 
 	err := vm.Run(context.Background())

@@ -10,7 +10,7 @@ import "C"
 
 import "unsafe"
 
-func (m memory) flushICache() {
+func flushICache(m memory) {
 	if len(m) == 0 {
 		return
 	}

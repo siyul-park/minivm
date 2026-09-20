@@ -1,9 +1,6 @@
-# Measured on the CI runner, which is amd64. The arm64 JIT backend does not
-# compile there, but the portable planner, tracer, and JIT core do - and the
-# tests that exercise them skip on amd64, so they count as uncovered. The
-# number is therefore lower than an arm64 run reports. Raising it needs
-# portable tests for those files, not a different threshold.
-coverage-min ?= 72.5
+# Measured on the coverage runner after the JIT removal; the next rebuild may
+# change this baseline only with measured coverage evidence.
+coverage-min ?= 83.7
 benchmark-pr-time ?= 100ms
 benchmark-time ?= 1s
 benchmark-count ?= 5
@@ -93,7 +90,7 @@ benchmark: benchmark-core
 benchmark-pr:
 	@root="$$( \
 		go test -run='^$$' -bench='^BenchmarkNew$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^(i32\.const_0x00000001;_nop|unreachable|const\.get_0x0000;_call|i32\.const_0x00000001;_array\.new_default_0x0000;_i32\.const_0x00000005;_array\.get)$$/^(Threaded|Fused|JITWarm)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^(i32\.const_0x00000001;_nop|unreachable|const\.get_0x0000;_call|i32\.const_0x00000001;_array\.new_default_0x0000;_i32\.const_0x00000005;_array\.get)$$/^(Threaded|Fused)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkInterpreter_Reset$$/^(Scalar|Heap)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkPool_(Get|Put)$$/^Uncontended$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp \
 	)" || { status=$$?; printf '%s\n' "$$root"; exit $$status; }; \
@@ -112,10 +109,7 @@ benchmark-pr:
 		'BenchmarkPool_Put/Uncontended'; do \
 		printf '%s\n' "$$root" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
 	done; \
-	if [ "$$(go env GOARCH)" = arm64 ]; then \
-		printf '%s\n' "$$root" | grep -q '^BenchmarkInterpreter_Run/i32.const_0x00000001;_nop/JITWarm-' || { printf '%s\n' 'missing ARM64 JIT warm benchmark'; exit 1; }; \
-	fi
-	@kernels="$$(cd benchmarks && \
+	kernels="$$(cd benchmarks && \
 		go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./... && \
 		go test -run='^$$' -bench='^BenchmarkCall_RecursiveFib$$/^(20|35)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
 	printf '%s\n' "$$kernels"; \

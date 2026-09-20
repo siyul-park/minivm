@@ -90,9 +90,9 @@ var (
 	typeVMMarshaler   = reflect.TypeFor[VMMarshaler]()
 	typeVMUnmarshaler = reflect.TypeFor[VMUnmarshaler]()
 
-	// natives are the VM runtime types a Go value may hold directly. They
+	// runtimeTypes are VM types a Go value may hold directly. They
 	// bypass structural compilation and pass through as themselves.
-	natives = map[reflect.Type]types.Type{
+	runtimeTypes = map[reflect.Type]types.Type{
 		reflect.TypeFor[types.I32]():    types.TypeI32,
 		reflect.TypeFor[types.I64]():    types.TypeI64,
 		reflect.TypeFor[types.F32]():    types.TypeF32,
@@ -101,6 +101,140 @@ var (
 		reflect.TypeFor[types.Boxed]():  types.TypeAny,
 		reflect.TypeFor[types.String](): types.TypeString,
 	}
+)
+
+// leaves holds the conversion of every primitive Go kind, indexed by that kind.
+// Only the vm, value, box, and set fields are filled; compile copies them onto
+// the conversion it is building. Selecting an entry once at compile time is
+// what keeps field access free of a per-read kind switch.
+var leaves = [...]conversion{
+	reflect.Bool: {
+		vm:    types.TypeI1,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I1(*(*bool)(p)), nil },
+		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI1(*(*bool)(p)), nil },
+		set:   setBool,
+	},
+	reflect.Int8: {
+		vm:    types.TypeI8,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int8)(p)), nil },
+		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI8(*(*int8)(p)), nil },
+		set:   setSigned[int8](),
+	},
+	reflect.Int16: {
+		vm:    types.TypeI32,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int16)(p)), nil },
+		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return types.BoxI32(int32(*(*int16)(p))), nil
+		},
+		set: setSigned[int16](),
+	},
+	reflect.Int32: {
+		vm:    types.TypeI32,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int32)(p)), nil },
+		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI32(*(*int32)(p)), nil },
+		set:   setSigned[int32](),
+	},
+	reflect.Int: {
+		vm:    types.TypeI64,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I64(*(*int)(p)), nil },
+		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return e.boxI64(int64(*(*int)(p)))
+		},
+		set: setSigned[int](),
+	},
+	reflect.Int64: {
+		vm:    types.TypeI64,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I64(*(*int64)(p)), nil },
+		box:   func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) { return e.boxI64(*(*int64)(p)) },
+		set:   setSigned[int64](),
+	},
+	reflect.Uint8: {
+		vm:    types.TypeI32,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*uint8)(p)), nil },
+		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return types.BoxI32(int32(*(*uint8)(p))), nil
+		},
+		set: setUnsigned[uint8](),
+	},
+	reflect.Uint16: {
+		vm:    types.TypeI32,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*uint16)(p)), nil },
+		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return types.BoxI32(int32(*(*uint16)(p))), nil
+		},
+		set: setUnsigned[uint16](),
+	},
+	reflect.Uint32: {
+		vm: types.TypeI32,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
+			return types.I32(int32(*(*uint32)(p))), nil
+		},
+		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return types.BoxI32(int32(*(*uint32)(p))), nil
+		},
+		set: setUnsigned[uint32](),
+	},
+	reflect.Uint: {
+		vm: types.TypeI64,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
+			return types.I64(int64(*(*uint)(p))), nil
+		},
+		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return e.boxI64(int64(*(*uint)(p)))
+		},
+		set: setUnsigned[uint](),
+	},
+	reflect.Uint64: {
+		vm: types.TypeI64,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
+			return types.I64(int64(*(*uint64)(p))), nil
+		},
+		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return e.boxI64(int64(*(*uint64)(p)))
+		},
+		set: setUnsigned[uint64](),
+	},
+	reflect.Uintptr: {
+		vm: types.TypeI64,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
+			return types.I64(int64(*(*uintptr)(p))), nil
+		},
+		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return e.boxI64(int64(*(*uintptr)(p)))
+		},
+		set: setUnsigned[uintptr](),
+	},
+	reflect.Float32: {
+		vm:    types.TypeF32,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F32(*(*float32)(p)), nil },
+		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF32(*(*float32)(p)), nil },
+		set:   setFloat[float32](),
+	},
+	reflect.Float64: {
+		vm:    types.TypeF64,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F64(*(*float64)(p)), nil },
+		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF64(*(*float64)(p)), nil },
+		set:   setFloat[float64](),
+	},
+	reflect.String: {
+		vm:    types.TypeString,
+		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.String(*(*string)(p)), nil },
+		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			return e.alloc(types.String(*(*string)(p)))
+		},
+		set: setString,
+	},
+}
+
+var (
+	complexF32 = types.NewStructType(
+		types.NewStructField(types.TypeF32, types.FieldWithName("Real")),
+		types.NewStructField(types.TypeF32, types.FieldWithName("Imag")),
+	)
+	complexF64 = types.NewStructType(
+		types.NewStructField(types.TypeF64, types.FieldWithName("Real")),
+		types.NewStructField(types.TypeF64, types.FieldWithName("Imag")),
+	)
 )
 
 // WithMarshaler registers m as the conversion of Go type t into a VM value. vm
@@ -270,9 +404,9 @@ func (p *conversion) converting() bool {
 	return true
 }
 
-// native resolves a Go type that already holds a VM value.
+// runtime resolves a Go type that already holds a VM value.
 func (p *conversion) native() bool {
-	vm, ok := natives[p.typ]
+	vm, ok := runtimeTypes[p.typ]
 	if !ok {
 		if !p.typ.Implements(typeValue) {
 			return false
@@ -475,129 +609,6 @@ func (p *conversion) complete() {
 	}
 }
 
-// leaves holds the conversion of every primitive Go kind, indexed by that kind.
-// Only the vm, value, box, and set fields are filled; compile copies them onto
-// the conversion it is building. Selecting an entry once at compile time is
-// what keeps field access free of a per-read kind switch.
-var leaves = [...]conversion{
-	reflect.Bool: {
-		vm:    types.TypeI1,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I1(*(*bool)(p)), nil },
-		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI1(*(*bool)(p)), nil },
-		set:   setBool,
-	},
-	reflect.Int8: {
-		vm:    types.TypeI8,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int8)(p)), nil },
-		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI8(*(*int8)(p)), nil },
-		set:   setSigned[int8](),
-	},
-	reflect.Int16: {
-		vm:    types.TypeI32,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int16)(p)), nil },
-		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return types.BoxI32(int32(*(*int16)(p))), nil
-		},
-		set: setSigned[int16](),
-	},
-	reflect.Int32: {
-		vm:    types.TypeI32,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int32)(p)), nil },
-		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI32(*(*int32)(p)), nil },
-		set:   setSigned[int32](),
-	},
-	reflect.Int: {
-		vm:    types.TypeI64,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I64(*(*int)(p)), nil },
-		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return e.boxI64(int64(*(*int)(p)))
-		},
-		set: setSigned[int](),
-	},
-	reflect.Int64: {
-		vm:    types.TypeI64,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I64(*(*int64)(p)), nil },
-		box:   func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) { return e.boxI64(*(*int64)(p)) },
-		set:   setSigned[int64](),
-	},
-	reflect.Uint8: {
-		vm:    types.TypeI32,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*uint8)(p)), nil },
-		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return types.BoxI32(int32(*(*uint8)(p))), nil
-		},
-		set: setUnsigned[uint8](),
-	},
-	reflect.Uint16: {
-		vm:    types.TypeI32,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*uint16)(p)), nil },
-		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return types.BoxI32(int32(*(*uint16)(p))), nil
-		},
-		set: setUnsigned[uint16](),
-	},
-	reflect.Uint32: {
-		vm: types.TypeI32,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
-			return types.I32(int32(*(*uint32)(p))), nil
-		},
-		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return types.BoxI32(int32(*(*uint32)(p))), nil
-		},
-		set: setUnsigned[uint32](),
-	},
-	reflect.Uint: {
-		vm: types.TypeI64,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
-			return types.I64(int64(*(*uint)(p))), nil
-		},
-		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return e.boxI64(int64(*(*uint)(p)))
-		},
-		set: setUnsigned[uint](),
-	},
-	reflect.Uint64: {
-		vm: types.TypeI64,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
-			return types.I64(int64(*(*uint64)(p))), nil
-		},
-		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return e.boxI64(int64(*(*uint64)(p)))
-		},
-		set: setUnsigned[uint64](),
-	},
-	reflect.Uintptr: {
-		vm: types.TypeI64,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
-			return types.I64(int64(*(*uintptr)(p))), nil
-		},
-		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return e.boxI64(int64(*(*uintptr)(p)))
-		},
-		set: setUnsigned[uintptr](),
-	},
-	reflect.Float32: {
-		vm:    types.TypeF32,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F32(*(*float32)(p)), nil },
-		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF32(*(*float32)(p)), nil },
-		set:   setFloat[float32](),
-	},
-	reflect.Float64: {
-		vm:    types.TypeF64,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F64(*(*float64)(p)), nil },
-		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF64(*(*float64)(p)), nil },
-		set:   setFloat[float64](),
-	},
-	reflect.String: {
-		vm:    types.TypeString,
-		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.String(*(*string)(p)), nil },
-		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
-			return e.alloc(types.String(*(*string)(p)))
-		},
-		set: setString,
-	},
-}
-
 // asInt, asUint, and asFloat read a scalar VM value as the Go number a
 // conversion writes. asUint keeps the raw bits an unsigned Go value was stored
 // as, which is what makes its round trip through a signed VM slot exact.
@@ -678,17 +689,6 @@ func bitsOf(val types.Value) (types.Kind, uint64, bool) {
 	}
 	return 0, 0, false
 }
-
-var (
-	complexF32 = types.NewStructType(
-		types.NewStructField(types.TypeF32, types.FieldWithName("Real")),
-		types.NewStructField(types.TypeF32, types.FieldWithName("Imag")),
-	)
-	complexF64 = types.NewStructType(
-		types.NewStructField(types.TypeF64, types.FieldWithName("Real")),
-		types.NewStructField(types.TypeF64, types.FieldWithName("Imag")),
-	)
-)
 
 // defaults registers the standard-library types that have no direct VM kind.
 // They take the same path as a user registration, so naming one of them in

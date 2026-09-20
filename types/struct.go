@@ -33,18 +33,6 @@ func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	return s
 }
 
-// Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
-// keep their data inline, so reinitialization does not allocate.
-func (s *Struct) Reset(typ *StructType) {
-	s.Typ = typ
-	if len(typ.Fields) <= len(s.inline) {
-		s.Data = s.inline[:len(typ.Fields)]
-		clear(s.Data)
-		return
-	}
-	s.Data = make([]uint64, len(typ.Fields))
-}
-
 func NewStructType(fields ...StructField) *StructType {
 	return &StructType{Fields: fields}
 }
@@ -64,6 +52,18 @@ func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 		opt(&s)
 	}
 	return s
+}
+
+// Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
+// keep their data inline, so reinitialization does not allocate.
+func (s *Struct) Reset(typ *StructType) {
+	s.Typ = typ
+	if len(typ.Fields) <= len(s.inline) {
+		s.Data = s.inline[:len(typ.Fields)]
+		clear(s.Data)
+		return
+	}
+	s.Data = make([]uint64, len(typ.Fields))
 }
 
 func (s *Struct) FieldByName(name string) Boxed {

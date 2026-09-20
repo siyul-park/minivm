@@ -1,151 +1,162 @@
 package transform
 
 import (
-	"fmt"
-
-	"github.com/siyul-park/minivm/analysis"
-	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
-	"github.com/siyul-park/minivm/program"
 )
 
+// DCEPass removes what running the function can never need: a block nothing
+// reaches from the entry, and an operation whose result nothing live reads
+// and which instr's effect model says does nothing on its own. Deleting is
+// all it does: branch offsets and exception tables, which a byte-shifting
+// deletion over bytecode has to repair, do not exist here, where a deletion is
+// just one fewer operation in a rebuilt block.
+//
+// instr's effect model, not a value's own use count, decides what survives
+// regardless of it: an OpExec that reads or writes anything (op.Code is not
+// IsPure()), an OpStore, a guard of any of the four kinds, a retain, a
+// release, or a bridge runs for what it does, not for what it returns, so
+// none of them is ever pruned even with zero uses of its result. From those
+// roots, liveness runs backward through every value an operation reads - its
+// arguments, an OpState's own frame stacks and promoted locals, and the state
+// any of the above resumes into - so a value named only inside a live deopt's
+// frame chain is exactly as live as one an ordinary argument names, and a pure
+// operation feeding a live guard or store survives by that chain even though
+// it is not itself a root. An OpState that nothing still live resumes into is
+// pruned like anything else; running GuardPass first is what leaves one
+// behind for this pass to sweep up, once the guard that alone resumed into it
+// is gone.
+//
+// A block parameter is never pruned in this phase: dropping an unread one
+// would also have to drop the matching argument from every predecessor's
+// edge, a second cascading rewrite this pass does not attempt.
 type DCEPass struct{}
 
-var _ pass.Pass[*program.Program] = (*DCEPass)(nil)
+// site names one operation: the block holding it and its index within that
+// block's Ops.
+type site struct {
+	block int
+	index int
+}
+
+var _ pass.Pass[*ssa.Function] = (*DCEPass)(nil)
 
 func NewDCEPass() *DCEPass {
 	return &DCEPass{}
 }
 
-func (p *DCEPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
-	for i, fn := range functions(prog) {
-		code := fn.Code
+func (p *DCEPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
+	blocks := order(fn)
+	live := liveOps(fn, blocks)
 
-		blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, fn)
-		if err != nil {
-			return pass.PreserveNone(), err
+	rb := newRebuilder(fn)
+	changed := len(blocks) != fn.Len()
+	for _, block := range blocks {
+		id := rb.block(block)
+		blk := fn.Block(block)
+		for _, param := range blk.Params {
+			rb.alias(param, rb.b.Param(id, fn.Type(param)))
 		}
-		catch := map[int]bool{}
-		for _, h := range fn.Handlers {
-			catch[h.Catch] = true
-		}
-		for i := 1; i < len(blocks); i++ {
-			blk := blocks[i]
-			// Catch blocks are entered out of band, so the CFG gives them no
-			// predecessors; they are live roots, not dead code.
-			if len(blk.Preds) == 0 && !catch[blk.Start] {
-				for j := blk.Start; j < blk.End; j++ {
-					code[j] = byte(instr.UNREACHABLE)
-				}
+		for i, op := range blk.Ops {
+			if !live[site{block, i}] {
+				changed = true
+				continue
 			}
+			rb.b.Add(id, rb.define(fn, rb.operation(op)))
 		}
-
-		offsets := make([]int, len(code))
-		for j := range offsets {
-			offsets[j] = -1
-		}
-
-		write := 0
-		for read := 0; read < len(code); {
-			inst := instr.Instruction(code[read:])
-			width := inst.Width()
-			if inst.Opcode() != instr.NOP && inst.Opcode() != instr.UNREACHABLE {
-				offsets[read] = write
-				if write != read {
-					copy(code[write:write+width], code[read:read+width])
-				}
-				write += width
-			}
-			read += width
-		}
-
-		code = code[:write]
-		if len(code) == 0 {
-			code = nil
-		}
-
-		read := 0
-		write = 0
-		for write < len(code) {
-			inst := instr.Instruction(code[write:])
-
-			switch inst.Opcode() {
-			case instr.BR, instr.BR_IF:
-				target := read + instr.ReadI16(inst.Operand(0)) + inst.Width()
-				if err := p.validate(target, len(offsets), i); err != nil {
-					return pass.PreserveNone(), fmt.Errorf("%w: at=%d", err, read)
-				}
-				inst.SetOperand(0, uint64(p.relocate(offsets, target, len(code))-write-inst.Width()))
-			case instr.BR_TABLE:
-				width := inst.Width()
-				operands := inst.Operands()
-				count := int(operands[0])
-				for j := 0; j <= count; j++ {
-					target := read + instr.ReadI16(operands[j+1]) + width
-					if err := p.validate(target, len(offsets), i); err != nil {
-						return pass.PreserveNone(), fmt.Errorf("%w: at=%d", err, read)
-					}
-					inst.SetOperand(j+1, uint64(p.relocate(offsets, target, len(code))-write-width))
-				}
-			default:
-			}
-
-			write += inst.Width()
-			for ; read < len(offsets) && offsets[read] != write; read++ {
-			}
-		}
-
-		handlers := p.rehandle(fn.Handlers, offsets, len(code))
-
-		fn.Code = code
-		fn.Handlers = handlers
-		if i == 0 {
-			prog.Code = code
-			prog.Handlers = handlers
-		}
+		rb.b.Term(id, rb.terminator(blk.Term))
 	}
 
+	if !changed {
+		return pass.PreserveAll(), nil
+	}
+	next := rb.b.Build()
+	*fn = *next
 	return pass.PreserveNone(), nil
 }
 
-// validate reports whether a branch target is safe to relocate: target must
-// stay in bounds, and the past-the-end virtual exit (target == size) is only
-// legal for top-level code (slot == 0), matching program.Verify. DCE runs
-// after verification and must not silently repair a target that verification
-// would have rejected.
-func (p *DCEPass) validate(target, size, slot int) error {
-	if target < 0 || target > size || (target == size && slot != 0) {
-		return analysis.ErrInvalidJump
-	}
-	return nil
-}
-
-// rehandle remaps an exception table through the compaction offset map: each
-// boundary moves to the first surviving instruction at or after its old offset,
-// so a region whose body was removed collapses cleanly. offsets[i] is the new
-// position of the instruction that began at old offset i, or -1 if removed.
-func (p *DCEPass) rehandle(handlers []instr.Handler, offsets []int, size int) []instr.Handler {
-	if len(handlers) == 0 {
-		return handlers
-	}
-	remapped := make([]instr.Handler, len(handlers))
-	for i, h := range handlers {
-		remapped[i] = instr.Handler{
-			Start: p.relocate(offsets, h.Start, size),
-			End:   p.relocate(offsets, h.End, size),
-			Catch: p.relocate(offsets, h.Catch, size),
-			Depth: h.Depth,
+// liveOps runs the mark phase of mark-sweep DCE over fn's reachable blocks:
+// every operation instr's effect model says runs unconditionally is a root,
+// every terminator's operands are roots, and liveness is then propagated
+// backward from each root's own operands - including an OpState's frame
+// stacks and promoted locals - to whatever defines them.
+func liveOps(fn *ssa.Function, blocks []int) map[site]bool {
+	defs := map[ssa.Value]site{}
+	for _, b := range blocks {
+		for i, op := range fn.Block(b).Ops {
+			for _, r := range op.Results {
+				defs[r] = site{b, i}
+			}
 		}
 	}
-	return remapped
+
+	live := map[site]bool{}
+	var queue []ssa.Value
+	push := func(v ssa.Value) {
+		if v != ssa.NoValue {
+			queue = append(queue, v)
+		}
+	}
+	mark := func(s site, op ssa.Operation) {
+		if live[s] {
+			return
+		}
+		live[s] = true
+		for _, a := range op.Args {
+			push(a)
+		}
+		for _, fr := range op.Frames {
+			for _, o := range fr.Stack {
+				push(o.Value)
+			}
+			for _, l := range fr.Locals {
+				push(l.Value)
+			}
+		}
+		push(op.State)
+	}
+
+	for _, b := range blocks {
+		blk := fn.Block(b)
+		for i, op := range blk.Ops {
+			if effectful(op) {
+				mark(site{b, i}, op)
+			}
+		}
+		for _, a := range blk.Term.Args {
+			push(a)
+		}
+		for _, e := range blk.Term.Edges {
+			for _, a := range e.Args {
+				push(a)
+			}
+		}
+		push(blk.Term.State)
+	}
+
+	for len(queue) > 0 {
+		v := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		s, ok := defs[v]
+		if !ok {
+			continue
+		}
+		mark(s, fn.Block(s.block).Ops[s.index])
+	}
+	return live
 }
 
-func (p *DCEPass) relocate(offsets []int, off, size int) int {
-	for off < len(offsets) && offsets[off] == -1 {
-		off++
+// effectful reports whether op runs for what it does rather than for what it
+// returns, so DCEPass keeps it regardless of whether anything reads its
+// results.
+func effectful(op ssa.Operation) bool {
+	switch op.Op {
+	case ssa.OpStore, ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardBounds, ssa.OpGuardValue,
+		ssa.OpRetain, ssa.OpRelease, ssa.OpBridge:
+		return true
+	case ssa.OpExec:
+		return !op.Code.IsPure()
+	default:
+		return false
 	}
-	if off >= len(offsets) {
-		return size
-	}
-	return offsets[off]
 }

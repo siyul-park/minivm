@@ -1,717 +1,84 @@
 package asm_test
 
 import (
-	"runtime"
 	"testing"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/stretchr/testify/require"
 )
 
-// noFrameArch disables spilling so register exhaustion stays observable.
-type noFrameArch struct{ asm.Arch }
-
-func (noFrameArch) Frame() asm.Frame { return nil }
-
 func TestNew(t *testing.T) {
 	require.NotNil(t, asm.New(arm64.New()))
 }
 
-func TestAssembler_Reg(t *testing.T) {
-	assembler := asm.New(arm64.New())
-
-	require.Equal(t, asm.NewVReg(0, asm.RegTypeInt, asm.Width64), assembler.Reg(asm.RegTypeInt, asm.Width64))
-	require.Equal(t, asm.NewVReg(1, asm.RegTypeFloat, asm.Width32), assembler.Reg(asm.RegTypeFloat, asm.Width32))
-}
-
 func TestAssembler_Label(t *testing.T) {
 	assembler := asm.New(arm64.New())
-	require.NotEqual(t, assembler.Label(), assembler.Label())
+	target := assembler.Label()
+	assembler.Emit(arm64.BLabel(target), arm64.RET())
+	assembler.Bind(target)
+	assembler.Emit(arm64.RET())
+
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x02, 0x00, 0x00, 0x14}, code[:4])
 }
 
-func TestAssembler_Bind(t *testing.T) {
-	t.Run("resolves a branch to the bound position", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-		target := assembler.Label()
-		assembler.Emit(arm64.BLabel(target))
-		assembler.Emit(arm64.RET())
-		assembler.Bind(target)
-		assembler.Emit(arm64.RET())
+func TestAssembler_Emit(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	assembler.Emit(arm64.MOV(arm64.X0, arm64.X1), arm64.RET())
 
-		code, err := assembler.Build()
-		require.NoError(t, err)
-		// B encodes its displacement as imm26 instruction counts, so the
-		// branch over one RET is +2: 0x14000002, little endian.
-		require.Equal(t, []byte{0x02, 0x00, 0x00, 0x14}, code[:4])
-	})
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+}
 
-	t.Run("rejects a branch to an unbound label", func(t *testing.T) {
+func TestAssembler_Build(t *testing.T) {
+	t.Run("unresolved label", func(t *testing.T) {
 		assembler := asm.New(arm64.New())
 		assembler.Emit(arm64.BLabel(assembler.Label()))
 
 		_, err := assembler.Build()
 		require.ErrorIs(t, err, asm.ErrUnresolvedLabel)
 	})
-}
-
-func TestAssembler_Pin(t *testing.T) {
-	t.Run("records conflicting pins", func(t *testing.T) {
+	t.Run("unallocated register", func(t *testing.T) {
 		assembler := asm.New(arm64.New())
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-
-		require.NoError(t, assembler.Pin(v, arm64.X0))
-		require.NoError(t, assembler.Pin(v, arm64.X0))
-		require.ErrorIs(t, assembler.Pin(v, arm64.X1), asm.ErrConflictingPin)
+		v := asm.NewVReg(0, asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.MOV(v, arm64.X0))
 
 		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrConflictingPin)
+		require.ErrorIs(t, err, asm.ErrUnallocated)
 	})
-
-	t.Run("rejects a physical register outside the architecture", func(t *testing.T) {
+	t.Run("unallocated memory base", func(t *testing.T) {
 		assembler := asm.New(arm64.New())
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-
-		require.ErrorIs(t, assembler.Pin(v, asm.NewPReg(64, asm.RegTypeInt, asm.Width64)), asm.ErrInvalidOperand)
-		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrInvalidOperand)
-	})
-
-	t.Run("rejects a reserved physical register", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-
-		require.ErrorIs(t, assembler.Pin(v, arm64.X28), asm.ErrInvalidOperand)
-		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrInvalidOperand)
-	})
-
-	t.Run("allows an architecture scratch register", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-
-		require.NoError(t, assembler.Pin(v, arm64.X10))
-	})
-
-	t.Run("rejects a virtual register it did not allocate", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-
-		require.ErrorIs(t, assembler.Pin(asm.NewVReg(7, asm.RegTypeInt, asm.Width64), arm64.X0), asm.ErrInvalidOperand)
-		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrInvalidOperand)
-	})
-}
-
-func TestAssembler_Emit(t *testing.T) {
-	t.Run("encodes appended instructions", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-		require.NotEmpty(t, code)
-	})
-
-	t.Run("pseudo use emits no bytes", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(v, 1)...)
-		assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.Virtual(v)})
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-
-		without := asm.New(arm64.New())
-		v = without.Reg(asm.RegTypeInt, asm.Width64)
-		without.Emit(arm64.LDI(v, 1)...)
-		without.Emit(arm64.RET())
-
-		want, err := without.Build()
-		require.NoError(t, err)
-		require.Equal(t, want, code)
-	})
-
-	t.Run("pseudo use extends live ranges", func(t *testing.T) {
-		const n = 64
-
-		without := asm.New(noFrameArch{arm64.New()})
-		for i := 0; i < n; i++ {
-			v := without.Reg(asm.RegTypeInt, asm.Width64)
-			without.Emit(arm64.LDI(v, uint64(i))...)
-		}
-		without.Emit(arm64.RET())
-		_, err := without.Build()
-		require.NoError(t, err)
-
-		assembler := asm.New(noFrameArch{arm64.New()})
-		values := make([]asm.VReg, n)
-		for i := range values {
-			values[i] = assembler.Reg(asm.RegTypeInt, asm.Width64)
-			assembler.Emit(arm64.LDI(values[i], uint64(i))...)
-		}
-		for _, v := range values {
-			assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.Virtual(v)})
-		}
-		assembler.Emit(arm64.RET())
-
-		_, err = assembler.Build()
-		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
-	})
-}
-
-func TestAssembler_Build(t *testing.T) {
-	t.Run("rejects a virtual register the assembler never handed out", func(t *testing.T) {
-		assembler := asm.New(arm64.New())
-		assembler.Emit(arm64.MOV(asm.NewVReg(7, asm.RegTypeInt, asm.Width64), arm64.X0))
+		v := asm.NewVReg(0, asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDR(arm64.X0, v, 0))
 
 		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrInvalidOperand)
+		require.ErrorIs(t, err, asm.ErrUnallocated)
 	})
-
-	t.Run("resolves a backward call within the build", func(t *testing.T) {
+	t.Run("backward branch", func(t *testing.T) {
 		assembler := asm.New(arm64.New())
 		head := assembler.Label()
 		assembler.Bind(head)
-		assembler.Emit(arm64.NOP())
-		assembler.Emit(arm64.BLLabel(head))
+		assembler.Emit(arm64.NOP(), arm64.BLLabel(head))
 
 		code, err := assembler.Build()
 		require.NoError(t, err)
-		// BL is the second four-byte instruction and targets the first, so its
-		// signed imm26 displacement is -4: 0x97ffffff, little endian.
 		require.Equal(t, []byte{0xff, 0xff, 0xff, 0x97}, code[4:8])
 	})
-
-	t.Run("arch without a frame rejects spilling", func(t *testing.T) {
-		// An Arch whose Frame() returns nil disables spilling: allocation
-		// fails with asm.ErrNoRegistersAvailable instead of inserting a spill
-		// frame.
-		assembler := asm.New(noFrameArch{arm64.New()})
-		emitWideSum(assembler, 64)
-
-		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
-	})
-
-	if runtime.GOARCH != "arm64" {
-		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
-	}
-
-	t.Run("context pointer round trip", func(t *testing.T) {
-		arch := arm64.New()
-
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		left := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		right := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		sum := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-
-		assembler.Emit(arm64.LDR(left, ctx, 0))
-		assembler.Emit(arm64.LDR(right, ctx, 8))
-		assembler.Emit(arm64.ADD(sum, left, right))
-		assembler.Emit(arm64.STR(sum, ctx, 16))
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-		require.NotEmpty(t, code)
-
-		buffer, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, buffer.Free()) }()
-
-		callable, err := asm.Link(buffer, arch.ABI(), code)
-		require.NoError(t, err)
-
-		values := [3]uint64{3, 4, 0}
-		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
-		require.Equal(t, [3]uint64{3, 4, 7}, values)
-	})
-
-	// Each case emits a branch whose target is pushed past its +-1MB imm19
-	// range by over 1MB of filler, forcing Build to relax it.
-	branches := []struct {
-		name string
-		emit func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label)
-	}{
-		{"relaxes an out-of-range CBZ branch", func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label) {
-			assembler.Emit(arm64.CBZLabel(flag, zero))
-		}},
-		{"relaxes an out-of-range B.cond branch", func(assembler *asm.Assembler, flag asm.VReg, zero asm.Label) {
-			assembler.Emit(arm64.CMPI(flag, 0))
-			assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, zero))
-		}},
-	}
-	for _, tt := range branches {
-		t.Run(tt.name, func(t *testing.T) {
-			arch := arm64.New()
-
-			assembler := asm.New(arch)
-			ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-			flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
-			filler := assembler.Reg(asm.RegTypeInt, asm.Width64)
-			result := assembler.Reg(asm.RegTypeInt, asm.Width64)
-			require.NoError(t, assembler.Pin(ctx, arm64.X0))
-
-			zero := assembler.Label()
-
-			assembler.Emit(arm64.LDR(flag, ctx, 0))
-			tt.emit(assembler, flag, zero)
-
-			const fillerCount = 1 << 18
-			assembler.Emit(arm64.LDI(filler, 1)...)
-			for i := 0; i < fillerCount; i++ {
-				assembler.Emit(arm64.ADDI(filler, filler, 1))
-			}
-
-			assembler.Emit(arm64.LDI(result, 1)...)
-			assembler.Emit(arm64.STR(result, ctx, 8))
-			assembler.Emit(arm64.RET())
-
-			assembler.Bind(zero)
-			assembler.Emit(arm64.LDI(result, 0)...)
-			assembler.Emit(arm64.STR(result, ctx, 8))
-			assembler.Emit(arm64.RET())
-
-			code, err := assembler.Build()
-			require.NoError(t, err)
-			require.Greater(t, len(code), 1<<20)
-
-			buffer, err := asm.NewBuffer(len(code) + 4096)
-			require.NoError(t, err)
-			defer func() { require.NoError(t, buffer.Free()) }()
-
-			callable, err := asm.Link(buffer, arch.ABI(), code)
-			require.NoError(t, err)
-
-			notTaken := []uint64{1, 0xFF}
-			require.NoError(t, callable.Call(unsafe.Pointer(&notTaken[0])))
-			require.Equal(t, uint64(1), notTaken[1])
-
-			taken := []uint64{0, 0xFF}
-			require.NoError(t, callable.Call(unsafe.Pointer(&taken[0])))
-			require.Equal(t, uint64(0), taken[1])
-		})
-	}
-
-	t.Run("spills under register pressure", func(t *testing.T) {
-		// Hold far more values live at once than the integer bank has
-		// allocatable registers, forcing the allocator to spill. Every value
-		// stays live until the final fold, so the allocator must keep
-		// spilling and reloading; a balanced SP frame is proven by the call
-		// returning cleanly with the correct sum.
-		arch := arm64.New()
-
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-		sum := emitWideSum(assembler, 256)
-		assembler.Emit(arm64.STR(sum, ctx, 0))
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-
-		buffer, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, buffer.Free()) }()
-
-		callable, err := asm.Link(buffer, arch.ABI(), code)
-		require.NoError(t, err)
-
-		want := wideSum(256)
-		// Run on a fresh goroutine each time so the spill frame is exercised
-		// against a stack the Go runtime may still grow and relocate.
-		for range 64 {
-			values := [1]uint64{}
-			done := make(chan error, 1)
-			go func() {
-				done <- callable.Call(unsafe.Pointer(&values[0]))
-			}()
-			require.NoError(t, <-done)
-			require.Equal(t, want, values[0])
+	t.Run("relaxes conditional branch", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		target := assembler.Label()
+		assembler.Emit(arm64.CBZLabel(arm64.X0, target))
+		for range 1 << 18 {
+			assembler.Emit(arm64.ADDI(arm64.X1, arm64.X1, 1))
 		}
-	})
-
-	t.Run("spills a value live across a forward branch", func(t *testing.T) {
-		// This diamond has no back-edge, so nothing keeps the spill frame
-		// away on that account, and a value live across both arms is the
-		// shape that broke the allocator when it judged spills by a single
-		// linear last-use index with no notion of which arm an instruction
-		// belonged to. The store must dominate the reload; this proves it
-		// does.
-		//
-		// v is defined before the branch, so it is live on both arms.
-		// Register pressure inside the fall-through arm forces the
-		// allocator to spill it there; the reload sits at the merge point,
-		// unconditionally, on both arms. If the allocator is unsound, the
-		// taken arm — which never runs the fall-through arm's code,
-		// including v's spill store — reaches that reload having never
-		// written v's slot on this call.
-		//
-		// poison manufactures a deterministic value in that exact slot
-		// without relying on any external memory state: poison is spilled
-		// and reloaded before the branch (so every call runs this
-		// unconditionally), which frees its slot back to the allocator's
-		// LIFO free list. v's own spill inside the fall-through arm is the
-		// very next spill after that, so it reuses poison's slot. On the
-		// taken arm, if the reload after merge reads poison's value
-		// instead of v's, the store the reload depends on never dominated
-		// it.
-		arch := arm64.New()
-
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-
-		const pressure = 17 // one past the 17 auto-allocatable integer registers.
-		const poison = 0xBADC0FFEE0DDF00D
-		const magic = 0x1234567890ABCDEF
-
-		poisonReg := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(poisonReg, poison)...)
-		poisonSum := emitWideSum(assembler, pressure)
-		discard := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.ADD(discard, poisonSum, poisonReg))
-
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(v, magic)...)
-		armZero := assembler.Reg(asm.RegTypeInt, asm.Width64)
-
-		flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDR(flag, ctx, 0))
-
-		taken := assembler.Label()
-		merge := assembler.Label()
-		assembler.Emit(arm64.CBZLabel(flag, taken))
-
-		fallSum := emitWideSum(assembler, pressure)
-		assembler.Emit(arm64.SUBI(armZero, fallSum, uint16(wideSum(pressure))))
-		assembler.Emit(arm64.BLabel(merge))
-
-		assembler.Bind(taken)
-		assembler.Emit(arm64.LDI(armZero, 0)...)
-
-		assembler.Bind(merge)
-		result := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.ADD(result, armZero, v))
-		assembler.Emit(arm64.STR(result, ctx, 8))
+		assembler.Bind(target)
 		assembler.Emit(arm64.RET())
 
 		code, err := assembler.Build()
 		require.NoError(t, err)
-
-		buffer, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, buffer.Free()) }()
-
-		callable, err := asm.Link(buffer, arch.ABI(), code)
-		require.NoError(t, err)
-
-		run := func(flag uint64) uint64 {
-			values := [2]uint64{flag, 0}
-			require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
-			return values[1]
-		}
-
-		// The fall-through arm executes v's spill store itself, so this run
-		// is correct however the allocator behaves: a sanity check that the
-		// diamond is otherwise wired correctly.
-		require.Equal(t, uint64(magic), run(1),
-			"fall-through arm must read back the value its own arm stored")
-
-		// The taken arm never executes the fall-through arm's code, so v's
-		// spill store never runs on this call. v was defined before the
-		// branch, not inside the skipped arm, so a sound allocator must
-		// still produce magic here.
-		require.Equal(t, uint64(magic), run(0),
-			"branch-taken arm must still see v's value after the forward-branch merge")
+		require.Greater(t, len(code), 1<<20)
 	})
-
-	t.Run("self-recursive call clobbers the caller's spill slots", func(t *testing.T) {
-		// A BL to a label bound in this same build runs the shared epilogue
-		// on return (Resume), but Frame() only reserves the spill area
-		// again — it never gives the callee a fresh base the way the true
-		// entry prologue (Enter) does. A recursive activation therefore
-		// spills into the exact physical addresses its caller is still
-		// using.
-		//
-		// head is bound before any spilling code, so it stands in for
-		// ctx.head in internal/jit/arm64: both the initial external entry
-		// and every recursive BL fall through to the same point. Recursing
-		// twice (depth 2) is required to observe corruption: the innermost
-		// activation (depth 0) is a trivial base case that touches no
-		// spill slot, so it cannot clobber anything. The middle activation
-		// (depth 1) runs the same register-heavy body as the outer one,
-		// spilling into the same slots the outer activation is still
-		// holding live across its own call — that overwrite is what a fix
-		// must prevent.
-		arch := arm64.New()
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-		result := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(result, arm64.X1))
-
-		head := assembler.Label()
-		base := assembler.Label()
-		assembler.Bind(head)
-
-		depth := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDR(depth, ctx, 0))
-		assembler.Emit(arm64.CBZLabel(depth, base))
-
-		// Hold far more values live across the recursive call than the
-		// integer bank has allocatable registers: every value's only other
-		// use is in the fold loop after the BL, so several must be spilled
-		// before the call and reloaded after it.
-		const wide = 40
-		values := make([]asm.VReg, wide)
-		for i := range values {
-			values[i] = assembler.Reg(asm.RegTypeInt, asm.Width64)
-			assembler.Emit(arm64.LDI(values[i], uint64(i*7+11))...)
-		}
-
-		next := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.SUBI(next, depth, 1))
-		assembler.Emit(arm64.STR(next, ctx, 0))
-		assembler.Emit(arm64.BLLabel(head))
-
-		sum := result
-		for _, v := range values {
-			folded := assembler.Reg(asm.RegTypeInt, asm.Width64)
-			assembler.Emit(arm64.ADD(folded, sum, v))
-			sum = folded
-		}
-		assembler.Emit(arm64.MOV(result, sum))
-		assembler.Emit(arm64.RET())
-
-		assembler.Bind(base)
-		assembler.Emit(arm64.LDI(result, 1)...)
-		assembler.Emit(arm64.RET())
-
-		// The build must refuse rather than emit that overwrite. A BL to a
-		// label bound at or before the call site is a self-recursive call,
-		// and every value still needed after it is barred from spilling
-		// (internal/asm/rewriter.go's barriers, fed by carryHazards-adjacent
-		// bookkeeping in crosses): with the frame unavailable for these wide
-		// values, exhausting the register bank rejects the build instead of
-		// silently sharing one spill area between activations.
-		// interp/jit.go's publish turns this into "keep threaded dispatch".
-		_, err := assembler.Build()
-		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable,
-			"a self-recursive build must reject rather than share one spill area between activations")
-	})
-
-	t.Run("spills a value confined to one loop iteration", func(t *testing.T) {
-		// backEdge used to disable the spill frame for the whole build
-		// whenever any branch targeted an earlier instruction, so a
-		// function containing a loop could not spill at all, however far a
-		// value sat from the loop. Dominance judges each spill on its own
-		// merits instead: wide is computed fresh and folded away within the
-		// same pass through the loop body every iteration, so wherever
-		// register pressure forces its store, that store dominates its one
-		// reload — the same shape as the non-looping "spills under register
-		// pressure" case above, just replayed inside a loop body.
-		arch := arm64.New()
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-
-		const iterations = 5
-		const pressure = 17 // one past the 17 auto-allocatable integer registers.
-
-		counter := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(counter, iterations)...)
-
-		loop := assembler.Label()
-		done := assembler.Label()
-		assembler.Bind(loop)
-		assembler.Emit(arm64.CBZLabel(counter, done))
-		wide := emitWideSum(assembler, pressure)
-		combined := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.ADD(combined, wide, counter))
-		assembler.Emit(arm64.STR(combined, ctx, 8))
-		assembler.Emit(arm64.SUBI(counter, counter, 1))
-		assembler.Emit(arm64.BLabel(loop))
-		assembler.Bind(done)
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err, "a loop confining its pressure to one iteration must still get a spill frame")
-
-		buffer, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, buffer.Free()) }()
-
-		callable, err := asm.Link(buffer, arch.ABI(), code)
-		require.NoError(t, err)
-
-		values := [2]uint64{0, 0}
-		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
-		// The loop counts 5, 4, 3, 2, 1, so the last iteration to run — the
-		// one whose store survives — sees counter == 1.
-		require.Equal(t, wideSum(pressure)+1, values[1],
-			"the last iteration's spilled-and-reloaded value must survive intact")
-	})
-
-	t.Run("declines a value live across a back edge", func(t *testing.T) {
-		// total is defined once before the loop and updated by an
-		// instruction that reads its own current value (ADD total, total,
-		// counter): the shape a loop-carried mutable value takes in this
-		// flat IR. Its last reference is the store after the loop, the
-		// largest instruction index in the whole build, so victim's
-		// farthest-last-use heuristic tries it before anything else the
-		// pre-loop pressure below also makes available.
-		//
-		// Dominance alone would accept spilling it here: a store issued
-		// before the loop dominates every reference inside and after the
-		// loop under the ordinary definition, because dominance counts
-		// paths, not iterations. But a spill inserts exactly one store and
-		// one reload instruction, not one pair per iteration: a reload
-		// sitting at total's self-referencing update would replay the
-		// pre-loop value (0) on every iteration instead of the previous
-		// iteration's running sum, discarding the accumulation. carryHazards
-		// (internal/asm/carry.go) is what actually declines this, and this
-		// test is the proof: if it did not, the sum below would come back
-		// wrong after more than one iteration.
-		arch := arm64.New()
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-
-		const iterations = 6
-		const pressure = 17 // one past the 17 auto-allocatable integer registers.
-
-		counter := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(counter, iterations)...)
-		total := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(total, 0)...)
-
-		// Pressure right after total and counter are both bound and both
-		// carry a far-future last use tempts victim into choosing one of
-		// them before it ever reaches the loop.
-		pre := emitWideSum(assembler, pressure)
-		discard := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.ADD(discard, pre, counter))
-
-		loop := assembler.Label()
-		done := assembler.Label()
-		assembler.Bind(loop)
-		assembler.Emit(arm64.CBZLabel(counter, done))
-		assembler.Emit(arm64.ADD(total, total, counter))
-		assembler.Emit(arm64.SUBI(counter, counter, 1))
-		assembler.Emit(arm64.BLabel(loop))
-		assembler.Bind(done)
-		assembler.Emit(arm64.STR(total, ctx, 8))
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-
-		buffer, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, buffer.Free()) }()
-
-		callable, err := asm.Link(buffer, arch.ABI(), code)
-		require.NoError(t, err)
-
-		values := [2]uint64{0, 0}
-		require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
-		require.Equal(t, uint64(iterations*(iterations+1)/2), values[1],
-			"a store issued once before the loop must not silently replay on every iteration of a self-referencing reload")
-	})
-
-	t.Run("declines a value spilled on one diamond arm and reloaded on the sibling arm", func(t *testing.T) {
-		// The existing "spills a value live across a forward branch" case
-		// above spills inside the fall-through arm and reloads at the
-		// merge point both arms reach. This one has no merge at all: v is
-		// used only inside taken, a sibling arm the fall-through arm never
-		// runs. The old label-crossing heuristic and dominance agree on the
-		// merge-point shape, but only a real per-arm reachability question
-		// — does every path to v's one use pass through a store placed
-		// inside the other arm — tells the two apart in general; this
-		// build is the case where the answer is unconditionally no; there
-		// is no path from the fall-through arm into taken at all.
-		//
-		// v is bound (from before the branch) with its only use — the
-		// store inside taken — far ahead of anything the fall-through arm's
-		// own pressure needs, so victim tries v first.
-		arch := arm64.New()
-		assembler := asm.New(arch)
-		ctx := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, assembler.Pin(ctx, arm64.X0))
-
-		const pressure = 17 // one past the 17 auto-allocatable integer registers.
-		const magic = 0x1234567890ABCDEF
-
-		flag := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDR(flag, ctx, 0))
-		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(v, magic)...)
-
-		taken := assembler.Label()
-		assembler.Emit(arm64.CBZLabel(flag, taken))
-
-		pre := emitWideSum(assembler, pressure)
-		discard := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.ADD(discard, pre, flag))
-		assembler.Emit(arm64.STR(discard, ctx, 8))
-		assembler.Emit(arm64.RET())
-
-		assembler.Bind(taken)
-		assembler.Emit(arm64.STR(v, ctx, 8))
-		assembler.Emit(arm64.RET())
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-
-		buffer, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, buffer.Free()) }()
-
-		callable, err := asm.Link(buffer, arch.ABI(), code)
-		require.NoError(t, err)
-
-		run := func(flag uint64) uint64 {
-			values := [2]uint64{flag, 0}
-			require.NoError(t, callable.Call(unsafe.Pointer(&values[0])))
-			return values[1]
-		}
-
-		require.Equal(t, wideSum(pressure)+1, run(1),
-			"the fall-through arm must still compute its own result correctly")
-		require.Equal(t, uint64(magic), run(0),
-			"the taken arm must read v intact even though the sibling arm's own pressure never dominates it")
-	})
-}
-
-// emitWideSum loads n distinct values, keeps every one live, and folds them
-// into a single register, so the register bank is oversubscribed by n.
-func emitWideSum(assembler *asm.Assembler, n int) asm.VReg {
-	values := make([]asm.VReg, n)
-	for i := range values {
-		values[i] = assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.LDI(values[i], uint64(i*7+1))...)
-	}
-	sum := values[0]
-	for _, v := range values[1:] {
-		next := assembler.Reg(asm.RegTypeInt, asm.Width64)
-		assembler.Emit(arm64.ADD(next, sum, v))
-		sum = next
-	}
-	return sum
-}
-
-// wideSum returns the value emitWideSum(assembler, n) computes, so a caller
-// can state the expected result independently of the allocator's choices.
-func wideSum(n int) uint64 {
-	var want uint64
-	for i := 0; i < n; i++ {
-		want += uint64(i*7 + 1)
-	}
-	return want
 }

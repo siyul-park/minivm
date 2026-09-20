@@ -19,11 +19,11 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
-func (m memory) executable() error {
+func executable(m memory) error {
 	if len(m) == 0 {
 		return nil
 	}
-	m.flushICache()
+	flushICache(m)
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_MPROTECT,
 		uintptr(unsafe.Pointer(&m[0])),
@@ -36,7 +36,7 @@ func (m memory) executable() error {
 	return nil
 }
 
-func (m memory) free() error {
+func freeMemory(m memory) error {
 	if len(m) == 0 {
 		return nil
 	}

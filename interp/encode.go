@@ -395,7 +395,7 @@ func marshalFunc(t reflect.Type, typ *types.FunctionType) MarshalerFunc {
 	}
 }
 
-// marshalStruct writes exported fields into a native VM struct.
+// marshalStruct writes exported fields into a VM struct.
 func marshalStruct(vm *types.StructType, fields []field) MarshalerFunc {
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		out := types.NewStruct(vm)

@@ -2,40 +2,27 @@ package interp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math"
 	"reflect"
-	"time"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/internal/jit"
-	"github.com/siyul-park/minivm/internal/journal"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
 type Interpreter struct {
-	ctx         context.Context
-	done        <-chan struct{}
-	tracer      *tracer
-	hook        func(*Interpreter) error
-	codec       Codec
-	speculative bool
-
-	compiler  *jit.Compiler
-	cache     *cache
-	profiler  *prof.Profiler
-	samples   *prof.Collector
-	exits     map[jit.Anchor]func(*Interpreter)
-	natives   []unsafe.Pointer
-	tried     map[jit.Anchor]bool
-	live      map[jit.Anchor]jit.Entry
-	watchdogs map[jit.Anchor]*watchdog
-	journal   []uint64
+	// ctx is non-nil only while Run is executing and is cleared before Run returns.
+	ctx context.Context
+	// done is the current Run context's cancellation channel and has the same lifetime.
+	done     <-chan struct{}
+	hook     func(*Interpreter) error
+	codec    Codec
+	profiler *prof.Profiler
+	samples  *prof.Collector
+	closed   bool
 
 	types       []types.Type
 	constants   []types.Boxed
@@ -43,10 +30,6 @@ type Interpreter struct {
 	globalTypes []types.Type
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
-	backedges   []bool
-	entries     []uint64
-	cold        []bool
-	misses      []uint8
 	coros       []bool
 	handlers    [][]instr.Handler
 	module      *types.Function
@@ -86,11 +69,27 @@ type Interpreter struct {
 	gen int
 	gas int64
 
-	threshold int64
-	trigger   uint64
-	tick      int
-	fuel      int64
-	limit     int
+	tick  int
+	fuel  int64
+	limit int
+}
+
+// Option configures an Interpreter or Pool at construction. Only the With
+// constructors produce one, so callers can name and collect options without
+// reaching the unexported state they configure.
+type Option func(*option)
+
+type option struct {
+	hook     func(*Interpreter) error
+	codec    Codec
+	profiler *prof.Profiler
+
+	frame   int
+	stack   int
+	heap    int
+	maxHeap int
+	tick    int
+	fuel    uint64
 }
 
 type frame struct {
@@ -109,36 +108,14 @@ type frame struct {
 	bp int
 }
 
-// Option configures an Interpreter or Pool at construction. Only the With
-// constructors produce one, so callers can name and collect options without
-// reaching the unexported state they configure.
-type Option func(*option)
-
-type option struct {
-	hook      func(*Interpreter) error
-	codec     Codec
-	cache     *cache
-	tracer    *tracer
-	profiler  *prof.Profiler
-	threshold int
-
-	frame   int
-	stack   int
-	heap    int
-	maxHeap int
-	tick    int
-	fuel    uint64
-}
-
 const heapRunway = 64
 
-// loopWarmup is how many times one back edge runs between reports to the
-// interpreter. It is a fixed interval, not a threshold: each report is one hot
-// event for the enclosing function, and the configured threshold is what counts
-// those. Reporting every iteration would make a loop cross any threshold before
-// its body had run enough to be worth compiling. The generated back-edge
-// handlers compare against it directly.
-const loopWarmup = 8
+// negZeroF32 and negZeroF64 are the bit patterns of -0.0. A map key folds them
+// onto +0.0 so both spellings of zero index one entry.
+const (
+	negZeroF32 = uint32(1) << 31
+	negZeroF64 = uint64(1) << 63
+)
 
 func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
@@ -152,15 +129,9 @@ func WithCodec(c Codec) Option {
 	return func(o *option) { o.codec = c }
 }
 
-// WithProfiler attaches a profiler that aggregates this interpreter's execution
-// samples and JIT counters. It is opt-in and observational: what compiles is
-// decided by the call and back-edge counters either way, so attaching one only
-// adds the per-tick sampling that fills the profile. Pass the same Profiler to
-// NewPool so every pooled interpreter shares it.
+// WithProfiler attaches execution sampling to an interpreter.
 func WithProfiler(p *prof.Profiler) Option {
-	return func(o *option) {
-		o.profiler = p
-	}
+	return func(o *option) { o.profiler = p }
 }
 
 func WithFrame(val int) Option {
@@ -183,33 +154,18 @@ func WithTick(val int) Option {
 	return func(o *option) { o.tick = val }
 }
 
-func WithThreshold(val int) Option {
-	return func(o *option) { o.threshold = val }
-}
-
 func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
-}
-
-func withCache(c *cache) Option {
-	return func(o *option) { o.cache = c }
-}
-
-// withTracer shares tracing state with interpreters for the same program.
-// A tracer already bound to another program is isolated automatically.
-func withTracer(t *tracer) Option {
-	return func(o *option) { o.tracer = t }
 }
 
 // New builds an interpreter for prog. It trusts prog to be well-formed; run
 // program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
 func New(prog *program.Program, opts ...Option) *Interpreter {
 	opt := option{
-		frame:     128,
-		stack:     1024,
-		heap:      128,
-		tick:      128,
-		threshold: 64,
+		frame: 128,
+		stack: 1024,
+		heap:  128,
+		tick:  128,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -228,16 +184,11 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		opt.tick = 1
 	}
 
-	tracer := opt.tracer
-	if tracer == nil || !tracer.bind(prog) {
-		tracer = newTracer()
-		tracer.bind(prog)
-	}
-	samples := prof.NewCollector()
 	activeCodec := opt.codec
 	if activeCodec == nil {
 		activeCodec = NewRegistry()
 	}
+	samples := prof.NewCollector()
 
 	var fuel int64 = -1
 	if opt.fuel > 0 {
@@ -245,46 +196,20 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		fuel = int64(min(ticks, 1<<63-1))
 	}
 
-	// threshold counts hot events - one per call into a function, one per
-	// warmed back edge - not instructions, so it is used as given. It is NOT
-	// divided by tick: nothing about tiering up runs on the tick loop any more.
-	threshold := int64(opt.threshold)
-	if threshold == 0 {
-		threshold = 1
-	}
-	var trigger uint64
-	if threshold > 0 {
-		trigger = uint64(threshold)
-	}
-
 	i := &Interpreter{
-		tracer:      tracer,
 		hook:        opt.hook,
 		codec:       activeCodec,
-		cache:       opt.cache,
 		profiler:    opt.profiler,
 		samples:     samples,
-		threshold:   threshold,
-		trigger:     trigger,
 		types:       prog.Types,
 		constants:   make([]types.Boxed, len(prog.Constants)),
 		globals:     make([]types.Boxed, len(prog.Globals)),
 		globalTypes: prog.Globals,
 		instrs:      make([][]byte, len(prog.Constants)+1),
 		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
-		backedges:   make([]bool, len(prog.Constants)+1),
-		entries:     make([]uint64, len(prog.Constants)+1),
-		cold:        make([]bool, len(prog.Constants)+1),
-		misses:      make([]uint8, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
 		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
-		exits:       map[jit.Anchor]func(*Interpreter){},
-		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
-		tried:       map[jit.Anchor]bool{},
-		live:        map[jit.Anchor]jit.Entry{},
-		watchdogs:   map[jit.Anchor]*watchdog{},
 		dynamic:     map[int]bool{},
-		journal:     make([]uint64, journal.Len(opt.frame)),
 		frames:      make([]frame, opt.frame),
 		stack:       make([]types.Boxed, opt.stack),
 		heap:        make([]types.Value, 0, opt.heap),
@@ -375,8 +300,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	// the boundary contract for SetGlobal and Reset.
 	i.seed()
 
-	i.backedges[0] = nativeBackend && i.threshold >= 0
-	c := i.threader(i.backedges[0])
+	c := i.threader()
 	i.code[0] = c.Compile(prog.Code, i.module.Slots(), i.module.Declared(), types.Kinds(i.module.Captures), i.module.Captures)
 
 	for j, v := range prog.Constants {
@@ -394,31 +318,15 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.fp = 1
 	i.fr = &i.frames[0]
 	i.retain(0)
-	if opt.cache != nil && !i.cache.attach() {
-		i.cache = nil
-	}
 
 	return i
 }
 
 func (i *Interpreter) Run(ctx context.Context) (err error) {
-	i.probeBoundary()
-	defer i.probeBoundary()
 	i.ctx = ctx
 	i.done = nil
 	if ctx != nil {
 		i.done = ctx.Done()
-	}
-	// The top frame is built by New and Reset, not by a threaded call handler, so
-	// this is the module's only entry hook. It runs once per Run: a caught throw
-	// loops below without re-entering. The host-callback trampoline replaces the
-	// frame's code table, so it is the only frame that must skip this hook.
-	if i.owns(i.fr) {
-		if err := i.hit(); err != nil {
-			i.ctx = nil
-			i.done = nil
-			return err
-		}
 	}
 	for {
 		// dispatch's recover absorbs every panic, so nothing escapes it and ctx is
@@ -485,8 +393,7 @@ func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.globals) {
 		return 0, ErrSegmentationFault
 	}
-	val := i.globals[idx]
-	return val, nil
+	return i.globals[idx], nil
 }
 
 // SetGlobal writes val into global slot idx, releasing the reference the slot
@@ -738,29 +645,24 @@ func (i *Interpreter) Len() int {
 	return i.sp
 }
 
-// Flush publishes the interpreter's pending execution samples and JIT
-// counters into the attached profiler without closing the interpreter, so a
-// long-running embedded VM can observe metrics without waiting for Close. It
-// has no observable effect when no profiler is attached (see WithProfiler).
+// Flush publishes the interpreter's pending execution samples into the
+// attached profiler without closing the interpreter. It has no observable
+// effect when no profiler is attached (see WithProfiler).
 func (i *Interpreter) Flush() {
 	i.flush()
 }
 
+// Close releases interpreter-owned resources and is idempotent.
 func (i *Interpreter) Close() error {
+	if i.closed {
+		return nil
+	}
 	i.flush()
 	i.Reset()
 	i.arrays.clear()
 	i.structs.clear()
-	var err error
-	if i.compiler != nil {
-		err = errors.Join(err, i.compiler.Close())
-		i.compiler = nil
-	}
-	if i.cache != nil {
-		err = errors.Join(err, i.cache.detach())
-		i.cache = nil
-	}
-	return err
+	i.closed = true
+	return nil
 }
 
 func (i *Interpreter) Reset() {
@@ -856,13 +758,8 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 
 	f := i.fr
 	code := f.code
-	// Tiering up is driven by the entry and back-edge hooks compiled into the
-	// handlers, not by this loop, so a program with nothing else to coordinate
-	// runs with no per-instruction accounting at all whether or not the JIT is
-	// enabled. The countdown below survives only for what genuinely needs an
-	// instruction-grained cadence: cancellation, fuel, the user hook, the user
-	// profiler, and a pool's shared-module handshake.
-	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil {
+	// The fast path avoids safepoint bookkeeping when no coordination is needed.
+	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil {
 		for f.ip < len(code) {
 			code[f.ip](i)
 			f = i.fr
@@ -947,9 +844,8 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 	}()
 
 	// The trampoline runs one CALL and nothing else, so it needs no program
-	// context - but it must still count the callee it dispatches, or a function
-	// only ever reached from a host callback never becomes hot.
-	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{entry: (*Interpreter).entered})}
+	// context.
+	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
 	i.fr.ip = 0
 	if err = i.Run(ctx); err != nil {
 		return nil, err
@@ -977,11 +873,8 @@ func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
 	}
 }
 
-// safepoint runs one round of per-tick coordination shared by the threaded Run
-// loop and native loop yields: context cancellation, fuel metering, the user
-// hook, profile sampling, and the one-shot JIT trigger. It reads the current
-// frame i.fr, so a native yield must rebuild frames (deopt) and point i.fr at
-// the resumable frame before calling it.
+// safepoint runs per-tick interpreter coordination: context cancellation,
+// fuel metering, and the user hook.
 func (i *Interpreter) safepoint() error {
 	if i.done != nil {
 		select {
@@ -990,14 +883,12 @@ func (i *Interpreter) safepoint() error {
 		default:
 		}
 	}
-
 	if i.gas >= 0 {
 		if i.gas == 0 {
 			return ErrFuelExhausted
 		}
 		i.gas--
 	}
-
 	f := i.fr
 	if i.hook != nil {
 		i.restore(f, f.addr)
@@ -1005,60 +896,16 @@ func (i *Interpreter) safepoint() error {
 			return err
 		}
 	}
-
-	// Sampling here serves the user's profiler and nothing else: which
-	// functions are worth compiling is decided by the entry and back-edge
-	// hooks, which observe real calls and real iterations rather than whichever
-	// instruction a countdown stopped on.
 	if i.profiler != nil {
-		i.sample(f)
-	}
-
-	// Adopting a module a peer published is a matter of elapsed time, not of
-	// this member's own hotness, so sync stays on the tick. Claiming the right
-	// to compile does not: it aggregates hot events across members and is
-	// raised from the same hooks a solo interpreter compiles from (see entered).
-	if i.cache != nil {
-		i.sync()
+		i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
 	}
 	return nil
-}
-
-func (i *Interpreter) owns(f *frame) bool {
-	if f.addr < 0 || f.addr >= len(i.code) {
-		return false
-	}
-	code := i.code[f.addr]
-	return len(f.code) > 0 && len(code) > 0 && &f.code[0] == &code[0]
-}
-
-// probeBoundary discards an incomplete throughput sample at a Run boundary.
-// Warmup and completed verdicts remain intact; an interrupted timed pair is
-// restarted from a fresh native window so host-side work between Run calls is
-// never included in the measured interpreter span.
-func (i *Interpreter) probeBoundary() {
-	for _, wd := range i.watchdogs {
-		if wd.probe == probeShadow {
-			wd.probe = probeNative
-		}
-		wd.probeCount = 0
-		wd.probeStart = time.Time{}
-		wd.probeNative = 0
-		wd.probePending = false
-	}
 }
 
 func (i *Interpreter) flush() {
 	if i.profiler != nil {
 		i.profiler.Flush(i.samples)
 	}
-}
-
-// sample records one profile hit for the frame's current instruction. It feeds
-// the user's profiler only; tiering up is driven by the entry and back-edge
-// hooks (see entered and backedge).
-func (i *Interpreter) sample(f *frame) {
-	i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
 }
 
 func (i *Interpreter) restore(f *frame, addr int) {
@@ -1245,13 +1092,6 @@ func (i *Interpreter) zero(kind types.Kind) types.Boxed {
 		return types.BoxedNull
 	}
 }
-
-// negZeroF32 and negZeroF64 are the bit patterns of -0.0. A map key folds them
-// onto +0.0 so both spellings of zero index one entry.
-const (
-	negZeroF32 = uint32(1) << 31
-	negZeroF64 = uint64(1) << 63
-)
 
 // mapKey indexes one entry of a generic map. It is the single owner of the
 // rule every map opcode and the codec must agree on, because a key written
@@ -1487,7 +1327,7 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 }
 
 // structField reads the field at index at off the struct bound to heap address
-// addr, covering a native *types.Struct and a *HostStruct alike. It is the
+// addr, covering a *types.Struct and a *HostStruct alike. It is the
 // generic counterpart to the specialized reads struct.get
 // fusion emits for a declared *types.StructType slot: the unfused STRUCT_GET
 // handler calls it unconditionally, and a fused handler falls back to it when
@@ -1666,6 +1506,7 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 }
 
 func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
+	c := i.threader()
 	n := addr + 1
 	if addr >= len(i.instrs) {
 		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
@@ -1673,26 +1514,12 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.code) {
 		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
 	}
-	if addr >= len(i.backedges) {
-		i.backedges = append(i.backedges, make([]bool, n-len(i.backedges))...)
-	}
-	if addr >= len(i.entries) {
-		i.entries = append(i.entries, make([]uint64, n-len(i.entries))...)
-	}
-	if addr >= len(i.cold) {
-		i.cold = append(i.cold, make([]bool, n-len(i.cold))...)
-	}
-	if addr >= len(i.misses) {
-		i.misses = append(i.misses, make([]uint8, n-len(i.misses))...)
-	}
 	if addr >= len(i.handlers) {
 		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
 	}
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	i.backedges[addr] = nativeBackend && i.threshold >= 0
-	c := i.threader(i.backedges[addr])
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
 	}
@@ -1719,11 +1546,9 @@ func (i *Interpreter) globalDecls() []types.Kind {
 	return kinds
 }
 
-// threader builds generated dispatch state. The backedge callback is injected at
-// runtime instead of referenced by the generated global handler table, avoiding
-// an initialization cycle through trace compilation.
-func (i *Interpreter) threader(backedge bool) *threader {
-	c := &threader{
+// threader builds generated dispatch state.
+func (i *Interpreter) threader() *threader {
+	return &threader{
 		types:       i.types,
 		constants:   i.constants,
 		heap:        i.heap,
@@ -1731,12 +1556,7 @@ func (i *Interpreter) threader(backedge bool) *threader {
 		globals:     i.globalDecls(),
 		globalTypes: i.globalTypes,
 		exact:       i.tick == 1,
-		entry:       (*Interpreter).entered,
 	}
-	if backedge {
-		c.backedge = (*Interpreter).backedge
-	}
-	return c
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after
@@ -1846,12 +1666,12 @@ func (i *Interpreter) retains(addr int, n int) {
 	i.rc[addr] += n
 }
 
-// gc collects one cycle. Every pass walks the whole heap, so the recorded slot
-// count is what the collection cost; the two metrics together report collector
-// pressure without a build-time switch.
+// gc collects one cycle. Every pass walks the whole heap.
 func (i *Interpreter) gc() {
-	i.samples.AddMetric("vm_gc_cycles_total", 1)
-	i.samples.AddMetric("vm_gc_slots_total", float64(len(i.heap)))
+	if i.profiler != nil {
+		i.samples.AddMetric("vm_gc_cycles_total", 1)
+		i.samples.AddMetric("vm_gc_slots_total", float64(len(i.heap)))
+	}
 	i.scan()
 	i.mark()
 	i.sweep()
@@ -1974,16 +1794,16 @@ func (i *Interpreter) release(addr int) {
 	base := len(i.work)
 	i.work = append(i.work, addr)
 	for len(i.work) > base {
-		addr := i.work[len(i.work)-1]
+		next := i.work[len(i.work)-1]
 		i.work = i.work[:len(i.work)-1]
 
-		i.rc[addr]--
-		if i.rc[addr] == 0 {
-			v := i.heap[addr]
+		i.rc[next]--
+		if i.rc[next] == 0 {
+			v := i.heap[next]
 			for _, r := range i.refs(v) {
 				i.work = append(i.work, int(r))
 			}
-			i.reclaim(addr, v)
+			i.reclaim(next, v)
 		}
 	}
 }
@@ -2020,12 +1840,8 @@ func (i *Interpreter) finalize(addr int, v types.Value) {
 	if _, ok := v.(*types.Function); ok {
 		i.remove(addr)
 	}
-	// External finalizers belong to committed execution, never speculative
-	// trace capture.
-	if !i.speculative {
-		if c, ok := v.(io.Closer); ok {
-			_ = c.Close()
-		}
+	if c, ok := v.(io.Closer); ok {
+		_ = c.Close()
 	}
 }
 
@@ -2036,37 +1852,8 @@ func (i *Interpreter) remove(addr int) {
 	}
 	i.instrs[addr] = nil
 	i.code[addr] = nil
-	i.backedges[addr] = false
-	i.cold[addr] = false
-	i.misses[addr] = 0
 	i.handlers[addr] = nil
 	i.coros[addr] = false
-	for a := range i.exits {
-		if a.Addr == addr {
-			delete(i.exits, a)
-		}
-	}
-	for a := range i.tried {
-		if a.Addr == addr {
-			delete(i.tried, a)
-		}
-	}
-	for a := range i.live {
-		if a.Addr == addr {
-			delete(i.live, a)
-		}
-	}
-	for a := range i.watchdogs {
-		if a.Addr == addr {
-			delete(i.watchdogs, a)
-		}
-	}
-	if addr >= 0 && addr < len(i.entries) {
-		i.entries[addr] = 0
-	}
-	if i.tracer != nil {
-		i.tracer.remove(addr)
-	}
 	delete(i.dynamic, addr)
 }
 

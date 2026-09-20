@@ -77,8 +77,7 @@ func TestDecoder_Unmarshal(t *testing.T) {
 				}
 				*(*int32)(p) = int32(n) + 100
 				return nil
-			})),
-	)
+			})))
 
 	var dst decodeCelsius
 	require.NoError(t, r.Unmarshal(i, types.I32(3), &dst))

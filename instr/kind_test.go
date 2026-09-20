@@ -30,10 +30,10 @@ func TestKind_String(t *testing.T) {
 
 func TestKind_IsNumeric(t *testing.T) {
 	for _, kind := range []instr.Kind{instr.KindI1, instr.KindI8, instr.KindI32, instr.KindI64, instr.KindF32, instr.KindF64} {
-		require.True(t, kind.IsNumeric(), kind.String())
+		require.True(t, kind.IsNumeric())
 	}
 	for _, kind := range []instr.Kind{instr.KindRef, instr.KindAny} {
-		require.False(t, kind.IsNumeric(), kind.String())
+		require.False(t, kind.IsNumeric())
 	}
 }
 

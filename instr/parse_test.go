@@ -227,6 +227,29 @@ func TestParseAll(t *testing.T) {
 		require.Contains(t, err.Error(), `"missing"`)
 	})
 
+	t.Run("first reference to an undefined label", func(t *testing.T) {
+		got, err := instr.ParseAll(strings.NewReader("known:\nbr known\nbr_table 1 known missing\nbr missing\n"))
+		require.Nil(t, got)
+		require.ErrorIs(t, err, instr.ErrUnboundLabel)
+		require.EqualError(t, err, `line 3: unbound label: "missing"`)
+	})
+
+	t.Run("range error after multiple symbolic and numeric targets", func(t *testing.T) {
+		listing := "br near\nnear:\nbr_table 2 near 0 far\n" + strings.Repeat("nop\n", math.MaxInt16+1) + "far:\n"
+		got, err := instr.ParseAll(strings.NewReader(listing))
+		require.Nil(t, got)
+		require.ErrorIs(t, err, instr.ErrOffsetRange)
+		require.EqualError(t, err, `line 3: branch offset out of range: "far"`)
+	})
+
+	t.Run("backward range error after a valid target", func(t *testing.T) {
+		listing := "start:\n" + strings.Repeat("nop\n", math.MaxInt16) + "near:\nbr_table 1 near start\n"
+		got, err := instr.ParseAll(strings.NewReader(listing))
+		require.Nil(t, got)
+		require.ErrorIs(t, err, instr.ErrOffsetRange)
+		require.EqualError(t, err, "line 32770: branch offset out of range: \"start\"")
+	})
+
 	t.Run("duplicate label", func(t *testing.T) {
 		_, err := instr.ParseAll(strings.NewReader("loop:\nnop\nloop:\nreturn"))
 		require.ErrorIs(t, err, instr.ErrDuplicateLabel)

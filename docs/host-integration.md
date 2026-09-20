@@ -1,107 +1,43 @@
 # Host Integration
 
-Passing values and calls between Go host code and the VM.
+Go host ↔ VM calls, values, heap refs, and reflection.
 
-## When to Read
+Heap ownership is defined in `memory-model.md`; boxed layout in `value-representation.md`.
 
-Use this document when embedding minivm in Go code, exposing host functions, moving heap references across the host boundary, or using `Marshal` and `Unmarshal`.
+## Layers
 
-For heap ownership, see `docs/memory-model.md`. For boxed value layout, see `docs/value-representation.md`.
-
-## Overview
-
-The Go host and the VM run in the same process, but they use different value representations.
-
-| Layer | Main APIs | Best for |
+| Layer | APIs | Use |
 |---|---|---|
-| Direct | `types.Boxed`, `types.Value`, `HostFunction`, `Alloc`, `Load`, `Retain`, `Release` | hot paths and explicit heap control |
-| Reflection | `Marshal`, `Unmarshal`, `Registry`, `WithCodec`, `WithMarshaler`, `WithUnmarshaler` | setup data, tests, structs, maps, slices, and functions |
+| Direct | `Boxed`, `Value`, `HostFunction`, `Alloc`, `Load`, `Retain`, `Release` | hot paths / explicit ownership |
+| Reflection | `Marshal`, `Unmarshal`, `Registry`, codecs | setup, tests, structs, maps, slices, functions |
 
-Both layers can be used with the same interpreter.
+## Host Functions
 
-## Direct Layer
-
-### Host Functions
-
-`HostFunction` is the direct call bridge from bytecode to Go.
-
-Its `Typ` and `Fn` fields are public. A struct literal and `NewHostFunction`
-establish the same value; the constructor is the concise common path.
+`HostFunction` bridges `CALL` to Go:
 
 ```go
 func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error)
 ```
 
-Example:
-
-```go
-fn := interp.NewHostFunction(
-    &types.FunctionType{
-        Params:  []types.Type{types.TypeI32, types.TypeI32},
-        Returns: []types.Type{types.TypeI32},
-    },
-    func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-        a := params[0].I32()
-        b := params[1].I32()
-        return []types.Boxed{types.BoxI32(a + b)}, nil
-    },
-)
-
-prog := program.New(instrs, program.WithConstants(fn))
-```
-
-Bytecode calls the function with `CONST_GET` and `CALL`.
+`NewHostFunction` is the normal constructor; `Typ` and `Fn` remain public.
 
 Rules:
 
-- `params` is valid only during the call
-- returning a non-nil error stops the current `Run`
-- do not call `vm.Run` recursively from a host function
+- `params` is valid only during the call;
+- non-nil errors stop the current `Run`;
+- host functions `MUST NOT` call `vm.Run` recursively.
 
-### Boxed Values
+## Boxed Values
 
-`types.Boxed` is the VM stack word. Check `Kind()` before unboxing unless the bytecode contract already proves the kind.
+`types.Boxed` is the VM stack word. The agent `MUST` check `Kind()` before unboxing unless the bytecode contract proves the kind.
 
-```go
-switch v.Kind() {
-case types.KindI32:
-    n := v.I32()
-case types.KindI64:
-    n := v.I64()
-case types.KindF32:
-    f := v.F32()
-case types.KindF64:
-    f := v.F64()
-case types.KindRef:
-    obj, err := vm.Load(v.Ref())
-    _ = obj
-    _ = err
-}
-```
+Wrong-kind unboxing is invalid.
 
-Wrong-kind unboxing is invalid and may return garbage.
+`PopBoxed` returns the raw stack word. For `KindRef`, it transfers stack ownership to the caller; `Load` does not change ownership, and the caller `MUST` release the transferred ref when finished. The caller `MUST` retain first when another ownership is required.
 
-### Reading Results
+`Pop` returns `types.Value`; for refs it detaches the heap value and releases the stack ref.
 
-Use `PopBoxed` when the caller wants the raw stack word.
-
-```go
-v, err := vm.PopBoxed()
-if err != nil {
-    return err
-}
-score := v.F64()
-```
-
-For scalar values, `PopBoxed` is allocation-free.
-
-For `KindRef`, `PopBoxed` transfers the stack reference to the caller. Resolve it with `Load`, then `Release` it when done. Use `Retain` first if the host needs another independent reference.
-
-Use `Pop` when the caller wants a `types.Value`. For heap values, `Pop` detaches the heap value and releases the stack reference.
-
-### Heap Access
-
-Host code can allocate, load, replace, retain, and release VM heap values.
+## Heap API
 
 ```go
 addr, err := vm.Alloc(types.String("hello"))
@@ -111,437 +47,67 @@ obj, err = vm.Retain(addr)
 err = vm.Release(addr)
 ```
 
-Ownership rules:
-
-- `Alloc` creates an owned heap reference
-- `Alloc` of an existing `types.Ref` or `KindRef` creates another ownership of the same address
-- `Load` reads without changing ownership
-- `Store` replaces the value at an address, releases refs owned by the old value, and finalizes its external resources
-- function, closure, and coroutine slots are immutable because runtime frames
-  borrow their code, captures, and suspension state
-- storing the same concrete pointer or the destination's own `types.Ref` /
-  `KindRef` is a no-op
-- storing a different heap address returns `ErrTypeMismatch`; use
-  `Alloc(existingRef)` to create another ownership of one object
-- concrete pointer values passed to `Alloc`, `Store`, or `Push` transfer unique
-  ownership and must not already be owned by the interpreter; use an existing
-  ref when sharing one object. The interpreter answers this from an index of the
-  pointers that have crossed `Alloc`, `Store`, `Push`, `Load`, `Retain`, or
-  `Pop`, so the check costs one lookup no matter how large the heap is
-- `Retain` creates another host-owned reference
-- `Release` drops a host-owned reference
-- every owned reference from `Alloc` or `Retain` must eventually be transferred or released
-
-Leaked host references keep heap objects alive. Releasing an address does not
-invalidate another ownership created by `Alloc` or `Retain`.
-
-### Globals and Locals
-
-`SetGlobal(idx, val)` and `SetLocal(idx, val)` overwrite VM slots.
-
-If `val` is a different valid `KindRef`, ownership transfers into the slot. The
-caller must not release that same ownership afterward. Invalid heap addresses
-return `ErrSegmentationFault` without changing the slot. Assigning the slot's
-current boxed value is a no-op; in that case no ownership transfers, and the
-caller remains responsible for any ownership it already holds.
-
-To keep another reference after a different-value assignment, retain first.
-
-```go
-_, err := vm.Retain(addr)
-if err != nil {
-    return err
-}
-err = vm.SetGlobal(0, types.BoxRef(addr))
-```
-
-This mirrors `GLOBAL_SET` and `LOCAL_SET`, which consume stack references into slots.
-
-### Dynamic Functions
-
-`Alloc` and `Store` can accept `*types.Function`.
-
-When a function is stored in the heap, the interpreter keeps a callable dispatch slot for that heap address. Bytecode can call the reference with `CALL` or `RETURN_CALL`.
-
-Dynamic functions follow normal heap ownership rules. When no stack, global, closure, object, or host reference keeps the function alive, the heap slot is reclaimed and the callable dispatch slot is removed.
-
-`Alloc` and `Store` do not verify function bytecode. If a dynamic function comes from outside the trusted program builder, verify the bytecode before storing it.
-
-### Resource Limits
-
-`WithHeap(n)` sets the initial heap capacity.
-
-`WithHeapLimit(n)` sets a hard heap-entry limit. Values `n <= 0` mean unlimited.
-
-Allocation order is described in `docs/memory-model.md`; this document only covers host-facing API behavior.
-
-`Alloc`, `Push`, and `Marshal` return heap exhaustion as normal errors. Guest execution wraps heap exhaustion in `RuntimeError`, which unwraps to `ErrHeapExhausted`.
-
-## Reflection Layer
-
-The reflection layer converts ordinary Go values to and from VM values. It is convenient, but it is not the preferred hot path.
-
-Use it for setup data, configuration, tests, ordinary structs, maps, slices, and functions.
-
-### Marshal
-
-`Marshal` converts a Go value into a `types.Value`.
-
-```go
-v, err := vm.Marshal(myGoValue)
-```
-
-The built-in codec compiles and caches one conversion per Go type. Compilation is where reflection runs; the compiled conversion reads and writes Go memory through stored offsets and strides.
-
-### Type Mapping
-
-| Go type | VM type | Notes |
-|---|---|---|
-| `bool` | `I1` | `false=0`, `true=1` |
-| `int8` | `I8` | |
-| `int16`, `int32` | `I32` | |
-| `int`, `int64` | `I64` | large values may heap-spill |
-| `uint8`, `uint16`, `uint32` | `I32` | raw bits preserved |
-| `uint`, `uint64`, `uintptr` | `I64` | raw bits preserved |
-| `float32` | `F32` | |
-| `float64` | `F64` | |
-| `string` | `String` ref | heap-allocated by the interpreter; equal contents need not share a ref |
-| `[N]T`, by value | typed array, or `*Array` ref | `I1Array` for `bool`, `I8Array` for 8-bit, `I32Array` for 16/32-bit, `I64Array` for 64-bit and `int`, `F32Array` and `F64Array` for floats, `*Array` otherwise; raw bits preserved for unsigned values |
-| `[]T` | `*HostArray` ref | live view of the Go slice |
-| `map[K]V` | `*HostMap` ref | live view of the Go map; a `map[any]V` key normalizes |
-| struct, by value, all fields exported | `*Struct` ref | exported fields, in declaration order |
-| struct with an unexported field | `*HostStruct` ref | live view of the Go struct |
-| defined scalar or string with methods | underlying scalar or `string` | keeps primitive fast path |
-| `*T` | `T` or `Null` | nil pointer becomes `Null`; a struct, array, slice, or map behind it is a live view |
-| `func(...)` | `*HostFunction` ref | final `error` return is host-only |
-| `interface{}` / `any` | `ref` | dynamic value |
-| `types.Value` | passthrough | returned as-is |
-| `types.Boxed` | unboxed | `KindRef` resolved with `Load` |
-| `time.Time` | `I64` | Unix nanoseconds |
-| `time.Duration` | `I64` | normal scalar path |
-| `complex64` | `*Struct{Real, Imag F32}` | heap-allocated |
-| `complex128` | `*Struct{Real, Imag F64}` | heap-allocated |
-| `VMMarshaler` | custom | `MarshalVM` decides representation |
-| recursive `*T` field | `*HostStruct` ref | a view is shallow, so the walk terminates |
-
-Nil pointers marshal to `types.Null`. A map or slice that reaches itself returns `ErrMarshalCycle`; a struct behind a pointer does not, because the view it produces is shallow. Shared pointers are allowed.
-
-### Go Functions
-
-A Go function marshals to `*HostFunction`.
-
-A final `error` return is treated as a host error. If it returns non-nil, the VM call fails with that error.
-
-An exact `context.Context` parameter is host-only and omitted from the VM function signature, wherever it appears. When guest code calls the marshaled function, minivm passes the active `Interpreter.Context`; a nil active context is normalized to `context.Background()`. Position does not matter because a method expression carries its receiver first, and the context that follows it is no less host-only for that.
-
-```go
-add := func(a, b int32) (int32, error) {
-    return a + b, nil
-}
-fn, err := vm.Marshal(add)
-```
-
-A VM `*types.Function`, `*types.Closure`, or live function ref can be unmarshaled into a matching Go function type. Each call marshals arguments, runs the VM function on the same interpreter, then unmarshals results.
-
-```go
-var add func(int32, int32) (int32, error)
-err := vm.Unmarshal(vmFunction, &add)
-result, err := add(2, 3)
-```
-
-The Go and VM signatures must map to equal VM function types. A final Go `error` return is host-only: VM traps and bridge errors are returned there. Without a final `error`, those failures panic. Calls must not overlap another `Run` or callable-wrapper call on the same interpreter. Wrappers use the interpreter heap and become invalid when their referenced function no longer survives normal `Release`, `Reset`, or `Close` ownership rules.
-
-When a VM function, closure, or live function ref is unmarshaled into a Go function wrapper, an exact `context.Context` parameter is host-only and omitted from the VM signature, wherever it appears. The wrapper passes it to VM execution, so cancellation and `Interpreter.Context` use the caller's context. A nil caller context and wrappers without a context parameter use `context.Background()`.
-
-VM-native scalar types can reduce conversion overhead.
-
-```go
-add := func(a, b types.I32) types.I32 {
-    return a + b
-}
-```
-
-### Dynamic Interface Values
-
-`interface{}` and named interfaces map to the VM dynamic `ref` type.
-
-```go
-got, err := vm.Marshal([]any{int32(1), "x", 2.5})
-```
-
-Rules:
-
-- `Marshal` uses the concrete dynamic value
-- nil interface values become `Null`
-- interface-typed fields, slice elements, and map values become `ref`
-- primitive values inside interface-typed slots are heap-boxed because the slot stores `ref`
-- `Unmarshal` into `interface{}` returns VM-native `types.Value` values, except a dynamic map key, which decodes to the Go type its VM kind normalizes to
-- use a concrete Go destination type to recover Go-native values
-- bytecode can recover dynamic type with `REF_TEST` and `REF_CAST`
-
-A Go map is a live `*HostMap`, and the VM map type it reports — along with the copy `ARRAY_SLICE`-style opcodes rebuild — follows its Go key type. A primitive or `string` key gives a `*TypedMap[K]` indexed by value. A pointer key follows the type it points at, so `map[*int32]V` is a `*TypedMap[int32]` keyed by the pointed-to value, and a nil pointer key fails with `ErrTypeMismatch` because it has no such value. Any other key type — `interface{}`, a named interface, a struct, an array, a pointer to one of those — gives a generic `*Map`.
-
-Either way an entry is indexed exactly as `MAP_GET` and `MAP_SET` index it: a typed map stores the key as its Go value, a generic map goes through `(*Interpreter).mapKey`, and both agree — scalars by value, strings by content, every other reference by heap address. A guest lookup with an equal key finds the entry.
-
-A struct or array key, or a pointer to one, is therefore reachable only through the same reference, since the VM has no content equality for those. Prefer a scalar or string key, or build the map inside the VM.
-
-## Host Views
-
-The form a Go value takes follows one rule: **use the VM type system whenever a
-copy reproduces the whole value, and a live view only when it cannot.**
-
-| Marshaled | Result | Why |
-|---|---|---|
-| a struct value, all fields exported | `*types.Struct` | the VM struct holds every field; nothing is left behind |
-| a struct value with methods, all fields exported | `*types.Struct` | a method that mutates a copy is Go value semantics, not a loss |
-| a struct value with an unexported field | `*interp.HostStruct` | unexported state has no slot, so no copy is faithful |
-| an array value | typed array, or `*types.Array` | a Go array is a value; the copy carries all of it |
-| a slice | `*interp.HostArray` | a Go slice is a reference; a copy drops every write |
-| a map | `*interp.HostMap` | a Go map is a reference; a copy drops every write |
-| a pointer to any of them | the matching view | the caller asked for a reference; a copy would drop the aliasing |
-| a scalar or string, with or without methods | the primitive | nothing is lost but pointer-receiver mutation, which the VM has no place to put |
-
-A native VM value keeps the fast path: fusion and native JIT lowering apply, and
-`Unmarshal` rebuilds an equal Go value from it.
-
-A view reports the same VM type a copy would have reported, so guest code reaches
-it with the ordinary opcodes — `STRUCT_GET`, `ARRAY_GET`, `MAP_GET` and the rest
-— and those reads and writes address the Go memory in place. `Unmarshal` recovers
-the whole Go value from a view, unexported state included.
-
-An opcode splits by what it produces:
-
-- **Changes the value.** `STRUCT_SET`, `ARRAY_SET`, `ARRAY_FILL`, `ARRAY_APPEND`,
-  `ARRAY_DELETE`, `ARRAY_COPY`, `MAP_SET`, `MAP_DELETE`, and `MAP_CLEAR` write
-  through to Go memory. `ARRAY_APPEND` and `ARRAY_DELETE` write the resulting
-  slice back through the view, so the Go side sees the growth even when `append`
-  reallocates; a Go array has a fixed length and refuses both.
-- **Produces a new value.** `ARRAY_SLICE`, `MAP_KEYS`, and `MAP_ITER` first
-  rebuild the view as the VM value a copy would have produced and work from that,
-  so the result is VM-owned and the view keeps addressing Go memory.
-
-A view addresses the Go *variable* rather than the data behind it, so a slice or
-map the Go side replaced is the one the next access reaches.
-
-A host struct field also lowers natively on ARM64: `STRUCT_GET` and `STRUCT_SET`
-read and write the Go field from the compiled layout rather than leaving the
-native trace, so a loop over one runs at the speed of a loop over a VM struct. A
-field the backend has no load for — a string, a pointer, a nested container — and
-a write narrower than its VM slot, whose range check can fail, stay with the
-interpreter. `docs/jit-internals.md` holds the guards.
-
-### Dynamic Map Keys
-
-A `map[any]V` is a view like any other map. A VM key carries no Go type of its
-own, so it decodes to the one type the VM's own key normalization names for its
-kind: `i1`, `i8`, and `i32` all to `int32`, `i64` to `int64`, `f32` and `f64` to
-their Go counterparts, and a string to `string`. Every other reference keys by
-identity. An entry the Go side stored under one of those types is reachable; one
-stored under another — `true`, `int`, `uint8` — reads as the element zero, the
-same way Go's own dynamic keys miss on a type mismatch.
-
-### Structs and Methods
-
-```go
-type Counter struct {
-    Name  string
-    count int
-}
-
-func (c *Counter) Bump(n int32) int32 { c.count += int(n); return int32(c.count) }
-
-c := &Counter{Name: "a"}
-obj, _ := vm.Marshal(c)                 // *interp.HostStruct{Name}: pointer, and unexported state
-bump, _ := vm.Marshal((*Counter).Bump)  // *interp.HostFunction
-```
-
-Methods are not fields. A method is an ordinary Go function, so a **method
-expression** marshals through the same path any `func` does, with the receiver
-as its first parameter. Called with a host view, it mutates the value the caller
-marshaled; called with any other VM value — a native `*types.Struct` among them
-— the receiver decodes into a fresh Go value and the call still runs, with the
-mutation staying on that copy. A **method value** — `c.Bump`, already bound —
-marshals just as well and takes no receiver parameter.
-
-One layout serves both forms, because a value and a pointer to it must report
-the same VM type. A view owns none of the references it hands out: reading a
-field publishes a reference the caller owns, and writing one copies what the VM
-value holds into the Go field rather than storing the slot, leaving the Go side
-holding a borrowed reference exactly as `Unmarshal` does.
-
-An `interp.Interpreter` is passed into each field access rather than captured, so
-a host view reached from a program constant is safe to share across pooled
-interpreters.
-
-## Unmarshal
-
-`Unmarshal` converts a VM value back into Go.
-
-The destination must be a non-nil pointer.
-
-```go
-var n int32
-err := vm.Unmarshal(types.I32(42), &n)
-
-var s string
-err = vm.Unmarshal(types.String("hello"), &s)
-```
-
-The source may be a standalone value or a slot the guest handed over. A slot is
-followed once, at the entry, so a `types.Boxed` naming a heap value decodes as
-the value it names — including a string or an `i64` too large to box inline.
-`Encoder.Encode`'s counterpart `Decoder.Decode` takes the same two forms, so an
-`Unmarshaler` may pass on whatever a container held.
-
-Struct fields are matched by name first. Unmatched destination fields fall back to the first unused VM field by position. VM function-typed fields are skipped.
-
-Errors:
-
-- overflow returns `ErrValueOverflow`
-- incompatible source/destination kinds return `ErrTypeMismatch`
-- invalid destination returns `ErrInvalidUnmarshalTarget`
-
-Unsigned integers use the same VM types as signed integers. Values above the signed maximum preserve raw bits. Signedness is recovered from the Go destination type during `Unmarshal`, or from `_S` / `_U` opcode suffixes in bytecode.
-
-## Value Lifetime
-
-Marshaled references live on the VM heap. This includes strings, arrays, maps, structs, and host functions.
-
-They remain alive while reachable from the stack, constants, globals, closures, heap objects, or retained host references. Dynamic values do not survive `vm.Close()` or `vm.Reset()`; reset finalizes their external resources and invalidates every dynamic heap address.
-
-Use marshaled refs before the next reset, or register immutable inputs as program constants.
-
-```go
-v, err := vm.Marshal(myStruct)
-if err != nil {
-    return err
-}
-
-addr, err := vm.Alloc(v)
-if err != nil {
-    return err
-}
-
-err = vm.Push(types.BoxRef(addr))
-if err != nil {
-    return err
-}
-
-err = vm.Run(ctx)
-```
-
-Or register values before creating the interpreter:
-
-```go
-prog := program.New(instrs, program.WithConstants(marshaledValue))
-```
-
-## Custom Conversion
-
-Conversion is customized per Go type. A registration layers onto the built-in
-codec rather than replacing it, and every registered conversion receives the
-`*Encoder` or `*Decoder` that started the call, so it converts its own
-dependencies through the active codec.
-
-For a type you own, implement `VMMarshaler` and `VMUnmarshaler`. The
-registry compiles an implementing type into an ordinary entry, so it resolves
-by the same rule as a registration.
-
-```go
-func (c Celsius) MarshalVM(e *interp.Encoder) (types.Value, error) {
-    return types.I32(c), nil
-}
-
-func (c *Celsius) UnmarshalVM(d *interp.Decoder, v types.Value) error {
-    n, ok := v.(types.I32)
-    if !ok {
-        return interp.ErrTypeMismatch
-    }
-    *c = Celsius(n)
-    return nil
-}
-```
-
-For a type you do not own, register a `Marshaler` or `Unmarshaler` on a
-`Registry` and install it. A marshaler receives an `unsafe.Pointer` to a live
-value of the registered type, valid only for the duration of the call, and must
-not retain it.
-
-```go
-r := interp.NewRegistry(
-    interp.WithMarshaler(reflect.TypeFor[time.Duration](), types.TypeI64,
-        interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
-            ms := int64(*(*time.Duration)(p) / time.Millisecond)
-            return e.Encode(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
-        })),
-)
-vm := interp.New(prog, interp.WithCodec(r))
-```
-
-`WithMarshaler` declares the VM type the marshaler produces, because enclosing
-struct, array, and map layouts compile from it. `WithUnmarshaler` needs no VM
-type: the source value carries its own.
-
-Registration happens during `NewRegistry`, so a `Registry` never changes
-afterwards and may be shared by pooled interpreters.
-
-Use `WithCodec` to replace conversion entirely:
-
-```go
-type Codec interface {
-    Marshal(*interp.Interpreter, any) (types.Value, error)
-    Unmarshal(*interp.Interpreter, types.Value, any) error
-}
-```
-
-`WithCodec` governs `Marshal` and `Unmarshal` alike; there is no second codec.
-It defaults to `NewRegistry()`.
-
-The built-in registry resolves a Go type by the first rule that matches:
-
-1. a type registered with `WithMarshaler` or `WithUnmarshaler`
-2. a type implementing `VMMarshaler` or `VMUnmarshaler`
-3. a VM runtime type such as `types.I32`, `types.Boxed`, or `types.String`, and
-   any type implementing `types.Value`
-4. the structural reflection mapping
-
-`time.Time`, `complex64`, and `complex128` are ordinary rule-1 entries
-installed before user options, so registering one of those types replaces it.
-A type providing only one direction leaves the other returning
-`ErrUnsupportedMarshalType`.
-
-## Errors
-
-| Error | Meaning |
+| API | Contract |
 |---|---|
-| `RuntimeError` | guest execution failed; unwraps to the cause and carries frames |
-| `types.Error` | guest exception value with code, message, payload, and optional wrapped Go cause |
-| `ErrHeapExhausted` | heap allocation exceeded `WithHeapLimit` |
-| `ErrMarshalCycle` | a copying walk reaches itself: a pointer chain through a type no view stands for, or a self-referential container an opcode rebuilds |
-| `ErrUnsupportedMarshalType` | Go type or conversion direction is unsupported |
-| `ErrInvalidUnmarshalTarget` | destination is not a non-nil pointer |
-| `ErrValueOverflow` | numeric value does not fit destination type |
-| `ErrTypeMismatch` | source and destination kinds are incompatible |
+| `Alloc` | creates one owned ref |
+| `Load` | reads without ownership change |
+| `Store` | replaces value; releases refs owned by old value |
+| `Retain` | creates one host-owned ref |
+| `Release` | drops one host-owned ref |
 
-Use `errors.Is` for error categories and `errors.As` to inspect structured errors.
+Additional rules:
 
-Use `interp.TrapCode(err)` or `types.Error.Code()` to map VM traps to source-language exceptions without matching rendered error messages. Code `0` is unclassified. Source-language errors should use `types.ErrorCodeUserBase` and above.
+- Allocating an existing ref creates another ownership;
+- storing the same concrete pointer or destination ref is a no-op;
+- storing a different heap address returns `ErrTypeMismatch`; the agent `MUST` use `Alloc(ref)` to share;
+- concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned;
+- owned refs `MUST` eventually transfer or release;
+- leaked host ownership keeps objects alive.
 
-## Maintenance Notes
+`Store`/`Alloc` dynamically track crossed pointers to reject double ownership. Dynamic functions stored in the heap receive callable dispatch slots and follow normal heap lifetime.
 
-When changing host integration code:
+External dynamic functions `MUST` be verified before storage.
 
-- keep hot paths on `types.Boxed`
-- keep reflection out of performance-sensitive loops
-- make ownership transfer explicit
-- release every retained reference
-- avoid retaining temporary slices or VM stack views
-- prefer one clear conversion path over multiple partial paths
-- keep custom conversion APIs small
-- do not expose implementation details through public errors
+## Globals and Locals
 
-## Related Docs
+`SetGlobal` and `SetLocal` transfer a new valid ref and release the replaced ref.
 
-- `docs/memory-model.md` — heap ownership, RC, GC, and host refs
-- `docs/value-representation.md` — `types.Boxed`, kinds, and dynamic `ref`
-- `docs/instruction-set.md` — host-callable opcodes and dynamic type checks
+Invalid heap addresses return `ErrSegmentationFault` and leave the slot unchanged. Assigning the current boxed value is a no-op and transfers no ownership.
+
+The caller `MUST` retain before assignment when it must keep its ownership:
+
+```go
+if _, err := vm.Retain(addr); err != nil { return err }
+if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { return err }
+```
+
+## Limits
+
+`WithHeap` sets initial capacity. `WithHeapLimit(n)` sets a hard entry limit; `n <= 0` means unlimited. `Alloc`, `Push`, and `Marshal` return `ErrHeapExhausted`; guest execution wraps it in `RuntimeError`.
+
+## Reflection
+
+`Marshal` and `Unmarshal` use cached per-type codecs. `Unmarshal` writes a VM value into a Go destination. Heap ownership is unchanged by conversion semantics.
+
+| Go | VM |
+|---|---|
+| `bool` | `I1` |
+| `int8` | `I8` |
+| `int16` / `int32` / `uint8` / `uint16` / `uint32` | `I32` |
+| `int` / `int64` / `uint` / `uint64` / `uintptr` | `I64` |
+| `float32` / `float64` | `F32` / `F64` |
+| `string` | string ref |
+| `[]T` | live host-array view |
+| `map[K]V` | live host-map view |
+| exported struct | VM struct |
+| struct with unexported fields | host-struct view |
+| function | host-function ref |
+| `any` | ref |
+| `types.Value` | passthrough |
+| `types.Boxed` | unboxed value |
+
+## Related
+
+- `memory-model.md`
+- `value-representation.md`
+- `verification.md`

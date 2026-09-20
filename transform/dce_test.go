@@ -1,219 +1,160 @@
 package transform_test
 
 import (
-	"context"
 	"testing"
 
-	"github.com/siyul-park/minivm/analysis"
-	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/interp"
-	"github.com/siyul-park/minivm/pass"
-	"github.com/siyul-park/minivm/program"
-	transform "github.com/siyul-park/minivm/transform"
-	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
+
+	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/pass"
+	"github.com/siyul-park/minivm/transform"
+	"github.com/siyul-park/minivm/types"
 )
 
 func TestNewDCEPass(t *testing.T) {
-	require.NotNil(t, transform.NewDCEPass())
+	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
+		var p pass.Pass[*ssa.Function] = transform.NewDCEPass()
+		require.NotNil(t, p)
+	})
 }
 
 func TestDCEPass_Run(t *testing.T) {
-	tests := []struct {
-		program  *program.Program
-		expected *program.Program
-	}{
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.NOP),
-					}),
-				},
-			),
-			expected: program.New(nil),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.UNREACHABLE),
-					}),
-				},
-			),
-			expected: program.New(nil),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR, 6),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.NOP),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-			expected: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR, 0),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR_IF, 6),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.NOP),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-			expected: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR_IF, 5),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR_TABLE, 1, 6, 0),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.NOP),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-			expected: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR_TABLE, 1, 5, 0),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.NOP),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.BR, uint64(uint16(-9+1<<16))),
-					}),
-				},
-			),
-			expected: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.BR, uint64(uint16(-8+1<<16))),
-					}),
-				},
-			),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.NOP),
-						instr.New(instr.I32_CONST, 0),
-						instr.New(instr.BR_IF, uint64(uint16(-9+1<<16))),
-					}),
-				},
-			),
-			expected: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.I32_CONST, 0),
-						instr.New(instr.BR_IF, uint64(uint16(-8+1<<16))),
-					}),
-				},
-			),
-		},
-		{
-			program: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.NOP),
-						instr.New(instr.I32_CONST, 0),
-						instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-			expected: program.New(
-				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.I32_CONST, 0),
-						instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
-						instr.New(instr.I32_CONST, 2),
-					}),
-				},
-			),
-		},
-	}
+	t.Run("removes a pure operation whose result nothing reads", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, unused := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{unused}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
 
-	for _, tt := range tests {
-		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
 
-		t.Run(tt.program.String(), func(t *testing.T) {
-			actual := tt.program
-			_, err := transform.NewDCEPass().Run(m, actual)
-			require.NoError(t, err)
-			require.Equal(t, tt.expected, actual)
-		})
-	}
-
-	// A branch to the past-the-end offset is a virtual exit only for top-level
-	// code (program.Verify enforces this). A function constant that branches to
-	// its own end is malformed, and DCE must reject it rather than silently
-	// repairing the offset as if it were a legal virtual exit.
-	t.Run("rejects branch to end inside a function", func(t *testing.T) {
-		fn := &types.Function{Typ: &types.FunctionType{}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.BR, 0)})}
-		prog := program.New(nil, program.WithConstants(fn))
-
-		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
-
-		_, err := transform.NewDCEPass().Run(m, prog)
-		require.ErrorIs(t, err, analysis.ErrInvalidJump)
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveNone(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, "func f\nblk0: ()\n\tv1:i32 = const 1\n\treturn v1\n", ssa.Format(fn))
 	})
 
-	t.Run("preserves execution", func(t *testing.T) {
-		builder := program.NewBuilder()
-		live := builder.Label()
-		builder.Br(live).Emit(instr.I32_CONST, 99).Bind(live).Emit(instr.I32_CONST, 42)
-		prog, err := builder.Build()
-		require.NoError(t, err)
-		before := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
-		defer before.Close()
-		require.NoError(t, before.Run(context.Background()))
-		want, err := before.Pop()
-		require.NoError(t, err)
+	t.Run("keeps an operation with an effect even when its result is unused", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		array := b.Param(entry, ssa.TypeRef)
+		length := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, Results: []ssa.Value{length}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
 
-		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBlocksAnalysis())
-		_, err = transform.NewDCEPass().Run(manager, prog)
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
 		require.NoError(t, err)
-		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
-		defer after.Close()
-		require.NoError(t, after.Run(context.Background()))
-		got, err := after.Pop()
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, ssa.Format(fn), "array.len")
+	})
+
+	t.Run("removes a block unreachable from the entry", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, live := b.Block(), b.Block()
+		orphan := b.Block()
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: live}}})
+		b.Term(live, ssa.Terminator{Op: ssa.OpComplete})
+		// Nothing names orphan on any edge; ssa.Builder does not judge that, so
+		// this "before" state is deliberately not ssa.Verify-clean.
+		b.Term(orphan, ssa.Terminator{Op: ssa.OpComplete})
+		fn := b.Build()
+		require.Equal(t, 3, fn.Len())
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
 		require.NoError(t, err)
-		require.Equal(t, want, got)
+		require.Equal(t, pass.PreserveNone(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, 2, fn.Len())
+	})
+
+	t.Run("keeps a pure operation a deopt frame alone still references", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: sum}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
+		require.Contains(t, out, "i32.add")
+		require.Contains(t, out, "stack=[v3]")
+	})
+
+	t.Run("keeps a reference only a frame's owned entry names, still owned once renumbered", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		array, dead, state := b.Value(ssa.TypeRef), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(3), Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(9), Results: []ssa.Value{dead}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1, Stack: []ssa.Operand{{Value: array, Owned: true}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveNone(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, "func f\nblk0: ()\n\tv1:ref = const 3\n\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[v1 owned]}\n\texit state v2\n", ssa.Format(fn))
+	})
+
+	t.Run("removes an OpState nothing still resumes into, once the guard that alone used it is gone", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveNone(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.NotContains(t, ssa.Format(fn), "state")
+	})
+
+	t.Run("keeps a pure operation that feeds a live guard even though nothing else reads it", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		array := b.Param(entry, ssa.TypeRef)
+		zero := b.Value(ssa.TypeI32)
+		state := b.Value(ssa.TypeState)
+		length := b.Value(ssa.TypeI32)
+		refined := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, Results: []ssa.Value{length}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{length, zero}, State: state, Results: []ssa.Value{refined}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, pass.PreserveAll(), preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, ssa.Format(fn), "const 0")
 	})
 }

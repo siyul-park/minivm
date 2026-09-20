@@ -16,17 +16,11 @@ type hostCounter struct {
 	offset int32
 }
 
-func (c *hostCounter) Bump(n int32) int32 {
-	c.Count += n + c.offset
-	return c.Count
-}
-
 func TestNewHostFunction(t *testing.T) {
 	t.Run("constructor", func(t *testing.T) {
 		typ := &types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}
+			Returns: []types.Type{types.TypeI32}}
 		fn := interp.NewHostFunction(typ, func(_ *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return []types.Boxed{types.BoxI32(params[0].I32() * 2)}, nil
 		})
@@ -43,8 +37,7 @@ func TestNewHostFunction(t *testing.T) {
 			Typ: typ,
 			Fn: func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(7)}, nil
-			},
-		}
+			}}
 
 		require.Same(t, typ, fn.Typ)
 		got, err := fn.Fn(nil, nil)
@@ -584,4 +577,8 @@ func TestHostMap_Map(t *testing.T) {
 
 	src[2] = 8
 	require.Equal(t, 1, out.(*types.TypedMap[int32]).Len())
+}
+func (c *hostCounter) Bump(n int32) int32 {
+	c.Count += n + c.offset
+	return c.Count
 }
