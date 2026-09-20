@@ -38,7 +38,7 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		for _, operation := range currentBlock.Operations {
 			operation = rebuilder.operation(operation)
 			if operation.Op == ssa.OpExec && operation.Code.IsPure() {
-				if next, ok := p.fold(rebuilder, id, function, constants, computed, operation); ok {
+				if next, ok := fold(rebuilder, id, function, constants, computed, operation); ok {
 					changed = true
 					if len(next.Results) == 0 {
 						continue
@@ -68,7 +68,7 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-func (p *FoldPass) fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
+func fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ssa.Value]types.Boxed, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
 	args := make([]types.Boxed, 0, len(operation.Args))
 	for _, a := range operation.Args {
 		c, ok := constants[a]

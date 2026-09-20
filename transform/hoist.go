@@ -135,18 +135,17 @@ func isHoistable(operation ssa.Operation) bool {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		return operation.Code.IsPure() && isSpeculatable(operation.Code) && !ssa.CanOverflowI64(operation.Code)
+		if !operation.Code.IsPure() || ssa.CanOverflowI64(operation.Code) {
+			return false
+		}
+		switch operation.Code {
+		case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
+			instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
+			return false
+		default:
+			return true
+		}
 	default:
 		return false
-	}
-}
-
-func isSpeculatable(code instr.Opcode) bool {
-	switch code {
-	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
-		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-		return false
-	default:
-		return true
 	}
 }

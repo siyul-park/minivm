@@ -91,7 +91,15 @@ func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
 	for _, b := range blocks {
 		currentBlock := function.Block(b)
 		for i, operation := range currentBlock.Operations {
-			if isEffectful(operation) {
+			effectful := false
+			switch operation.Op {
+			case ssa.OpStore, ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardBounds, ssa.OpGuardValue,
+				ssa.OpRetain, ssa.OpRelease:
+				effectful = true
+			case ssa.OpExec:
+				effectful = !operation.Code.IsPure()
+			}
+			if effectful {
 				mark(operationSite{b, i}, operation)
 			}
 		}
@@ -116,16 +124,4 @@ func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
 		mark(s, function.Block(s.block).Operations[s.index])
 	}
 	return live
-}
-
-func isEffectful(operation ssa.Operation) bool {
-	switch operation.Op {
-	case ssa.OpStore, ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardBounds, ssa.OpGuardValue,
-		ssa.OpRetain, ssa.OpRelease:
-		return true
-	case ssa.OpExec:
-		return !operation.Code.IsPure()
-	default:
-		return false
-	}
 }

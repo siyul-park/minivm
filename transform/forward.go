@@ -52,16 +52,20 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 					changed = true
 					continue
 				}
-				operation = rebuilder.define(function, operation)
-				rebuilder.builder.Add(id, operation)
-				held[operation.Slot] = operation.Results[0]
-				continue
 			case ssa.OpStore:
 				delete(held, operation.Slot)
 			case ssa.OpExec:
-				invalidate(held, operation.Code)
+				for slot := range held {
+					if operation.Code.Writes(effects[slot.Space]) {
+						delete(held, slot)
+					}
+				}
 			}
-			rebuilder.builder.Add(id, rebuilder.define(function, operation))
+			operation = rebuilder.define(function, operation)
+			if operation.Op == ssa.OpLoad {
+				held[operation.Slot] = operation.Results[0]
+			}
+			rebuilder.builder.Add(id, operation)
 		}
 		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
 
@@ -76,12 +80,4 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 	}
 	*function = *rebuilder.builder.Build()
 	return false, nil
-}
-
-func invalidate(held map[ssa.Slot]ssa.Value, code instr.Opcode) {
-	for slot := range held {
-		if code.Writes(effects[slot.Space]) {
-			delete(held, slot)
-		}
-	}
 }
