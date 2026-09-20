@@ -182,7 +182,17 @@ func (activation activation) resultCount() int {
 }
 
 func (f facts) build(entry activation, spans []span, states [][]fact, root int) *ssa.Function {
-	order := reachable(spans, root)
+	seen := make([]bool, len(spans))
+	seen[root] = true
+	order := []int{root}
+	for n := 0; n < len(order); n++ {
+		for _, successor := range spans[order[n]].succs {
+			if !seen[successor] {
+				seen[successor] = true
+				order = append(order, successor)
+			}
+		}
+	}
 	ids := make([]int, len(spans))
 	for i := range ids {
 		ids[i] = -1

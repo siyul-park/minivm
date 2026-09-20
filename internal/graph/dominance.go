@@ -44,7 +44,11 @@ func Frontier(g Graph, d *Dominance) [][]int {
 // (2001). A node unreachable from the entry keeps idom -1 and Dominates
 // treats it as dominating nothing, not even itself.
 func NewDominance(g Graph) *Dominance {
-	rpoNum, order := reversePostorder(g)
+	order := ReversePostorder(g)
+	rpoNum := make([]int, g.Len())
+	for i, node := range order {
+		rpoNum[node] = i
+	}
 	idom := make([]int, g.Len())
 	for i := range idom {
 		idom[i] = -1
@@ -102,6 +106,18 @@ func (d *Dominance) IDom(node int) int {
 	return d.idom[node]
 }
 
+// Children returns the dominator-tree children for every node.
+func (d *Dominance) Children() [][]int {
+	children := make([][]int, len(d.idom))
+	for node := 1; node < len(d.idom); node++ {
+		parent := d.IDom(node)
+		if parent >= 0 {
+			children[parent] = append(children[parent], node)
+		}
+	}
+	return children
+}
+
 // intersect finds the nearest common ancestor of a and b in the dominator
 // tree being built, walking each toward the root by reverse-postorder
 // number until they meet.
@@ -115,52 +131,4 @@ func intersect(idom, rpoNum []int, a, b int) int {
 		}
 	}
 	return a
-}
-
-// reversePostorder walks g depth-first from node 0 and returns each
-// reachable node's reverse-postorder number (unreachable nodes get -1)
-// together with the reachable nodes listed in that order, root first.
-func reversePostorder(g Graph) (rpoNum []int, order []int) {
-	n := g.Len()
-	rpoNum = make([]int, n)
-	for i := range rpoNum {
-		rpoNum[i] = -1
-	}
-	if n == 0 {
-		return rpoNum, nil
-	}
-
-	visited := make([]bool, n)
-	post := make([]int, 0, n)
-	stack := []struct {
-		node int
-		next int
-	}{{0, 0}}
-	visited[0] = true
-	for len(stack) > 0 {
-		top := &stack[len(stack)-1]
-		succ := g.Successors(top.node)
-		if top.next < len(succ) {
-			s := succ[top.next]
-			top.next++
-			if !visited[s] {
-				visited[s] = true
-				stack = append(stack, struct {
-					node int
-					next int
-				}{s, 0})
-			}
-			continue
-		}
-		post = append(post, top.node)
-		stack = stack[:len(stack)-1]
-	}
-
-	order = make([]int, len(post))
-	for i, b := range post {
-		pos := len(post) - 1 - i
-		order[pos] = b
-		rpoNum[b] = pos
-	}
-	return rpoNum, order
 }

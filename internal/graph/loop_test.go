@@ -44,3 +44,67 @@ func TestLoopHeaders(t *testing.T) {
 		require.Empty(t, graph.LoopHeaders(g, d))
 	})
 }
+
+func TestLoopBody(t *testing.T) {
+	t.Run("returns the natural loop nodes including the header", func(t *testing.T) {
+		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}, {3, 4}})
+		d := graph.NewDominance(g)
+
+		require.Equal(t, map[int]bool{1: true, 2: true}, graph.LoopBody(g, d, 1))
+	})
+
+	t.Run("merges all back edges targeting the same header", func(t *testing.T) {
+		g := newFixture(6, [][2]int{
+			{0, 1}, {1, 2}, {2, 3}, {3, 1}, {2, 4}, {4, 5}, {5, 1},
+		})
+		d := graph.NewDominance(g)
+
+		require.Equal(t, map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true}, graph.LoopBody(g, d, 1))
+	})
+}
+
+func TestPreheader(t *testing.T) {
+	t.Run("returns the unique predecessor outside the loop", func(t *testing.T) {
+		g := newFixture(4, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}})
+		d := graph.NewDominance(g)
+		body := graph.LoopBody(g, d, 1)
+
+		preheader, ok := graph.Preheader(g, body, 1)
+
+		require.True(t, ok)
+		require.Equal(t, 0, preheader)
+	})
+
+	t.Run("returns no preheader when the header has multiple outside predecessors", func(t *testing.T) {
+		g := newFixture(6, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}, {3, 4}, {4, 3}})
+		d := graph.NewDominance(g)
+		body := graph.LoopBody(g, d, 3)
+
+		preheader, ok := graph.Preheader(g, body, 3)
+
+		require.False(t, ok)
+		require.Zero(t, preheader)
+	})
+
+	t.Run("returns no preheader when the outside predecessor branches elsewhere", func(t *testing.T) {
+		g := newFixture(5, [][2]int{{0, 2}, {2, 1}, {2, 3}, {1, 4}, {4, 1}})
+		d := graph.NewDominance(g)
+		body := graph.LoopBody(g, d, 1)
+
+		preheader, ok := graph.Preheader(g, body, 1)
+
+		require.False(t, ok)
+		require.Zero(t, preheader)
+	})
+
+	t.Run("returns no preheader for a loop rooted at the entry", func(t *testing.T) {
+		g := newFixture(1, [][2]int{{0, 0}})
+		d := graph.NewDominance(g)
+		body := graph.LoopBody(g, d, 0)
+
+		preheader, ok := graph.Preheader(g, body, 0)
+
+		require.False(t, ok)
+		require.Zero(t, preheader)
+	})
+}

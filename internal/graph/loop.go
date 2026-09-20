@@ -16,3 +16,48 @@ func LoopHeaders(g Graph, d *Dominance) []int {
 	}
 	return out
 }
+
+// LoopBody returns the nodes of the natural loop rooted at header.
+func LoopBody(g Graph, d *Dominance, header int) map[int]bool {
+	body := map[int]bool{header: true}
+	stack := make([]int, 0)
+	for _, predecessor := range g.Predecessors(header) {
+		if d.Dominates(header, predecessor) && !body[predecessor] {
+			body[predecessor] = true
+			stack = append(stack, predecessor)
+		}
+	}
+	for len(stack) > 0 {
+		node := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, predecessor := range g.Predecessors(node) {
+			if !body[predecessor] {
+				body[predecessor] = true
+				stack = append(stack, predecessor)
+			}
+		}
+	}
+	return body
+}
+
+// Preheader returns the unique outside predecessor whose only successor is header.
+func Preheader(g Graph, body map[int]bool, header int) (int, bool) {
+	found := -1
+	for _, predecessor := range g.Predecessors(header) {
+		if body[predecessor] {
+			continue
+		}
+		if found >= 0 {
+			return 0, false
+		}
+		found = predecessor
+	}
+	if found < 0 {
+		return 0, false
+	}
+	successors := g.Successors(found)
+	if len(successors) != 1 || successors[0] != header {
+		return 0, false
+	}
+	return found, true
+}

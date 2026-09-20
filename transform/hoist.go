@@ -30,9 +30,9 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 	bodies := make(map[int]map[int]bool, len(headers))
 	preheaders := make(map[int]int, len(headers))
 	for _, h := range headers {
-		b := loopBody(function, dominance, h)
+		b := graph.LoopBody(function, dominance, h)
 		bodies[h] = b
-		if p, ok := preheader(function, b, h); ok {
+		if p, ok := graph.Preheader(function, b, h); ok {
 			preheaders[h] = p
 		}
 	}
@@ -40,7 +40,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved
 		return len(bodies[headers[i]]) < len(bodies[headers[j]])
 	})
 
-	blocks := reversePostorder(function)
+	blocks := graph.ReversePostorder(function)
 	defSite := map[ssa.Value]operationSite{}
 	paramOf := map[ssa.Value]int{}
 	for _, b := range blocks {
@@ -149,40 +149,4 @@ func isSpeculatable(code instr.Opcode) bool {
 	default:
 		return true
 	}
-}
-
-func loopBody(function *ssa.Function, dominance *graph.Dominance, header int) map[int]bool {
-	body := map[int]bool{header: true}
-	var stack []int
-	for _, p := range function.Predecessors(header) {
-		if dominance.Dominates(header, p) && !body[p] {
-			body[p] = true
-			stack = append(stack, p)
-		}
-	}
-	for len(stack) > 0 {
-		n := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		for _, p := range function.Predecessors(n) {
-			if !body[p] {
-				body[p] = true
-				stack = append(stack, p)
-			}
-		}
-	}
-	return body
-}
-
-func preheader(function *ssa.Function, body map[int]bool, header int) (int, bool) {
-	found, ok := -1, false
-	for _, p := range function.Predecessors(header) {
-		if body[p] {
-			continue
-		}
-		if ok {
-			return 0, false
-		}
-		found, ok = p, true
-	}
-	return found, ok
 }

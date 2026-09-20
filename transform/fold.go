@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/bits"
 
+	"github.com/siyul-park/minivm/internal/graph"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
@@ -27,7 +29,7 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved,
 	rebuilder := newRebuilder(function)
 	changed := false
 
-	for _, block := range reversePostorder(function) {
+	for _, block := range graph.ReversePostorder(function) {
 		id := rebuilder.block(block)
 		currentBlock := function.Block(block)
 		for _, param := range currentBlock.Params {

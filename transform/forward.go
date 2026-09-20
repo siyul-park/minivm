@@ -27,7 +27,7 @@ func NewForwardPass() *ForwardPass {
 
 // Run applies the pass to one SSA function.
 func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
-	children := dominatorChildren(function, graph.NewDominance(function))
+	children := graph.NewDominance(function).Children()
 
 	rebuilder := newRebuilder(function)
 	changed := false

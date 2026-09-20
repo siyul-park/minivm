@@ -7,7 +7,7 @@ import (
 
 func deduplicate(function *ssa.Function, key func(*ssa.Function, ssa.Operation) (string, bool)) (*ssa.Function, bool) {
 	dominance := graph.NewDominance(function)
-	children := dominatorChildren(function, dominance)
+	children := dominance.Children()
 
 	rebuilder := newRebuilder(function)
 	table := map[string][]ssa.Value{}

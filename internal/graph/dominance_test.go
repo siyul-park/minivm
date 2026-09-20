@@ -8,15 +8,6 @@ import (
 	"github.com/siyul-park/minivm/internal/graph"
 )
 
-// fixture is a fixed adjacency-list graph.Graph built from an explicit
-// edge list, so node numbering and edge order stay deterministic across
-// runs — it is a public API client of graph.Graph, not a private-state
-// double.
-type fixture struct {
-	succ [][]int
-	pred [][]int
-}
-
 func TestNewDominance(t *testing.T) {
 	t.Run("computes dominance for an empty graph", func(t *testing.T) {
 		g := newFixture(0, nil)
@@ -93,6 +84,25 @@ func TestFrontier(t *testing.T) {
 		f := graph.Frontier(g, graph.NewDominance(g))
 
 		require.Equal(t, [][]int{nil, nil, nil, nil}, f)
+	})
+}
+
+func TestDominance_Children(t *testing.T) {
+	t.Run("returns dominator tree children in node order", func(t *testing.T) {
+		entry, left, right, join, exit := 0, 1, 2, 3, 4
+		g := newFixture(5, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}, {join, exit}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, [][]int{{left, right, join}, nil, nil, {exit}, nil}, d.Children())
+	})
+
+	t.Run("omits unreachable nodes", func(t *testing.T) {
+		g := newFixture(3, [][2]int{{0, 1}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, [][]int{{1}, nil, nil}, d.Children())
 	})
 }
 
@@ -186,17 +196,4 @@ func TestDominance_IDom(t *testing.T) {
 		require.Equal(t, 1, d.IDom(2))
 		require.Equal(t, 2, d.IDom(3))
 	})
-}
-func (g *fixture) Len() int                 { return len(g.succ) }
-func (g *fixture) Successors(n int) []int   { return g.succ[n] }
-func (g *fixture) Predecessors(n int) []int { return g.pred[n] }
-
-func newFixture(n int, edges [][2]int) *fixture {
-	g := &fixture{succ: make([][]int, n), pred: make([][]int, n)}
-	for _, e := range edges {
-		from, to := e[0], e[1]
-		g.succ[from] = append(g.succ[from], to)
-		g.pred[to] = append(g.pred[to], from)
-	}
-	return g
 }

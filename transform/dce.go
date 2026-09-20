@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
 )
@@ -22,7 +23,7 @@ func NewDCEPass() *DCEPass {
 
 // Run applies the pass to one SSA function.
 func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (pass.Preserved, error) {
-	blocks := reversePostorder(function)
+	blocks := graph.ReversePostorder(function)
 	live := liveness(function, blocks)
 
 	rebuilder := newRebuilder(function)

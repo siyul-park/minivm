@@ -87,7 +87,7 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 
 	dominance := graph.NewDominance(function)
 	params := placements(function, dominance, localTypes, indexes)
-	children := dominatorChildren(function, dominance)
+	children := dominance.Children()
 
 	rebuilder := newRebuilder(function)
 	var walk func(block int, reaching map[int]ssa.Value)
@@ -148,7 +148,7 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 func prependEntry(function *ssa.Function) *ssa.Function {
 	rebuilder := newRebuilder(function)
 	first := rebuilder.builder.AddBlock()
-	for _, block := range reversePostorder(function) {
+	for _, block := range graph.ReversePostorder(function) {
 		id := rebuilder.block(block)
 		currentBlock := function.Block(block)
 		for _, param := range currentBlock.Params {

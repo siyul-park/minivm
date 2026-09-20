@@ -75,34 +75,27 @@ func isPastEnd(code []byte) bool {
 }
 
 func successors(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
-	ip, inst, ok := lastInstruction(code, block)
-	if ok {
-		switch inst.Opcode() {
-		case instr.RETURN, instr.RETURN_CALL:
-			return nil
-		case instr.BR, instr.BR_TABLE:
-			return targets(instr.Targets(code, ip), at)
-		case instr.BR_IF:
-			return targets(append(instr.Targets(code, ip), ip+inst.Width()), at)
-		}
-	}
-	if block.End >= len(code) {
-		return nil
-	}
-	return targets([]int{block.End}, at)
-}
-
-func lastInstruction(code []byte, block *analysis.BasicBlock) (int, instr.Instruction, bool) {
 	last := -1
 	for ip := block.Start; ip < block.End; {
 		inst := instr.Instruction(code[ip:])
 		last = ip
 		ip += inst.Width()
 	}
-	if last < 0 {
-		return 0, nil, false
+	if last >= 0 {
+		inst := instr.Instruction(code[last:])
+		switch inst.Opcode() {
+		case instr.RETURN, instr.RETURN_CALL:
+			return nil
+		case instr.BR, instr.BR_TABLE:
+			return targets(instr.Targets(code, last), at)
+		case instr.BR_IF:
+			return targets(append(instr.Targets(code, last), last+inst.Width()), at)
+		}
 	}
-	return last, instr.Instruction(code[last:]), true
+	if block.End >= len(code) {
+		return nil
+	}
+	return targets([]int{block.End}, at)
 }
 
 func targets(offsets []int, at map[int]int) []int {
@@ -113,19 +106,4 @@ func targets(offsets []int, at map[int]int) []int {
 		}
 	}
 	return out
-}
-
-func reachable(spans []span, root int) []int {
-	seen := make([]bool, len(spans))
-	seen[root] = true
-	order := []int{root}
-	for n := 0; n < len(order); n++ {
-		for _, succ := range spans[order[n]].succs {
-			if !seen[succ] {
-				seen[succ] = true
-				order = append(order, succ)
-			}
-		}
-	}
-	return order
 }
