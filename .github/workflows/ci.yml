@@ -41,10 +41,8 @@ jobs:
 
   coverage:
     needs: check
-    # ARM64: the JIT is ARM64-only, so coverage measured on x86-64 counts
-    # thousands of statements that cannot execute there, and the suite never
-    # exercises native compilation at all. docs/compatibility.md lists
-    # Linux/ARM64 JIT as supported; this is what checks that.
+    # Coverage runs on ARM64 so architecture-specific executable-memory and
+    # encoder paths are reachable. The native rebuild is tracked separately.
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout Code
