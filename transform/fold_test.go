@@ -24,7 +24,7 @@ func TestNewFoldPass(t *testing.T) {
 func TestFoldPass_Run(t *testing.T) {
 	t.Run("folds a pure operation whose arguments are both constants", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, y, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
@@ -48,7 +48,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("leaves the function untouched when nothing folds", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		param := b.Param(entry, ssa.TypeI32)
 		one, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
@@ -66,7 +66,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("leaves a constant divisor of zero unfolded", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, zero, quotient := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
@@ -83,7 +83,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("leaves an i64 result that overflows the boxed constant range unfolded", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, y, product := b.Value(ssa.TypeI64), b.Value(ssa.TypeI64), b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1 << 30), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1 << 30), Results: []ssa.Value{y}})
@@ -101,7 +101,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("folds a value a deopt frame references without disturbing what the activation names", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
@@ -182,7 +182,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("leaves an identity over a value read out of a slot", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{right}})
@@ -216,7 +216,7 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("leaves a signed divide by a power of two alone", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x := b.Param(entry, ssa.TypeI32)
 		right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(8), Results: []ssa.Value{right}})
@@ -579,7 +579,7 @@ func TestFoldPass_Run(t *testing.T) {
 func identity(t *testing.T, code instr.Opcode, valueType ssa.Type, constant types.Boxed) {
 	t.Helper()
 	b := ssa.New("f")
-	entry := b.AddBlock()
+	entry := b.Block()
 	param := b.Param(entry, valueType)
 	x, right, result := b.Value(valueType), b.Value(valueType), b.Value(valueType)
 	seed := instr.I32_REM_S
@@ -608,7 +608,7 @@ func identity(t *testing.T, code instr.Opcode, valueType ssa.Type, constant type
 func shift(t *testing.T, code instr.Opcode, valueType ssa.Type, constant types.Boxed, want instr.Opcode, amount int) {
 	t.Helper()
 	b := ssa.New("f")
-	entry := b.AddBlock()
+	entry := b.Block()
 	x := b.Param(entry, valueType)
 	right, result := b.Value(valueType), b.Value(valueType)
 	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: constant, Results: []ssa.Value{right}})
@@ -631,7 +631,7 @@ func shift(t *testing.T, code instr.Opcode, valueType ssa.Type, constant types.B
 func fold(t *testing.T, code instr.Opcode, boxes []types.Boxed, want types.Boxed) {
 	t.Helper()
 	b := ssa.New("f")
-	entry := b.AddBlock()
+	entry := b.Block()
 	args := make([]ssa.Value, len(boxes))
 	for i, box := range boxes {
 		args[i] = b.Value(ssa.TypeOf(box.Kind()))

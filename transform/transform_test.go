@@ -16,7 +16,7 @@ import (
 func TestPassOrder(t *testing.T) {
 	t.Run("folds, deduplicates, eliminates a redundant guard, and sweeps the dead code left behind", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		array := b.Param(entry, ssa.TypeRef)
 
 		x, y := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
@@ -62,7 +62,7 @@ func TestPassOrder(t *testing.T) {
 
 	t.Run("hoists a loop-invariant computation once CSE has unified a redundant guard, and DCE sweeps the rest", func(t *testing.T) {
 		b := ssa.New("f")
-		pre, header, body, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
+		pre, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
 		array := b.Param(pre, ssa.TypeRef)
 		x, y := b.Param(pre, ssa.TypeI32), b.Param(pre, ssa.TypeI32)
 

@@ -21,7 +21,7 @@ func Frontier(g Graph, d *Dominance) [][]int {
 	frontier := make([][]int, g.Len())
 	for b := range g.Len() {
 		idom := d.IDom(b)
-		preds := g.Predecessors(b)
+		preds := g.Pred(b)
 		if b != 0 && (idom < 0 || len(preds) < 2) {
 			continue
 		}
@@ -44,7 +44,7 @@ func Frontier(g Graph, d *Dominance) [][]int {
 // (2001). A node unreachable from the entry keeps idom -1 and Dominates
 // treats it as dominating nothing, not even itself.
 func NewDominance(g Graph) *Dominance {
-	order := ReversePostorder(g)
+	order := Order(g)
 	rpoNum := make([]int, g.Len())
 	for i, node := range order {
 		rpoNum[node] = i
@@ -62,7 +62,7 @@ func NewDominance(g Graph) *Dominance {
 		changed = false
 		for _, b := range order[1:] {
 			pick := -1
-			for _, p := range g.Predecessors(b) {
+			for _, p := range g.Pred(b) {
 				if idom[p] == -1 {
 					continue
 				}

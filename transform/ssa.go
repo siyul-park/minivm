@@ -60,7 +60,7 @@ func (p *SSAPass) Run(manager *pass.Manager, program *program.Program) (bool, er
 }
 
 func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int, function *types.Function) (bool, error) {
-	if !isExpressible(function.Code) {
+	if !expressible(function.Code) {
 		return false, nil
 	}
 	f, err := Translate(constants.module(), address, function, 0)
@@ -92,7 +92,7 @@ func newPool(program *program.Program) *pool {
 		boxed, ok := box(v)
 		if !ok {
 			boxed = types.BoxRef(i + 1)
-			p.objects[i+1] = resolveObject(v)
+			p.objects[i+1] = resolved(v)
 		}
 		p.boxed[i] = boxed
 		if _, seen := p.at[boxed]; !seen {
@@ -125,7 +125,7 @@ func (p *pool) intern(c types.Boxed) (int, bool) {
 	return at, true
 }
 
-func isExpressible(code []byte) bool {
+func expressible(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
 		switch inst.Opcode() {
@@ -158,7 +158,7 @@ func box(v types.Value) (types.Boxed, bool) {
 	}
 }
 
-func resolveObject(v types.Value) Object {
+func resolved(v types.Value) Object {
 	switch v := v.(type) {
 	case *types.Function:
 		return Object{Function: v}

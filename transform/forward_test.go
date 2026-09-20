@@ -26,7 +26,7 @@ func TestForwardPass_Run(t *testing.T) {
 
 	t.Run("forwards a repeated read of one slot onto the first", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		first, second := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
@@ -44,7 +44,7 @@ func TestForwardPass_Run(t *testing.T) {
 
 	t.Run("forwards into a block only one edge reaches", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, next := b.AddBlock(), b.AddBlock()
+		entry, next := b.Block(), b.Block()
 		first, second := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: next}}})
@@ -63,7 +63,7 @@ func TestForwardPass_Run(t *testing.T) {
 
 	t.Run("keeps a read a store to the same slot separates", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		first, second, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -82,7 +82,7 @@ func TestForwardPass_Run(t *testing.T) {
 
 	t.Run("keeps a read a store to another slot does not separate", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		first, second, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -102,7 +102,7 @@ func TestForwardPass_Run(t *testing.T) {
 
 	t.Run("keeps a global read a call separates but forwards a local one", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		callee := b.Param(entry, ssa.TypeRef)
 		global, held, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{global}})
@@ -128,7 +128,7 @@ func TestForwardPass_Run(t *testing.T) {
 
 	t.Run("keeps a read in a block more than one edge reaches", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, left, right, join := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
+		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
 		cond := b.Param(entry, ssa.TypeI1)
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})

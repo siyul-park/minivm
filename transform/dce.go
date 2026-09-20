@@ -9,7 +9,7 @@ import (
 // DCEPass removes unreachable blocks and dead pure operations.
 type DCEPass struct{}
 
-type operationSite struct {
+type site struct {
 	block int
 	index int
 }
@@ -23,7 +23,7 @@ func NewDCEPass() *DCEPass {
 
 // Run applies the pass to one SSA function.
 func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	blocks := graph.ReversePostorder(function)
+	blocks := graph.Order(function)
 	live := liveness(function, blocks)
 
 	rebuilder := newRebuilder(function)
@@ -35,7 +35,7 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
 		for i, operation := range currentBlock.Operations {
-			if !live[operationSite{block, i}] {
+			if !live[site{block, i}] {
 				changed = true
 				continue
 			}
@@ -52,24 +52,24 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
-	defs := map[ssa.Value]operationSite{}
+func liveness(function *ssa.Function, blocks []int) map[site]bool {
+	defs := map[ssa.Value]site{}
 	for _, b := range blocks {
 		for i, operation := range function.Block(b).Operations {
 			for _, r := range operation.Results {
-				defs[r] = operationSite{b, i}
+				defs[r] = site{b, i}
 			}
 		}
 	}
 
-	live := map[operationSite]bool{}
+	live := map[site]bool{}
 	var queue []ssa.Value
 	push := func(v ssa.Value) {
 		if v != ssa.NoValue {
 			queue = append(queue, v)
 		}
 	}
-	mark := func(s operationSite, operation ssa.Operation) {
+	mark := func(s site, operation ssa.Operation) {
 		if live[s] {
 			return
 		}
@@ -100,7 +100,7 @@ func liveness(function *ssa.Function, blocks []int) map[operationSite]bool {
 				effectful = !operation.Code.IsPure()
 			}
 			if effectful {
-				mark(operationSite{b, i}, operation)
+				mark(site{b, i}, operation)
 			}
 		}
 		for _, a := range currentBlock.Terminator.Args {

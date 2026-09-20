@@ -22,7 +22,7 @@ func NewHoistPass() *HoistPass {
 // Run applies the pass to one SSA function.
 func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	dominance := graph.NewDominance(function)
-	headers := graph.LoopHeaders(function, dominance)
+	headers := graph.Headers(function, dominance)
 	if len(headers) == 0 {
 		return true, nil
 	}
@@ -30,7 +30,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	bodies := make(map[int]map[int]bool, len(headers))
 	preheaders := make(map[int]int, len(headers))
 	for _, h := range headers {
-		b := graph.LoopBody(function, dominance, h)
+		b := graph.Body(function, dominance, h)
 		bodies[h] = b
 		if p, ok := graph.Preheader(function, b, h); ok {
 			preheaders[h] = p
@@ -40,8 +40,8 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		return len(bodies[headers[i]]) < len(bodies[headers[j]])
 	})
 
-	blocks := graph.ReversePostorder(function)
-	defSite := map[ssa.Value]operationSite{}
+	blocks := graph.Order(function)
+	defSite := map[ssa.Value]site{}
 	paramOf := map[ssa.Value]int{}
 	for _, b := range blocks {
 		currentBlock := function.Block(b)
@@ -50,13 +50,13 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		}
 		for i, operation := range currentBlock.Operations {
 			for _, r := range operation.Results {
-				defSite[r] = operationSite{b, i}
+				defSite[r] = site{b, i}
 			}
 		}
 	}
 
-	dest := map[operationSite]int{}
-	current := func(s operationSite) int {
+	dest := map[site]int{}
+	current := func(s site) int {
 		if b, ok := dest[s]; ok {
 			return b
 		}
@@ -85,11 +85,11 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			}
 			ops := function.Block(b).Operations
 			for i, operation := range ops {
-				s := operationSite{b, i}
+				s := site{b, i}
 				if !body[current(s)] {
 					continue
 				}
-				if !isHoistable(operation) {
+				if !hoistable(operation) {
 					continue
 				}
 				invariant := true
@@ -120,7 +120,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			rebuilder.alias(v, rebuilder.builder.Param(id, function.Type(v)))
 		}
 		for i, operation := range currentBlock.Operations {
-			target := rebuilder.block(current(operationSite{b, i}))
+			target := rebuilder.block(current(site{b, i}))
 			rebuilder.builder.Add(target, rebuilder.define(function, rebuilder.operation(operation)))
 		}
 		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
@@ -130,12 +130,12 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-func isHoistable(operation ssa.Operation) bool {
+func hoistable(operation ssa.Operation) bool {
 	switch operation.Op {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		if !operation.Code.IsPure() || ssa.CanOverflowI64(operation.Code) {
+		if !operation.Code.IsPure() || ssa.OverflowsI64(operation.Code) {
 			return false
 		}
 		switch operation.Code {

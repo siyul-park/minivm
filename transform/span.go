@@ -13,7 +13,7 @@ type span struct {
 	suspend bool
 }
 
-func splitSpans(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int) {
+func split(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int) {
 	var spans []span
 	first := make([]int, len(blocks))
 	last := make([]int, len(blocks))
@@ -36,7 +36,7 @@ func splitSpans(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int
 		at[s.start] = i
 	}
 	exit := -1
-	if _, ok := at[len(code)]; !ok && isPastEnd(code) {
+	if _, ok := at[len(code)]; !ok && past(code) {
 		spans = append(spans, span{start: len(code), end: len(code)})
 		exit = len(spans) - 1
 		at[len(code)] = exit
@@ -62,7 +62,7 @@ func splitSpans(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int
 	return spans, at
 }
 
-func isPastEnd(code []byte) bool {
+func past(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		for _, target := range instr.Targets(code, ip) {
 			if target == len(code) {

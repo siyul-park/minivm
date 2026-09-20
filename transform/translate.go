@@ -63,13 +63,13 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		globals:   module.Globals,
 		objects:   module.Objects,
 		types:     module.Types,
-		callFree:  !hasCall(function.Code),
+		callFree:  !calls(function.Code),
 	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {
 		return nil, err
 	}
-	spans, at := splitSpans(function.Code, blocks)
+	spans, at := split(function.Code, blocks)
 	root, ok := at[entry]
 	if !ok {
 		return nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
@@ -86,7 +86,7 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		if states[root] == nil {
 			return nil, nil
 		}
-		states, ok = f.analyze(activation, spans, root, ownReferences(states[root]))
+		states, ok = f.analyze(activation, spans, root, owned(states[root]))
 		if !ok {
 			return nil, nil
 		}
@@ -94,7 +94,7 @@ func translate(module Module, address int, function *types.Function, entry int) 
 	return f.build(activation, spans, states, root), nil
 }
 
-func hasCall(code []byte) bool {
+func calls(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
 		if inst.Opcode().Writes(instr.Frame) {

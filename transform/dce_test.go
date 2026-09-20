@@ -22,7 +22,7 @@ func TestNewDCEPass(t *testing.T) {
 func TestDCEPass_Run(t *testing.T) {
 	t.Run("removes a pure operation whose result nothing reads", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, unused := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{unused}})
@@ -40,7 +40,7 @@ func TestDCEPass_Run(t *testing.T) {
 
 	t.Run("keeps an operation with an effect even when its result is unused", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		array := b.Param(entry, ssa.TypeRef)
 		length := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, State: deoptState(b, entry), Results: []ssa.Value{length}})
@@ -58,8 +58,8 @@ func TestDCEPass_Run(t *testing.T) {
 
 	t.Run("removes a block unreachable from the entry", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, live := b.AddBlock(), b.AddBlock()
-		orphan := b.AddBlock()
+		entry, live := b.Block(), b.Block()
+		orphan := b.Block()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: live}}})
 		b.Term(live, ssa.Terminator{Op: ssa.OpComplete})
 		b.Term(orphan, ssa.Terminator{Op: ssa.OpComplete})
@@ -76,7 +76,7 @@ func TestDCEPass_Run(t *testing.T) {
 
 	t.Run("keeps a pure operation a deopt frame alone still references", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
@@ -98,7 +98,7 @@ func TestDCEPass_Run(t *testing.T) {
 
 	t.Run("keeps a reference only a frame's owned entry names, still owned once renumbered", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		array, dead, state := b.Value(ssa.TypeRef), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(3), Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(9), Results: []ssa.Value{dead}})
@@ -117,7 +117,7 @@ func TestDCEPass_Run(t *testing.T) {
 
 	t.Run("removes an OpState nothing still resumes into, once the guard that alone used it is gone", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
@@ -134,7 +134,7 @@ func TestDCEPass_Run(t *testing.T) {
 
 	t.Run("keeps a pure operation that feeds a live guard even though nothing else reads it", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		array := b.Param(entry, ssa.TypeRef)
 		zero := b.Value(ssa.TypeI32)
 		state := b.Value(ssa.TypeState)

@@ -102,7 +102,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 	t.Run("does not hoist out of a loop with no suitable preheader", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, left, right, header, body, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
+		entry, left, right, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
 
 		pick := b.Value(ssa.TypeI1)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI1(true), Results: []ssa.Value{pick}})
@@ -180,7 +180,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 	t.Run("cascades a doubly loop-invariant operation out of a nested loop in one run", func(t *testing.T) {
 		b := ssa.New("f")
-		pre, outer, mid, inner, innerBody, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
+		pre, outer, mid, inner, innerBody, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
 
 		x, y := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
@@ -234,7 +234,7 @@ func TestHoistPass_Run(t *testing.T) {
 
 	t.Run("is correct on a function carrying no loop at all", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{x}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
@@ -251,7 +251,7 @@ func TestHoistPass_Run(t *testing.T) {
 }
 func newCountedLoop() *countedLoop {
 	b := ssa.New("f")
-	l := &countedLoop{b: b, pre: b.AddBlock(), header: b.AddBlock(), body: b.AddBlock(), exit: b.AddBlock()}
+	l := &countedLoop{b: b, pre: b.Block(), header: b.Block(), body: b.Block(), exit: b.Block()}
 
 	l.bound = b.Value(ssa.TypeI32)
 	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{l.bound}})

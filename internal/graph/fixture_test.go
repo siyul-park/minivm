@@ -5,9 +5,9 @@ type fixture struct {
 	pred [][]int
 }
 
-func (g *fixture) Len() int                 { return len(g.succ) }
-func (g *fixture) Successors(n int) []int   { return g.succ[n] }
-func (g *fixture) Predecessors(n int) []int { return g.pred[n] }
+func (g *fixture) Len() int         { return len(g.succ) }
+func (g *fixture) Succ(n int) []int { return g.succ[n] }
+func (g *fixture) Pred(n int) []int { return g.pred[n] }
 
 func newFixture(n int, edges [][2]int) *fixture {
 	g := &fixture{succ: make([][]int, n), pred: make([][]int, n)}

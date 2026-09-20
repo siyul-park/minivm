@@ -49,7 +49,7 @@ const (
 	backingUpval                 // deferred to a closure upval slot
 )
 
-func deoptOperands(stack []operand) []ssa.Operand {
+func deopt(stack []operand) []ssa.Operand {
 	out := make([]ssa.Operand, len(stack))
 	for i, o := range stack {
 		out[i] = ssa.Operand{Value: o.value, Owned: o.kind == types.KindRef && o.backing == backingStack}
@@ -101,10 +101,10 @@ func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][
 
 func (f facts) transfer(activation activation, s span, in []fact) ([]fact, bool) {
 	b := ssa.New("")
-	block := b.AddBlock()
+	block := b.Block()
 	stack := make([]operand, len(in))
 	for i, e := range in {
-		t, ok := ssaType(e.kind)
+		t, ok := typ(e.kind)
 		if !ok {
 			return nil, false
 		}
@@ -149,7 +149,7 @@ func (f *fact) merge(src fact) (bool, bool) {
 	return changed, true
 }
 
-func ownReferences(in []fact) []fact {
+func owned(in []fact) []fact {
 	out := append([]fact(nil), in...)
 	for i := range out {
 		if out[i].kind == types.KindRef {
@@ -159,7 +159,7 @@ func ownReferences(in []fact) []fact {
 	return out
 }
 
-func fromType(t types.Type) fact {
+func holds(t types.Type) fact {
 	if t == nil {
 		return fact{}
 	}
@@ -169,12 +169,12 @@ func fromType(t types.Type) fact {
 	return f
 }
 
-func ssaType(kind types.Kind) (ssa.Type, bool) {
+func typ(kind types.Kind) (ssa.Type, bool) {
 	t := ssa.TypeOf(kind)
 	return t, t != 0
 }
 
-func (activation activation) resultCount() int {
+func (activation activation) returns() int {
 	if activation.function.Typ == nil {
 		return 0
 	}
@@ -199,13 +199,13 @@ func (f facts) build(entry activation, spans []span, states [][]fact, root int) 
 	}
 	b := ssa.New(fmt.Sprintf("%d:%d", entry.address, spans[root].start))
 	for _, id := range order {
-		ids[id] = b.AddBlock()
+		ids[id] = b.Block()
 	}
 
 	for _, id := range order {
 		stack := make([]operand, len(states[id]))
 		for i, e := range states[id] {
-			t, ok := ssaType(e.kind)
+			t, ok := typ(e.kind)
 			if !ok {
 				return nil
 			}

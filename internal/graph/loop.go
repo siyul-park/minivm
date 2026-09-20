@@ -1,13 +1,13 @@
 package graph
 
-// LoopHeaders returns the node index of every node some back-edge
+// Headers returns the node index of every node some back-edge
 // targets: b->s is a back-edge, and s a loop header, exactly when s
 // dominates b — the standard definition of a natural loop.
-func LoopHeaders(g Graph, d *Dominance) []int {
+func Headers(g Graph, d *Dominance) []int {
 	seen := make(map[int]bool)
 	var out []int
 	for b := 0; b < g.Len(); b++ {
-		for _, s := range g.Successors(b) {
+		for _, s := range g.Succ(b) {
 			if !seen[s] && d.Dominates(s, b) {
 				seen[s] = true
 				out = append(out, s)
@@ -17,11 +17,11 @@ func LoopHeaders(g Graph, d *Dominance) []int {
 	return out
 }
 
-// LoopBody returns the nodes of the natural loop rooted at header.
-func LoopBody(g Graph, d *Dominance, header int) map[int]bool {
+// Body returns the nodes of the natural loop rooted at header.
+func Body(g Graph, d *Dominance, header int) map[int]bool {
 	body := map[int]bool{header: true}
 	stack := make([]int, 0)
-	for _, predecessor := range g.Predecessors(header) {
+	for _, predecessor := range g.Pred(header) {
 		if d.Dominates(header, predecessor) && !body[predecessor] {
 			body[predecessor] = true
 			stack = append(stack, predecessor)
@@ -30,7 +30,7 @@ func LoopBody(g Graph, d *Dominance, header int) map[int]bool {
 	for len(stack) > 0 {
 		node := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		for _, predecessor := range g.Predecessors(node) {
+		for _, predecessor := range g.Pred(node) {
 			if !body[predecessor] {
 				body[predecessor] = true
 				stack = append(stack, predecessor)
@@ -43,7 +43,7 @@ func LoopBody(g Graph, d *Dominance, header int) map[int]bool {
 // Preheader returns the unique outside predecessor whose only successor is header.
 func Preheader(g Graph, body map[int]bool, header int) (int, bool) {
 	found := -1
-	for _, predecessor := range g.Predecessors(header) {
+	for _, predecessor := range g.Pred(header) {
 		if body[predecessor] {
 			continue
 		}
@@ -55,7 +55,7 @@ func Preheader(g Graph, body map[int]bool, header int) (int, bool) {
 	if found < 0 {
 		return 0, false
 	}
-	successors := g.Successors(found)
+	successors := g.Succ(found)
 	if len(successors) != 1 || successors[0] != header {
 		return 0, false
 	}

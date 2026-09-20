@@ -13,8 +13,8 @@ func New(name string) *Builder {
 	return &Builder{name: name, types: make([]Type, 1)}
 }
 
-// AddBlock appends an empty block and returns its id.
-func (b *Builder) AddBlock() int {
+// Block appends an empty block and returns its id.
+func (b *Builder) Block() int {
 	b.blocks = append(b.blocks, Block{})
 	return len(b.blocks) - 1
 }

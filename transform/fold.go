@@ -29,7 +29,7 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	rebuilder := newRebuilder(function)
 	changed := false
 
-	for _, block := range graph.ReversePostorder(function) {
+	for _, block := range graph.Order(function) {
 		id := rebuilder.block(block)
 		currentBlock := function.Block(block)
 		for _, param := range currentBlock.Params {
@@ -78,7 +78,7 @@ func fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ss
 		args = append(args, c)
 	}
 	if len(args) == len(operation.Args) {
-		if result, ok := evaluate(operation.Code, args); ok {
+		if result, ok := eval(operation.Code, args); ok {
 			return ssa.Operation{Op: ssa.OpConst, Const: result, Results: operation.Results}, true
 		}
 		return operation, false
@@ -160,15 +160,15 @@ func log2(v uint64) (uint64, bool) {
 	return uint64(bits.TrailingZeros64(v)), true
 }
 
-func evaluate(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
+func eval(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 	switch code {
 	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U,
 		instr.I32_REM_S, instr.I32_REM_U, instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
 		instr.I32_XOR, instr.I32_AND, instr.I32_OR:
-		return evaluateI32(code, args[0].I32(), args[1].I32())
+		return evalI32(code, args[0].I32(), args[1].I32())
 	case instr.I32_EQ, instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
 		instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U:
-		return evaluateI32Cmp(code, args[0].I32(), args[1].I32())
+		return evalI32Cmp(code, args[0].I32(), args[1].I32())
 	case instr.I32_EQZ:
 		return types.BoxI1(args[0].I32() == 0), true
 	case instr.I32_TO_F32_S:
@@ -179,10 +179,10 @@ func evaluate(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U,
 		instr.I64_REM_S, instr.I64_REM_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
 		instr.I64_XOR, instr.I64_AND, instr.I64_OR:
-		return evaluateI64(code, args[0].I64(), args[1].I64())
+		return evalI64(code, args[0].I64(), args[1].I64())
 	case instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U,
 		instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U:
-		return evaluateI64Cmp(code, args[0].I64(), args[1].I64())
+		return evalI64Cmp(code, args[0].I64(), args[1].I64())
 	case instr.I64_EQZ:
 		return types.BoxI1(args[0].I64() == 0), true
 	case instr.I64_TO_I32:
@@ -197,18 +197,18 @@ func evaluate(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 		return types.BoxF64(float64(uint64(args[0].I64()))), true
 
 	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD:
-		return evaluateF32(code, args[0].F32(), args[1].F32())
+		return evalF32(code, args[0].F32(), args[1].F32())
 	case instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
-		return evaluateF32Cmp(code, args[0].F32(), args[1].F32())
+		return evalF32Cmp(code, args[0].F32(), args[1].F32())
 	case instr.F32_TO_I32_S:
 		return types.BoxI32(int32(args[0].F32())), true
 	case instr.F32_TO_I32_U:
 		return types.BoxI32(int32(uint32(args[0].F32()))), true
 
 	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD:
-		return evaluateF64(code, args[0].F64(), args[1].F64())
+		return evalF64(code, args[0].F64(), args[1].F64())
 	case instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
-		return evaluateF64Cmp(code, args[0].F64(), args[1].F64())
+		return evalF64Cmp(code, args[0].F64(), args[1].F64())
 	case instr.F64_TO_I32_S:
 		return types.BoxI32(int32(args[0].F64())), true
 	case instr.F64_TO_I32_U:
@@ -225,7 +225,7 @@ func evaluate(code instr.Opcode, args []types.Boxed) (types.Boxed, bool) {
 	}
 }
 
-func evaluateI32(code instr.Opcode, a, b int32) (types.Boxed, bool) {
+func evalI32(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	switch code {
 	case instr.I32_ADD:
 		return types.BoxI32(a + b), true
@@ -270,7 +270,7 @@ func evaluateI32(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	}
 }
 
-func evaluateI32Cmp(code instr.Opcode, a, b int32) (types.Boxed, bool) {
+func evalI32Cmp(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	switch code {
 	case instr.I32_EQ:
 		return types.BoxI1(a == b), true
@@ -297,7 +297,7 @@ func evaluateI32Cmp(code instr.Opcode, a, b int32) (types.Boxed, bool) {
 	}
 }
 
-func evaluateI64(code instr.Opcode, a, b int64) (types.Boxed, bool) {
+func evalI64(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	switch code {
 	case instr.I64_ADD:
 		return i64(a + b)
@@ -342,7 +342,7 @@ func evaluateI64(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	}
 }
 
-func evaluateI64Cmp(code instr.Opcode, a, b int64) (types.Boxed, bool) {
+func evalI64Cmp(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	switch code {
 	case instr.I64_EQ:
 		return types.BoxI1(a == b), true
@@ -369,7 +369,7 @@ func evaluateI64Cmp(code instr.Opcode, a, b int64) (types.Boxed, bool) {
 	}
 }
 
-func evaluateF32(code instr.Opcode, a, b float32) (types.Boxed, bool) {
+func evalF32(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	switch code {
 	case instr.F32_ADD:
 		return types.BoxF32(a + b), true
@@ -397,7 +397,7 @@ func evaluateF32(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	}
 }
 
-func evaluateF32Cmp(code instr.Opcode, a, b float32) (types.Boxed, bool) {
+func evalF32Cmp(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	switch code {
 	case instr.F32_EQ:
 		return types.BoxI1(a == b), true
@@ -416,7 +416,7 @@ func evaluateF32Cmp(code instr.Opcode, a, b float32) (types.Boxed, bool) {
 	}
 }
 
-func evaluateF64(code instr.Opcode, a, b float64) (types.Boxed, bool) {
+func evalF64(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	switch code {
 	case instr.F64_ADD:
 		return types.BoxF64(a + b), true
@@ -444,7 +444,7 @@ func evaluateF64(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	}
 }
 
-func evaluateF64Cmp(code instr.Opcode, a, b float64) (types.Boxed, bool) {
+func evalF64Cmp(code instr.Opcode, a, b float64) (types.Boxed, bool) {
 	switch code {
 	case instr.F64_EQ:
 		return types.BoxI1(a == b), true

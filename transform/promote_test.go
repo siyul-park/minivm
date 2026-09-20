@@ -72,7 +72,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("gives an entry that is its own loop header a block to load in", func(t *testing.T) {
 		b := ssa.New("f")
-		header, exit := b.AddBlock(), b.AddBlock()
+		header, exit := b.Block(), b.Block()
 		held := b.Value(ssa.TypeI32)
 		b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
 		one := b.Value(ssa.TypeI32)
@@ -95,7 +95,7 @@ func TestPromotePass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 
 		require.Equal(t, 3, fn.Len())
-		require.Empty(t, fn.Predecessors(0))
+		require.Empty(t, fn.Pred(0))
 		require.Equal(t, ssa.OpLoad, fn.Block(0).Operations[0].Op)
 		require.Equal(t, ssa.OpJump, fn.Block(0).Terminator.Op)
 		require.Equal(t, 1, countOperations(fn, ssa.OpLoad))
@@ -104,7 +104,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when nothing stores it", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		held := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
@@ -120,7 +120,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when its accesses disagree on a type", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
@@ -139,7 +139,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when it holds a reference", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		stored := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxedNull, Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
@@ -158,7 +158,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when it belongs to an inlined frame", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0, Base: 4}, stored)
@@ -177,7 +177,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("leaves a slot alone when it is not a local", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Space: ssa.SpaceGlobal}, stored)
@@ -196,7 +196,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("declines a function that hands a local opcode to the interpreter", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		stored := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{stored}})
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
@@ -218,7 +218,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 	t.Run("declines a function whose entry both takes operands and is a loop header", func(t *testing.T) {
 		b := ssa.New("f")
-		header, exit := b.AddBlock(), b.AddBlock()
+		header, exit := b.Block(), b.Block()
 		seed := b.Param(header, ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
 		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
@@ -242,7 +242,7 @@ func TestPromotePass_Run(t *testing.T) {
 
 func slotFunction() *ssa.Function {
 	b := ssa.New("f")
-	entry, header, body, exit := b.AddBlock(), b.AddBlock(), b.AddBlock(), b.AddBlock()
+	entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
 
 	zero := b.Value(ssa.TypeI32)
 	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})

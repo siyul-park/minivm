@@ -27,12 +27,12 @@ type emitter struct {
 	code   []instr.Instruction
 	begin  int
 	starts []int
-	fixes  []branchFix
+	fixes  []fix
 	stack  []ssa.Value
 	needed ssa.Value
 }
 
-type branchFix struct {
+type fix struct {
 	at      int
 	operand int
 	block   int
@@ -50,8 +50,8 @@ func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byt
 		return nil, nil, false
 	}
 	for range len(e.uses) + 1 {
-		e.homeParams()
-		if !e.assignHomes() {
+		e.params()
+		if !e.assign() {
 			return nil, nil, false
 		}
 		if e.walk() {
@@ -143,7 +143,7 @@ func (e *emitter) count(id int, values []ssa.Value) {
 	}
 }
 
-func (e *emitter) homeParams() {
+func (e *emitter) params() {
 	for id := range e.function.Len() {
 		params := e.function.Block(id).Params
 		homed := false
@@ -159,7 +159,7 @@ func (e *emitter) homeParams() {
 	}
 }
 
-func (e *emitter) assignHomes() bool {
+func (e *emitter) assign() bool {
 	e.home, e.locals = map[ssa.Value]int{}, nil
 	values := make([]ssa.Value, 0, len(e.homed))
 	for v := range e.homed {
@@ -170,7 +170,7 @@ func (e *emitter) assignHomes() bool {
 	}
 	slices.Sort(values)
 	for _, v := range values {
-		t, ok := localType(e.function.Type(v))
+		t, ok := declared(e.function.Type(v))
 		if !ok {
 			return false
 		}
@@ -224,7 +224,7 @@ func (e *emitter) open(id int) bool {
 }
 
 func (e *emitter) perform(operation ssa.Operation) bool {
-	if !e.loadArgs(operation.Args) {
+	if !e.load(operation.Args) {
 		return false
 	}
 	switch operation.Op {
@@ -249,7 +249,7 @@ func (e *emitter) close(id int) bool {
 	term := e.terms[id]
 	switch term.Op {
 	case ssa.OpReturn:
-		if !e.loadArgs(term.Args) {
+		if !e.load(term.Args) {
 			return false
 		}
 		e.write(instr.New(instr.RETURN))
@@ -282,7 +282,7 @@ func (e *emitter) close(id int) bool {
 	return true
 }
 
-func (e *emitter) loadArgs(args []ssa.Value) bool {
+func (e *emitter) load(args []ssa.Value) bool {
 	at := 0
 	for n := min(len(args), len(e.stack)); n > 0; n-- {
 		if slices.Equal(e.stack[len(e.stack)-n:], args[:n]) {
@@ -303,7 +303,7 @@ func (e *emitter) loadArgs(args []ssa.Value) bool {
 }
 
 func (e *emitter) carry(args []ssa.Value) bool {
-	if !e.loadArgs(args) {
+	if !e.load(args) {
 		return false
 	}
 	if len(e.stack) != len(args) {
@@ -353,7 +353,7 @@ func (e *emitter) leave(id, next int) {
 
 func (e *emitter) branch(operation instr.Opcode, block int) {
 	e.write(instr.New(operation, 0))
-	e.fixes = append(e.fixes, branchFix{at: len(e.code) - 1, operand: 0, block: block})
+	e.fixes = append(e.fixes, fix{at: len(e.code) - 1, operand: 0, block: block})
 }
 
 func (e *emitter) table(edges []ssa.Edge) {
@@ -361,7 +361,7 @@ func (e *emitter) table(edges []ssa.Edge) {
 	operands[0] = uint64(len(edges) - 1)
 	e.write(instr.New(instr.BR_TABLE, operands...))
 	for i, edge := range edges {
-		e.fixes = append(e.fixes, branchFix{at: len(e.code) - 1, operand: i + 1, block: edge.Block})
+		e.fixes = append(e.fixes, fix{at: len(e.code) - 1, operand: i + 1, block: edge.Block})
 	}
 }
 
@@ -446,7 +446,7 @@ func operands(t ssa.Terminator) []ssa.Value {
 	return out
 }
 
-func localType(t ssa.Type) (types.Type, bool) {
+func declared(t ssa.Type) (types.Type, bool) {
 	switch t {
 	case ssa.TypeI1:
 		return types.TypeI1, true

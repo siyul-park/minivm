@@ -37,33 +37,33 @@ func Verify(function *Function) error {
 			return fmt.Errorf("%w: blk%d is unreachable from the entry", ErrForm, id)
 		}
 	}
-	sites, err := validateDefinitions(function)
+	sites, err := define(function)
 	if err != nil {
 		return err
 	}
 	for id, block := range function.blocks {
-		if err := validateParameters(function, id); err != nil {
+		if err := params(function, id); err != nil {
 			return fmt.Errorf("blk%d: %w", id, err)
 		}
-		for i, operation := range block.Operations {
-			if err := validateOperation(function, sites, operation); err != nil {
+		for i, o := range block.Operations {
+			if err := operation(function, sites, o); err != nil {
 				return fmt.Errorf("blk%d operation %d: %w", id, i, err)
 			}
-			if err := validateUses(function, sites, dominance, position{id, i}, operationUses(operation)); err != nil {
+			if err := uses(function, sites, dominance, position{id, i}, reads(o)); err != nil {
 				return fmt.Errorf("blk%d operation %d: %w", id, i, err)
 			}
 		}
-		if err := validateTerminator(function, sites, block.Terminator); err != nil {
+		if err := terminator(function, sites, block.Terminator); err != nil {
 			return fmt.Errorf("blk%d term: %w", id, err)
 		}
-		if err := validateUses(function, sites, dominance, position{id, len(block.Operations)}, terminatorUses(block.Terminator)); err != nil {
+		if err := uses(function, sites, dominance, position{id, len(block.Operations)}, ends(block.Terminator)); err != nil {
 			return fmt.Errorf("blk%d term: %w", id, err)
 		}
 	}
 	return nil
 }
 
-func validateDefinitions(function *Function) ([]position, error) {
+func define(function *Function) ([]position, error) {
 	sites := make([]position, len(function.types))
 	for i := range sites {
 		sites[i] = position{-1, -1}
@@ -100,7 +100,7 @@ func validateDefinitions(function *Function) ([]position, error) {
 	return sites, nil
 }
 
-func validateParameters(function *Function, block int) error {
+func params(function *Function, block int) error {
 	want := function.blocks[block].Params
 	for _, pred := range function.preds[block] {
 		for _, edge := range function.blocks[pred].Terminator.Edges {
@@ -120,50 +120,50 @@ func validateParameters(function *Function, block int) error {
 	return nil
 }
 
-func validateOperation(function *Function, sites []position, o Operation) error {
+func operation(function *Function, sites []position, o Operation) error {
 	args, results := len(o.Args), len(o.Results)
 	deopts := false
 	switch o.Op {
 	case OpConst, OpLoad:
 		if args != 0 || results != 1 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
 	case OpExec:
-		if err := validateOpcode(function, o); err != nil {
+		if err := performs(function, o); err != nil {
 			return err
 		}
 		deopts = true
 	case OpStore:
 		if args != 1 || results != 0 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardKind, OpGuardShape:
 		if args != 1 || results != 1 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardBounds:
 		if args != 2 || results != 0 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
 		deopts = true
 	case OpGuardValue:
 		if args != 2 || results != 1 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
-		if !isConstant(function, sites, o.Args[1]) {
+		if !constant(function, sites, o.Args[1]) {
 			return fmt.Errorf("%w: %s admits v%d, which is no observation", ErrForm, o.name(), o.Args[1])
 		}
 		deopts = true
 	case OpRetain, OpRelease:
 		if args != 1 || results != 0 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
 		deopts = o.Op == OpRelease
 	case OpState:
 		if args != 0 || results != 1 {
-			return arityError(o.name(), args, results)
+			return counted(o.name(), args, results)
 		}
 		if len(o.Frames) == 0 {
 			return fmt.Errorf("%w: %s carries no frame", ErrState, o.name())
@@ -186,28 +186,28 @@ func validateOperation(function *Function, sites []position, o Operation) error 
 	default:
 		return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
 	}
-	if _, err := stateOperation(function, sites, o.State, o.name(), deopts); err != nil {
+	if _, err := resume(function, sites, o.State, o.name(), deopts); err != nil {
 		return err
 	}
-	return validateTypes(function, o)
+	return typed(function, o)
 }
 
-func validateOpcode(function *Function, o Operation) error {
+func performs(function *Function, o Operation) error {
 	if !instr.Valid(o.Code) {
 		return fmt.Errorf("%w: %s performs no opcode", ErrForm, o.Op)
 	}
-	if isTerminator(o.Code) {
+	if leaves(o.Code) {
 		return fmt.Errorf("%w: %s performs a terminator", ErrForm, o.name())
 	}
 	operationType := instr.TypeOf(o.Code)
 	if operationType.Pop == nil && operationType.Push == nil {
 		if o.Code.Writes(instr.Frame) && len(o.Args) == 0 {
-			return arityError(o.name(), len(o.Args), len(o.Results))
+			return counted(o.name(), len(o.Args), len(o.Results))
 		}
 		return nil
 	}
 	if len(o.Args) != len(operationType.Pop) || len(o.Results) != len(operationType.Push) {
-		return arityError(o.name(), len(o.Args), len(o.Results))
+		return counted(o.name(), len(o.Args), len(o.Results))
 	}
 	for i, want := range operationType.Pop {
 		if got := function.Type(o.Args[len(o.Args)-1-i]); !accepts(got, want) {
@@ -225,7 +225,7 @@ func validateOpcode(function *Function, o Operation) error {
 	return nil
 }
 
-func isTerminator(operation instr.Opcode) bool {
+func leaves(operation instr.Opcode) bool {
 	switch operation {
 	case instr.BR, instr.BR_IF, instr.BR_TABLE, instr.RETURN, instr.RETURN_CALL:
 		return true
@@ -234,7 +234,7 @@ func isTerminator(operation instr.Opcode) bool {
 	}
 }
 
-func validateTypes(function *Function, o Operation) error {
+func typed(function *Function, o Operation) error {
 	for _, v := range o.Results {
 		if function.Type(v) == 0 {
 			return fmt.Errorf("%w: result v%d has no type", ErrType, v)
@@ -261,33 +261,33 @@ func validateTypes(function *Function, o Operation) error {
 	return nil
 }
 
-func validateTerminator(function *Function, sites []position, t Terminator) error {
+func terminator(function *Function, sites []position, t Terminator) error {
 	args, edges := len(t.Args), len(t.Edges)
 	deopts := false
 	switch t.Op {
 	case OpJump:
 		if args != 0 || edges != 1 {
-			return arityError(t.Op.String(), args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpBranch:
 		if args != 1 || edges != 2 {
-			return arityError(t.Op.String(), args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpTable:
 		if args != 1 || edges == 0 {
-			return arityError(t.Op.String(), args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpReturn:
 		if edges != 0 {
-			return arityError(t.Op.String(), args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpComplete:
 		if edges != 0 {
-			return arityError(t.Op.String(), args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 	case OpExit, OpSuspend:
 		if args != 0 || edges != 0 {
-			return arityError(t.Op.String(), args, edges)
+			return counted(t.Op.String(), args, edges)
 		}
 		deopts = true
 	default:
@@ -298,7 +298,7 @@ func validateTerminator(function *Function, sites []position, t Terminator) erro
 			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Op, edge.Block)
 		}
 	}
-	state, err := stateOperation(function, sites, t.State, t.Op.String(), deopts)
+	state, err := resume(function, sites, t.State, t.Op.String(), deopts)
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func validateTerminator(function *Function, sites []position, t Terminator) erro
 	return nil
 }
 
-func stateOperation(function *Function, sites []position, v Value, name string, deopts bool) (Operation, error) {
+func resume(function *Function, sites []position, v Value, name string, deopts bool) (Operation, error) {
 	if !deopts {
 		if v != NoValue {
 			return Operation{}, fmt.Errorf("%w: %s cannot resume into v%d", ErrState, name, v)
@@ -325,7 +325,7 @@ func stateOperation(function *Function, sites []position, v Value, name string, 
 	return function.blocks[def.block].Operations[def.index], nil
 }
 
-func isConstant(function *Function, sites []position, v Value) bool {
+func constant(function *Function, sites []position, v Value) bool {
 	if v <= NoValue || int(v) >= len(sites) {
 		return false
 	}
@@ -333,7 +333,7 @@ func isConstant(function *Function, sites []position, v Value) bool {
 	return def.index >= 0 && function.blocks[def.block].Operations[def.index].Op == OpConst
 }
 
-func validateUses(function *Function, sites []position, dominance *graph.Dominance, at position, values []Value) error {
+func uses(function *Function, sites []position, dominance *graph.Dominance, at position, values []Value) error {
 	for _, v := range values {
 		if v <= NoValue || int(v) >= len(sites) {
 			return fmt.Errorf("%w: v%d is not a value of this function", ErrDefine, v)
@@ -352,7 +352,7 @@ func validateUses(function *Function, sites []position, dominance *graph.Dominan
 	return nil
 }
 
-func operationUses(o Operation) []Value {
+func reads(o Operation) []Value {
 	values := append([]Value(nil), o.Args...)
 	for _, frame := range o.Frames {
 		for _, operand := range frame.Stack {
@@ -368,7 +368,7 @@ func operationUses(o Operation) []Value {
 	return values
 }
 
-func terminatorUses(t Terminator) []Value {
+func ends(t Terminator) []Value {
 	values := append([]Value(nil), t.Args...)
 	for _, edge := range t.Edges {
 		values = append(values, edge.Args...)
@@ -390,6 +390,6 @@ func representation(t Type) Type {
 	return t
 }
 
-func arityError(name string, in, out int) error {
+func counted(name string, in, out int) error {
 	return fmt.Errorf("%w: %s takes %d and yields %d", ErrForm, name, in, out)
 }

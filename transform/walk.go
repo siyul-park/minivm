@@ -93,7 +93,7 @@ func (w *walker) deopt() ssa.Value {
 	w.state = w.builder.Value(ssa.TypeState)
 	w.builder.Add(w.block, ssa.Operation{
 		Op:      ssa.OpState,
-		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.resultCount(), Stack: deoptOperands(w.before)}},
+		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.returns(), Stack: deopt(w.before)}},
 		Results: []ssa.Value{w.state},
 	})
 	return w.state
@@ -122,7 +122,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 			}
 			return ssa.Terminator{Op: ssa.OpBranch, Args: args}, true
 		case instr.RETURN:
-			if len(w.stack) < w.activation.resultCount() {
+			if len(w.stack) < w.activation.returns() {
 				return ssa.Terminator{}, false
 			}
 			return w.leave(), true
@@ -269,7 +269,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) < 3 {
 			return false
 		}
-		tok, ok := elementToken(w.stack[len(w.stack)-1].kind)
+		tok, ok := token(w.stack[len(w.stack)-1].kind)
 		if !ok {
 			return false
 		}
@@ -371,7 +371,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 	return w.emit(operation, len(effect.Pop), results)
 }
 
-func elementToken(kind types.Kind) (uintptr, bool) {
+func token(kind types.Kind) (uintptr, bool) {
 	switch kind {
 	case types.KindI1:
 		return shapeArrayI1, true
@@ -396,19 +396,19 @@ func (w *walker) element(array fact) (types.Kind, uintptr, bool) {
 	if !w.callFree || array.arrayType == nil || array.arrayType.ElemKind == instr.KindAny {
 		return 0, 0, false
 	}
-	tok, ok := elementToken(array.arrayType.ElemKind)
+	tok, ok := token(array.arrayType.ElemKind)
 	return array.arrayType.ElemKind, tok, ok
 }
 
 func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
-	record := w.structType(container)
+	record := w.record(container)
 	if record == nil || !index.valueKnown || index.value < 0 || int(index.value) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
 	return record.Fields[index.value].Kind, ssa.Shape{Tag: shapeStruct, Type: uintptr(unsafe.Pointer(record))}, true
 }
 
-func (w *walker) structType(container fact) *types.StructType {
+func (w *walker) record(container fact) *types.StructType {
 	if container.structType != nil {
 		return container.structType
 	}
@@ -435,7 +435,7 @@ func (w *walker) load(space ssa.Space, index int) bool {
 	if !ok {
 		return false
 	}
-	t, ok := ssaType(out.kind)
+	t, ok := typ(out.kind)
 	if !ok {
 		return false
 	}
@@ -487,13 +487,13 @@ func (w *walker) slot(space ssa.Space, index int) (ssa.Slot, fact, bool) {
 		if index >= len(frame.slots) {
 			return slot, out, false
 		}
-		out = fromType(frame.slots[index])
+		out = holds(frame.slots[index])
 		out.backing, out.offset = backingLocal, index
 	case ssa.SpaceUpval:
 		if index >= len(frame.function.Captures) {
 			return slot, out, false
 		}
-		out = fromType(frame.function.Captures[index])
+		out = holds(frame.function.Captures[index])
 		out.backing, out.offset = backingUpval, index
 	default:
 		if index >= len(w.globals) {
@@ -518,7 +518,7 @@ func (w *walker) pool(index int) bool {
 }
 
 func (w *walker) constant(boxed types.Boxed, out fact) bool {
-	t, ok := ssaType(out.kind)
+	t, ok := typ(out.kind)
 	if !ok {
 		return false
 	}
@@ -548,7 +548,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	}
 	out := make([]ssa.Value, len(results))
 	for i, r := range results {
-		t, ok := ssaType(r.kind)
+		t, ok := typ(r.kind)
 		if !ok {
 			return false
 		}
@@ -593,7 +593,7 @@ func (w *walker) complete() ssa.Terminator {
 }
 
 func (w *walker) leave() ssa.Terminator {
-	n := w.activation.resultCount()
+	n := w.activation.returns()
 	if n > len(w.stack) {
 		n = len(w.stack)
 	}

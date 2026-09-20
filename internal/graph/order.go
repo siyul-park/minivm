@@ -1,7 +1,7 @@
 package graph
 
-// ReversePostorder returns reachable nodes in reverse-postorder, root first.
-func ReversePostorder(g Graph) []int {
+// Order returns reachable nodes in reverse-postorder, root first.
+func Order(g Graph) []int {
 	n := g.Len()
 	if n == 0 {
 		return nil
@@ -16,7 +16,7 @@ func ReversePostorder(g Graph) []int {
 	visited[0] = true
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
-		successors := g.Successors(top.node)
+		successors := g.Succ(top.node)
 		if top.next < len(successors) {
 			next := successors[top.next]
 			top.next++

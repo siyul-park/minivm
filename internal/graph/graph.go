@@ -9,8 +9,8 @@ package graph
 type Graph interface {
 	// Len returns the number of nodes.
 	Len() int
-	// Successors returns node's successors.
-	Successors(node int) []int
-	// Predecessors returns node's predecessors.
-	Predecessors(node int) []int
+	// Succ returns node's successors.
+	Succ(node int) []int
+	// Pred returns node's predecessors.
+	Pred(node int) []int
 }

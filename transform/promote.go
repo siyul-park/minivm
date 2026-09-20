@@ -46,7 +46,7 @@ func promotable(function *ssa.Function) map[int]ssa.Type {
 				}
 				continue
 			case ssa.OpState:
-				if frameEntry(operation) < 0 {
+				if entry(operation) < 0 {
 					return nil
 				}
 				continue
@@ -77,11 +77,11 @@ func promotable(function *ssa.Function) map[int]ssa.Type {
 }
 
 func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function, bool) {
-	if len(function.Predecessors(0)) > 0 {
+	if len(function.Pred(0)) > 0 {
 		if len(function.Block(0).Params) > 0 {
 			return nil, false
 		}
-		function = prependEntry(function)
+		function = head(function)
 	}
 	indexes := slices.Sorted(maps.Keys(localTypes))
 
@@ -115,14 +115,14 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 		for _, operation := range currentBlock.Operations {
 			operation = rebuilder.operation(operation)
 			switch {
-			case operation.Op == ssa.OpLoad && isPromoted(localTypes, operation.Slot):
+			case operation.Op == ssa.OpLoad && promoted(localTypes, operation.Slot):
 				rebuilder.alias(operation.Results[0], reaching[operation.Slot.Index])
 				continue
-			case operation.Op == ssa.OpStore && isPromoted(localTypes, operation.Slot):
+			case operation.Op == ssa.OpStore && promoted(localTypes, operation.Slot):
 				reaching[operation.Slot.Index] = operation.Args[0]
 				continue
 			case operation.Op == ssa.OpState:
-				at := frameEntry(operation)
+				at := entry(operation)
 				operation.Frames[at].Locals = pinned(operation.Frames[at].Locals, indexes, reaching)
 			}
 			rebuilder.builder.Add(id, rebuilder.define(function, operation))
@@ -145,10 +145,10 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 	return rebuilder.builder.Build(), true
 }
 
-func prependEntry(function *ssa.Function) *ssa.Function {
+func head(function *ssa.Function) *ssa.Function {
 	rebuilder := newRebuilder(function)
-	first := rebuilder.builder.AddBlock()
-	for _, block := range graph.ReversePostorder(function) {
+	first := rebuilder.builder.Block()
+	for _, block := range graph.Order(function) {
 		id := rebuilder.block(block)
 		currentBlock := function.Block(block)
 		for _, param := range currentBlock.Params {
@@ -167,7 +167,7 @@ func placements(function *ssa.Function, dominance *graph.Dominance, localTypes m
 	stored := map[int][]int{}
 	for block := range function.Len() {
 		for _, operation := range function.Block(block).Operations {
-			if operation.Op != ssa.OpStore || !isPromoted(localTypes, operation.Slot) {
+			if operation.Op != ssa.OpStore || !promoted(localTypes, operation.Slot) {
 				continue
 			}
 			at := stored[operation.Slot.Index]
@@ -198,7 +198,7 @@ func placements(function *ssa.Function, dominance *graph.Dominance, localTypes m
 	return params
 }
 
-func isPromoted(localTypes map[int]ssa.Type, s ssa.Slot) bool {
+func promoted(localTypes map[int]ssa.Type, s ssa.Slot) bool {
 	if s.Space != ssa.SpaceLocal || s.Base != 0 {
 		return false
 	}
@@ -216,7 +216,7 @@ func pinned(already []ssa.Local, indexes []int, reaching map[int]ssa.Value) []ss
 	return locals
 }
 
-func frameEntry(operation ssa.Operation) int {
+func entry(operation ssa.Operation) int {
 	for i, frame := range operation.Frames {
 		if frame.Base == 0 {
 			return i

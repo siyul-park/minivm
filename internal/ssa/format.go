@@ -21,14 +21,14 @@ func Format(function *Function) string {
 		}
 		sb.WriteString("\n")
 		for _, o := range block.Operations {
-			fmt.Fprintf(&sb, "\t%s\n", operationText(function, o))
+			fmt.Fprintf(&sb, "\t%s\n", op(function, o))
 		}
-		fmt.Fprintf(&sb, "\t%s\n", terminatorText(function, block.Terminator))
+		fmt.Fprintf(&sb, "\t%s\n", term(function, block.Terminator))
 	}
 	return sb.String()
 }
 
-func operationText(function *Function, o Operation) string {
+func op(function *Function, o Operation) string {
 	var sb strings.Builder
 	if len(o.Results) > 0 {
 		fmt.Fprintf(&sb, "%s = ", definitions(function, o.Results))
@@ -40,13 +40,13 @@ func operationText(function *Function, o Operation) string {
 	case OpConst:
 		args = append(args, o.Const.String())
 	case OpLoad, OpStore:
-		args = append(args, slotText(o.Slot))
+		args = append(args, slot(o.Slot))
 	case OpState:
 		for _, frame := range o.Frames {
 			at := fmt.Sprintf("{addr=%d base=%d ip=%d returns=%d stack=[%s]",
-				frame.Address, frame.Base, frame.IP, frame.Returns, strings.Join(stackText(frame.Stack), ", "))
+				frame.Address, frame.Base, frame.IP, frame.Returns, strings.Join(stack(frame.Stack), ", "))
 			if len(frame.Locals) > 0 {
-				at += fmt.Sprintf(" locals=[%s]", strings.Join(localText(frame.Locals), ", "))
+				at += fmt.Sprintf(" locals=[%s]", strings.Join(locals(frame.Locals), ", "))
 			}
 			args = append(args, at+"}")
 		}
@@ -55,14 +55,14 @@ func operationText(function *Function, o Operation) string {
 	if len(args) > 0 {
 		fmt.Fprintf(&sb, " %s", strings.Join(args, ", "))
 	}
-	sb.WriteString(shapeText(o.Shape))
+	sb.WriteString(shape(o.Shape))
 	if o.State != NoValue {
 		fmt.Fprintf(&sb, " state v%d", o.State)
 	}
 	return sb.String()
 }
 
-func terminatorText(function *Function, t Terminator) string {
+func term(function *Function, t Terminator) string {
 	var sb strings.Builder
 	sb.WriteString(t.Op.String())
 	args := references(t.Args)
@@ -78,14 +78,14 @@ func terminatorText(function *Function, t Terminator) string {
 	return sb.String()
 }
 
-func slotText(s Slot) string {
+func slot(s Slot) string {
 	if s.Base != 0 {
 		return fmt.Sprintf("%s[%d+%d]", s.Space, s.Base, s.Index)
 	}
 	return fmt.Sprintf("%s[%d]", s.Space, s.Index)
 }
 
-func shapeText(s Shape) string {
+func shape(s Shape) string {
 	var sb strings.Builder
 	if s.Tag != 0 {
 		fmt.Fprintf(&sb, " tag 0x%x", s.Tag)
@@ -107,7 +107,7 @@ func definitions(function *Function, values []Value) string {
 	return strings.Join(names, ", ")
 }
 
-func stackText(operands []Operand) []string {
+func stack(operands []Operand) []string {
 	names := make([]string, len(operands))
 	for i, o := range operands {
 		names[i] = fmt.Sprintf("v%d", o.Value)
@@ -118,7 +118,7 @@ func stackText(operands []Operand) []string {
 	return names
 }
 
-func localText(locals []Local) []string {
+func locals(locals []Local) []string {
 	names := make([]string, len(locals))
 	for i, l := range locals {
 		names[i] = fmt.Sprintf("%d=v%d", l.Index, l.Value)

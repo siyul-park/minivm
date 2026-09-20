@@ -12,7 +12,7 @@ import (
 func TestVerify(t *testing.T) {
 	t.Run("accepts a guarded read that resumes into an interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		array := b.Value(ssa.TypeRef)
 		length := b.Value(ssa.TypeI32)
@@ -25,7 +25,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("accepts module code completing with operands still on the stack", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		value := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{value}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{value}})
@@ -38,7 +38,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a block the entry cannot reach", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, orphan := b.AddBlock(), b.AddBlock()
+		entry, orphan := b.Block(), b.Block()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		b.Term(orphan, ssa.Terminator{Op: ssa.OpComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
@@ -46,14 +46,14 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an edge naming a block that does not exist", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: 7}}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
 	t.Run("rejects an edge count its terminator cannot have", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, join := b.AddBlock(), b.AddBlock()
+		entry, join := b.Block(), b.Block()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
 		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
@@ -61,14 +61,14 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an operation used where a terminator belongs", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpConst})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
 	t.Run("rejects a tail call used where an operation belongs", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		callee := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -80,7 +80,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a return used where an operation belongs", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		callee := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -92,7 +92,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a branch used where an operation belongs", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		callee := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -104,7 +104,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a value defined twice", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		one := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{one}})
@@ -114,7 +114,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a value no instruction defines", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		b.Value(ssa.TypeI32)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDefine)
@@ -122,7 +122,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a use ahead of its definition in the same block", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		one := b.Value(ssa.TypeI32)
@@ -135,7 +135,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a use its definition does not dominate", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, left, right := b.AddBlock(), b.AddBlock(), b.AddBlock()
+		entry, left, right := b.Block(), b.Block(), b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		cond := b.Value(ssa.TypeI32)
@@ -152,7 +152,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an edge that misses a block parameter", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, join := b.AddBlock(), b.AddBlock()
+		entry, join := b.Block(), b.Block()
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
 		param := b.Param(join, ssa.TypeI32)
 		b.Term(join, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
@@ -161,7 +161,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an edge argument of another type than its parameter", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, join := b.AddBlock(), b.AddBlock()
+		entry, join := b.Block(), b.Block()
 		null := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxedNull, Results: []ssa.Value{null}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join, Args: []ssa.Value{null}}}})
@@ -172,7 +172,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a guard with no interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		array := b.Value(ssa.TypeRef)
 		checked := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
@@ -183,7 +183,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("accepts a call reaching its callee through the reference a guard admits", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		slot := b.Value(ssa.TypeRef)
 		want := b.Value(ssa.TypeRef)
@@ -199,7 +199,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a guard admitting a value no observation fixed", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		slot := b.Value(ssa.TypeRef)
 		want := b.Value(ssa.TypeRef)
@@ -214,7 +214,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an interpreter state on an operation that cannot resume", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		one := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -225,7 +225,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a suspension from an inlined frame", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}, {Address: 2}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpSuspend, State: state})
@@ -234,7 +234,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("accepts a frame owning the reference it resumes with", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		array := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
@@ -246,7 +246,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a frame owning a value that holds no reference", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		count := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
@@ -257,7 +257,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("accepts a frame written back with a promoted local", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		count := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
@@ -268,7 +268,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a promoted local holding a reference", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		array := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
@@ -279,7 +279,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a promoted local naming no slot of its frame", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		count := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{count}})
@@ -290,7 +290,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a promoted local its definition does not dominate", func(t *testing.T) {
 		b := ssa.New("f")
-		entry, arm, join := b.AddBlock(), b.AddBlock(), b.AddBlock()
+		entry, arm, join := b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI1)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{cond}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: arm}, {Block: join}}})
@@ -305,7 +305,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an interpreter state with no frame", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
@@ -314,7 +314,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a result typed as interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		fake := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{fake}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
@@ -323,7 +323,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a reference operation over a scalar", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		one := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{one}})
@@ -333,7 +333,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an operand count the opcode cannot have", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		one := b.Value(ssa.TypeI32)
@@ -346,7 +346,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an operation performing no opcode", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.Opcode(0xff), State: state})
@@ -356,7 +356,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an operand of a kind the opcode does not pop", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		null := b.Value(ssa.TypeRef)
@@ -371,7 +371,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a result of a kind the opcode does not push", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		one := b.Value(ssa.TypeI32)
@@ -384,7 +384,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a heap overwrite with no interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		array := b.Value(ssa.TypeRef)
 		index := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
@@ -396,7 +396,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects a select whose arms disagree", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		cond := b.Value(ssa.TypeI32)
@@ -411,7 +411,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects an operation performing an opcode with no interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		x, y, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{y}})
@@ -422,7 +422,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("accepts an operation resuming into an interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
-		entry := b.AddBlock()
+		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		x, y, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})

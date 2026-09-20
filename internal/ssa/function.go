@@ -29,13 +29,13 @@ func (f *Function) Len() int {
 	return len(f.blocks)
 }
 
-// Successors returns block successors in edge order.
-func (f *Function) Successors(block int) []int {
+// Succ returns block successors in edge order.
+func (f *Function) Succ(block int) []int {
 	return f.succs[block]
 }
 
-// Predecessors returns blocks that reach block.
-func (f *Function) Predecessors(block int) []int {
+// Pred returns blocks that reach block.
+func (f *Function) Pred(block int) []int {
 	return f.preds[block]
 }
 

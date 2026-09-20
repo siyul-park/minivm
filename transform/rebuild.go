@@ -20,7 +20,7 @@ func (r *rebuilder) block(block int) int {
 	if id, ok := r.blocks[block]; ok {
 		return id
 	}
-	id := r.builder.AddBlock()
+	id := r.builder.Block()
 	r.blocks[block] = id
 	return id
 }

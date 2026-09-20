@@ -39,7 +39,7 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 		for _, param := range currentBlock.Params {
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
-		if len(function.Predecessors(block)) != 1 {
+		if len(function.Pred(block)) != 1 {
 			clear(held)
 		}
 
