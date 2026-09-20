@@ -5,7 +5,7 @@ import (
 	"github.com/siyul-park/minivm/internal/ssa"
 )
 
-// dedup collapses every operation a dominating operation with the same key
+// number collapses every operation a dominating operation with the same key
 // already performed, walking fn's dominator tree in preorder so a key
 // established while entering a block stays visible to every block it
 // dominates and is forgotten again once that whole subtree is done - the
@@ -15,20 +15,20 @@ import (
 //
 // key sees each operation with its arguments already translated through the
 // rebuild in progress, so two operations that only became equal because an
-// earlier dedup or renumbering unified their inputs are still recognized; its
-// bool return is whether key considers the operation dedup-eligible at all,
-// and false leaves it untouched.
+// earlier elision here or the rebuild's own renumbering unified their inputs
+// are still recognized; its bool return is whether key considers the
+// operation numberable at all, and false leaves it untouched.
 //
 // This is the one mechanism cse.go and guard.go share: CSE keys a pure
 // computation by its opcode and arguments, redundant guard elimination keys a
 // guard by what it admits, and both are otherwise this same textbook
 // dominator-tree-scoped value numbering. Neither ever needs to consult
-// op.State or an OpState's Frames directly - dedup only ever elides a whole
+// op.State or an OpState's Frames directly - number only ever elides a whole
 // operation in favor of an equal, already-dominating one, and translates
 // every value every surviving operation (including every OpState) reads
 // through rebuilder.operation exactly as fold.go's simpler in-place rewrite
 // does not have to, since fold.go never removes a value a frame could name.
-func dedup(fn *ssa.Function, key func(*ssa.Function, ssa.Operation) (string, bool)) (*ssa.Function, bool) {
+func number(fn *ssa.Function, key func(*ssa.Function, ssa.Operation) (string, bool)) (*ssa.Function, bool) {
 	dom := graph.NewDominance(fn)
 	children := domChildren(fn, dom)
 

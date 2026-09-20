@@ -16,7 +16,7 @@ import (
 // numbers across block boundaries, and a conservative story for which
 // mutable loads are even nameable across blocks - is not this pass's problem
 // to solve. It is the IR's own: a value here is its definition, so identity
-// is free, and dominance alone (dedup's dominator-tree-scoped table) decides
+// is free, and dominance alone (number's dominator-tree-scoped table) decides
 // what one definition may stand in for, with no dataflow fixpoint needed for
 // merges a dominator already covers.
 //
@@ -25,7 +25,7 @@ import (
 // mutable interpreter storage, and whether a store to that storage intervened
 // is ForwardPass's question, not this one's - run it first and a repeated read
 // is already one value here. A pure OpExec can carry deopt State (see
-// ssa.OverflowsI64's five arithmetic opcodes), so cseKey/dedup do merge two
+// ssa.OverflowsI64's five arithmetic opcodes), so cseKey/number do merge two
 // dominance-related occurrences with different State, discarding the
 // dominated one's. That is sound because a boxability guard's exit is a
 // total TrapFallback to threaded execution, never a bridge resumed back into
@@ -40,7 +40,7 @@ func NewCSEPass() *CSEPass {
 }
 
 func (p *CSEPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
-	next, changed := dedup(fn, cseKey)
+	next, changed := number(fn, cseKey)
 	if !changed {
 		return pass.PreserveAll(), nil
 	}

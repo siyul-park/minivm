@@ -13,9 +13,8 @@ The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimiz
 | Concern | Owner |
 |---|---|
 | Threaded execution | `interp/` |
-| Bytecode to SSA | `transform/` |
 | SSA IR | `internal/ssa/` |
-| SSA passes | `internal/ssa/transform/` |
+| Bytecode to SSA and SSA passes | `transform/` |
 | Machine encoding and executable memory | `internal/asm/` |
 | ARM64 encoding | `internal/asm/arm64/` |
 | Profiling | `prof/` |

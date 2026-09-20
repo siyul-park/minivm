@@ -9,7 +9,6 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	ssapass "github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
@@ -87,8 +86,8 @@ func TestSSAPass_Run(t *testing.T) {
 
 	t.Run("folds a window every pure opcode computes from constants alone", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
-		pipeline.Add(ssapass.NewFoldPass())
-		pipeline.Add(ssapass.NewDCEPass())
+		pipeline.Add(transform.NewFoldPass())
+		pipeline.Add(transform.NewDCEPass())
 
 		folded := map[instr.Opcode]bool{}
 		for _, window := range constant(t) {
@@ -120,7 +119,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 	t.Run("drops the padding an offset-preserving rewrite left behind", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
-		pipeline.Add(ssapass.NewDCEPass())
+		pipeline.Add(transform.NewDCEPass())
 
 		got := program.New([]instr.Instruction{instr.New(instr.NOP), instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)})
 		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
@@ -134,7 +133,7 @@ func TestSSAPass_Run(t *testing.T) {
 		// question a peephole over bytecode can answer; over SSA it is the
 		// same liveness every other operation is judged by.
 		pipeline := pass.NewPipeline[*ssa.Function]()
-		pipeline.Add(ssapass.NewDCEPass())
+		pipeline.Add(transform.NewDCEPass())
 
 		got := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2),
@@ -151,7 +150,7 @@ func TestSSAPass_Run(t *testing.T) {
 		// left without a state and simply not emitted, so the block goes and
 		// the function stays.
 		pipeline := pass.NewPipeline[*ssa.Function]()
-		pipeline.Add(ssapass.NewDCEPass())
+		pipeline.Add(transform.NewDCEPass())
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
 		done := fn.Label()
 		fn.Emit(instr.New(instr.I32_CONST, 1))
@@ -176,9 +175,9 @@ func TestSSAPass_Run(t *testing.T) {
 
 	t.Run("eliminates a repeated computation over a repeated load", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
-		pipeline.Add(ssapass.NewForwardPass())
-		pipeline.Add(ssapass.NewCSEPass())
-		pipeline.Add(ssapass.NewDCEPass())
+		pipeline.Add(transform.NewForwardPass())
+		pipeline.Add(transform.NewCSEPass())
+		pipeline.Add(transform.NewDCEPass())
 
 		// CSEPass numbers definitions rather than storage, and two loads of one
 		// slot are two definitions, so the additions over them are not equal
@@ -226,8 +225,8 @@ func TestSSAPass_Run(t *testing.T) {
 
 	t.Run("carries a promoted loop counter through the round trip", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
-		pipeline.Add(ssapass.NewPromotePass())
-		pipeline.Add(ssapass.NewDCEPass())
+		pipeline.Add(transform.NewPromotePass())
+		pipeline.Add(transform.NewDCEPass())
 
 		// A counter that lives in local 1 is read and written on every
 		// iteration. Promotion turns it into a value carried on the back edge,
@@ -318,12 +317,12 @@ func TestSSAPass_Run(t *testing.T) {
 // policies in.
 func optimizing() *pass.Pipeline[*ssa.Function] {
 	pipeline := pass.NewPipeline[*ssa.Function]()
-	pipeline.Add(ssapass.NewFoldPass())
-	pipeline.Add(ssapass.NewPromotePass())
-	pipeline.Add(ssapass.NewCSEPass())
-	pipeline.Add(ssapass.NewGuardPass())
-	pipeline.Add(ssapass.NewHoistPass())
-	pipeline.Add(ssapass.NewDCEPass())
+	pipeline.Add(transform.NewFoldPass())
+	pipeline.Add(transform.NewPromotePass())
+	pipeline.Add(transform.NewCSEPass())
+	pipeline.Add(transform.NewGuardPass())
+	pipeline.Add(transform.NewHoistPass())
+	pipeline.Add(transform.NewDCEPass())
 	return pipeline
 }
 

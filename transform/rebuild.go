@@ -9,7 +9,7 @@ import "github.com/siyul-park/minivm/internal/ssa"
 // aliases every old value to its own new one; a pass that also elides an
 // operation aliases its old result to whichever surviving value now stands in
 // for it instead. Every pass in this package shares this one
-// construction: cse.go and guard.go through dedup, dce.go, fold.go, and
+// construction: cse.go and guard.go through number, dce.go, fold.go, and
 // forward.go alike.
 type rebuilder struct {
 	b      *ssa.Builder

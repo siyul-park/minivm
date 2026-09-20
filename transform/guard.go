@@ -37,7 +37,7 @@ func NewGuardPass() *GuardPass {
 }
 
 func (p *GuardPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
-	next, changed := dedup(fn, guardKey)
+	next, changed := number(fn, guardKey)
 	if !changed {
 		return pass.PreserveAll(), nil
 	}

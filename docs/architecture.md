@@ -21,21 +21,15 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `program` | bytecode, builders, verification boundary |
 | `interp` | runtime state, threaded execution, host calls |
 | `internal/codegen` | generated threaded handlers and fusion |
-| `internal/ssa` | SSA IR and verification |
-| `internal/ssa/transform` | target-independent SSA transforms |
-| `internal/asm` | machine IR, allocation, linking, executable memory |
-| `internal/asm/<arch>` | ISA encoding and ABI mechanics |
-| `transform` | bytecode → SSA |
-| `internal/asm` | machine encoding, executable memory, publication |
-| `internal/asm/arm64` | ARM64 encoding |
-| `prof` | execution sampling and metrics |
-| `pass` | pass ownership and pipelines |
 | `internal/graph` | CFG analysis |
+| `internal/ssa` | SSA IR and verification |
+| `internal/asm` | machine IR, encoding, linking, executable memory |
+| `internal/asm/arm64` | ARM64 encoding |
+| `pass` | pass lifecycle, pipelines, analysis cache |
 | `analysis` | reusable read-only facts |
-| `transform` | bytecode transforms |
+| `transform` | bytecode transforms, bytecode↔SSA conversion, SSA transforms |
 | `optimize` | optimization composition |
-| `pass` | pass lifecycle and analysis cache |
-| `prof` | profiling and aggregation |
+| `prof` | execution sampling, metrics, aggregation |
 | `debug` | debugging policy |
 | `cli` | command parsing and presentation |
 
@@ -44,8 +38,7 @@ The agent `MUST` place behavior by dominant ownership, not import convenience. I
 ## Dependencies
 
 - `instr` and `internal/graph` `MUST` remain leaf-like.
-- `internal/ssa` and `internal/ssa/transform` `MUST NOT` depend on runtime or target packages.
-- `transform` `MUST NOT` depend on runtime implementation packages.
+- `internal/ssa` and `transform` `MUST NOT` depend on runtime or target packages.
 - `internal/asm` MUST remain below the runtime and compiler layers.
 - ARM64 encoding MUST stay under `internal/asm/arm64`.
 - The planned native compiler MUST NOT become a dependency of `internal/ssa*` or `transform`.

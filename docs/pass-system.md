@@ -17,8 +17,7 @@ pipeline   ordered transforms + invalidation
 | Layer | Owns |
 |---|---|
 | `analysis` | reusable program facts |
-| `transform` | bytecode transforms and bytecode↔SSA conversion |
-| `internal/ssa/transform` | standalone SSA transforms |
+| `transform` | bytecode transforms, bytecode↔SSA conversion, and SSA transforms |
 | `optimize` | user-facing optimization levels |
 | `pass` | pipeline infrastructure |
 

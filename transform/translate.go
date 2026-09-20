@@ -1,7 +1,3 @@
-// Package transform holds the SSA-based rewrites a program's bytecode round
-// trips through: the translation from bytecode to SSA, the pipeline of
-// optimization passes it runs through internal/ssa/transform, and the
-// emission back to bytecode.
 package transform
 
 import (

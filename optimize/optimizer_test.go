@@ -7,7 +7,6 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	ssapass "github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/pass"
@@ -453,7 +452,7 @@ func TestOptimizer_Level(t *testing.T) {
 
 func TestOptimizer_Add(t *testing.T) {
 	pipeline := pass.NewPipeline[*ssa.Function]()
-	pipeline.Add(ssapass.NewFoldPass())
+	pipeline.Add(transform.NewFoldPass())
 
 	o := optimize.New(optimize.O0)
 	o.Add(transform.NewSSAPass(pipeline))

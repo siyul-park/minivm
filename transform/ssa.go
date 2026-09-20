@@ -164,8 +164,8 @@ func (p *pool) index(c types.Boxed) (int, bool) {
 // round trip. UNREACHABLE traps where it stands and the IR gives it no
 // operation of its own, so a function holding one would come back without its
 // trap. YIELD and RESUME end native execution at their own opcode while the
-// threaded continuation runs past them, so the frontend plans only the native
-// prefix and a rewrite would come back without the continuation.
+// threaded continuation runs past them, so Translate carries only the
+// prefix before them and a rewrite would come back without the continuation.
 func expressible(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])

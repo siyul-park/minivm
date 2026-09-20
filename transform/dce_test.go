@@ -7,8 +7,8 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
-	"github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
+	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 )
 

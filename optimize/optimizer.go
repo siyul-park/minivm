@@ -3,7 +3,6 @@ package optimize
 import (
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/internal/ssa"
-	ssapass "github.com/siyul-park/minivm/internal/ssa/transform"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/transform"
@@ -72,12 +71,12 @@ func (o *Optimizer) Add(p pass.Pass[*program.Program]) {
 func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 	switch o.level {
 	case O1:
-		return route(ssapass.NewFoldPass(), ssapass.NewDCEPass())
+		return route(transform.NewFoldPass(), transform.NewDCEPass())
 	case O2:
-		return route(ssapass.NewFoldPass(), ssapass.NewCSEPass(), ssapass.NewGuardPass(), ssapass.NewDCEPass())
+		return route(transform.NewFoldPass(), transform.NewCSEPass(), transform.NewGuardPass(), transform.NewDCEPass())
 	case O3:
-		return route(ssapass.NewFoldPass(), ssapass.NewPromotePass(), ssapass.NewForwardPass(),
-			ssapass.NewCSEPass(), ssapass.NewGuardPass(), ssapass.NewHoistPass(), ssapass.NewDCEPass())
+		return route(transform.NewFoldPass(), transform.NewPromotePass(), transform.NewForwardPass(),
+			transform.NewCSEPass(), transform.NewGuardPass(), transform.NewHoistPass(), transform.NewDCEPass())
 	default:
 		return nil
 	}
