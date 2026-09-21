@@ -230,6 +230,34 @@ func TestNew(t *testing.T) {
 		require.Equal(t, []int{0, 0, 1}, rc)
 	})
 
+	t.Run("records a nested native call's return address in its own code", func(t *testing.T) {
+		fib, module := fibonacci(t)
+		f, err := transform.Translate(module, 2, fib, 0)
+		require.NoError(t, err)
+		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects)
+		require.NoError(t, err)
+		buffer, err := asm.NewBuffer(len(bytes))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
+		code, err := asm.Link(buffer, bytes)
+		require.NoError(t, err)
+
+		natives := []uintptr{0, 0, code}
+		rc := []int{0, 0, 1}
+		stack := make([]types.Boxed, 64)
+		stack[0] = types.BoxI32(10)
+		ctx := enter(t, stack)
+		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Limit = 2
+
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		require.Equal(t, jit.ExitCall, exits[ctx.Exit()].Kind)
+		require.Equal(t, uint64(2), ctx.Depth)
+		require.GreaterOrEqual(t, ctx.Records[1].PC, code)
+		require.Less(t, ctx.Records[1].PC, code+uintptr(len(bytes)))
+	})
+
 	t.Run("bridges a call to a function without native code", func(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)

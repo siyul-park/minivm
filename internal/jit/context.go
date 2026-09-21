@@ -11,8 +11,10 @@ import (
 
 // Record identifies one suspended native activation.
 type Record struct {
-	FB   uintptr
-	SP   uintptr
+	FB uintptr
+	SP uintptr
+	// PC is the activation's return address; for an activation a native
+	// caller entered, it lies in the caller's Code.
 	PC   uintptr
 	Exit uint64
 }

@@ -62,6 +62,7 @@ func TestMachine_Prologue(t *testing.T) {
 		target.LSLI(target.X17, target.X16, 5),
 		target.ADD(target.X17, target.Ctx, target.X17),
 		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
+		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
 		target.ADDI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 		target.STR(target.XZR, target.X25, 8),
