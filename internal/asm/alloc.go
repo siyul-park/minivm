@@ -369,8 +369,10 @@ func (a *allocator) victim(iv interval, active []interval) (interval, bool) {
 	return best, ok
 }
 
-// rewrite spills every value in spilled: each read of it reloads a fresh
-// register just before the row and each write parks one just after.
+// rewrite spills every value in spilled: a row that reads it reloads a fresh
+// register just before and a row that writes it parks that register just
+// after, one register per value and row, so a row that reads and writes it
+// through tied operands updates what it reloaded.
 func (a *allocator) rewrite(spilled []value) {
 	slot := map[value]int{}
 	for _, v := range spilled {
@@ -385,6 +387,8 @@ func (a *allocator) rewrite(spilled []value) {
 		var before, after []Instruction
 		written := a.frame.Writes(inst)
 		ops := [4]*Operand{&inst.Dst, &inst.Src1, &inst.Src2, &inst.Src3}
+		fresh := map[value]VReg{}
+		reloaded, parked := map[value]bool{}, map[value]bool{}
 		for i, op := range ops {
 			v, ok := a.value(register(*op))
 			if !ok || !v.virtual {
@@ -394,12 +398,20 @@ func (a *allocator) rewrite(spilled []value) {
 			if !ok {
 				continue
 			}
-			t := a.fresh(v)
+			t, ok := fresh[v]
+			if !ok {
+				t = a.fresh(v)
+				fresh[v] = t
+			}
 			*op = replace(*op, t)
 			if _, mem := (*op).(MemOperand); !mem && written[i] {
-				after = append(after, a.frame.Spill(t, n))
-			} else {
+				if !parked[v] {
+					after = append(after, a.frame.Spill(t, n))
+					parked[v] = true
+				}
+			} else if !reloaded[v] {
 				before = append(before, a.frame.Reload(t, n))
+				reloaded[v] = true
 			}
 		}
 		if len(before) == 0 && len(after) == 0 {

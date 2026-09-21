@@ -204,6 +204,35 @@ func TestAssembler_Build(t *testing.T) {
 		), code)
 	})
 
+	t.Run("reloads and parks one register for a row that reads and writes a spilled value", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			slots(arm64.OpSUBI),
+			arm64.MOVZ(vint(0), 5, 0),
+			arm64.MOVK(vint(0), 1, 48),
+			arm64.BLR(arm64.X1),
+			arm64.STR(vint(0), arm64.Ctx, 0),
+			slots(arm64.OpADDI),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.SUBI(arm64.SP, arm64.SP, 16),
+			arm64.MOVZ(arm64.X0, 5, 0),
+			arm64.STR(arm64.X0, arm64.SP, 0),
+			arm64.LDR(arm64.X0, arm64.SP, 0),
+			arm64.MOVK(arm64.X0, 1, 48),
+			arm64.STR(arm64.X0, arm64.SP, 0),
+			arm64.BLR(arm64.X1),
+			arm64.LDR(arm64.X0, arm64.SP, 0),
+			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.ADDI(arm64.SP, arm64.SP, 16),
+			arm64.RET(),
+		), code)
+	})
+
 	t.Run("spills a float live across a call in its own bank", func(t *testing.T) {
 		a := asm.New(arm64.New())
 		a.Emit(
