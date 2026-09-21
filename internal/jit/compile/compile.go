@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/transform"
+	"github.com/siyul-park/minivm/types"
 )
 
 // Machine emits the rows of one target. A Machine lowers one function at a
@@ -18,7 +20,9 @@ import (
 type Machine interface {
 	Arch() asm.Arch
 	Reserve() []asm.PReg
-	Prologue(a *asm.Assembler, slots, params int)
+	// Prologue begins a function whose slots have kinds, params of them
+	// parameters.
+	Prologue(a *asm.Assembler, kinds []types.Kind, params int)
 	Epilogue(a *asm.Assembler)
 	// Lower emits op and reports false when the target cannot lower it.
 	Lower(a *asm.Assembler, op ssa.Operation, s Site) bool
@@ -34,6 +38,8 @@ type Machine interface {
 	Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg)
 	// Results loads a bridge's results from the Context into regs.
 	Results(a *asm.Assembler, regs []asm.VReg)
+	// Call emits call site c and reports false when the target cannot.
+	Call(a *asm.Assembler, c Call, s Site) bool
 	Move(a *asm.Assembler, dst, src asm.VReg)
 }
 
@@ -41,27 +47,55 @@ type Machine interface {
 type Site interface {
 	Reg(v ssa.Value) asm.VReg
 	Type(v ssa.Value) ssa.Type
-	// Exit returns the label of an exit of kind k at the interpreter state
-	// of the operation. A resumable exit continues after the operation.
-	Exit(k jit.Kind) asm.Label
+	// Deopt returns the label of an exit that abandons native code at the
+	// interpreter state of the operation.
+	Deopt() asm.Label
+	// Release returns the label of an exit that hands the interpreter ref,
+	// whose last reference native code drops, and the label the machine
+	// binds where native code resumes.
+	Release(ref asm.VReg) (exit, resume asm.Label)
+}
+
+// Call is a CALL of a function resolved at compile time.
+type Call struct {
+	// Address is the callee's function address, its Context.Natives index.
+	Address int
+	// Callee is the function reference the call adopts; native code
+	// releases it once a native callee returns, as the interpreter releases
+	// the reference of a frame it pops.
+	Callee        ssa.Value
+	Args, Results []ssa.Value
+	// Base is the callee's frame base in slots from this activation's, and
+	// Size the slots from there the callee's frame must fit below
+	// Context.Top.
+	Base, Size int
+	// Exit is the id of the map of the caller's state after the call; Live
+	// are the registers it names, which stay live across the call.
+	Exit int
+	Live []asm.VReg
+	// Bridge is the ExitCall the call takes when the callee is not native,
+	// the activation is too deep, or the frame does not fit. It resumes at
+	// Resume, which Call binds where both paths load the results.
+	Bridge, Resume asm.Label
 }
 
 type lowering struct {
-	f      *ssa.Function
-	m      Machine
-	a      *asm.Assembler
-	states map[ssa.Value]ssa.Operation
-	raw    map[ssa.Value]bool
-	exits  []*jit.Exit
-	places [][]place
-	edges  []edge
-	stubs  []stub
-	err    error
+	f       *ssa.Function
+	m       Machine
+	a       *asm.Assembler
+	fn      *types.Function
+	objects transform.Objects
+	states  map[ssa.Value]ssa.Operation
+	consts  map[ssa.Value]types.Boxed
+	raw     map[ssa.Value]bool
+	exits   []*jit.Exit
+	places  [][]place
+	edges   []edge
+	stubs   []stub
+	err     error
 
-	// The operation or terminator being lowered.
-	op      ssa.Operation
-	resume  asm.Label
-	resumed bool
+	// op is the operation or terminator being lowered.
+	op ssa.Operation
 }
 
 // place is where exit map value to lives in the rows: register reg.
@@ -89,19 +123,22 @@ type stub struct {
 // ErrUnsupported reports SSA the backend does not lower.
 var ErrUnsupported = errors.New("unsupported lowering")
 
-// Lower emits native code for f, an entry-0 function with params parameter
-// slots followed by locals local slots, and the map of every exit it takes,
-// indexed by exit id.
-func Lower(f *ssa.Function, m Machine, params, locals int) ([]byte, []jit.Exit, error) {
-	if f.Len() == 0 || params < 0 || locals < 0 {
+// Lower emits native code for f, the entry-0 translation of fn whose calls
+// resolve through objects, and the map of every exit it takes, indexed by
+// exit id.
+func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects) ([]byte, []jit.Exit, error) {
+	if f.Len() == 0 {
 		return nil, nil, fmt.Errorf("%w: function shape", ErrUnsupported)
 	}
 	if len(f.Block(0).Params) > 0 {
 		return nil, nil, fmt.Errorf("%w: entry parameters", ErrUnsupported)
 	}
-	l := &lowering{f: f, m: m, a: asm.New(m.Arch()), states: map[ssa.Value]ssa.Operation{}, raw: map[ssa.Value]bool{}}
+	l := &lowering{
+		f: f, m: m, a: asm.New(m.Arch()), fn: fn, objects: objects,
+		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
+	}
 	l.a.Reserve(m.Reserve()...)
-	if err := l.function(params, locals); err != nil {
+	if err := l.function(); err != nil {
 		return nil, nil, err
 	}
 	code, err := l.a.Build()
@@ -122,7 +159,7 @@ func Lower(f *ssa.Function, m Machine, params, locals int) ([]byte, []jit.Exit, 
 	return code, exits, nil
 }
 
-func (l *lowering) function(params, locals int) error {
+func (l *lowering) function() error {
 	order := graph.Order(l.f)
 	labels := make([]asm.Label, l.f.Len())
 	for _, block := range order {
@@ -130,16 +167,21 @@ func (l *lowering) function(params, locals int) error {
 	}
 	headers := graph.Headers(l.f, graph.NewDominance(l.f))
 
-	l.m.Prologue(l.a, params+locals, params)
+	params := 0
+	if l.fn.Typ != nil {
+		params = len(l.fn.Typ.Params)
+	}
+	l.m.Prologue(l.a, l.fn.Slots(), params)
 	for _, block := range order {
 		b := l.f.Block(block)
 		l.a.Bind(labels[block])
 		counted := !slices.Contains(headers, block)
 		for _, op := range b.Operations {
 			if !counted && op.State != ssa.NoValue {
-				l.begin(op)
-				l.m.Budget(l.a, l.Exit(jit.ExitSafepoint))
-				l.end()
+				l.op = op
+				safepoint, resume := l.stub(l.exit(jit.ExitSafepoint))
+				l.m.Budget(l.a, safepoint)
+				l.a.Bind(resume)
 				counted = true
 			}
 			if err := l.operation(op); err != nil {
@@ -175,12 +217,13 @@ func (l *lowering) operation(op ssa.Operation) error {
 			return err
 		}
 	}
-	l.begin(op)
-	defer l.end()
+	l.op = op
 	switch op.Op {
 	case ssa.OpState:
 		l.states[op.Results[0]] = op
 		return nil
+	case ssa.OpConst:
+		l.consts[op.Results[0]] = op.Const
 	case ssa.OpLoad:
 		if l.f.Type(op.Results[0]) == ssa.TypeI64 {
 			l.raw[op.Results[0]] = true
@@ -191,6 +234,9 @@ func (l *lowering) operation(op ssa.Operation) error {
 			return nil
 		}
 	case ssa.OpExec:
+		if op.Code == instr.CALL {
+			return l.call(op)
+		}
 		if l.m.Lower(l.a, op, l) {
 			return l.err
 		}
@@ -202,7 +248,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		l.m.Exit(l.a, id, jit.ExitBridge, l.live(id))
 		l.m.Results(l.a, results)
 		return l.err
-	case ssa.OpConst, ssa.OpStore, ssa.OpRetain, ssa.OpRelease:
+	case ssa.OpStore, ssa.OpRetain, ssa.OpRelease:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
@@ -222,10 +268,15 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	if err := l.validate(append(args, t.Args...)); err != nil {
 		return err
 	}
-	l.begin(ssa.Operation{State: t.State})
-	defer l.end()
+	l.op = ssa.Operation{State: t.State}
 	switch t.Op {
-	case ssa.OpReturn, ssa.OpComplete:
+	case ssa.OpReturn:
+		if err := l.leave(t); err != nil {
+			return err
+		}
+		l.m.Return(l.a, t, l)
+		return l.err
+	case ssa.OpComplete:
 		l.m.Return(l.a, t, l)
 		return l.err
 	case ssa.OpExit:
@@ -299,30 +350,91 @@ func (l *lowering) Type(v ssa.Value) ssa.Type {
 	return l.f.Type(v)
 }
 
-// Exit places a stub for an exit of kind k at the current state.
-func (l *lowering) Exit(k jit.Kind) asm.Label {
-	id := l.exit(k)
+// Deopt places a deopt stub at the current state.
+func (l *lowering) Deopt() asm.Label {
+	exit, _ := l.stub(l.exit(jit.ExitDeopt))
+	return exit
+}
+
+// Release places a release stub for ref.
+func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(jit.ExitRelease)
+	e := l.exits[id]
+	e.Release.Kind = types.KindRef
+	l.places[id] = append(l.places[id], place{to: &e.Release, reg: ref})
+	return l.stub(id)
+}
+
+// stub places the stub of exit id; a resumable one continues at resume,
+// which its caller binds.
+func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	s := stub{label: l.a.Label(), id: id}
-	if k != jit.ExitDeopt {
-		if !l.resumed {
-			l.resume, l.resumed = l.a.Label(), true
-		}
-		s.resume = l.resume
+	if l.exits[id].Kind != jit.ExitDeopt {
+		s.resume = l.a.Label()
 	}
 	l.stubs = append(l.stubs, s)
-	return s.label
+	return s.label, s.resume
 }
 
-func (l *lowering) begin(op ssa.Operation) {
-	l.op, l.resumed = op, false
-}
-
-// end binds where the exits of the current operation resume.
-func (l *lowering) end() {
-	if l.resumed {
-		l.a.Bind(l.resume)
-		l.resumed = false
+// call lowers a CALL of a constant function reference. Its map is the
+// caller's state once the callee returns: the arguments and callee popped,
+// the instruction after the call next.
+func (l *lowering) call(op ssa.Operation) error {
+	callee := op.Args[len(op.Args)-1]
+	c, ok := l.consts[callee]
+	if !ok || c.Kind() != types.KindRef {
+		return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
 	}
+	target := l.objects[c.Ref()].Function
+	if target == nil || target.Typ == nil {
+		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
+	}
+	for _, v := range op.Results {
+		if l.f.Type(v) == ssa.TypeI64 {
+			return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
+		}
+	}
+	state, ok := l.states[op.State]
+	if !ok || len(state.Frames) == 0 {
+		return fmt.Errorf("%w: call without a state", ErrUnsupported)
+	}
+	below := len(state.Frames[len(state.Frames)-1].Stack) - len(op.Args)
+	id := l.exit(jit.ExitCall)
+	l.exits[id].Callee = c.Ref()
+	bridge, resume := l.stub(id)
+	site := Call{
+		Address: c.Ref(),
+		Callee:  callee,
+		Args:    op.Args[:len(op.Args)-1],
+		Results: op.Results,
+		Base:    len(l.fn.Slots()) + below,
+		Size:    max(len(target.Slots()), len(target.Typ.Returns)),
+		Exit:    id,
+		Live:    l.live(id),
+		Bridge:  bridge,
+		Resume:  resume,
+	}
+	if !l.m.Call(l.a, site, l) {
+		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
+	}
+	return l.err
+}
+
+// leave checks that returning t releases nothing the interpreter's RETURN
+// would: every owned operand is a result.
+func (l *lowering) leave(t ssa.Terminator) error {
+	state, ok := l.states[t.State]
+	if !ok {
+		return nil
+	}
+	for _, frame := range state.Frames {
+		for _, o := range frame.Stack[:max(len(frame.Stack)-len(t.Args), 0)] {
+			if o.Owned {
+				return fmt.Errorf("%w: return over owned v%d", ErrUnsupported, o.Value)
+			}
+		}
+	}
+	return nil
 }
 
 // exit records the map of an exit of kind k at the current operation's state.
@@ -332,6 +444,9 @@ func (l *lowering) exit(k jit.Kind) int {
 	l.exits = append(l.exits, e)
 	l.places = append(l.places, nil)
 
+	if k == jit.ExitRelease {
+		return id
+	}
 	state, ok := l.states[l.op.State]
 	if !ok {
 		l.fail(fmt.Errorf("%w: %s exits without a state", ErrUnsupported, l.op.Op))
@@ -341,10 +456,15 @@ func (l *lowering) exit(k jit.Kind) int {
 	for i, frame := range state.Frames {
 		f := &e.Frames[i]
 		*f = jit.Frame{Address: frame.Address, Base: frame.Base, IP: frame.IP, Returns: frame.Returns}
-		if len(frame.Stack) > 0 {
-			f.Stack = make([]jit.Operand, len(frame.Stack))
+		stack := frame.Stack
+		if k == jit.ExitCall && i == len(state.Frames)-1 {
+			stack = stack[:len(stack)-len(l.op.Args)]
+			f.IP += instr.Instruction(l.fn.Code[f.IP:]).Width()
 		}
-		for j, o := range frame.Stack {
+		if len(stack) > 0 {
+			f.Stack = make([]jit.Operand, len(stack))
+		}
+		for j, o := range stack {
 			f.Stack[j].Owned = o.Owned
 			l.place(id, &f.Stack[j].Value, o.Value)
 		}
@@ -356,15 +476,14 @@ func (l *lowering) exit(k jit.Kind) int {
 			l.place(id, &f.Locals[j].Value, local.Value)
 		}
 	}
-	switch k {
-	case jit.ExitBridge:
+	if k == jit.ExitBridge {
 		e.Code = l.op.Code
 		e.Adopts = transform.Adopts(l.op.Code, len(l.op.Args))
+	}
+	if k == jit.ExitBridge || k == jit.ExitCall {
 		for _, v := range l.op.Results {
 			e.Results = append(e.Results, l.f.Type(v).Kind())
 		}
-	case jit.ExitRelease:
-		l.place(id, &e.Release, l.op.Args[0])
 	}
 	return id
 }

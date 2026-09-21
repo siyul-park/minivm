@@ -1,6 +1,7 @@
 package arm64_test
 
 import (
+	"slices"
 	"testing"
 	"unsafe"
 
@@ -23,7 +24,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(7)}
-		code, _ := lower(t, arm64.New(), translate(t, fn), 2, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
@@ -33,7 +34,8 @@ func TestNew(t *testing.T) {
 
 	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
 		stack := []types.Boxed{types.BoxI32(10), types.BoxI32(99), types.BoxI32(99)}
-		code, exits := lower(t, arm64.New(), translate(t, sum(t)), 1, 2)
+		fn := sum(t)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
 		ctx := enter(t, stack)
 		ctx.Budget = 3
 
@@ -54,7 +56,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(0)}
-		code, exits := lower(t, arm64.New(), translate(t, fn), 2, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -79,7 +81,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), 0, 1)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -104,7 +106,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{wide}, State: ret})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), 0, 1)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -116,7 +118,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
 		})
 		fn.Typ.Returns = []types.Type{types.TypeI64}
-		code, exits := lower(t, arm64.New(), translate(t, fn), 1, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
 
 		inline := []types.Boxed{types.BoxI64(-42)}
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, inline)))
@@ -143,7 +145,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), 0, 1)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
@@ -172,7 +174,7 @@ func TestNew(t *testing.T) {
 
 		rc := []int{0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(2)}
-		code, exits := lower(t, arm64.New(), b.Build(), 1, 0)
+		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil)
 		ctx := enter(t, stack)
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
 
@@ -182,8 +184,109 @@ func TestNew(t *testing.T) {
 		require.Equal(t, uint64(types.BoxRef(2)), read(ctx, exit.Release))
 		require.Equal(t, []int{0, 0, 1}, rc)
 
-		rc[2] = 0
+		rc[2] = 2
 		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
+		require.Equal(t, []int{0, 0, 1}, rc)
+	})
+
+	t.Run("releases and clears the references its slots hold on return", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeString}, nil, func(b *instr.Builder) {
+			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
+		})
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
+
+		rc := []int{0, 0, 0, 2}
+		stack := []types.Boxed{types.BoxRef(3)}
+		ctx := enter(t, stack)
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, []int{0, 0, 0, 1}, rc)
+		require.Equal(t, types.BoxI32(1), stack[0])
+
+		stack[0] = types.BoxRef(3)
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		require.Equal(t, uint64(types.BoxRef(3)), read(ctx, exits[ctx.Exit()].Release))
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
+		require.Equal(t, types.BoxI32(1), stack[0])
+	})
+
+	t.Run("calls itself through the natives table", func(t *testing.T) {
+		fib, module := fibonacci(t)
+		f, err := transform.Translate(module, 2, fib, 0)
+		require.NoError(t, err)
+		code, _ := lower(t, arm64.New(), f, fib, module.Objects)
+
+		natives := []uintptr{0, 0, code}
+		rc := []int{0, 0, 1}
+		stack := make([]types.Boxed, 64)
+		stack[0] = types.BoxI32(10)
+		ctx := enter(t, stack)
+		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI32(55), stack[0])
+		require.Zero(t, ctx.Depth)
+		require.Equal(t, []int{0, 0, 1}, rc)
+	})
+
+	t.Run("bridges a call to a function without native code", func(t *testing.T) {
+		fib, module := fibonacci(t)
+		f, err := transform.Translate(module, 2, fib, 0)
+		require.NoError(t, err)
+		code, exits := lower(t, arm64.New(), f, fib, module.Objects)
+
+		natives := []uintptr{0, 0, 0}
+		rc := []int{0, 0, 1}
+		stack := make([]types.Boxed, 64)
+		stack[0] = types.BoxI32(10)
+		ctx := enter(t, stack)
+		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitCall, exit.Kind)
+		require.Equal(t, 2, exit.Callee)
+		require.Equal(t, []types.Kind{types.KindI32}, exit.Results)
+		require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frames[0].IP-1]))
+		require.Empty(t, exit.Frames[0].Stack)
+		require.Equal(t, types.BoxI32(9), stack[1])
+
+		stack[1] = types.BoxI32(34)
+		require.Equal(t, jit.TrapBridge, jit.Resume(ctx))
+		require.Equal(t, []uint64{34}, operands(ctx, exits[ctx.Exit()].Frames[0]))
+		require.Equal(t, types.BoxI32(8), stack[2])
+
+		stack[2] = types.BoxI32(21)
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
+		require.Equal(t, types.BoxI32(55), stack[0])
+		require.Equal(t, []int{0, 0, 3}, rc)
+	})
+
+	t.Run("bridges a call past the depth limit or the stack top", func(t *testing.T) {
+		fib, module := fibonacci(t)
+		f, err := transform.Translate(module, 2, fib, 0)
+		require.NoError(t, err)
+		code, exits := lower(t, arm64.New(), f, fib, module.Objects)
+		natives := []uintptr{0, 0, code}
+		rc := []int{0, 0, 1}
+
+		for _, limit := range []func(ctx *jit.Context, stack []types.Boxed){
+			func(ctx *jit.Context, _ []types.Boxed) { ctx.Limit = 1 },
+			func(ctx *jit.Context, stack []types.Boxed) { ctx.Top = uintptr(unsafe.Pointer(&stack[1])) },
+		} {
+			stack := make([]types.Boxed, 64)
+			stack[0] = types.BoxI32(10)
+			ctx := enter(t, stack)
+			ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
+			ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+			limit(ctx, stack)
+
+			require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+			require.Equal(t, jit.ExitCall, exits[ctx.Exit()].Kind)
+			require.Equal(t, uint64(1), ctx.Depth)
+		}
 	})
 
 	t.Run("returns every kind boxed", func(t *testing.T) {
@@ -200,7 +303,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: args, State: at})
 
 		stack := make([]types.Boxed, len(consts))
-		code, _ := lower(t, arm64.New(), b.Build(), 0, len(consts))
+		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, consts, stack)
 	})
@@ -216,10 +319,10 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 			b.Bind(other).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
 		})
-		lower(t, m, translate(t, first), 2, 0)
+		lower(t, m, translate(t, first), first, nil)
 
 		stack := []types.Boxed{types.BoxI32(0)}
-		code, _ := lower(t, m, translate(t, second), 1, 0)
+		code, _ := lower(t, m, translate(t, second), second, nil)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, types.BoxI32(1), stack[0])
 	})
@@ -236,6 +339,25 @@ func sum(t *testing.T) *types.Function {
 		b.Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
 	})
+}
+
+// fibonacci is fib(n) = n < 2 ? n : fib(n-1) + fib(n-2) at function
+// address 2, calling itself through constant 0.
+func fibonacci(t *testing.T) (*types.Function, transform.Module) {
+	fib := function(t, []types.Type{types.TypeI32}, nil, func(b *instr.Builder) {
+		small := b.Label()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_LT_S).BrIf(small)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_SUB).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.I32_ADD).Emit(instr.RETURN)
+		b.Bind(small).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	})
+	return fib, transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: fib}}}
+}
+
+// frame is a function without code whose slots are params then locals.
+func frame(params, locals []types.Type) *types.Function {
+	return &types.Function{Typ: &types.FunctionType{Params: params}, Locals: locals}
 }
 
 func function(t *testing.T, params, locals []types.Type, emit func(*instr.Builder)) *types.Function {
@@ -264,10 +386,10 @@ func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
 	return v
 }
 
-// lower builds f with m and publishes it.
-func lower(t *testing.T, m compile.Machine, f *ssa.Function, params, locals int) (uintptr, []jit.Exit) {
+// lower builds f, the translation of fn, with m and publishes it.
+func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, exits, err := compile.Lower(f, m, params, locals)
+	code, exits, err := compile.Lower(f, m, fn, objects)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
@@ -283,6 +405,8 @@ func enter(t *testing.T, stack []types.Boxed) *jit.Context {
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
 	ctx.FB = uintptr(unsafe.Pointer(&stack[0]))
+	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
+	ctx.Limit = uint64(len(ctx.Records))
 	ctx.Budget = 1000
 	return ctx
 }

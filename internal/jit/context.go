@@ -31,6 +31,7 @@ type Context struct {
 	Globals uintptr
 	RC      uintptr
 	Natives uintptr
+	Top     uintptr
 	FB      uintptr
 
 	Depth   uint64
@@ -63,6 +64,7 @@ const (
 	OffsetGlobals = unsafe.Offsetof(Context{}.Globals)
 	OffsetRC      = unsafe.Offsetof(Context{}.RC)
 	OffsetNatives = unsafe.Offsetof(Context{}.Natives)
+	OffsetTop     = unsafe.Offsetof(Context{}.Top)
 	OffsetFB      = unsafe.Offsetof(Context{}.FB)
 	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)
 	OffsetLimit   = unsafe.Offsetof(Context{}.Limit)

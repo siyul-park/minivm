@@ -15,10 +15,14 @@ type Exit struct {
 	// Adopts is how many popped operands Code takes ownership of; the
 	// interpreter retains the rest, which native code still releases.
 	Adopts int
-	// Frames are the interpreter frames at the exit, innermost last.
+	// Callee is the function address an ExitCall asks the interpreter to
+	// call with the arguments native code stored at the callee's frame base.
+	Callee int
+	// Frames are the interpreter frames at the exit, innermost last. An
+	// ExitRelease has none: it neither reads nor rebuilds them.
 	Frames []Frame
 	// Results are the kinds of the values an ExitBridge reads back from
-	// Context.Results, in order.
+	// Context.Results, or an ExitCall from the callee's frame base, in order.
 	Results []types.Kind
 	// Release is the reference an ExitRelease hands to the interpreter.
 	Release Value
@@ -69,4 +73,8 @@ const (
 	// ExitRelease suspends native code for the interpreter to release the
 	// last reference to Release.
 	ExitRelease
+	// ExitCall suspends native code for the interpreter to call Callee; it
+	// resumes once the callee returns. Frames are the caller's state after
+	// the call, which is also its state while a native callee runs.
+	ExitCall
 )

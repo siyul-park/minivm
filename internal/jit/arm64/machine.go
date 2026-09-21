@@ -3,6 +3,7 @@ package arm64
 
 import (
 	"math"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
@@ -17,7 +18,7 @@ import (
 // the address of the activation's VM slot 0; X16 and X17 are scratch inside
 // one lowered row sequence.
 type Machine struct {
-	slots int
+	kinds []types.Kind
 	temp  int32
 	end   asm.Label
 }
@@ -35,22 +36,21 @@ func (m *Machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X1
 
 // Prologue begins a function: it builds the frame, loads the frame base,
 // pushes the activation record, and clears the locals after params.
-func (m *Machine) Prologue(a *asm.Assembler, slots, params int) {
-	*m = Machine{slots: slots, temp: -1, end: a.Label()}
+func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int) {
+	*m = Machine{kinds: kinds, temp: -1, end: a.Label()}
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		asm.Instruction{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
-		target.ADDI(target.X17, target.Ctx, uint16(jit.OffsetRecords)),
-		target.LSLI(target.X16, target.X16, 5),
-		target.ADD(target.X17, target.X17, target.X16),
-		target.STR(target.X25, target.X17, int16(jit.RecordFB)),
+		target.LSLI(target.X17, target.X16, 5),
+		target.ADD(target.X17, target.Ctx, target.X17),
+		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
 		target.ADDI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 	)
-	for i := params; i < slots; i++ {
+	for i := params; i < len(kinds); i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 	}
 }
@@ -87,7 +87,7 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		m.retain(a, s.Reg(op.Args[0]))
 		return true
 	case ssa.OpRelease:
-		m.release(a, s.Reg(op.Args[0]), s.Exit(jit.ExitRelease))
+		m.release(a, s.Reg(op.Args[0]), s)
 		return true
 	default:
 		return false
@@ -112,11 +112,24 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 }
 
 // Return boxes t's arguments into the VM slots the interpreter reads them
-// from: slot 0 on for OpReturn, past the locals for OpComplete.
+// from: slot 0 on for OpReturn, past the locals for OpComplete. An OpReturn
+// first releases and clears every slot whose kind can hold a reference, as
+// the interpreter's RETURN releases the frame it pops; a cleared slot holds
+// no reference should a result still deopt.
 func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
-	base := 0
-	if t.Op == ssa.OpComplete {
-		base = m.slots
+	base := len(m.kinds)
+	if t.Op == ssa.OpReturn {
+		base = 0
+		for i, k := range m.kinds {
+			switch k.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+				continue
+			}
+			word := m.vreg()
+			a.Emit(target.LDR(word, target.X25, int16(i*8)))
+			m.release(a, word, s)
+			a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
+		}
 	}
 	for i, v := range t.Args {
 		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((base+i)*8)))
@@ -164,6 +177,63 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	for i, r := range regs {
 		a.Emit(target.LDR(r, target.Ctx, int16(int(jit.OffsetResults)+8*i)))
 	}
+}
+
+// Call stores c's arguments boxed at the callee's frame base and calls the
+// callee's native code through Context.Natives, pushing nothing itself: the
+// callee's prologue pushes its record, and this activation's record names
+// its stack pointer and the call's map meanwhile. A callee that is not native,
+// an activation at Context.Limit, or a frame past Context.Top takes the
+// bridge instead. Both paths load the results from the callee's frame base.
+func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
+	if 8*(c.Base+c.Size) > 4095 {
+		return false
+	}
+	record := func(field uintptr) int16 { return int16(jit.OffsetRecords - unsafe.Sizeof(jit.Record{}) + field) }
+	for i, v := range c.Args {
+		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((c.Base+i)*8)))
+	}
+	code := m.vreg()
+	a.Emit(target.LDR(code, target.Ctx, int16(jit.OffsetNatives)))
+	a.Emit(target.LDI(target.X16, uint64(c.Address))...)
+	a.Emit(
+		target.LDRR(code, code, target.X16),
+		target.CBZLabel(code, c.Bridge),
+		target.ADDI(target.X16, target.X25, uint16(8*(c.Base+c.Size))),
+		target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+		target.CMP(target.X16, target.X17),
+		target.BCondLabel(target.OpBHI, c.Bridge),
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+		target.CMP(target.X16, target.X17),
+		target.BCondLabel(target.OpBCS, c.Bridge),
+		target.LSLI(target.X16, target.X16, 5),
+		target.ADD(target.X16, target.Ctx, target.X16),
+		target.ADDI(target.X17, target.SP, 0),
+		target.STR(target.X17, target.X16, record(jit.RecordSP)),
+	)
+	a.Emit(target.LDI(target.X17, uint64(c.Exit))...)
+	a.Emit(
+		target.STR(target.X17, target.X16, record(jit.RecordExit)),
+		target.ADDI(target.X16, target.X25, uint16(8*c.Base)),
+		target.STR(target.X16, target.Ctx, int16(jit.OffsetFB)),
+		target.BLR(code),
+	)
+	for _, u := range c.Live {
+		a.Emit(target.USE(u))
+	}
+	a.Emit(
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		target.LSLI(target.X16, target.X16, 5),
+		target.ADD(target.X16, target.Ctx, target.X16),
+		target.LDR(target.X25, target.X16, record(jit.RecordFB)),
+	)
+	m.release(a, s.Reg(c.Callee), s)
+	a.Bind(c.Resume)
+	for j, v := range c.Results {
+		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))
+	}
+	return true
 }
 
 // Move copies src into dst of the same bank.
@@ -242,8 +312,7 @@ func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 	case slot.Space == ssa.SpaceLocal && slot.Base == 0:
 		return target.X25, true
 	case slot.Space == ssa.SpaceGlobal:
-		m.temp--
-		base := asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
+		base := m.vreg()
 		a.Emit(target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)))
 		return base, true
 	default:
@@ -514,7 +583,7 @@ func (m *Machine) divide(a *asm.Assembler, op ssa.Operation, s compile.Site, wid
 	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != width {
 		return false
 	}
-	a.Emit(target.CBZLabel(y, s.Exit(jit.ExitDeopt)))
+	a.Emit(target.CBZLabel(y, s.Deopt()))
 	rem := op.Code == instr.I32_REM_S || op.Code == instr.I32_REM_U || op.Code == instr.I64_REM_S || op.Code == instr.I64_REM_U
 	if rem {
 		q := target.W16
@@ -656,7 +725,7 @@ func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	a.Emit(target.LDI(target.X17, types.Tag(types.KindI64)>>49)...)
 	a.Emit(
 		target.CMP(target.X16, target.X17),
-		target.BCondLabel(target.OpBNE, s.Exit(jit.ExitDeopt)),
+		target.BCondLabel(target.OpBNE, s.Deopt()),
 		target.SBFX(dst, word, 0, 49),
 	)
 	return true
@@ -674,16 +743,16 @@ func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
 // release counts one reference to ref less, as the interpreter's releaseBox:
 // never the null one. The last reference exits for the interpreter to
 // release the object and what it holds.
-func (m *Machine) release(a *asm.Assembler, ref asm.VReg, last asm.Label) {
-	skip := a.Label()
-	m.count(a, ref, skip, false)
+func (m *Machine) release(a *asm.Assembler, ref asm.VReg, s compile.Site) {
+	last, resume := s.Release(ref)
+	m.count(a, ref, resume, false)
 	a.Emit(
 		target.CMPI(target.X17, 1),
 		target.BCondLabel(target.OpBLE, last),
 		target.SUBI(target.X17, target.X17, 1),
 		target.STR(target.X17, target.X16, 0),
 	)
-	a.Bind(skip)
+	a.Bind(resume)
 }
 
 // count points X16 at the reference count of ref and loads it into X17. A
@@ -708,6 +777,12 @@ func (m *Machine) count(a *asm.Assembler, ref asm.VReg, skip asm.Label, null boo
 	)
 }
 
+// vreg is a fresh 64-bit register no SSA value names.
+func (m *Machine) vreg() asm.VReg {
+	m.temp--
+	return asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
+}
+
 // box returns the register holding v as a boxed word. An i64 outside the
 // inline range deopts.
 func (m *Machine) box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
@@ -720,7 +795,7 @@ func (m *Machine) box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 		a.Emit(
 			target.ADD(target.X17, src, target.X16),
 			target.LSRI(target.X17, target.X17, 49),
-			target.CBNZLabel(target.X17, s.Exit(jit.ExitDeopt)),
+			target.CBNZLabel(target.X17, s.Deopt()),
 			target.ANDI(target.X16, src, types.VMask),
 		)
 	case types.KindF32:
