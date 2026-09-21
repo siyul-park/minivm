@@ -6,7 +6,7 @@ Current status and planned ownership for the JIT rebuild.
 
 ## Status
 
-The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimization are the current implementation; a native tier is being rebuilt as one compiler pipeline.
+The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimization remain the semantic baseline; the native tier is being rebuilt as one compiler pipeline. As of S2-P6a, `interp.WithThreshold` lets the interpreter enter compiled native code for a hot `*types.Function`, resuming only `ExitSafepoint` and `ExitRelease`; every other exit is a documented gap until S2-P6b's deoptimization lands (see Runtime below).
 
 ## Current owners
 
@@ -81,6 +81,18 @@ The rebuild MUST preserve threaded behavior as the semantic baseline. Native exe
 ### Tiers and the compile queue
 
 `compile.Compile(u, m)` translates `u.Function` from `u.Module` at `u.Address`, verifies, runs `u.Tier`'s pass pipeline on a fresh `pass.Manager` — `jit.Baseline`: fold, dce; `jit.Optimized`: the O3 order (fold, promote, forward, cse, guard, hoist, dce) — verifies again, and lowers with `m` into a `jit.Code`. `compile.Queue` runs `Compile` on worker goroutines, each owning one machine, one unit per address in flight at a time: `Submit` refuses a second one until `Drain` collects the first; `Close` lets queued units finish and joins every worker. A `Job`'s `Code`, once handed to `Store.Publish`, is freed there if it turns out stale — a tier no higher than what is already published.
+
+## Runtime
+
+`interp.WithThreshold(n)` enables the JIT: `n >= 0` calls to one `*types.Function` before it compiles, only on `runtime.GOARCH == "arm64"`, and only without `WithHook`/`WithFuel` (their per-tick semantics need interpreter frames); `WithProfiler` is compatible. The `CALL` handler for a `*types.Function` — the dynamic and the fused `CONST_GET;CALL` path alike — calls into the interpreter's native runtime once, after its usual overflow/underflow checks and before it fills a frame; when native code runs the call to completion, no interpreter frame is pushed for it.
+
+Compiles run asynchronously on `compile.Queue` (one Baseline unit per hot address); the interpreter drains finished jobs at its next call to that address and `Store.Publish`es a successful one. A failed compile marks the address permanently unsupported for the interpreter's life; it is never resubmitted.
+
+Only `ExitSafepoint` and `ExitRelease` resume native code (S2-P6a): a safepoint checks the active `Run` context for cancellation and refills `Context.Budget`; a release performs `Interpreter.Release` on the reference `Context.Read` names for the exiting activation. Every other exit — `ExitDeopt`, `ExitBridge`, `ExitCall`, and a safepoint that finds the context cancelled — needs deoptimization: materializing every suspended native activation as an interpreter frame and continuing threaded. `interp`'s native runtime does not build that yet; reaching one of these is reported as a runtime error naming the exit kind rather than silently miscomputing (S2-P6b owns the materializer).
+
+Because every unresumable exit deoptimizes, no guest code ever runs while a native activation is suspended: one native run at a time per interpreter, and `jit.Enter` never nests.
+
+Metrics, only with `WithProfiler`: `vm_jit_compiles_total{tier,outcome=ok|unsupported|failed}`, `vm_jit_entries_total{tier}`, `vm_jit_exits_total{kind}`.
 
 ## Evidence
 

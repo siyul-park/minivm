@@ -22,6 +22,7 @@ type Interpreter struct {
 	codec    Codec
 	profiler *prof.Profiler
 	samples  *prof.Collector
+	native   *native
 	closed   bool
 
 	types       []types.Type
@@ -84,12 +85,13 @@ type option struct {
 	codec    Codec
 	profiler *prof.Profiler
 
-	frame   int
-	stack   int
-	heap    int
-	maxHeap int
-	tick    int
-	fuel    uint64
+	frame     int
+	stack     int
+	heap      int
+	maxHeap   int
+	tick      int
+	fuel      uint64
+	threshold int
 }
 
 type frame struct {
@@ -158,14 +160,22 @@ func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
 }
 
+// WithThreshold enables the JIT: n calls to a *types.Function before it is
+// compiled to native code. n < 0 disables it; this is the default. The JIT
+// also requires runtime.GOARCH == "arm64" and neither WithHook nor WithFuel.
+func WithThreshold(n int) Option {
+	return func(o *option) { o.threshold = n }
+}
+
 // New builds an interpreter for prog. It trusts prog to be well-formed; run
 // program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
 func New(prog *program.Program, opts ...Option) *Interpreter {
 	opt := option{
-		frame: 128,
-		stack: 1024,
-		heap:  128,
-		tick:  128,
+		frame:     128,
+		stack:     1024,
+		heap:      128,
+		tick:      128,
+		threshold: -1,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -318,6 +328,10 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.fp = 1
 	i.fr = &i.frames[0]
 	i.retain(0)
+
+	if jitEnabled(opt) {
+		i.native = newNative(i, opt.threshold)
+	}
 
 	return i
 }
@@ -662,7 +676,10 @@ func (i *Interpreter) Close() error {
 	i.arrays.clear()
 	i.structs.clear()
 	i.closed = true
-	return nil
+	if i.native == nil {
+		return nil
+	}
+	return i.native.close()
 }
 
 func (i *Interpreter) Reset() {

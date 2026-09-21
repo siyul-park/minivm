@@ -32,6 +32,8 @@ metrics := p.Metrics()
 
 Metrics include execution samples, opcode/function/IP sample counts, custom metrics, and GC activity. Current names are defined in `prof`.
 
+An interpreter built with `interp.WithThreshold` and `WithProfiler` also reports native execution: `vm_jit_compiles_total{tier,outcome=ok|unsupported|failed}`, `vm_jit_entries_total{tier}`, `vm_jit_exits_total{kind}`. See `jit-internals.md` Runtime for what each counts.
+
 ## REPL
 
 `.profile` re-executes with exact sampling and reports hot functions, IPs, and opcodes.

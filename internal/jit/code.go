@@ -10,6 +10,17 @@ const (
 	Optimized
 )
 
+func (t Tier) String() string {
+	switch t {
+	case Baseline:
+		return "baseline"
+	case Optimized:
+		return "optimized"
+	default:
+		return "none"
+	}
+}
+
 // Code is the native code of one function at one tier, in executable memory of its own.
 type Code struct {
 	Address int

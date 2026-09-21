@@ -39,3 +39,19 @@ func TestCode_Free(t *testing.T) {
 
 	require.NoError(t, c.Free())
 }
+
+func TestTier_String(t *testing.T) {
+	tests := []struct {
+		tier jit.Tier
+		want string
+	}{
+		{jit.Baseline, "baseline"},
+		{jit.Optimized, "optimized"},
+		{jit.Tier(0), "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.tier.String())
+		})
+	}
+}

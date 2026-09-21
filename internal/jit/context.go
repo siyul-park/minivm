@@ -12,6 +12,8 @@ import (
 // Record identifies one suspended native activation.
 type Record struct {
 	FB uintptr
+	// SP is the activation's spill base: its values that stay live across a
+	// native call sit at SP + 8*slot.
 	SP uintptr
 	// PC is the activation's return address; for an activation a native
 	// caller entered, it lies in the caller's Code.
@@ -115,6 +117,25 @@ func Resume(ctx *Context) Trap {
 // what it names is the code publisher's to say.
 func (c *Context) Exit() uint64 {
 	return c.exit
+}
+
+// Read returns the raw native value v names in activation record: for the
+// innermost activation (record == Depth-1) a register from the saved
+// register file or v's own spill slot; for an outer activation, always the
+// spill slot at Records[record].SP + 8*slot, since that activation's values
+// stay live in memory across the call. A register location there is a
+// programmer error no compiled map produces.
+func (c *Context) Read(record int, v Value) uint64 {
+	if record == int(c.Depth)-1 {
+		if v.Loc.Spilled {
+			return c.Slot(v.Loc.Slot)
+		}
+		return c.Reg(v.Loc.Reg)
+	}
+	if !v.Loc.Spilled {
+		panic("jit: an outer activation's value must be spilled")
+	}
+	return c.Word(c.Records[record].SP + uintptr(8*v.Loc.Slot))
 }
 
 func (t Trap) String() string {

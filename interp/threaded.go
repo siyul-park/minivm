@@ -176,6 +176,9 @@ var (
 					if locals > 0 {
 						clear(i.stack[i.sp-1 : i.sp+locals-1])
 					}
+					if i.native != nil && i.native.call(i, addr, fn, true, 1) {
+						return
+					}
 					f := &i.frames[i.fp]
 					f.code = i.code[addr]
 					f.upvals = nil
@@ -67162,6 +67165,9 @@ var (
 						}
 						if locals > 0 {
 							clear(i.stack[i.sp : i.sp+locals])
+						}
+						if i.native != nil && i.native.call(i, addr, fn, false, 4) {
+							return
 						}
 						f := &i.frames[i.fp]
 						f.code = i.code[addr]

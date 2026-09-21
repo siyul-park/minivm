@@ -22,7 +22,7 @@ type State struct {
 
 	sp, fp, lr uintptr
 	pc         uintptr
-	nsp        unsafe.Pointer
+	nsp, top   unsafe.Pointer
 	exited     uint64
 	regs       [32]uint64
 	fregs      [32]uint64
@@ -47,7 +47,21 @@ func NewState(size int) (State, error) {
 		index--
 	}
 	top := unsafe.Add(base, index*8)
-	return State{stub: exitPC(), nsp: top, stack: stack}, nil
+	return State{stub: exitPC(), nsp: top, top: top, stack: stack}, nil
+}
+
+// PC reports where the last exit left: the exit stub's return address, which
+// lies in the exiting activation's code.
+func (s *State) PC() uintptr {
+	return s.pc
+}
+
+// Abandon discards a suspended native stack, so the next Enter runs a fresh
+// activation from the stack's top rather than nesting below the abandoned
+// one.
+func (s *State) Abandon() {
+	s.nsp = s.top
+	s.exited = 0
 }
 
 // Reg reports the saved value of r. r must be saved by the exit protocol.
@@ -67,6 +81,16 @@ func (s *State) Slot(n int) uint64 {
 		panic("asm: invalid spill slot")
 	}
 	return *(*uint64)(unsafe.Add(s.nsp, n*8))
+}
+
+// Word reads the native stack word at addr, an address a native activation
+// recorded, such as its stack pointer plus a spill slot's offset.
+func (s *State) Word(addr uintptr) uint64 {
+	offset := addr - uintptr(unsafe.Pointer(&s.stack[0]))
+	if addr < uintptr(unsafe.Pointer(&s.stack[0])) || offset%8 != 0 || offset/8 >= uintptr(len(s.stack)) {
+		panic("asm: address outside the native stack")
+	}
+	return s.stack[offset/8]
 }
 
 func (s *State) slot(r PReg) *uint64 {

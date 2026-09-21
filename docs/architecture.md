@@ -52,14 +52,14 @@ The agent `MUST` place behavior by dominant ownership, not import convenience. I
 ## Execution
 
 ```text
-program → Verify → optimize? → interp → threaded
+program → Verify → optimize? → interp → threaded ⇄ native
 ```
 
-Threaded execution is the semantic baseline. Native compilation is a planned optimization tier and is not part of the current execution path.
+Threaded execution is the semantic baseline. A hot `*types.Function`, entered at ip 0 from an interpreted `CALL`, `MAY` run compiled native code instead (`interp.WithThreshold`, arm64 only); every other call stays threaded.
 
 ## Runtime
 
-`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. A shared `Pool` owns compile coordination; an interpreter owns its execution state and dispatch table.
+`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. An interpreter built with `WithThreshold` owns its own native execution context, published code, and compile queue; a `Pool`-shared store and queue across the pool's interpreters is planned.
 
 Execution is single-goroutine-owned. Background compilation consumes immutable input and `MUST NOT` mutate live interpreter state.
 

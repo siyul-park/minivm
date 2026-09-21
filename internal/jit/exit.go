@@ -78,3 +78,20 @@ const (
 	// the call, which is also its state while a native callee runs.
 	ExitCall
 )
+
+func (k Kind) String() string {
+	switch k {
+	case ExitDeopt:
+		return "deopt"
+	case ExitBridge:
+		return "bridge"
+	case ExitSafepoint:
+		return "safepoint"
+	case ExitRelease:
+		return "release"
+	case ExitCall:
+		return "call"
+	default:
+		return "invalid"
+	}
+}
