@@ -42,14 +42,15 @@ blk1: () <-- (blk0, blk3)
 	br v5, blk2(), blk3()
 blk2: () <-- (blk1)
 	v7:i32 = load local[0]
-	return v7
+	v8:state = state {addr=1 base=0 ip=33 returns=1 stack=[v7]}
+	return v7 state v8
 blk3: () <-- (blk1)
-	v8:i32 = load local[0]
-	v9:i32 = const 1
-	v11:state = state {addr=1 base=0 ip=25 returns=1 stack=[v8, v9]}
-	v10:i32 = i32.add v8, v9 state v11
-	v12:state = state {addr=1 base=0 ip=26 returns=1 stack=[v10]}
-	store local[0], v10 state v12
+	v9:i32 = load local[0]
+	v10:i32 = const 1
+	v12:state = state {addr=1 base=0 ip=25 returns=1 stack=[v9, v10]}
+	v11:i32 = i32.add v9, v10 state v12
+	v13:state = state {addr=1 base=0 ip=26 returns=1 stack=[v11]}
+	store local[0], v11 state v13
 	jump blk1()
 `, ssa.Format(out))
 	})
@@ -87,7 +88,8 @@ blk0: ()
 	retain v1
 	v3:state = state {addr=0 base=0 ip=3 returns=0 stack=[v1 owned]}
 	v2:i32 = call v1 state v3
-	complete v2
+	v4:state = state {addr=0 base=0 ip=4 returns=0 stack=[v2]}
+	complete v2 state v4
 `, ssa.Format(out))
 	})
 
@@ -107,7 +109,8 @@ blk0: ()
 	v2:i32 = const 2
 	v4:state = state {addr=1 base=0 ip=10 returns=1 stack=[v1, v2]}
 	v3:i32 = i32.add v1, v2 state v4
-	return v3
+	v5:state = state {addr=1 base=0 ip=11 returns=1 stack=[v3]}
+	return v3 state v5
 `, ssa.Format(out))
 	})
 
@@ -122,15 +125,16 @@ blk0: (v1:ref) <-- (blk2)
 	v2:i32 = load local[1]
 	br v2, blk1(v1), blk2(v1)
 blk1: (v3:ref) <-- (blk0)
-	return v3
-blk2: (v4:ref) <-- (blk0)
-	v5:i32 = load local[1]
-	v6:i32 = const 1
-	v8:state = state {addr=1 base=0 ip=14 returns=1 stack=[v4 owned, v5, v6]}
-	v7:i32 = i32.sub v5, v6 state v8
-	v9:state = state {addr=1 base=0 ip=15 returns=1 stack=[v4 owned, v7]}
-	store local[1], v7 state v9
-	jump blk0(v4)
+	v4:state = state {addr=1 base=0 ip=20 returns=1 stack=[v3 owned]}
+	return v3 state v4
+blk2: (v5:ref) <-- (blk0)
+	v6:i32 = load local[1]
+	v7:i32 = const 1
+	v9:state = state {addr=1 base=0 ip=14 returns=1 stack=[v5 owned, v6, v7]}
+	v8:i32 = i32.sub v6, v7 state v9
+	v10:state = state {addr=1 base=0 ip=15 returns=1 stack=[v5 owned, v8]}
+	store local[1], v8 state v10
+	jump blk0(v5)
 `, ssa.Format(root))
 
 		entry, err := transform.Translate(transform.Module{}, 1, fn, 0)
@@ -145,15 +149,16 @@ blk1: (v2:ref) <-- (blk0, blk3)
 	br v3, blk2(v2), blk3(v2)
 blk2: (v4:ref) <-- (blk1)
 	retain v4
-	return v4
-blk3: (v5:ref) <-- (blk1)
-	v6:i32 = load local[1]
-	v7:i32 = const 1
-	v9:state = state {addr=1 base=0 ip=14 returns=1 stack=[v5, v6, v7]}
-	v8:i32 = i32.sub v6, v7 state v9
-	v10:state = state {addr=1 base=0 ip=15 returns=1 stack=[v5, v8]}
-	store local[1], v8 state v10
-	jump blk1(v5)
+	v5:state = state {addr=1 base=0 ip=20 returns=1 stack=[v4 owned]}
+	return v4 state v5
+blk3: (v6:ref) <-- (blk1)
+	v7:i32 = load local[1]
+	v8:i32 = const 1
+	v10:state = state {addr=1 base=0 ip=14 returns=1 stack=[v6, v7, v8]}
+	v9:i32 = i32.sub v7, v8 state v10
+	v11:state = state {addr=1 base=0 ip=15 returns=1 stack=[v6, v9]}
+	store local[1], v9 state v11
+	jump blk1(v6)
 `, ssa.Format(entry))
 	})
 
@@ -275,18 +280,19 @@ blk1: () <-- (blk0, blk3)
 	br v7, blk2(), blk3()
 blk2: () <-- (blk1)
 	v9:i32 = load local[1]
-	return v9
+	v10:state = state {addr=1 base=0 ip=31 returns=1 stack=[v9]}
+	return v9 state v10
 blk3: () <-- (blk1)
-	v10:ref = load local[0]
-	v11:i32 = load local[1]
-	v13:state = state {addr=1 base=0 ip=20 returns=1 stack=[v10, v11]}
-	v12:ref = guard.shape v10 tag 0x3 state v13
-	v14:i32 = array.get v12, v11 state v13
-	v15:i32 = load local[1]
-	v17:state = state {addr=1 base=0 ip=23 returns=1 stack=[v14, v15]}
-	v16:i32 = i32.add v14, v15 state v17
-	v18:state = state {addr=1 base=0 ip=24 returns=1 stack=[v16]}
-	store local[1], v16 state v18
+	v11:ref = load local[0]
+	v12:i32 = load local[1]
+	v14:state = state {addr=1 base=0 ip=20 returns=1 stack=[v11, v12]}
+	v13:ref = guard.shape v11 tag 0x3 state v14
+	v15:i32 = array.get v13, v12 state v14
+	v16:i32 = load local[1]
+	v18:state = state {addr=1 base=0 ip=23 returns=1 stack=[v15, v16]}
+	v17:i32 = i32.add v15, v16 state v18
+	v19:state = state {addr=1 base=0 ip=24 returns=1 stack=[v17]}
+	store local[1], v17 state v19
 	jump blk1()
 `, ssa.Format(out))
 	})
@@ -310,7 +316,8 @@ blk0: ()
 	v5:state = state {addr=1 base=0 ip=12 returns=0 stack=[v1, v2, v3]}
 	v4:ref = guard.shape v1 tag 0x3 state v5
 	array.set v4, v2, v3 state v5
-	return
+	v6:state = state {addr=1 base=0 ip=13 returns=0 stack=[]}
+	return state v6
 `, ssa.Format(out))
 	})
 
@@ -338,7 +345,8 @@ blk0: ()
 	v6:ref = guard.shape v2 tag 0x8 state v7
 	struct.set v6, v4, v5 state v7
 	release v6 state v7
-	return
+	v8:state = state {addr=1 base=0 ip=19 returns=0 stack=[]}
+	return state v8
 `, ssa.Format(out))
 	})
 
@@ -399,9 +407,27 @@ blk0: ()
 	v1:i64 = load local[0]
 	v3:state = state {addr=1 base=0 ip=0 returns=1 stack=[]}
 	v2:i64 = guard.kind v1 state v3
-	return v2
+	v4:state = state {addr=1 base=0 ip=2 returns=1 stack=[v2]}
+	return v2 state v4
 `, ssa.Format(out))
 	})
+}
+
+func TestAdopts(t *testing.T) {
+	tests := []struct {
+		code instr.Opcode
+		pops int
+		want int
+	}{
+		{instr.CALL, 3, 3},
+		{instr.ARRAY_SET, 3, 1},
+		{instr.I32_ADD, 2, 0},
+	}
+	for _, tt := range tests {
+		t.Run(instr.TypeOf(tt.code).Mnemonic, func(t *testing.T) {
+			require.Equal(t, tt.want, transform.Adopts(tt.code, tt.pops))
+		})
+	}
 }
 
 func loopFunction(t *testing.T) (*types.Function, int) {

@@ -187,6 +187,7 @@ const (
 
 	// System
 	OpNOP
+	OpUSE
 	OpBRK
 	OpSVC
 	OpHLT
@@ -646,6 +647,9 @@ func BCC(offset int32) asm.Instruction { return newBranch(OpBCC, int64(offset)) 
 
 func NOP() asm.Instruction { return newInst(OpNOP, nil) }
 func HLT() asm.Instruction { return newInst(OpHLT, nil) }
+
+// USE reads src and encodes nothing: it keeps a value live up to its row.
+func USE(src asm.Reg) asm.Instruction { return newReg1(OpUSE, src) }
 
 // BRK #imm — software breakpoint
 func BRK(imm16 uint16) asm.Instruction { return newInst(OpBRK, nil, nil, imm(int64(imm16))) }

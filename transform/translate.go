@@ -54,6 +54,20 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 	return f, nil
 }
 
+// Adopts is how many of the pops operands code takes ownership of: every one
+// when it enters a frame, the stored value when it overwrites heap contents.
+// The owned operands it does not adopt stay the translated code's to release.
+func Adopts(code instr.Opcode, pops int) int {
+	switch {
+	case code.Writes(instr.Frame):
+		return pops
+	case code.Reads(instr.Heap) && code.Writes(instr.Heap):
+		return 1
+	default:
+		return 0
+	}
+}
+
 func translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
 	if len(function.Code) == 0 {
 		return nil, nil

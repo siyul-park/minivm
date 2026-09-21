@@ -16,10 +16,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// regs names value v with the register its type is represented in.
+// regs names value v with the register its type is represented in; every
+// exit it is asked for is exit.
 type regs map[ssa.Value]ssa.Type
 
+const exit = asm.Label(99)
+
 func (r regs) Type(v ssa.Value) ssa.Type { return r[v] }
+
+func (r regs) Exit(jit.Kind) asm.Label { return exit }
 
 func (r regs) Reg(v ssa.Value) asm.VReg {
 	switch r[v] {
@@ -33,9 +38,6 @@ func (r regs) Reg(v ssa.Value) asm.VReg {
 		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width32)
 	}
 }
-
-// fail is the label of the first failed check after Prologue binds the end.
-const fail = asm.Label(1)
 
 func TestMachine_Reserve(t *testing.T) {
 	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X25}, arm64.New().Reserve())
@@ -72,22 +74,11 @@ func TestMachine_Epilogue(t *testing.T) {
 		target.RET(),
 	}
 
-	t.Run("pops the record and the frame", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, 0)
-		start := len(a.Rows())
-		m.Epilogue(a)
-		require.Equal(t, pop, a.Rows()[start:])
-	})
-
-	t.Run("halts a failed check after the return", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, 0)
-		m.Budget(a)
-		start := len(a.Rows())
-		m.Epilogue(a)
-		require.Equal(t, append(slices.Clone(pop), target.BRK(0)), a.Rows()[start:])
-	})
+	m, a := arm64.New(), asm.New(target.New())
+	m.Prologue(a, 0, 0)
+	start := len(a.Rows())
+	m.Epilogue(a)
+	require.Equal(t, pop, a.Rows()[start:])
 }
 
 func TestMachine_Lower(t *testing.T) {
@@ -111,6 +102,12 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	local := func(i int) ssa.Slot { return ssa.Slot{Space: ssa.SpaceLocal, Index: i} }
 	globals := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
+	counter := []asm.Instruction{
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+		target.LSLI(target.X17, target.X17, 3),
+		target.ADD(target.X16, target.X16, target.X17),
+		target.LDR(target.X17, target.X16, 0),
+	}
 
 	var tests []test
 	for _, c := range []struct {
@@ -230,20 +227,20 @@ func TestMachine_Lower(t *testing.T) {
 			name: "i64.div_s fails on a zero divisor",
 			regs: regs{1: i64, 2: i64, 3: i64},
 			op:   exec(instr.I64_DIV_S, 1, 2),
-			rows: []asm.Instruction{target.CBZLabel(x(2), fail), target.SDIV(x(3), x(1), x(2))}, lower: true,
+			rows: []asm.Instruction{target.CBZLabel(x(2), exit), target.SDIV(x(3), x(1), x(2))}, lower: true,
 		},
 		{
 			name: "i32.div_u fails on a zero divisor",
 			regs: regs{1: i32, 2: i32, 3: i32},
 			op:   exec(instr.I32_DIV_U, 1, 2),
-			rows: []asm.Instruction{target.CBZLabel(w(2), fail), target.UDIV(w(3), w(1), w(2))}, lower: true,
+			rows: []asm.Instruction{target.CBZLabel(w(2), exit), target.UDIV(w(3), w(1), w(2))}, lower: true,
 		},
 		{
 			name: "i32.rem_u subtracts the quotient",
 			regs: regs{1: i32, 2: i32, 3: i32},
 			op:   exec(instr.I32_REM_U, 1, 2),
 			rows: []asm.Instruction{
-				target.CBZLabel(w(2), fail), target.UDIV(target.W16, w(1), w(2)), target.MSUB(w(3), target.W16, w(2), w(1)),
+				target.CBZLabel(w(2), exit), target.UDIV(target.W16, w(1), w(2)), target.MSUB(w(3), target.W16, w(2), w(1)),
 			}, lower: true,
 		},
 		{
@@ -251,7 +248,7 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: i64, 2: i64, 3: i64},
 			op:   exec(instr.I64_REM_S, 1, 2),
 			rows: []asm.Instruction{
-				target.CBZLabel(x(2), fail), target.SDIV(target.X16, x(1), x(2)), target.MSUB(x(3), target.X16, x(2), x(1)),
+				target.CBZLabel(x(2), exit), target.SDIV(target.X16, x(1), x(2)), target.MSUB(x(3), target.X16, x(2), x(1)),
 			}, lower: true,
 		},
 		{
@@ -303,10 +300,62 @@ func TestMachine_Lower(t *testing.T) {
 			rows: target.LDI(x(1), uint64(types.BoxRef(4))), lower: true,
 		},
 		{
-			name: "load i64 sign-extends its payload",
+			name: "load i64 keeps the slot word for its guard",
 			regs: regs{1: i64},
 			op:   ssa.Operation{Op: ssa.OpLoad, Slot: local(2), Results: []ssa.Value{1}},
-			rows: []asm.Instruction{target.LDR(x(1), target.X25, 16), target.SBFX(x(1), x(1), 0, 49)}, lower: true,
+			rows: []asm.Instruction{target.LDR(x(1), target.X25, 16)}, lower: true,
+		},
+		{
+			name: "guard.kind deopts on a word that is no inline i64 and unboxes",
+			regs: regs{1: i64, 2: i64},
+			op:   ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: slices.Concat(
+				[]asm.Instruction{target.LSRI(target.X16, x(1), 49)},
+				target.LDI(target.X17, types.Tag(types.KindI64)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, exit),
+					target.SBFX(x(2), x(1), 0, 49),
+				},
+			), lower: true,
+		},
+		{
+			name: "retain counts any reference up",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{1}},
+			rows: slices.Concat(
+				[]asm.Instruction{target.LSRI(target.X16, x(1), 49)},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, 1),
+					target.SBFX(target.X17, x(1), 0, 32),
+				},
+				counter,
+				[]asm.Instruction{target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0)},
+			), lower: true,
+		},
+		{
+			name: "release counts a non-null reference down and exits on the last",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{1}},
+			rows: slices.Concat(
+				[]asm.Instruction{target.LSRI(target.X16, x(1), 49)},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, 1),
+					target.SBFX(target.X17, x(1), 0, 32),
+					target.CBZLabel(target.X17, 1),
+				},
+				counter,
+				[]asm.Instruction{
+					target.CMPI(target.X17, 1),
+					target.BCondLabel(target.OpBLE, exit),
+					target.SUBI(target.X17, target.X17, 1),
+					target.STR(target.X17, target.X16, 0),
+				},
+			), lower: true,
 		},
 		{
 			name: "load f32 reads the low word",
@@ -339,7 +388,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: append(boxed(types.KindI64, append(target.LDI(target.X16, 1<<48),
 				target.ADD(target.X17, x(1), target.X16),
 				target.LSRI(target.X17, target.X17, 49),
-				target.CBNZLabel(target.X17, fail),
+				target.CBNZLabel(target.X17, exit),
 				target.ANDI(target.X16, x(1), types.VMask),
 			)...), target.STR(target.X16, target.X25, 8)), lower: true,
 		},
@@ -438,13 +487,53 @@ func TestMachine_Budget(t *testing.T) {
 	m, a := arm64.New(), asm.New(target.New())
 	m.Prologue(a, 0, 0)
 	start := len(a.Rows())
-	m.Budget(a)
+	m.Budget(a, exit)
 	require.Equal(t, []asm.Instruction{
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
 		target.SUBSI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
-		target.BCondLabel(target.OpBLE, fail),
+		target.BCondLabel(target.OpBLE, exit),
 	}, a.Rows()[start:])
+}
+
+func TestMachine_Exit(t *testing.T) {
+	uses := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
+	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
+		return slices.Concat(
+			[]asm.Instruction{target.USE(uses[0]), target.USE(uses[1])},
+			target.LDI(target.X16, id),
+			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
+			target.LDI(target.X16, uint64(trap)),
+			[]asm.Instruction{
+				target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
+				target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
+				target.BLR(target.X16),
+			},
+		)
+	}
+
+	t.Run("suspends a resumable exit", func(t *testing.T) {
+		a := asm.New(target.New())
+		arm64.New().Exit(a, 3, jit.ExitBridge, uses)
+		require.Equal(t, rows(3, jit.TrapBridge), a.Rows())
+	})
+
+	t.Run("never returns from a deopt", func(t *testing.T) {
+		a := asm.New(target.New())
+		arm64.New().Exit(a, 4, jit.ExitDeopt, uses)
+		require.Equal(t, append(rows(4, jit.TrapDeopt), target.BRK(0)), a.Rows())
+	})
+}
+
+func TestMachine_Results(t *testing.T) {
+	a := asm.New(target.New())
+	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
+	d := asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)
+	arm64.New().Results(a, []asm.VReg{w, d})
+	require.Equal(t, []asm.Instruction{
+		target.LDR(w, target.Ctx, int16(jit.OffsetResults)),
+		target.LDR(d, target.Ctx, int16(jit.OffsetResults)+8),
+	}, a.Rows())
 }
 
 func TestMachine_Move(t *testing.T) {

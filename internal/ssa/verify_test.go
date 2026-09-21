@@ -32,6 +32,26 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
+	t.Run("accepts a return resuming into an interpreter state", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		value := b.Value(ssa.TypeI64)
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1), Results: []ssa.Value{value}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: value}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: state})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
+	t.Run("rejects a return resuming into a value that is no state", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		value := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1), Results: []ssa.Value{value}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: value})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
+	})
+
 	t.Run("rejects a function with no entry block", func(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(ssa.New("f").Build()), ssa.ErrForm)
 	})

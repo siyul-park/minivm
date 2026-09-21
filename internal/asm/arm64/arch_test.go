@@ -18,6 +18,7 @@ func TestFrame_Flow(t *testing.T) {
 	}{
 		{"ADD", arm64.ADD(arm64.X0, arm64.X1, arm64.X2), asm.FlowNext},
 		{"STR", arm64.STR(arm64.X0, arm64.X1, 0), asm.FlowNext},
+		{"USE", arm64.USE(arm64.X0), asm.FlowNext},
 		{"B label", arm64.BLabel(0), asm.FlowJump},
 		{"B", arm64.B(8), asm.FlowJump},
 		{"BR", arm64.BR(arm64.X0), asm.FlowEnd},
@@ -59,6 +60,7 @@ func TestFrame_Writes(t *testing.T) {
 		{"CBZ", arm64.CBZLabel(arm64.X0, 0), [4]bool{}},
 		{"BLR", arm64.BLR(arm64.X0), [4]bool{}},
 		{"FMOV", arm64.FMOV(arm64.D0, arm64.X0), [4]bool{true, false, false, false}},
+		{"USE", arm64.USE(arm64.X0), [4]bool{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

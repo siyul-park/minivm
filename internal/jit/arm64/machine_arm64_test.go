@@ -23,25 +23,167 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(7)}
-		ctx := run(t, arm64.New(), translate(t, fn), 2, 0, stack)
+		code, _ := lower(t, arm64.New(), translate(t, fn), 2, 0)
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(43), stack[0])
 		require.Zero(t, ctx.Depth)
 	})
 
-	t.Run("runs a translated loop through its budget", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
-			loop, done := b.Label(), b.Label()
-			b.Bind(loop)
-			b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
-			b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-			b.Br(loop)
-			b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
-		})
+	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
 		stack := []types.Boxed{types.BoxI32(10), types.BoxI32(99), types.BoxI32(99)}
-		ctx := run(t, arm64.New(), translate(t, fn), 1, 2, stack)
+		code, exits := lower(t, arm64.New(), translate(t, sum(t)), 1, 2)
+		ctx := enter(t, stack)
+		ctx.Budget = 3
+
+		safepoints := 0
+		for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+			require.Equal(t, jit.TrapBridge, trap)
+			require.Equal(t, jit.ExitSafepoint, exits[ctx.Exit()].Kind)
+			safepoints++
+			ctx.Budget = 3
+		}
 		require.Equal(t, types.BoxI32(45), stack[0])
-		require.Equal(t, int64(1000-11), ctx.Budget)
+		require.Equal(t, 3, safepoints)
+		require.Zero(t, ctx.Depth)
+	})
+
+	t.Run("deopts a division by zero with the operands of its instruction", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
+		})
+		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(0)}
+		code, exits := lower(t, arm64.New(), translate(t, fn), 2, 0)
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitDeopt, exit.Kind)
+		require.Equal(t, 2*instr.New(instr.LOCAL_GET, 0).Width(), exit.Frames[0].IP)
+		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frames[0]))
+	})
+
+	t.Run("deopts storing an i64 outside the inline range", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		one := b.Value(ssa.TypeI64)
+		shift := b.Value(ssa.TypeI64)
+		wide := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1), Results: []ssa.Value{one}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(50), Results: []ssa.Value{shift}})
+		at := state(b, entry, ssa.Operand{Value: one}, ssa.Operand{Value: shift})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_SHL, Args: []ssa.Value{one, shift}, State: at, Results: []ssa.Value{wide}})
+		store := state(b, entry, ssa.Operand{Value: wide})
+		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{wide}, State: store})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		stack := []types.Boxed{0}
+		code, exits := lower(t, arm64.New(), b.Build(), 0, 1)
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitDeopt, exit.Kind)
+		require.Equal(t, types.KindI64, exit.Frames[0].Stack[0].Kind)
+		require.Equal(t, []uint64{1 << 50}, operands(ctx, exit.Frames[0]))
+		require.Zero(t, stack[0])
+	})
+
+	t.Run("deopts returning an i64 outside the inline range", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		one := b.Value(ssa.TypeI64)
+		shift := b.Value(ssa.TypeI64)
+		wide := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1), Results: []ssa.Value{one}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(50), Results: []ssa.Value{shift}})
+		at := state(b, entry, ssa.Operand{Value: one}, ssa.Operand{Value: shift})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_SHL, Args: []ssa.Value{one, shift}, State: at, Results: []ssa.Value{wide}})
+		ret := state(b, entry, ssa.Operand{Value: wide})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{wide}, State: ret})
+
+		stack := []types.Boxed{0}
+		code, exits := lower(t, arm64.New(), b.Build(), 0, 1)
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		require.Equal(t, []uint64{1 << 50}, operands(ctx, exits[ctx.Exit()].Frames[0]))
+	})
+
+	t.Run("unboxes an inline i64 slot and deopts on a promoted one", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeI64}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
+		})
+		fn.Typ.Returns = []types.Type{types.TypeI64}
+		code, exits := lower(t, arm64.New(), translate(t, fn), 1, 0)
+
+		inline := []types.Boxed{types.BoxI64(-42)}
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, inline)))
+		require.Equal(t, types.BoxI64(-41), inline[0])
+
+		promoted := []types.Boxed{types.BoxRef(3)}
+		ctx := enter(t, promoted)
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		require.Zero(t, exits[ctx.Exit()].Frames[0].IP)
+	})
+
+	t.Run("bridges an operation it does not lower", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		table := b.Value(ssa.TypeRef)
+		key := b.Value(ssa.TypeI32)
+		got := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(5), Results: []ssa.Value{table}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{key}})
+		at := state(b, entry, ssa.Operand{Value: table}, ssa.Operand{Value: key})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{table, key}, State: at, Results: []ssa.Value{got}})
+		after := state(b, entry, ssa.Operand{Value: got})
+		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{got}, State: after})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		stack := []types.Boxed{0}
+		code, exits := lower(t, arm64.New(), b.Build(), 0, 1)
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitBridge, exit.Kind)
+		require.Equal(t, instr.MAP_GET, exit.Code)
+		require.Equal(t, []types.Kind{types.KindRef}, exit.Results)
+		require.Equal(t, []uint64{uint64(types.BoxRef(5)), 2}, operands(ctx, exit.Frames[0]))
+
+		ctx.Results[0] = uint64(types.BoxRef(9))
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
+		require.Equal(t, types.BoxRef(9), stack[0])
+	})
+
+	t.Run("counts references through the Context and exits on the last release", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		ref := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{ref}})
+		at := state(b, entry)
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{ref}})
+		for range 3 {
+			b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{ref}, State: at})
+		}
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		rc := []int{0, 0, 2}
+		stack := []types.Boxed{types.BoxRef(2)}
+		code, exits := lower(t, arm64.New(), b.Build(), 1, 0)
+		ctx := enter(t, stack)
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitRelease, exit.Kind)
+		require.Equal(t, uint64(types.BoxRef(2)), read(ctx, exit.Release))
+		require.Equal(t, []int{0, 0, 1}, rc)
+
+		rc[2] = 0
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
 	})
 
 	t.Run("returns every kind boxed", func(t *testing.T) {
@@ -54,26 +196,13 @@ func TestNew(t *testing.T) {
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c, Results: []ssa.Value{v}})
 			args = append(args, v)
 		}
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: args})
+		at := state(b, entry)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: args, State: at})
 
 		stack := make([]types.Boxed, len(consts))
-		run(t, arm64.New(), b.Build(), 0, len(consts), stack)
+		code, _ := lower(t, arm64.New(), b.Build(), 0, len(consts))
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, consts, stack)
-	})
-
-	t.Run("copies a reference between locals", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		ref := b.Value(ssa.TypeRef)
-		state := b.Value(ssa.TypeState)
-		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{ref}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Args: []ssa.Value{ref}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
-
-		stack := []types.Boxed{types.BoxRef(7), 0}
-		run(t, arm64.New(), b.Build(), 1, 1, stack)
-		require.Equal(t, types.BoxRef(7), stack[1])
 	})
 
 	t.Run("lowers each function afresh on one machine", func(t *testing.T) {
@@ -87,12 +216,25 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 			b.Bind(other).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
 		})
-		_, err := compile.Lower(translate(t, first), m, 2, 0)
-		require.NoError(t, err)
+		lower(t, m, translate(t, first), 2, 0)
 
 		stack := []types.Boxed{types.BoxI32(0)}
-		run(t, m, translate(t, second), 1, 0, stack)
+		code, _ := lower(t, m, translate(t, second), 1, 0)
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, types.BoxI32(1), stack[0])
+	})
+}
+
+// sum is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
+func sum(t *testing.T) *types.Function {
+	return function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
 	})
 }
 
@@ -116,21 +258,47 @@ func translate(t *testing.T, fn *types.Function) *ssa.Function {
 	return f
 }
 
-// run lowers f with m and enters it with its frame at stack[0].
-func run(t *testing.T, m compile.Machine, f *ssa.Function, params, locals int, stack []types.Boxed) *jit.Context {
+func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
+	v := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1, Stack: stack}}, Results: []ssa.Value{v}})
+	return v
+}
+
+// lower builds f with m and publishes it.
+func lower(t *testing.T, m compile.Machine, f *ssa.Function, params, locals int) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, err := compile.Lower(f, m, params, locals)
+	code, exits, err := compile.Lower(f, m, params, locals)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 	address, err := asm.Link(buffer, code)
 	require.NoError(t, err)
+	return address, exits
+}
 
+// enter is a context whose next activation has its frame at stack[0].
+func enter(t *testing.T, stack []types.Boxed) *jit.Context {
+	t.Helper()
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
 	ctx.FB = uintptr(unsafe.Pointer(&stack[0]))
 	ctx.Budget = 1000
-	require.Equal(t, jit.TrapReturn, jit.Enter(address, ctx))
 	return ctx
+}
+
+// read is the raw native value v names in the suspended activation.
+func read(ctx *jit.Context, v jit.Value) uint64 {
+	if v.Loc.Spilled {
+		return ctx.Slot(v.Loc.Slot)
+	}
+	return ctx.Reg(v.Loc.Reg)
+}
+
+func operands(ctx *jit.Context, f jit.Frame) []uint64 {
+	var out []uint64
+	for _, o := range f.Stack {
+		out = append(out, read(ctx, o.Value))
+	}
+	return out
 }

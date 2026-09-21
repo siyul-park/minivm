@@ -156,6 +156,12 @@ func TestEncoder_Encode(t *testing.T) {
 		require.Equal(t, []byte{0x83, 0x78, 0x25, 0xF8}, got)
 	})
 
+	t.Run("USE encodes nothing", func(t *testing.T) {
+		got, err := encoder.Encode(arm64.USE(arm64.X3))
+		require.NoError(t, err)
+		require.Empty(t, got)
+	})
+
 	invalid := []struct {
 		name string
 		inst asm.Instruction

@@ -277,14 +277,11 @@ func terminator(function *Function, sites []position, t Terminator) error {
 		if args != 1 || edges == 0 {
 			return counted(t.Op.String(), args, edges)
 		}
-	case OpReturn:
+	case OpReturn, OpComplete:
 		if edges != 0 {
 			return counted(t.Op.String(), args, edges)
 		}
-	case OpComplete:
-		if edges != 0 {
-			return counted(t.Op.String(), args, edges)
-		}
+		deopts = t.State != NoValue
 	case OpExit, OpSuspend:
 		if args != 0 || edges != 0 {
 			return counted(t.Op.String(), args, edges)

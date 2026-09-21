@@ -46,7 +46,7 @@ Instruction-cache maintenance for published code is user-mode ARM64 (`DC CVAU`/`
 
 ## Lowering
 
-`transform.Translate` translates a whole function from one entry — ip 0 or a loop header — and gives every `OpExec` the interpreter state at its own instruction, so which operations a backend lowers and which it bridges is the backend's decision alone.
+`transform.Translate` translates a whole function from one entry — ip 0 or a loop header — and gives every `OpExec`, return, and completion the interpreter state at its own instruction, so which operations a backend lowers and which it bridges is the backend's decision alone.
 
 ```text
 bytecode → transform.Translate → internal/ssa → SSA passes → compile.Lower → asm.Assembler.Build → native code
@@ -59,7 +59,18 @@ ARM64 activation ABI (`internal/jit/arm64`):
 - X25 is the frame base, the address of the activation's VM slot 0, loaded from `Context.FB` by the prologue; parameters and locals are `[X25, #8i]`. X16 and X17 are scratch inside one row sequence; all three are reserved from allocation (`Assembler.Reserve`).
 - The prologue pushes `Records[Depth] = {FB}`, increments `Depth`, and clears the locals after the parameters (the callee clears its own locals). Every return branches to one epilogue that decrements `Depth` and pops the frame.
 - `OpReturn` stores its results boxed from slot 0, where the interpreter's `RETURN` leaves them; `OpComplete` stores its operands past the locals.
-- A failed check (division by zero, an `i64` outside the inline range at a store, a spent budget) branches to `BRK` until exits exist.
+- An exit writes its id and trap to the `Context` and calls the exit stub (`X16` scratch). `ExitDeopt` never returns (a `BRK` follows); every other exit returns when the interpreter resumes it.
+
+Exits (`jit.Exit`, one map per exit id, returned by `compile.Lower`):
+
+| Kind | Taken at | The interpreter | Native code then |
+|---|---|---|---|
+| `ExitDeopt` | a failed check — division by zero, an `i64` outside the inline range at a store or return, an `i64` slot word that is no inline integer — or an `OpExit` | rebuilds `Frames` and continues threaded | never resumes |
+| `ExitBridge` | an `OpExec` the machine does not lower | performs `Code` at the innermost frame, retaining the popped operands it does not `Adopts`, and writes its results to `Context.Results` raw by `Results` kind | loads the results and continues |
+| `ExitSafepoint` | a loop header, when `Budget` is spent | runs its safepoint and refills `Budget` | continues into the header |
+| `ExitRelease` | an `OpRelease` of a last reference | releases `Release` | continues |
+
+Every value a map names is live up to its exit (an `asm/arm64` `USE` row) and has one `asm.Loc` for its life: a register the saved register file holds (`State.Reg`) or a spill slot (`State.Slot`). `Frames` read from the operation's `OpState`; a return or completion carries the state of its own instruction, so a wide `i64` result deopts there and the interpreter promotes it. An `i64` slot load is the slot word, unboxed only by its `OpGuardKind`; a word used any other way is `ErrUnsupported`, as are the shape, bounds, and value guards and `OpSuspend`.
 
 The rebuild MUST preserve threaded behavior as the semantic baseline. Native execution MUST resume through explicit runtime state rather than duplicate interpreter ownership.
 

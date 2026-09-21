@@ -1,6 +1,9 @@
 package ssa
 
-import "github.com/siyul-park/minivm/types"
+import (
+	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/types"
+)
 
 // Value identifies one SSA definition.
 type Value int32
@@ -41,6 +44,28 @@ func TypeOf(kind types.Kind) Type {
 		return TypeRef
 	default:
 		return 0
+	}
+}
+
+// Kind returns the guest kind t represents, KindAny for none.
+func (t Type) Kind() types.Kind {
+	switch t {
+	case TypeI1:
+		return types.KindI1
+	case TypeI8:
+		return types.KindI8
+	case TypeI32:
+		return types.KindI32
+	case TypeI64:
+		return types.KindI64
+	case TypeF32:
+		return types.KindF32
+	case TypeF64:
+		return types.KindF64
+	case TypeRef:
+		return types.KindRef
+	default:
+		return instr.KindAny
 	}
 }
 

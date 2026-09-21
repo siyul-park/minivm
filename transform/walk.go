@@ -125,7 +125,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 			if len(w.stack) < w.activation.returns() {
 				return ssa.Terminator{}, false
 			}
-			return w.leave(), true
+			return w.leave(ip), true
 		case instr.RETURN_CALL:
 			return w.tail(ip)
 		case instr.YIELD, instr.RESUME:
@@ -140,9 +140,9 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 		return ssa.Terminator{Op: ssa.OpJump}, true
 	}
 	if w.activation.address == 0 {
-		return w.complete(), true
+		return w.complete(s.end), true
 	}
-	return w.leave(), true
+	return w.leave(s.end), true
 }
 
 func (w *walker) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
@@ -555,14 +555,12 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 		out[i] = w.builder.Value(t)
 	}
 
-	adopted := 0
+	adopted := Adopts(opcode, pops)
 	switch {
 	case opcode.Writes(instr.Frame):
 		w.adopt()
-		adopted = pops
-	case opcode.Reads(instr.Heap) && opcode.Writes(instr.Heap):
+	case adopted > 0:
 		w.own(len(w.stack) - 1)
-		adopted = 1
 	}
 	args := make([]ssa.Value, named)
 	for i := range args {
@@ -583,26 +581,25 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	return true
 }
 
-func (w *walker) complete() ssa.Terminator {
+func (w *walker) complete(ip int) ssa.Terminator {
+	w.begin(ip)
 	w.adopt()
 	args := make([]ssa.Value, len(w.stack))
 	for i, o := range w.stack {
 		args[i] = o.value
 	}
-	return ssa.Terminator{Op: ssa.OpComplete, Args: args}
+	return ssa.Terminator{Op: ssa.OpComplete, Args: args, State: w.deopt()}
 }
 
-func (w *walker) leave() ssa.Terminator {
-	n := w.activation.returns()
-	if n > len(w.stack) {
-		n = len(w.stack)
-	}
+func (w *walker) leave(ip int) ssa.Terminator {
+	w.begin(ip)
+	n := min(w.activation.returns(), len(w.stack))
 	args := make([]ssa.Value, 0, n)
 	for i := len(w.stack) - n; i < len(w.stack); i++ {
 		w.own(i)
 		args = append(args, w.stack[i].value)
 	}
-	return ssa.Terminator{Op: ssa.OpReturn, Args: args}
+	return ssa.Terminator{Op: ssa.OpReturn, Args: args, State: w.deopt()}
 }
 
 func (w *walker) tail(ip int) (ssa.Terminator, bool) {
