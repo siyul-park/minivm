@@ -5,6 +5,8 @@ import (
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/stretchr/testify/require"
+
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 )
 
 func TestNewState(t *testing.T) {
@@ -31,6 +33,29 @@ func TestState_Reg(t *testing.T) {
 
 	require.Equal(t, uint64(42), s.Reg(intReg))
 	require.Equal(t, uint64(84), s.Reg(floatReg))
+}
+
+func TestState_Slot(t *testing.T) {
+	s, err := asm.NewState(4096)
+	require.NoError(t, err)
+	a := asm.New(arm64.New())
+	a.Emit(
+		arm64.MOVI(arm64.X0, 42),
+		arm64.STR(arm64.X0, arm64.SP, 0),
+		arm64.LDR(arm64.X16, arm64.Ctx, int16(asm.OffsetStub)),
+		arm64.BLR(arm64.X16),
+	)
+	code, err := a.Build()
+	require.NoError(t, err)
+	buffer, err := asm.NewBuffer(len(code))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
+	address, err := asm.Link(buffer, code)
+	require.NoError(t, err)
+	s.SetReg(arm64.X0, 42)
+
+	require.True(t, asm.Enter(address, &s))
+	require.Equal(t, uint64(42), s.Slot(0))
 }
 
 func TestState_SetReg(t *testing.T) {

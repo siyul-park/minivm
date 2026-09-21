@@ -20,11 +20,12 @@ type Label int
 // Each Assembler builds exactly one machine-code block. Reuse is not
 // supported — discard after Build returns.
 type Assembler struct {
-	arch    Arch
-	insts   []Instruction
-	labels  map[Label]int
-	nextLbl Label
-	locs    map[VReg]Loc
+	arch     Arch
+	reserved map[PReg]bool
+	insts    []Instruction
+	labels   map[Label]int
+	nextLbl  Label
+	locs     map[VReg]Loc
 }
 
 var (
@@ -36,8 +37,9 @@ var (
 // New constructs an Assembler targeting the given architecture.
 func New(arch Arch) *Assembler {
 	return &Assembler{
-		arch:   arch,
-		labels: make(map[Label]int),
+		arch:     arch,
+		reserved: make(map[PReg]bool),
+		labels:   make(map[Label]int),
 	}
 }
 
@@ -58,6 +60,18 @@ func (a *Assembler) Emit(insts ...Instruction) {
 	a.insts = append(a.insts, insts...)
 }
 
+// Rows returns the instruction rows before allocation and encoding.
+func (a *Assembler) Rows() []Instruction {
+	return slices.Clone(a.insts)
+}
+
+// Reserve removes registers from the allocator's usable banks.
+func (a *Assembler) Reserve(regs ...PReg) {
+	for _, reg := range regs {
+		a.reserved[reg] = true
+	}
+}
+
 // Build finalizes the instruction list into machine code. When the
 // architecture is a Frame, every virtual register is allocated first and
 // every Slots operand becomes the spill area's size; otherwise a virtual
@@ -68,7 +82,7 @@ func (a *Assembler) Build() ([]byte, error) {
 	}
 	insts, labels, slots := slices.Clone(a.insts), maps.Clone(a.labels), 0
 	if frame, ok := a.arch.(Frame); ok && virtual(insts) {
-		alloc := newAllocator(frame, insts, labels)
+		alloc := newAllocator(frame, insts, labels, a.reserved)
 		var err error
 		if insts, labels, err = alloc.allocate(); err != nil {
 			return nil, err

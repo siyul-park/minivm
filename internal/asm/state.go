@@ -22,7 +22,7 @@ type State struct {
 
 	sp, fp, lr uintptr
 	pc         uintptr
-	nsp        uintptr
+	nsp        unsafe.Pointer
 	exited     uint64
 	regs       [32]uint64
 	fregs      [32]uint64
@@ -40,9 +40,14 @@ func NewState(size int) (State, error) {
 	if size <= 0 {
 		return State{}, fmt.Errorf("%w: stack size %d", ErrInvalidArgs, size)
 	}
-	stack := make([]uint64, size/8+2)
-	top := uintptr(unsafe.Pointer(&stack[0])) + uintptr(len(stack))*8
-	return State{stub: exitPC(), nsp: top &^ 15, stack: stack}, nil
+	stack := make([]uint64, size/8+4)
+	base := unsafe.Pointer(&stack[0])
+	index := len(stack) - 1
+	if (uintptr(base)+uintptr(index*8))&15 != 0 {
+		index--
+	}
+	top := unsafe.Add(base, index*8)
+	return State{stub: exitPC(), nsp: top, stack: stack}, nil
 }
 
 // Reg reports the saved value of r. r must be saved by the exit protocol.
@@ -54,6 +59,14 @@ func (s *State) Reg(r PReg) uint64 {
 // exit protocol.
 func (s *State) SetReg(r PReg, v uint64) {
 	*s.slot(r) = v
+}
+
+// Slot reads spill slot n of the suspended native activation.
+func (s *State) Slot(n int) uint64 {
+	if n < 0 {
+		panic("asm: invalid spill slot")
+	}
+	return *(*uint64)(unsafe.Add(s.nsp, n*8))
 }
 
 func (s *State) slot(r PReg) *uint64 {

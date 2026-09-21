@@ -50,7 +50,7 @@ type interval struct {
 	call       bool
 }
 
-func newAllocator(frame Frame, insts []Instruction, labels map[Label]int) *allocator {
+func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserved map[PReg]bool) *allocator {
 	a := &allocator{
 		frame:  frame,
 		insts:  insts,
@@ -60,7 +60,8 @@ func newAllocator(frame Frame, insts []Instruction, labels map[Label]int) *alloc
 		tiny:   map[VReg]bool{},
 	}
 	for _, typ := range []RegType{RegTypeInt, RegTypeFloat} {
-		a.registers[typ] = frame.Registers(typ)
+		registers := slices.Clone(frame.Registers(typ))
+		a.registers[typ] = slices.DeleteFunc(registers, func(r PReg) bool { return reserved[r] })
 		for _, r := range a.registers[typ] {
 			a.usable[physical(r)] = true
 		}

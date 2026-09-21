@@ -2,6 +2,7 @@ package jit_test
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/jit"
@@ -19,6 +20,36 @@ func TestNewContext(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, ctx.Exit())
 	})
+}
+
+func TestContext_Layout(t *testing.T) {
+	tests := []struct {
+		name string
+		off  uintptr
+		want uintptr
+	}{
+		{"state", unsafe.Offsetof(jit.Context{}.State), 0},
+		{"stack", jit.OffsetStack, unsafe.Offsetof(jit.Context{}.Stack)},
+		{"globals", jit.OffsetGlobals, unsafe.Offsetof(jit.Context{}.Globals)},
+		{"rc", jit.OffsetRC, unsafe.Offsetof(jit.Context{}.RC)},
+		{"natives", jit.OffsetNatives, unsafe.Offsetof(jit.Context{}.Natives)},
+		{"fb", jit.OffsetFB, unsafe.Offsetof(jit.Context{}.FB)},
+		{"depth", jit.OffsetDepth, unsafe.Offsetof(jit.Context{}.Depth)},
+		{"limit", jit.OffsetLimit, unsafe.Offsetof(jit.Context{}.Limit)},
+		{"budget", jit.OffsetBudget, unsafe.Offsetof(jit.Context{}.Budget)},
+		{"results", jit.OffsetResults, unsafe.Offsetof(jit.Context{}.Results)},
+		{"records", jit.OffsetRecords, unsafe.Offsetof(jit.Context{}.Records)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.off)
+		})
+	}
+	require.Equal(t, uintptr(32), unsafe.Sizeof(jit.Record{}))
+	require.Equal(t, uintptr(0), jit.RecordFB)
+	require.Equal(t, uintptr(8), jit.RecordSP)
+	require.Equal(t, uintptr(16), jit.RecordPC)
+	require.Equal(t, uintptr(24), jit.RecordExit)
 }
 
 func TestTrap_String(t *testing.T) {

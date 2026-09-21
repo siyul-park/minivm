@@ -68,6 +68,7 @@ const (
 
 	// Move
 	OpMOV
+	OpMOVW
 	OpMOVI
 	OpMOVZ
 	OpMOVK
@@ -151,6 +152,7 @@ const (
 	OpCSNEG
 	OpCSET
 	OpCSETM
+	OpFCSEL
 
 	// Branch (unconditional / register)
 	OpB
@@ -329,6 +331,8 @@ func UXTW(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTW, dst, src) }
 // ---------------------------------------------------------------------------
 
 func MOV(dst, src asm.Reg) asm.Instruction { return newReg2(OpMOV, dst, src) }
+
+func MOVW(dst, src asm.Reg) asm.Instruction { return newReg2(OpMOVW, dst, src) }
 
 // MOVI dst, #imm — move 64-bit immediate (pseudo, expanded by assembler)
 func MOVI(dst asm.Reg, val int64) asm.Instruction {
@@ -553,6 +557,11 @@ func CSET(dst asm.Reg, cond uint8) asm.Instruction {
 // CSETM Xd, cond  — Xd = cond ? -1 : 0
 func CSETM(dst asm.Reg, cond uint8) asm.Instruction {
 	return newInst(OpCSETM, regOperand(dst), imm(int64(cond)))
+}
+
+// FCSEL selects between floating-point registers using the condition flags.
+func FCSEL(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
+	return newInst(OpFCSEL, regOperand(dst), regOperand(trueReg), imm(int64(cond)), regOperand(falseReg))
 }
 
 // ---------------------------------------------------------------------------

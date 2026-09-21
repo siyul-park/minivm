@@ -41,6 +41,38 @@ func encode(t *testing.T, insts ...asm.Instruction) []byte {
 	return code
 }
 
+func TestAssembler_Rows(t *testing.T) {
+	a := asm.New(arm64.New())
+	want := []asm.Instruction{arm64.MOVI(arm64.X0, 1), arm64.MOVI(arm64.X1, 2), arm64.ADD(arm64.X2, arm64.X0, arm64.X1)}
+	a.Emit(want...)
+	require.Equal(t, want, a.Rows())
+	_, err := a.Build()
+	require.NoError(t, err)
+	require.Equal(t, want, a.Rows())
+}
+
+func TestAssembler_Reserve(t *testing.T) {
+	type pair struct {
+		asm.Arch
+		asm.Frame
+	}
+	frame := pair{Arch: arm64.New(), Frame: arm64.New()}
+	a := asm.New(frame)
+	a.Emit(
+		arm64.MOVI(vint(0), 1),
+		arm64.MOVI(vint(1), 2),
+		arm64.ADD(vint(2), vint(0), vint(1)),
+		arm64.STR(vint(2), arm64.Ctx, 0),
+	)
+	a.Reserve(arm64.X0)
+
+	_, err := a.Build()
+	require.NoError(t, err)
+	loc, ok := a.Loc(vint(0))
+	require.True(t, ok)
+	require.NotEqual(t, arm64.X0, loc.Reg)
+}
+
 func TestAssembler_Loc(t *testing.T) {
 	a := asm.New(arm64.New())
 	a.Emit(

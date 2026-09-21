@@ -479,6 +479,16 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Move
 	// -----------------------------------------------------------------------
 
+	case OpMOVW: // MOV Wd, Xn: take the low 32 bits
+		d, n, err := e.decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+		if d.Type() != asm.RegTypeInt || d.Width() != asm.Width32 || n.Type() != asm.RegTypeInt || n.Width() != asm.Width64 {
+			return nil, asm.ErrInvalidOperand
+		}
+		return enc(0x2A0003E0 | reg(n)<<16 | reg(d)), nil
+
 	case OpMOV: // MOV Xd, Xn  →  ORR Xd, XZR, Xn
 		d, n, err := e.decodeReg2(inst)
 		if err != nil {
@@ -758,6 +768,21 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		base, err := intBase(selectOpcodes[op], d, n, m)
 		if err != nil {
 			return nil, err
+		}
+		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
+
+	case OpFCSEL:
+		d, n, m, cond, err := e.decodeSelect(inst)
+		if err != nil {
+			return nil, err
+		}
+		if d.Type() != asm.RegTypeFloat || n.Type() != asm.RegTypeFloat || m.Type() != asm.RegTypeFloat ||
+			d.Width() != n.Width() || d.Width() != m.Width() {
+			return nil, asm.ErrInvalidOperand
+		}
+		base := uint32(0x1E600C00)
+		if d.Width() == asm.Width32 {
+			base = 0x1E200C00
 		}
 		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
 

@@ -9,6 +9,14 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
+// Record identifies one suspended native activation.
+type Record struct {
+	FB   uintptr
+	SP   uintptr
+	PC   uintptr
+	Exit uint64
+}
+
 // Context is the state one native execution and the interpreter share. Its
 // machine half is the asm.State native code is entered with; the rest is
 // what native code writes before it exits, addressed off the same pinned
@@ -17,6 +25,19 @@ type Context struct {
 	asm.State
 	trap Trap
 	exit uint64
+
+	// Bases are written by the interpreter before every Enter and Resume.
+	Stack   uintptr
+	Globals uintptr
+	RC      uintptr
+	Natives uintptr
+	FB      uintptr
+
+	Depth   uint64
+	Limit   uint64
+	Budget  int64
+	Results [2]uint64
+	Records [256]Record
 }
 
 // Trap is how native code last left.
@@ -36,8 +57,23 @@ const (
 
 // Offsets of the Context fields native code writes before an exit.
 const (
-	OffsetTrap = unsafe.Offsetof(Context{}.trap)
-	OffsetExit = unsafe.Offsetof(Context{}.exit)
+	OffsetTrap    = unsafe.Offsetof(Context{}.trap)
+	OffsetExit    = unsafe.Offsetof(Context{}.exit)
+	OffsetStack   = unsafe.Offsetof(Context{}.Stack)
+	OffsetGlobals = unsafe.Offsetof(Context{}.Globals)
+	OffsetRC      = unsafe.Offsetof(Context{}.RC)
+	OffsetNatives = unsafe.Offsetof(Context{}.Natives)
+	OffsetFB      = unsafe.Offsetof(Context{}.FB)
+	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)
+	OffsetLimit   = unsafe.Offsetof(Context{}.Limit)
+	OffsetBudget  = unsafe.Offsetof(Context{}.Budget)
+	OffsetResults = unsafe.Offsetof(Context{}.Results)
+	OffsetRecords = unsafe.Offsetof(Context{}.Records)
+
+	RecordFB   = unsafe.Offsetof(Record{}.FB)
+	RecordSP   = unsafe.Offsetof(Record{}.SP)
+	RecordPC   = unsafe.Offsetof(Record{}.PC)
+	RecordExit = unsafe.Offsetof(Record{}.Exit)
 )
 
 // The pinned register names the Context and, through asm.OffsetStub, its
