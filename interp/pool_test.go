@@ -3,12 +3,14 @@ package interp_test
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	interp "github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -79,6 +81,50 @@ func TestPool_Get(t *testing.T) {
 
 		_, err := p.Get(context.Background())
 		require.ErrorIs(t, err, interp.ErrPoolClosed)
+	})
+
+	t.Run("shares one native JIT runtime across pooled interpreters, compiling once", func(t *testing.T) {
+		native(t)
+		prog := fibCallsProgram(t, 300)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer p.Close()
+
+			var wg sync.WaitGroup
+			errs := make(chan error, 2)
+			for range 2 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					vm, err := p.Get(context.Background())
+					if err != nil {
+						errs <- err
+						return
+					}
+					if err := vm.Run(context.Background()); err != nil {
+						errs <- err
+						return
+					}
+					if _, err := vm.Pop(); err != nil {
+						errs <- err
+						return
+					}
+					vm.Flush()
+					p.Put(vm)
+					errs <- nil
+				}()
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				require.NoError(t, err)
+			}
+
+			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles == 1
+		}, 5*time.Second, time.Millisecond)
 	})
 
 }

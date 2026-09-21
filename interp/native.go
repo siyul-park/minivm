@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"runtime"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/internal/jit"
@@ -14,19 +15,19 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// native holds one interpreter's JIT runtime: the shared native execution
-// context, the published code, the compile queue, and per-address tiering
-// state. It is nil on an interpreter built without WithThreshold.
+// native holds one interpreter's JIT runtime: its own native execution
+// context and per-address tiering state, plus the shared published code,
+// compile queue, and constant module a Pool may lend to every interpreter of
+// one Program. It is nil on an interpreter built without WithThreshold.
 type native struct {
-	ctx    *jit.Context
-	store  *jit.Store
-	queue  *compile.Queue
-	module transform.Module
+	ctx *jit.Context
+	*shared
 
 	threshold int
 	calls     map[int]int
-	failed    map[int]bool
-	pending   int
+	entries   map[int]int
+	deopts    map[int]int
+	failed    map[key]bool
 
 	// exact caches deoptimization's own compile of each address: i.code[addr]
 	// may be fused, and a fusion leaves no handler at the IPs it absorbs (see
@@ -44,12 +45,45 @@ type native struct {
 	compile func(fn *types.Function, exact bool) []func(*Interpreter)
 }
 
+// key is a failed compile attempt's identity: an address and the tier that
+// failed there. A Baseline failure never blocks a later Optimized attempt at
+// the same address, and vice versa.
+type key struct {
+	addr int
+	tier jit.Tier
+}
+
+// shared is the part of a native's JIT runtime a Pool may lend to every
+// interpreter of one Program: the published code, the compile queue, and the
+// constant module every compile reads (L11). Nothing here is interpreter-
+// specific; jit.Context and the tiering counters are not, and stay on native
+// itself. refs counts how many natives are using it, closing it only once
+// the last one releases — Put on a closed Pool can defer an outstanding
+// Interpreter's Close to a later call, so a Pool cannot always name the
+// native that closes last, and reference counting is the rule that is
+// correct regardless.
+type shared struct {
+	store  *jit.Store
+	queue  *compile.Queue
+	module transform.Module
+
+	refs atomic.Int64
+}
+
 // nativeStack is the size of the Go-allocated stack native code runs on.
 const nativeStack = 1 << 20
 
 // budget is Context.Budget's refill: how many loop back-edges native code
 // takes before it reaches a safepoint.
 const budget = 1 << 16
+
+// promote is how many times an address's Baseline code is entered before it
+// is submitted for an Optimized compile.
+const promote = 1000
+
+// refute is how many times an address deoptimizes before its code is
+// retired and its tiering counts reset, so it may compile again.
+const refute = 8
 
 const (
 	metricCompiles = "vm_jit_compiles_total"
@@ -89,6 +123,42 @@ func newModule(i *Interpreter) transform.Module {
 	}
 }
 
+// newShared builds a fresh, unshared JIT runtime for i's program: a Store
+// sized to i's code, a single-worker compile Queue, and i's constant module.
+func newShared(i *Interpreter) *shared {
+	r := &shared{
+		store:  jit.NewStore(len(i.code)),
+		queue:  compile.NewQueue(func() compile.Machine { return arm64.New() }, 1),
+		module: newModule(i),
+	}
+	r.refs.Store(1)
+	return r
+}
+
+// retain adds one reference to r, for a Pool sharing it with another
+// native, and returns r.
+func (r *shared) retain() *shared {
+	r.refs.Add(1)
+	return r
+}
+
+// release drops one reference to r, closing its queue — freeing every code
+// it finished but no native ever drained — and its store once none remain.
+// A native's calls into its shared runtime are synchronous, so no native
+// code is ever suspended when the last reference releases.
+func (r *shared) release() error {
+	if r.refs.Add(-1) > 0 {
+		return nil
+	}
+	var err error
+	for _, job := range r.queue.Close() {
+		if job.Code != nil {
+			err = errors.Join(err, job.Code.Free())
+		}
+	}
+	return errors.Join(err, r.store.Close())
+}
+
 func newNative(i *Interpreter, threshold int) *native {
 	ctx, err := jit.NewContext(nativeStack)
 	if err != nil {
@@ -96,28 +166,20 @@ func newNative(i *Interpreter, threshold int) *native {
 	}
 	return &native{
 		ctx:       ctx,
-		store:     jit.NewStore(len(i.code)),
-		queue:     compile.NewQueue(func() compile.Machine { return arm64.New() }, 1),
-		module:    newModule(i),
+		shared:    newShared(i),
 		threshold: threshold,
 		calls:     map[int]int{},
-		failed:    map[int]bool{},
+		entries:   map[int]int{},
+		deopts:    map[int]int{},
+		failed:    map[key]bool{},
 		exact:     map[int][]func(*Interpreter){},
 		compile:   i.compile,
 	}
 }
 
-// close closes the compile queue, freeing every code it finished but this
-// interpreter never drained, and closes the store. The interpreter's native
-// calls are synchronous, so no native code is ever suspended when close runs.
+// close releases n's reference to its shared runtime.
 func (n *native) close() error {
-	var err error
-	for _, job := range n.queue.Close() {
-		if job.Code != nil {
-			err = errors.Join(err, job.Code.Free())
-		}
-	}
-	return errors.Join(err, n.store.Close())
+	return n.shared.release()
 }
 
 // call is the CALL handler's hook for a *types.Function target at addr,
@@ -136,35 +198,66 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 		n.count(i, addr, fn)
 		return false
 	}
-	n.run(i, addr, fn, code, release, advance)
+	retire := n.run(i, addr, fn, code, release, advance)
 	n.store.Leave()
+	if retire {
+		n.store.Retire(addr)
+		n.forget(addr)
+	}
 	_ = n.store.Reclaim()
 	return true
 }
 
 // count tracks calls to addr and submits it for Baseline compilation once
-// the threshold is reached, unless it already failed to compile.
+// the threshold is reached, unless Baseline already failed there.
 func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	n.calls[addr]++
-	if n.calls[addr] < n.threshold || n.failed[addr] {
+	if n.calls[addr] < n.threshold || n.failed[key{addr, jit.Baseline}] {
 		return
 	}
-	if n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Baseline}) {
-		n.pending++
-	}
+	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Baseline})
 }
 
-// drain collects every unit this interpreter submitted and the queue has
-// finished, publishing successful code and marking a failed address so it is
-// never resubmitted.
-func (n *native) drain(i *Interpreter) {
-	if n.pending == 0 {
+// promote counts a native entry to addr's Baseline code and submits it for
+// an Optimized compile once entries reach the promote threshold, unless
+// Optimized already failed there.
+func (n *native) promote(addr int, fn *types.Function, code *jit.Code) {
+	if code.Tier != jit.Baseline {
 		return
 	}
+	n.entries[addr]++
+	if n.entries[addr] < promote || n.failed[key{addr, jit.Optimized}] {
+		return
+	}
+	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Optimized})
+}
+
+// refute counts a deoptimization of addr and reports whether it reached the
+// refute threshold, at which point call retires addr's code and resets its
+// tiering counts.
+func (n *native) refute(addr int) bool {
+	n.deopts[addr]++
+	return n.deopts[addr] >= refute
+}
+
+// forget clears addr's call, entry, and deopt counts after call retires its
+// code, so it tiers up again from a fresh Baseline compile if it is still
+// called. A permanent compile failure (failed) is not runtime behavior and
+// stays.
+func (n *native) forget(addr int) {
+	delete(n.calls, addr)
+	delete(n.entries, addr)
+	delete(n.deopts, addr)
+}
+
+// drain collects every job the queue has finished — including one a Pool's
+// other interpreter submitted, when the runtime is shared, since Publish is
+// safe and idempotent on a stale result — publishing successful code and
+// marking a failed (address, tier) so it is never resubmitted.
+func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
-		n.pending--
 		if job.Err != nil {
-			n.failed[job.Unit.Address] = true
+			n.failed[key{job.Unit.Address, job.Unit.Tier}] = true
 			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome(job.Err)})
 			continue
 		}
@@ -174,8 +267,9 @@ func (n *native) drain(i *Interpreter) {
 }
 
 // run drives code to completion for a call to fn at addr whose frame would
-// begin at bp, the same bp pushFrame would have computed.
-func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, release bool, advance int) {
+// begin at bp, the same bp pushFrame would have computed. It reports whether
+// addr deoptimized enough times for call to retire its code.
+func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, release bool, advance int) bool {
 	params := len(fn.Typ.Params)
 	returns := len(fn.Typ.Returns)
 	bp := i.sp - params
@@ -195,6 +289,8 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx.Depth = 0
 
 	n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
+	n.promote(addr, fn, code)
+
 	trap := jit.Enter(code.Entry(), ctx)
 	for {
 		if trap == jit.TrapReturn {
@@ -203,7 +299,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			}
 			i.sp = bp + returns
 			i.fr.ip += advance
-			return
+			return false
 		}
 
 		exit := n.store.Find(ctx.PC()).Exits[ctx.Exit()]
@@ -214,7 +310,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 				// Threaded code reports the cancellation at its next safepoint,
 				// as an error no guest handler can catch.
 				n.deopt(i, exit, release, advance)
-				return
+				return n.refute(addr)
 			}
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
@@ -227,7 +323,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			trap = jit.Resume(ctx)
 		default:
 			n.deopt(i, exit, release, advance)
-			return
+			return n.refute(addr)
 		}
 	}
 }

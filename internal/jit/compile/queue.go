@@ -2,6 +2,7 @@ package compile
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/jit"
 )
@@ -23,6 +24,9 @@ type Queue struct {
 	active map[int]bool
 	done   []Job
 	closed bool
+	// ready is len(done), readable without the lock so Drain on an empty
+	// queue — every interpreted call's case — takes no lock.
+	ready atomic.Int64
 
 	mu   sync.Mutex
 	cond *sync.Cond
@@ -65,10 +69,14 @@ func (q *Queue) Submit(u Unit) bool {
 // Drain returns every finished job in finish order and frees its address
 // for Submit.
 func (q *Queue) Drain() []Job {
+	if q.ready.Load() == 0 {
+		return nil
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	jobs := q.done
 	q.done = nil
+	q.ready.Store(0)
 	for _, j := range jobs {
 		delete(q.active, j.Unit.Address)
 	}
@@ -107,6 +115,7 @@ func (q *Queue) work() {
 
 		q.mu.Lock()
 		q.done = append(q.done, Job{Unit: u, Code: code, Err: err})
+		q.ready.Add(1)
 		q.mu.Unlock()
 	}
 }

@@ -324,6 +324,40 @@ func wideI64Program(t *testing.T, warm int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fn))
 }
 
+// divFailProgram warms divFunction with a nonzero divisor warm times, then
+// calls it with a zero divisor fails times in a loop whose body is one Try
+// region: every one of those native entries deoptimizes, so enough of them
+// retire the address and it tiers up again from a fresh Baseline compile.
+// Locals are [0]=warm counter, [1]=fail counter, so the Try region's entry
+// depth (params + locals + live operands, per instr.Handler) is 2.
+func divFailProgram(t *testing.T, warm, fails int) *program.Program {
+	t.Helper()
+	fn := divFunction(t)
+	b := instr.NewBuilder()
+	warmLoop, warmDone := b.Label(), b.Label()
+	b.Bind(warmLoop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(warmDone)
+	b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(warmLoop)
+	b.Bind(warmDone)
+
+	failLoop, failDone, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(failLoop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(fails)).Emit(instr.I32_GE_S).BrIf(failDone)
+	b.Bind(start).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Bind(end)
+	b.Bind(catch).Emit(instr.ERROR_CODE).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(failLoop)
+	b.Bind(failDone).Emit(instr.LOCAL_GET, 1)
+	b.Try(start, end, catch, 2)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32),
+		program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
+}
+
 func TestWithThreshold(t *testing.T) {
 	t.Run("compiles a hot recursive function and enters its native code", func(t *testing.T) {
 		native(t)
@@ -534,6 +568,55 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("a hot function tiers up to Optimized after enough native entries", func(t *testing.T) {
+		native(t)
+		prog := fibCallsProgram(t, 2000)
+		want := runProgram(t, prog)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			if result != want {
+				return false
+			}
+			vm.Flush()
+			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("a function that deoptimizes every call is retired and stops entering native code", func(t *testing.T) {
+		native(t)
+		// warm is large enough (matching sumWarmProgram/sumTryProgram) that the
+		// async Baseline compile reliably finishes during warmup, so every one
+		// of fails' native entries deoptimizes: without retirement, every one
+		// of them reaches native code and vm_jit_exits_total{kind=deopt} equals
+		// fails exactly; retirement bounds it to a handful of refute-sized
+		// cycles instead.
+		const fails = 200
+		prog := divFailProgram(t, 200_000, fails)
+		want := runProgram(t, prog)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			if result != want {
+				return false
+			}
+			vm.Flush()
+			deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return deopts > 0 && deopts < fails/2
 		}, 5*time.Second, time.Millisecond)
 	})
 

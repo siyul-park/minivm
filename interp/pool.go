@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -19,6 +20,9 @@ type Pool struct {
 
 	idle chan *Interpreter
 	live atomic.Int64
+
+	shared   *shared
+	sharedMu sync.Mutex
 
 	mu     sync.RWMutex
 	closed bool
@@ -111,6 +115,12 @@ func (p *Pool) Close() error {
 		}
 		p.live.Add(-1)
 	}
+	p.sharedMu.Lock()
+	if p.shared != nil {
+		errs = append(errs, p.shared.release())
+		p.shared = nil
+	}
+	p.sharedMu.Unlock()
 	return errors.Join(errs...)
 }
 
@@ -123,9 +133,37 @@ func (p *Pool) grow() *Interpreter {
 			return nil
 		}
 		if p.live.CompareAndSwap(live, live+1) {
-			return New(p.prog, p.opts...)
+			i := New(p.prog, p.opts...)
+			p.share(i)
+			return i
 		}
 	}
+}
+
+// share gives i's native JIT runtime to the pool: the first Interpreter's is
+// adopted, with a reference of the pool's own that Close drops, as the pool's
+// shared runtime, and a later one swaps onto it once
+// its own freshly loaded constants match — which every Interpreter built
+// from the same Program always does, so a mismatch leaves i on its own
+// runtime instead of risking a shared one that does not actually agree with
+// it. A no-op when i was built without WithThreshold.
+func (p *Pool) share(i *Interpreter) {
+	if i.native == nil {
+		return
+	}
+	p.sharedMu.Lock()
+	defer p.sharedMu.Unlock()
+
+	if p.shared == nil {
+		p.shared = i.native.shared.retain()
+		return
+	}
+	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
+		return
+	}
+	own := i.native.shared
+	i.native.shared = p.shared.retain()
+	_ = own.release()
 }
 
 func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {

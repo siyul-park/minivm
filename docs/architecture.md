@@ -59,7 +59,7 @@ Threaded execution is the semantic baseline. A hot `*types.Function`, entered at
 
 ## Runtime
 
-`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. An interpreter built with `WithThreshold` owns its own native execution context, published code, and compile queue; a `Pool`-shared store and queue across the pool's interpreters is planned.
+`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. An interpreter built with `WithThreshold` owns its native execution context and tiering counts; its published code and compile queue are its own, or its `Pool`'s when pooled (see `jit-internals.md` Runtime).
 
 Execution is single-goroutine-owned. Background compilation consumes immutable input and `MUST NOT` mutate live interpreter state.
 
