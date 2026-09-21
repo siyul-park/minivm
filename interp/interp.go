@@ -310,8 +310,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	// the boundary contract for SetGlobal and Reset.
 	i.seed()
 
-	c := i.threader()
-	i.code[0] = c.Compile(prog.Code, i.module.Slots(), i.module.Declared(), types.Kinds(i.module.Captures), i.module.Captures)
+	i.code[0] = i.compile(i.module, i.tick == 1)
 
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
@@ -1523,7 +1522,6 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 }
 
 func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
-	c := i.threader()
 	n := addr + 1
 	if addr >= len(i.instrs) {
 		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
@@ -1542,7 +1540,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	}
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
-	i.code[addr] = c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
+	i.code[addr] = i.compile(fn, i.tick == 1)
 	if dynamic {
 		i.dynamic[addr] = true
 	}
@@ -1563,17 +1561,20 @@ func (i *Interpreter) globalDecls() []types.Kind {
 	return kinds
 }
 
-// threader builds generated dispatch state.
-func (i *Interpreter) threader() *threader {
-	return &threader{
+// compile builds fn's threaded code: fused unless exact, which every
+// materialized native frame needs because a fusion leaves no handler at the
+// IPs it absorbs (interp/native.go's deopt resumes exactly there).
+func (i *Interpreter) compile(fn *types.Function, exact bool) []func(*Interpreter) {
+	c := &threader{
 		types:       i.types,
 		constants:   i.constants,
 		heap:        i.heap,
 		coros:       i.coros,
 		globals:     i.globalDecls(),
 		globalTypes: i.globalTypes,
-		exact:       i.tick == 1,
+		exact:       exact,
 	}
+	return c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after

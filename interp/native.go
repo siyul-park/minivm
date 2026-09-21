@@ -2,6 +2,7 @@ package interp
 
 import (
 	"errors"
+	"math"
 	"runtime"
 	"unsafe"
 
@@ -26,6 +27,21 @@ type native struct {
 	calls     map[int]int
 	failed    map[int]bool
 	pending   int
+
+	// exact caches deoptimization's own compile of each address: i.code[addr]
+	// may be fused, and a fusion leaves no handler at the IPs it absorbs (see
+	// threader.Compile), so a materialized frame must run code compiled
+	// exactly, which this builds once per address and keeps for every later
+	// deoptimization at it.
+	exact map[int][]func(*Interpreter)
+
+	// compile is i.compile, captured once here rather than called on i
+	// directly: threaded[] stores the CALL handler that reaches native.call,
+	// so a direct reference from deoptimization back to compile's own
+	// threader.Compile (which threaded[] indexes) would be a package
+	// initialization cycle. Going through this field instead of the method
+	// stays outside that static reference graph.
+	compile func(fn *types.Function, exact bool) []func(*Interpreter)
 }
 
 // nativeStack is the size of the Go-allocated stack native code runs on.
@@ -86,6 +102,8 @@ func newNative(i *Interpreter, threshold int) *native {
 		threshold: threshold,
 		calls:     map[int]int{},
 		failed:    map[int]bool{},
+		exact:     map[int][]func(*Interpreter){},
+		compile:   i.compile,
 	}
 }
 
@@ -179,45 +197,159 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
 	trap := jit.Enter(code.Entry(), ctx)
 	for {
-		switch trap {
-		case jit.TrapReturn:
+		if trap == jit.TrapReturn {
 			if release {
 				i.release(addr)
 			}
 			i.sp = bp + returns
 			i.fr.ip += advance
 			return
-		case jit.TrapBridge:
-			exit := n.store.Find(ctx.PC()).Exits[ctx.Exit()]
-			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
-			switch exit.Kind {
-			case jit.ExitSafepoint:
-				if cancelled(i) {
-					n.deopt(exit.Kind)
-				}
-				ctx.RC = rcBase(i.rc)
-				ctx.Budget = budget
-				trap = jit.Resume(ctx)
-			case jit.ExitRelease:
-				if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {
-					i.release(ref)
-				}
-				ctx.RC = rcBase(i.rc)
-				trap = jit.Resume(ctx)
-			default:
-				n.deopt(exit.Kind)
+		}
+
+		exit := n.store.Find(ctx.PC()).Exits[ctx.Exit()]
+		n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		switch exit.Kind {
+		case jit.ExitSafepoint:
+			if cancelled(i) {
+				// Threaded code reports the cancellation at its next safepoint,
+				// as an error no guest handler can catch.
+				n.deopt(i, exit, release, advance)
+				return
 			}
+			ctx.RC = rcBase(i.rc)
+			ctx.Budget = budget
+			trap = jit.Resume(ctx)
+		case jit.ExitRelease:
+			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {
+				i.release(ref)
+			}
+			ctx.RC = rcBase(i.rc)
+			trap = jit.Resume(ctx)
 		default:
-			n.deopt(jit.ExitDeopt)
+			n.deopt(i, exit, release, advance)
+			return
 		}
 	}
 }
 
-// deopt is S2-P6b's materializer, not yet built: it will rebuild every
-// native activation as an interpreter frame and continue threaded. Reaching
-// it now is not a bug; it names work this phase intentionally leaves undone.
-func (n *native) deopt(kind jit.Kind) {
-	panic("interp: native exit " + kind.String() + " requires deoptimization, which S2-P6b implements")
+// deopt materializes every activation ctx.Depth counts as an interpreter
+// frame, outermost first, and leaves the interpreter positioned to continue
+// threaded at the innermost one. exit is the map of whichever exit brought
+// native code here; release and advance are the call site's own, since the
+// outermost frame's ownership and the entering caller's ip advance must match
+// it exactly (a fused CONST_GET;CALL borrows its target and advances by its
+// own width, unlike a dynamic CALL).
+func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int) {
+	ctx := n.ctx
+	depth := int(ctx.Depth)
+
+	maps := make([]jit.Frame, depth)
+	maps[depth-1] = exit.Frames[0]
+	for k := depth - 2; k >= 0; k-- {
+		code := n.store.Find(ctx.Records[k+1].PC)
+		maps[k] = code.Exits[ctx.Records[k].Exit].Frames[0]
+	}
+
+	start := i.fp
+	for k := 0; k < depth; k++ {
+		n.frame(i, ctx, start, k, maps[k], k > 0 || release)
+	}
+	inner := &i.frames[start+depth-1]
+
+	if exit.Kind == jit.ExitCall {
+		callee := i.heap[exit.Callee].(*types.Function)
+		i.sp += len(callee.Typ.Params)
+		i.stack[i.sp] = types.BoxRef(exit.Callee)
+		i.sp++
+		// CALL is one byte (interp.go's handler walk relies on the same
+		// fact), so its own ip is the map's IP, recorded past it, minus one.
+		inner.ip--
+	}
+
+	i.fr.ip += advance
+	i.fp += depth
+	i.fr = inner
+
+	ctx.Depth = 0
+	ctx.Abandon()
+}
+
+// frame materializes activation k of ctx, whose exit map is m, as interpreter
+// frame base+k. Every native activation was entered by a CALL that adopted
+// its callee reference, so release is true except for the outermost, which
+// carries the entering call site's own release.
+func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Frame, release bool) {
+	f := &i.frames[start+k]
+	f.addr = m.Address
+	f.code = n.exactCode(i, m.Address)
+	f.ref = m.Address
+	f.release = release
+	f.bp = int((ctx.Records[k].FB - ctx.Stack) / unsafe.Sizeof(types.Boxed(0)))
+	f.returns = m.Returns
+	f.ip = m.IP
+	f.upvals = nil
+	f.coro = 0
+
+	fn := i.heap[m.Address].(*types.Function)
+	sp := f.bp + len(fn.Declared())
+	for j, o := range m.Stack {
+		boxed := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
+		if !o.Owned {
+			i.retainBox(boxed)
+		}
+		i.stack[sp+j] = boxed
+	}
+	sp += len(m.Stack)
+
+	for _, l := range m.Locals {
+		boxed := n.box(i, l.Value.Kind, ctx.Read(k, l.Value))
+		addr := f.bp + l.Index
+		i.releaseBox(i.stack[addr])
+		i.stack[addr] = boxed
+	}
+
+	if k == int(ctx.Depth)-1 {
+		if sp > len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		i.sp = sp
+	}
+}
+
+// exactCode returns addr's threaded code compiled exact, building and caching
+// it the first time a deoptimization at addr needs it.
+func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
+	if code, ok := n.exact[addr]; ok {
+		return code
+	}
+	code := n.compile(i.heap[addr].(*types.Function), true)
+	n.exact[addr] = code
+	return code
+}
+
+// box materializes a native word of kind into the interpreter's Boxed
+// representation: i1/i8/i32 and f32 take it from the low 32 bits, f64 and ref
+// carry it unchanged, and a wide i64 promotes through boxI64 exactly as a
+// slot store would.
+func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
+	switch kind {
+	case types.KindI1:
+		return types.BoxI1(uint32(word) != 0)
+	case types.KindI8:
+		return types.BoxI8(int8(uint32(word)))
+	case types.KindI32:
+		return types.BoxI32(int32(uint32(word)))
+	case types.KindF32:
+		return types.BoxF32(math.Float32frombits(uint32(word)))
+	case types.KindF64:
+		return types.Boxed(word)
+	case types.KindRef:
+		return types.Boxed(word)
+	case types.KindI64:
+		return i.boxI64(int64(word))
+	default:
+		panic("interp: invalid native value kind " + kind.String())
+	}
 }
 
 func (n *native) metric(i *Interpreter, name string, labels ...prof.Label) {
