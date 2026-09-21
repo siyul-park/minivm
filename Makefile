@@ -110,15 +110,20 @@ benchmark-pr:
 		printf '%s\n' "$$root" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
 	done; \
 	kernels="$$(cd benchmarks && \
-		go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./... && \
-		go test -run='^$$' -bench='^BenchmarkCall_RecursiveFib$$/^(20|35)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
+		go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^(threaded|jit)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./... && \
+		go test -run='^$$' -bench='^BenchmarkCall_RecursiveFib$$/^(20|35)$$/^(threaded|jit)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
 	printf '%s\n' "$$kernels"; \
 	for name in \
 		BenchmarkControl_IterativeFib/threaded \
+		BenchmarkControl_IterativeFib/jit \
 		BenchmarkCall_RecursiveFib/20/threaded \
+		BenchmarkCall_RecursiveFib/20/jit \
 		BenchmarkCall_RecursiveFib/35/threaded \
+		BenchmarkCall_RecursiveFib/35/jit \
 		BenchmarkMemory_TypedArraySum/threaded \
-		BenchmarkNumeric_BranchTree/threaded; do \
+		BenchmarkMemory_TypedArraySum/jit \
+		BenchmarkNumeric_BranchTree/threaded \
+		BenchmarkNumeric_BranchTree/jit; do \
 		printf '%s\n' "$$kernels" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
 	done
 

@@ -6,7 +6,7 @@ Current status and planned ownership for the JIT rebuild.
 
 ## Status
 
-The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimization remain the semantic baseline; the native tier is being rebuilt as one compiler pipeline. As of S2-P6c, `interp.WithThreshold` lets the interpreter enter compiled native code for a hot `*types.Function`: `ExitSafepoint` and `ExitRelease` resume it, every other exit deoptimizes it back to threaded execution (see Runtime below). A hot address tiers up from Baseline to Optimized, a repeatedly deoptimizing address is retired and can compile again, and a Pool may share one published-code store, compile queue, and constant module across its interpreters.
+The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimization remain the semantic baseline; the native tier is being rebuilt as one compiler pipeline. As of S2-P6c/P7, `interp.WithThreshold(n)` is opt-in and ARM64-only: it lets the interpreter enter compiled native code for a `*types.Function` after `n` calls to it. `ExitSafepoint` and `ExitRelease` resume the native activation; every other exit — a bridge, an unsupported call, or a terminator with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) — deoptimizes it back to threaded execution (see Runtime below and `instruction-set.md` for per-opcode status). A Baseline address that is entered `native.promote`-many times submits an Optimized compile for the same function; an address that deoptimizes `native.refute`-many times is retired and tiers up again from a fresh Baseline compile if it is still called. A Pool may share one published-code store, compile queue, and constant module across its interpreters. S3 work is tracked in GitHub issues.
 
 ## Current owners
 

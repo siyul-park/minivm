@@ -56,14 +56,13 @@ The agent `MUST` preserve:
 
 ## JIT
 
-The agent `MUST` add ARM64 lowering only when guards and fallback are explicit:
+An opcode with no case in `internal/jit/arm64` (`Machine.exec` for `OpExec`, or `Machine.Lower`'s other `ssa.Op` cases) already bridges into the interpreter through `ExitBridge`; adding ARM64 lowering is optional and, when added, `MUST` keep guards and fallback explicit:
 
-- decline before mutating lowering state when unsupported;
-- deopt before unsupported behavior executes;
-- prefer terminal fallback over duplicated interpreter behavior;
-- preserve stack/local/global/upvalue/ref ownership.
+- decline (`return false`) before mutating lowering state when unsupported, so `compile.Lower` bridges the operation instead of emitting incomplete code;
+- prefer terminal fallback (bridge or deopt) over duplicated interpreter behavior;
+- preserve stack/local/global/upvalue/ref ownership, matching the release/retain the threaded handler performs.
 
-See `jit-internals.md`.
+See `jit-internals.md` and `internal/jit/arm64/machine.go` for the current lowered set.
 
 ## Tests
 

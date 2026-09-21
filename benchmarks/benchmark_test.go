@@ -67,7 +67,12 @@ func TestKernels(t *testing.T) {
 		opts []interp.Option
 	}{
 		{name: "threaded"},
+		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
 	}
+	// rounds exceeds the historical 2 so a mode whose compiles publish
+	// asynchronously (jit) is also exercised once its native code is live,
+	// not only on the calls that first submitted it.
+	const rounds = 5
 	for _, kernel := range kernels {
 		for _, mode := range modes {
 			name, prog, want, opts := kernel.name+"/"+mode.name, kernel.prog, kernel.want, mode.opts
@@ -75,7 +80,7 @@ func TestKernels(t *testing.T) {
 				require.NoError(t, program.Verify(prog))
 				vm := interp.New(prog, opts...)
 				defer vm.Close()
-				for range 2 {
+				for range rounds {
 					require.NoError(t, vm.Run(t.Context()))
 					value, err := vm.PopBoxed()
 					require.NoError(t, err)
@@ -94,6 +99,7 @@ func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
 		opts []interp.Option
 	}{
 		{name: "threaded"},
+		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
 	}
 	for _, mode := range modes {
 		b.Run(mode.name, func(b *testing.B) {

@@ -85,7 +85,7 @@ lookup := interp.NewHostFunction(
 
 ## 성능
 
-스레디드 인터프리터가 현재 실행 기준입니다. 네이티브 재구축은 계획 상태이며, 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
+스레디드 인터프리터가 현재 실행 기준입니다. `interp.WithThreshold`를 통해 arm64에서만 옵트인으로 네이티브 티어를 사용할 수 있습니다. 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
 
 ## 런타임 도구
 
@@ -127,7 +127,7 @@ vm := interp.New(prog,
 Program -> verifier / optimizer -> threaded interpreter
 ```text
 
-스레디드 인터프리터가 현재 완전한 실행 엔진입니다. 네이티브 컴파일은 계획된 재구축이며 현재 런타임에는 포함되지 않습니다.
+스레디드 인터프리터가 완전한 실행 엔진이자 의미론적 기준입니다. 네이티브 컴파일은 `interp.WithThreshold`를 통한 옵트인이며 arm64 전용입니다: 활성화된 `*types.Function`을 네이티브 코드로 컴파일하고, 네이티브로 실행할 수 없는 지점에서는 스레디드 실행으로 역최적화합니다.
 
 명령어 셋은 WebAssembly를 참고했지만 의도적으로 독자 설계했습니다. 1바이트 opcode와 고정 폭 또는 길이 접두사 피연산자를 사용합니다.
 
@@ -143,7 +143,7 @@ Program -> verifier / optimizer -> threaded interpreter
 | 스레디드 인터프리터 | ✅ 사용 가능 |
 | 정적 바이트코드 검증기 | ✅ 사용 가능 |
 | AOT 최적화 (`O1`-`O3`) | ✅ 사용 가능 |
-| ARM64 네이티브 재구축 | ⬜ 계획 |
+| ARM64 네이티브 티어 (옵트인, `interp.WithThreshold`) | ✅ 사용 가능 |
 | 디버거와 프로파일러 | ✅ 사용 가능 |
 | x86-64 네이티브 백엔드 | 🔲 미구현 |
 

@@ -85,7 +85,7 @@ See [Host Integration](docs/host-integration.md) for marshaling, host objects, a
 
 ## Performance
 
-The threaded interpreter is the current execution baseline. The native rebuild is planned; current measurements and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
+The threaded interpreter is the current execution baseline. A native tier is available opt-in on arm64 via `interp.WithThreshold`; current measurements and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
 
 ## Runtime Tooling
 
@@ -127,7 +127,7 @@ Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instructio
 Program -> verifier / optimizer -> threaded interpreter
 ```text
 
-The threaded interpreter is the complete current execution engine. Native compilation is a planned rebuild and is not part of the current runtime.
+The threaded interpreter is the complete execution engine and the semantic baseline. Native compilation is opt-in via `interp.WithThreshold` and arm64-only: it compiles a hot `*types.Function` to native code and deoptimizes back to threaded execution wherever it cannot run natively.
 
 The instruction set is WebAssembly-inspired but intentionally custom. It uses one-byte opcodes with fixed-width or length-prefixed operands.
 
@@ -143,7 +143,7 @@ The instruction set is WebAssembly-inspired but intentionally custom. It uses on
 | Threaded interpreter | ✅ Available |
 | Static bytecode verifier | ✅ Available |
 | AOT optimizer (`O1`-`O3`) | ✅ Available |
-| ARM64 native rebuild | ⬜ Planned |
+| ARM64 native tier (opt-in, `interp.WithThreshold`) | ✅ Available |
 | Debugger and profiler | ✅ Available |
 | x86-64 native backend | 🔲 Not implemented |
 

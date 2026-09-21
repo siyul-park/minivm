@@ -4,15 +4,15 @@ Comparisons here are tier-matched.
 
 This document owns performance evidence; `testing.md` owns test contracts.
 
-minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `default` or `jit` were measured with the previous native tier before its removal (2026-09) and are kept as historical reference until the rebuild re-measures them; they are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
+minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the rebuilt native tier (S2-P6c/P7): `interp.WithThreshold` compiling a hot `*types.Function` to ARM64 native code, measured 2026-09-22 on the host below. The tier's scope in S2: functions only, entered from an interpreted `CALL`; no OSR into a running loop; any opcode, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). Rows labelled `default` are the previous, removed native tier (pre-2026-09) and are kept only where no current `jit` number exists yet, labelled historical; `jit` numbers below are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
 
-| Kernel | `default` | `threaded` | Wazero |
+| Kernel | `jit` | `threaded` | Wazero |
 |---|---:|---:|---:|
-| `RecursiveFib(35)` | 59.59 ms | 415.3 ms | 44.4 ms |
-| `RecursiveFib(20)` | 44.39 µs | 318.03 µs | 33.2 µs |
+| `RecursiveFib(35)` | 100.35 ms | 433.59 ms | 44.4 ms |
+| `RecursiveFib(20)` | 79.83 µs | 317.93 µs | 33.2 µs |
 
 > **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
-> **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median.
+> **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median. The `jit`/`threaded` numbers on this page are a deliberate exception (L17: an M4 Pro drifts ~10% run to run): two interleaved `-benchtime=1s -count=3` runs of `cd benchmarks && go test -run='^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=1s -count=3 .`, reporting the median of the combined six samples, measured 2026-09-22.
 
 ## Controls
 
@@ -20,7 +20,8 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 |---|---|---|
 | Interpreter | minivm `threaded` | Generated threaded execution. |
 | Interpreter | CPython, Tengo, GopherLua, Goja, gpython, Yaegi | Bytecode or AST interpreters with no native code generation. |
-| Native | minivm `default` / `jit` | Historical rows from the removed native tier; no current mode produces them. |
+| Native | minivm `jit` | `interp.WithThreshold` compiling to ARM64 native code (S2-P6c/P7). |
+| Native | minivm `default` | Historical rows from the removed native tier, kept only where no current `jit` number exists yet. |
 | Native | Wazero | WebAssembly runtime using its optimizing compiler backend on arm64. |
 | Reference | Native Go | The same kernel written directly in Go. A lower bound, not a peer. |
 
@@ -41,28 +42,26 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 506.7 ns | 0 | 0 |
+| Interpreter | minivm `threaded` | 481.7 ns | 0 | 0 |
 |  | Tengo | 9.27 µs | 90,592 | 61 |
 |  | GopherLua | 651.0 ns | 160 | 0 |
 |  | Goja | 2.21 µs | 368 | 20 |
 |  | gpython | 2.57 µs | 2,448 | 88 |
 |  | Yaegi | 2.84 µs | 2,036 | 101 |
-| Native | minivm `default` | 36.0 ns | 0 | 0 |
-|  | minivm `jit` | 35.8 ns | 0 | 0 |
+| Native | minivm `jit` | 481.6 ns | 0 | 0 |
 |  | Wazero | 52.8 ns | 8 | 1 |
 | Reference | Native Go | 9.6 ns | 0 | 0 |
 #### `Sieve(256)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 7.77 µs | 1,048 | 2 |
+| Interpreter | minivm `threaded` | 7.72 µs | 1,048 | 2 |
 |  | Tengo | 57.17 µs | 122,504 | 1,611 |
 |  | GopherLua | 22.85 µs | 18,416 | 44 |
 |  | Goja | 43.29 µs | 1,872 | 25 |
 |  | gpython | 35.62 µs | 5,704 | 30 |
 |  | Yaegi | 18.92 µs | 1,800 | 37 |
-| Native | minivm `default` | 1.34 µs | 1,048 | 2 |
-|  | minivm `jit` | 1.38 µs | 1,048 | 2 |
+| Native | minivm `jit` | 7.80 µs | 1,048 | 2 |
 |  | Wazero | **677.0 ns** | 8 | 1 |
 | Reference | Native Go | 268.6 ns | 0 | 0 |
 
@@ -71,77 +70,70 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 318.03 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 317.93 µs | 0 | 0 |
 |  | CPython | 562.79 µs | 26 | 0 |
 |  | Tengo | 930.21 µs | 319,347 | 28,655 |
 |  | GopherLua | 1.07 ms | 704 | 2 |
 |  | Goja | 1.52 ms | 4,680 | 39 |
 |  | gpython | 3.89 ms | 9,807,919 | 109,494 |
 |  | Yaegi | 4.50 ms | 8,302,177 | 192,840 |
-| Native | minivm `default` | **44.39 µs** | 0 | 0 |
-|  | minivm `jit` | 44.31 µs | 0 | 0 |
+| Native | minivm `jit` | **79.83 µs** | 0 | 0 |
 |  | Wazero | **33.20 µs** | 8 | 1 |
 | Reference | Native Go | 14.61 µs | 0 | 0 |
 #### `IndirectRecursiveFib`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 580.9 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 561.64 µs | 0 | 0 |
 |  | Tengo | 944.71 µs | 319,359 | 28,655 |
 |  | GopherLua | 941.72 µs | 704 | 2 |
 |  | Goja | 1.37 ms | 4,680 | 39 |
 |  | gpython | 3.90 ms | 10,158,202 | 109,494 |
 |  | Yaegi | 10.98 ms | 13,059,853 | 394,041 |
-| Native | minivm `default` | 70.09 µs | 0 | 0 |
-|  | minivm `jit` | 69.36 µs | 0 | 0 |
+| Native | minivm `jit` | 1.05 ms | 0 | 0 |
 |  | Wazero | **42.34 µs** | 8 | 1 |
 | Reference | Native Go | 15.72 µs | 0 | 0 |
 #### `TailSum(1000)` and `TailPingPong(1000)`
 
-The only kernels whose bytecode holds a `RETURN_CALL`. Measured on Apple M4 Pro, Go 1.26.2, `-benchtime=1s -count=2`, no external runtimes.
+The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deoptimizes at it (S2 scope: no native lowering for `RETURN_CALL`, see `instruction-set.md`). Measured on Apple M4 Pro, Go 1.26.2, 2026-09-22, `-benchtime=1s -count=3`, two interleaved runs, median of six, no external runtimes.
 
 | Kernel | Tier | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| `TailSum` | minivm `threaded` | **10.07 µs** | 0 | 0 |
-|  | minivm `default` | 277.6 µs | 0 | 0 |
-|  | minivm `jit` | 273.2 µs | 0 | 0 |
-| `TailPingPong` | minivm `threaded` | **10.25 µs** | 0 | 0 |
-|  | minivm `default` | 138.6 µs | 0 | 0 |
-|  | minivm `jit` | 139.0 µs | 0 | 0 |
+| `TailSum` | minivm `threaded` | **9.73 µs** | 0 | 0 |
+|  | minivm `jit` | 11.11 µs | 100 | 2 |
+| `TailPingPong` | minivm `threaded` | **9.91 µs** | 0 | 0 |
+|  | minivm `jit` | 11.26 µs | 112 | 2 |
 
 #### `ClosureCounter(128)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 2.60 µs | 64 | 2 |
+| Interpreter | minivm `threaded` | 2.49 µs | 64 | 2 |
 |  | Tengo | 13.59 µs | 92,272 | 261 |
 |  | GopherLua | 5.88 µs | 151 | 3 |
 |  | Goja | 10.11 µs | 1,264 | 13 |
 |  | gpython | 27.29 µs | 58,312 | 659 |
 |  | Yaegi | 33.69 µs | 34,784 | 786 |
-| Native | minivm `default` | 3.34 µs | 64 | 2 |
-|  | minivm `jit` | 3.33 µs | 64 | 2 |
+| Native | minivm `jit` | 2.47 µs | 64 | 2 |
 | Reference | Native Go | 34.9 ns | 0 | 0 |
 
 #### `NQueens(7)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 196.49 µs | 120 | 6 |
+| Interpreter | minivm `threaded` | 201.64 µs | 120 | 6 |
 |  | CPython | 226.15 µs | 11 | 0 |
 |  | gpython | 782.30 µs | 363,441 | 4,156 |
-| Native | minivm `default` | 104.60 µs | 120 | 6 |
-|  | minivm `jit` | 104.69 µs | 120 | 6 |
+| Native | minivm `jit` | 213.17 µs | 120 | 6 |
 | Reference | Native Go | 4.21 µs | 0 | 0 |
 #### `Fannkuch(6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 399.53 µs | 34,608 | 1,442 |
+| Interpreter | minivm `threaded` | 401.58 µs | 34,608 | 1,442 |
 |  | CPython | 430.81 µs | 20 | 0 |
 |  | gpython | 1.57 ms | 1,367,678 | 16,944 |
-| Native | minivm `default` | 402.25 µs | 34,608 | 1,442 |
-|  | minivm `jit` | 404.40 µs | 34,608 | 1,442 |
+| Native | minivm `jit` | 446.68 µs | 34,608 | 1,442 |
 | Reference | Native Go | 17.54 µs | 17,280 | 720 |
 
 ### Memory and data structures
@@ -149,84 +141,77 @@ The only kernels whose bytecode holds a `RETURN_CALL`. Measured on Apple M4 Pro,
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 3.07 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 2.78 µs | 0 | 0 |
 |  | Tengo | 15.83 µs | 94,208 | 513 |
 |  | GopherLua | 3.42 µs | 4,000 | 15 |
 |  | Goja | 13.29 µs | 2,080 | 238 |
 |  | gpython | 7.63 µs | 2,496 | 246 |
 |  | Yaegi | 4.23 µs | 296 | 8 |
-| Native | minivm `default` | 311.0 ns | 0 | 0 |
-|  | minivm `jit` | 306.8 ns | 0 | 0 |
+| Native | minivm `jit` | 2.77 µs | 0 | 0 |
 |  | Wazero | **161.0 ns** | 8 | 1 |
 | Reference | Native Go | 70.8 ns | 0 | 0 |
 #### `AllocationGraph(128)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 4.58 µs | 1,024 | 128 |
+| Interpreter | minivm `threaded` | 4.16 µs | 1,024 | 128 |
 |  | Tengo | 13.60 µs | 96,288 | 388 |
 |  | GopherLua | 6.45 µs | 14,376 | 256 |
 |  | Goja | 25.84 µs | 78,016 | 770 |
 |  | gpython | 5.84 µs | 5,712 | 266 |
 |  | Yaegi | 13.81 µs | 1,492 | 142 |
-| Native | minivm `default` | 4.58 µs | 1,024 | 128 |
-|  | minivm `jit` | 4.59 µs | 1,024 | 128 |
+| Native | minivm `jit` | 4.16 µs | 1,024 | 128 |
 | Reference | Native Go | 944.1 ns | 1,024 | 128 |
 #### `PermutationFlips(24,64)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 77.92 µs | 14,336 | 128 |
+| Interpreter | minivm `threaded` | 75.90 µs | 14,336 | 128 |
 |  | Tengo | 321.12 µs | 292,858 | 9,856 |
 |  | GopherLua | **101.03 µs** | 78,808 | 451 |
 |  | Goja | 262.24 µs | 122,504 | 765 |
 |  | gpython | 228.35 µs | 115,560 | 2,496 |
 |  | Yaegi | 174.84 µs | 112,600 | 5,591 |
-| Native | minivm `default` | 77.66 µs | 14,336 | 128 |
-|  | minivm `jit` | 77.82 µs | 14,336 | 128 |
+| Native | minivm `jit` | 77.29 µs | 14,336 | 128 |
 | Reference | Native Go | 1.08 µs | 0 | 0 |
 #### `StructTreeWalk(9)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 137.5 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 140.31 µs | 768 | 8 |
 |  | Tengo | 280.54 µs | 458,379 | 5,114 |
 |  | GopherLua | 545.66 µs | 818,512 | 11,253 |
 |  | Goja | 448.41 µs | 558,961 | 6,149 |
 |  | gpython | 1.26 ms | 2,570,669 | 34,797 |
 |  | Yaegi | 846.99 µs | 1,422,624 | 35,306 |
-| Native | minivm `default` | 133.5 µs | 768 | 8 |
-|  | minivm `jit` | 135.6 µs | 768 | 8 |
+| Native | minivm `jit` | 213.17 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
 #### `BinaryTrees(4..6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 951.4 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 967.43 µs | 768 | 8 |
 |  | CPython | 991.16 µs | 45 | 0 |
 |  | gpython | 9.87 ms | 19,457,623 | 280,714 |
-| Native | minivm `default` | 749.5 µs | 768 | 8 |
-|  | minivm `jit` | 752.7 µs | 768 | 8 |
+| Native | minivm `jit` | 1.37 ms | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
 #### `SortStress(128,2)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 186.7 µs | 5,136 | 512 |
+| Interpreter | minivm `threaded` | 192.38 µs | 5,136 | 512 |
 |  | CPython | 339.27 µs | 16 | 0 |
 |  | gpython | 870.26 µs | 23,448 | 2,034 |
-| Native | minivm `default` | 51.07 µs | 5,136 | 512 |
-|  | minivm `jit` | 66.49 µs | 5,136 | 512 |
+| Native | minivm `jit` | 192.96 µs | 5,136 | 512 |
 | Reference | Native Go | 4.38 µs | 1,024 | 2 |
 #### `StringBuild(512)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 335.8 µs | 85,408 | 4,107 |
+| Interpreter | minivm `threaded` | 344.20 µs | 85,408 | 4,107 |
 |  | CPython | 368.74 µs | 17 | 0 |
 |  | gpython | 1.25 ms | 2,104,720 | 21,456 |
-| Native | minivm `default` | 261.7 µs | 85,408 | 4,107 |
-|  | minivm `jit` | 260.6 µs | 85,408 | 4,107 |
+| Native | minivm `jit` | 354.59 µs | 85,408 | 4,107 |
 | Reference | Native Go | 138.19 µs | 855,892 | 5,001 |
 
 ### Numeric
@@ -234,55 +219,50 @@ The only kernels whose bytecode holds a `RETURN_CALL`. Measured on Apple M4 Pro,
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 524.4 ns | 0 | 0 |
+| Interpreter | minivm `threaded` | 501.2 ns | 0 | 0 |
 |  | Tengo | 16.98 µs | 95,384 | 660 |
 |  | GopherLua | 8.56 µs | 2,464 | 9 |
 |  | Goja | 13.91 µs | 1,992 | 196 |
 |  | gpython | 12.75 µs | 2,168 | 203 |
 |  | Yaegi | 10.56 µs | 1,832 | 308 |
-| Native | minivm `default` | 266.5 ns | 0 | 0 |
-|  | minivm `jit` | 261.6 ns | 0 | 0 |
+| Native | minivm `jit` | 500.1 ns | 0 | 0 |
 |  | Wazero | **167.0 ns** | 16 | 1 |
 | Reference | Native Go | 78.4 ns | 0 | 0 |
 #### `NBody(5,100)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 314.0 µs | 504 | 14 |
+| Interpreter | minivm `threaded` | 311.95 µs | 504 | 14 |
 |  | CPython | **230.89 µs** | 11 | 0 |
 |  | gpython | 1.17 ms | 382,762 | 34,975 |
-| Native | minivm `default` | 78.97 µs | 504 | 14 |
-|  | minivm `jit` | 82.71 µs | 504 | 14 |
+| Native | minivm `jit` | 314.87 µs | 504 | 14 |
 | Reference | Native Go | 3.39 µs | 0 | 0 |
 #### `SpectralNorm(24,2)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 281.1 µs | 648 | 6 |
+| Interpreter | minivm `threaded` | 272.65 µs | 648 | 6 |
 |  | CPython | 415.89 µs | 20 | 0 |
 |  | gpython | 1.94 ms | 2,457,137 | 52,718 |
-| Native | minivm `default` | 36.51 µs | 648 | 6 |
-|  | minivm `jit` | 36.36 µs | 648 | 6 |
+| Native | minivm `jit` | **193.11 µs** | 648 | 6 |
 | Reference | Native Go | 2.79 µs | 576 | 3 |
 #### `Mandelbrot(16x16)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 140.4 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 138.81 µs | 0 | 0 |
 |  | CPython | 181.52 µs | 9 | 0 |
 |  | gpython | 684.61 µs | 324,977 | 23,643 |
-| Native | minivm `default` | 44.01 µs | 0 | 0 |
-|  | minivm `jit` | 44.02 µs | 0 | 0 |
+| Native | minivm `jit` | **31.52 µs** | 0 | 0 |
 | Reference | Native Go | 2.99 µs | 0 | 0 |
 #### `MatMul(16)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 176.4 µs | 6,216 | 6 |
+| Interpreter | minivm `threaded` | 174.44 µs | 6,216 | 6 |
 |  | CPython | 210.72 µs | 10 | 0 |
 |  | gpython | 701.09 µs | 90,712 | 9,350 |
-| Native | minivm `default` | 16.61 µs | 6,216 | 6 |
-|  | minivm `jit` | 16.58 µs | 6,216 | 6 |
+| Native | minivm `jit` | 173.02 µs | 6,216 | 6 |
 | Reference | Native Go | 2.66 µs | 6,144 | 3 |
 
 ## Direct Interpreter Operations
@@ -353,7 +333,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-Native execution primarily benefits tight arithmetic, loops, and indexed access. Call-heavy and allocation-heavy workloads retain more threaded work. The agent `MUST` read results by row and tier and `MUST NOT` aggregate unlike tiers.
+The S2 native tier only ever enters at an interpreted `CALL` to a `*types.Function` (`instruction-set.md`); it never compiles top-level or loop-only code with no calls in it. A kernel with no `CALL` at all (`IterativeFib`, `Sieve`, `BranchTree`, `TypedArraySum`, `AllocationGraph`, `PermutationFlips`, `MatMul`, …) therefore measures identically under `jit` and `threaded` — the native tier never runs. A kernel whose called function lowers cleanly and stays hot (`RecursiveFib`, `SpectralNorm`, `Mandelbrot`) gets a large win. A kernel whose called function hits an opcode `internal/jit/arm64` does not lower, or a `RETURN_CALL` (`TailSum`, `TailPingPong`), pays the always-on call-path bookkeeping (`native.call`'s `Store.Enter`/`Code`/`Leave` and counters) on every call without ever completing natively, and `jit` measures slightly slower than `threaded` (`IndirectRecursiveFib`, `NQueens`, `Fannkuch`, `StructTreeWalk`, `BinaryTrees`, `StringBuild`). The agent `MUST` read results by row and tier and `MUST NOT` aggregate unlike tiers.
 
 ## Benchmark Fixture Inventory
 
@@ -407,9 +387,9 @@ go test -tags=compare -run='^$' -bench='^(BenchmarkControl|BenchmarkMemory|Bench
 
 | Location | Responsibility |
 |---|---|
-| `interp/*_test.go` | interpreter benchmarks; native benchmarks return with the rebuild |
+| `interp/*_test.go` | interpreter benchmarks (`threaded` only; no native-tier benchmarks live here) |
 | `types/*_test.go` | reference traversal benchmarks |
-| `benchmarks/` | runtime-neutral workloads and external comparisons |
+| `benchmarks/` | runtime-neutral kernel workloads (`threaded` and `jit`) and external comparisons |
 
 ## Related
 

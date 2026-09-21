@@ -62,7 +62,16 @@ Coverage measures reachability, not quality. When behavior already exists and no
 
 ## Native / JIT
 
-Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points when a native backend exists. Interpreter tests `MUST` prove threaded parity through public results, errors, ownership, and execution; native parity becomes applicable when the rebuild exists.
+Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points when a native backend exists. Interpreter tests `MUST` prove threaded parity through public results, errors, ownership, and execution; native parity applies wherever the native tier can enter.
+
+Current proof layers for the native tier:
+
+| Layer | Owner |
+|---|---|
+| Backend goldens | `internal/jit/arm64` |
+| Compile maps | `internal/jit/compile` |
+| Runtime e2e | `internal/jit` |
+| Interpreter parity | `interp` `TestWithThreshold`, `benchmarks` `TestKernels/*/jit` |
 
 ARM64 goldens are the native instruction specification: the agent `MUST` define expected instructions independently of the emitter, `MUST` build the input shape explicitly, `MUST` fix the expected stream first and then build the assembler, and `MUST` assert the complete stream and relevant metadata.
 
