@@ -1,3 +1,4 @@
+// Package arm64 lowers SSA to ARM64 rows.
 package arm64
 
 import (
@@ -12,50 +13,37 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-const (
-	mask32 = uint64(0xffffffff)
-	mask49 = uint64(types.VMask)
-)
-
-type machine struct {
-	tempID   int32
-	slots    int
-	end      asm.Label
-	deopt    asm.Label
-	deoptSet bool
+// Machine emits ARM64 rows for compile.Lower. X25 holds the frame base,
+// the address of the activation's VM slot 0; X16 and X17 are scratch inside
+// one lowered row sequence.
+type Machine struct {
+	slots   int
+	temp    int32
+	end     asm.Label
+	fail    asm.Label
+	failing bool
 }
 
-// New returns the ARM64 lowering machine.
-func New() *machine {
-	return &machine{tempID: -1}
+// New returns an ARM64 machine.
+func New() *Machine {
+	return &Machine{}
 }
 
-func (m *machine) Arch() asm.Arch { return target.New() }
+// Arch returns the ARM64 assembler target.
+func (m *Machine) Arch() asm.Arch { return target.New() }
 
-func (m *machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X17, target.X25} }
+// Reserve returns the scratch and frame-base registers.
+func (m *Machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X17, target.X25} }
 
-func (m *machine) Prologue(a *asm.Assembler, slots, params int) {
-	m.slots = slots
-	m.end = a.Label()
+// Prologue begins a function: it builds the frame, loads the frame base,
+// pushes the activation record, and clears the locals after params.
+func (m *Machine) Prologue(a *asm.Assembler, slots, params int) {
+	*m = Machine{slots: slots, temp: -1, end: a.Label()}
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
-		asm.Instruction{
-			Op:   uint16(target.OpSUBI),
-			Dst:  asm.Physical(target.SP),
-			Src1: asm.Physical(target.SP),
-			Src2: asm.Slots(),
-		},
+		asm.Instruction{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-	)
-	m.record(a)
-	for i := params; i < slots; i++ {
-		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
-	}
-}
-
-func (m *machine) record(a *asm.Assembler) {
-	a.Emit(
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 		target.ADDI(target.X17, target.Ctx, uint16(jit.OffsetRecords)),
 		target.LSLI(target.X16, target.X16, 5),
@@ -64,9 +52,14 @@ func (m *machine) record(a *asm.Assembler) {
 		target.ADDI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 	)
+	for i := params; i < slots; i++ {
+		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
+	}
 }
 
-func (m *machine) Epilogue(a *asm.Assembler) {
+// Epilogue ends a function: every return branches here to pop the record
+// and the frame. A failed check halts on BRK until exits exist.
+func (m *Machine) Epilogue(a *asm.Assembler) {
 	a.Bind(m.end)
 	a.Emit(
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
@@ -77,20 +70,14 @@ func (m *machine) Epilogue(a *asm.Assembler) {
 		target.ADDI(target.SP, target.SP, 16),
 		target.RET(),
 	)
-	if m.deoptSet {
-		a.Bind(m.deopt)
+	if m.failing {
+		a.Bind(m.fail)
 		a.Emit(target.BRK(0))
 	}
 }
 
-func (m *machine) Move(a *asm.Assembler, dst, src asm.VReg) {
-	if dst.Type() == asm.RegTypeFloat {
-		a.Emit(target.FMOV(dst, src))
-		return
-	}
-	a.Emit(target.MOV(dst, src))
-}
-func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+// Lower emits op and reports false when it has no ARM64 lowering.
+func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	switch op.Op {
 	case ssa.OpConst:
 		return m.constant(a, op, r)
@@ -105,7 +92,9 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool
 	}
 }
 
-func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, r compile.Regs, labels []asm.Label) {
+// Branch transfers control to labels: OpBranch takes labels[0] on nonzero,
+// OpTable takes labels[i] for index i and the last label out of range.
+func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, r compile.Regs, labels []asm.Label) {
 	switch t.Op {
 	case ssa.OpJump:
 		a.Emit(target.BLabel(labels[0]))
@@ -113,47 +102,54 @@ func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, r compile.Regs, lab
 		a.Emit(target.CBNZLabel(r.Reg(t.Args[0]), labels[0]), target.BLabel(labels[1]))
 	case ssa.OpTable:
 		index := r.Reg(t.Args[0])
-		for i := 0; i < len(labels)-1; i++ {
-			a.Emit(target.CMPI(index, uint16(i)), target.BCondLabel(target.OpBEQ, labels[i]))
+		for i, label := range labels[:len(labels)-1] {
+			a.Emit(target.CMPI(index, uint16(i)), target.BCondLabel(target.OpBEQ, label))
 		}
 		a.Emit(target.BLabel(labels[len(labels)-1]))
 	}
 }
 
-func (m *machine) Return(a *asm.Assembler, args []asm.VReg, types []ssa.Type) {
-	m.write(a, args, types, 0)
-	a.Emit(target.BLabel(m.end))
-}
-
-func (m *machine) Complete(a *asm.Assembler, args []asm.VReg, types []ssa.Type) {
-	m.write(a, args, types, m.slots)
-	a.Emit(target.BLabel(m.end))
-}
-
-func (m *machine) write(a *asm.Assembler, args []asm.VReg, types []ssa.Type, base int) {
-	for i, src := range args {
-		m.box(a, src, kind(types[i]), target.X16)
-		a.Emit(target.STR(target.X16, target.X25, int16((base+i)*8)))
+// Return boxes t's arguments into the VM slots the interpreter reads them
+// from: slot 0 on for OpReturn, past the locals for OpComplete.
+func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, r compile.Regs) {
+	base := 0
+	if t.Op == ssa.OpComplete {
+		base = m.slots
 	}
+	for i, v := range t.Args {
+		a.Emit(target.STR(m.box(a, r.Reg(v), kind(r.Type(v))), target.X25, int16((base+i)*8)))
+	}
+	a.Emit(target.BLabel(m.end))
 }
 
-func (m *machine) Budget(a *asm.Assembler, safepoint asm.Label) {
+// Budget counts Context.Budget down and fails when it is spent.
+func (m *Machine) Budget(a *asm.Assembler) {
 	a.Emit(
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
 		target.SUBSI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
-		target.BCondLabel(target.OpBLE, safepoint),
+		target.BCondLabel(target.OpBLE, m.failure(a)),
 	)
 }
 
-func (m *machine) deoptLabel(a *asm.Assembler) asm.Label {
-	if !m.deoptSet {
-		m.deopt = a.Label()
-		m.deoptSet = true
+// Move copies src into dst of the same bank.
+func (m *Machine) Move(a *asm.Assembler, dst, src asm.VReg) {
+	if dst.Type() == asm.RegTypeFloat {
+		a.Emit(target.FMOV(dst, src))
+		return
 	}
-	return m.deopt
+	a.Emit(target.MOV(dst, src))
 }
-func (m *machine) constant(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+
+func (m *Machine) failure(a *asm.Assembler) asm.Label {
+	if !m.failing {
+		m.fail = a.Label()
+		m.failing = true
+	}
+	return m.fail
+}
+
+func (m *Machine) constant(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Results) != 1 {
 		return false
 	}
@@ -183,101 +179,57 @@ func (m *machine) constant(a *asm.Assembler, op ssa.Operation, r compile.Regs) b
 	return true
 }
 
-func (m *machine) load(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+// load unboxes a slot: a narrow or f32 payload is the slot's low 32 bits,
+// an i64 payload sign-extends 49 bits, f64 and ref are the whole word.
+func (m *Machine) load(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Results) != 1 {
 		return false
 	}
-	dst := r.Reg(op.Results[0])
 	base, ok := m.base(a, op.Slot)
 	if !ok {
 		return false
 	}
-	kind := kind(r.Type(op.Results[0]))
-	off := int16(op.Slot.Index * 8)
-	switch kind {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
-		a.Emit(target.LDR(dst, base, off))
-	case types.KindI64:
-		a.Emit(target.LDR(dst, base, off), target.SBFX(dst, dst, 0, 49))
-	default:
-		return false
+	dst := r.Reg(op.Results[0])
+	a.Emit(target.LDR(dst, base, int16(op.Slot.Index*8)))
+	if kind(r.Type(op.Results[0])) == types.KindI64 {
+		a.Emit(target.SBFX(dst, dst, 0, 49))
 	}
 	return true
 }
-func (m *machine) store(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+
+func (m *Machine) store(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Args) != 1 {
 		return false
 	}
-	src := r.Reg(op.Args[0])
-	kind := kind(r.Type(op.Args[0]))
 	base, ok := m.base(a, op.Slot)
 	if !ok {
 		return false
 	}
-	off := int16(op.Slot.Index * 8)
-	switch kind {
-	case types.KindI1:
-		a.Emit(target.UXTW(target.X16, src))
-		a.Emit(target.ANDI(target.X16, target.X16, 1))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI1))...)
-		a.Emit(target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, off))
-	case types.KindI8:
-		a.Emit(target.UXTW(target.X16, src))
-		a.Emit(target.ANDI(target.X16, target.X16, mask32))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI8))...)
-		a.Emit(target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, off))
-	case types.KindI32:
-		a.Emit(target.UXTW(target.X16, src))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI32))...)
-		a.Emit(target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, off))
-	case types.KindI64:
-		return m.wide(a, src, base, off)
-	case types.KindF32:
-		a.Emit(target.FMOV(target.X16, src))
-		a.Emit(target.ANDI(target.X16, target.X16, mask32))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindF32))...)
-		a.Emit(target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, off))
-	case types.KindF64, types.KindRef:
-		a.Emit(target.STR(src, base, off))
-	default:
-		return false
-	}
+	src := m.box(a, r.Reg(op.Args[0]), kind(r.Type(op.Args[0])))
+	a.Emit(target.STR(src, base, int16(op.Slot.Index*8)))
 	return true
 }
 
-func (m *machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
+// base is the register a slot is addressed from: X25 for a local of this
+// activation, the globals base for a global.
+func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 	if slot.Index < 0 || slot.Index > 4095 {
-		return asm.PReg{}, false
+		return nil, false
 	}
-	switch slot.Space {
-	case ssa.SpaceLocal:
-		if slot.Base != 0 {
-			return asm.PReg{}, false
-		}
+	switch {
+	case slot.Space == ssa.SpaceLocal && slot.Base == 0:
 		return target.X25, true
-	case ssa.SpaceGlobal:
-		base := m.temp(asm.RegTypeInt, asm.Width64)
+	case slot.Space == ssa.SpaceGlobal:
+		m.temp--
+		base := asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
 		a.Emit(target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)))
 		return base, true
 	default:
-		return asm.PReg{}, false
+		return nil, false
 	}
 }
 
-func (m *machine) wide(a *asm.Assembler, src asm.VReg, base asm.Reg, off int16) bool {
-	label := m.deoptLabel(a)
-	a.Emit(target.LDI(target.X16, 1<<48)...)
-	a.Emit(target.ADD(target.X17, src, target.X16))
-	a.Emit(target.LSRI(target.X17, target.X17, 49))
-	a.Emit(target.CBNZLabel(target.X17, label))
-	a.Emit(target.ANDI(target.X16, src, mask49))
-	a.Emit(target.LDI(target.X17, types.Tag(types.KindI64))...)
-	a.Emit(target.ORR(target.X16, target.X16, target.X17))
-	a.Emit(target.STR(target.X16, base, off))
-	return true
-}
-
-func (m *machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	switch op.Code {
 	case instr.I32_ADD:
 		return m.binary(a, op, r, target.ADD)
@@ -507,7 +459,8 @@ func (m *machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool 
 		return false
 	}
 }
-func (m *machine) binary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+
+func (m *Machine) binary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
@@ -519,7 +472,7 @@ func (m *machine) binary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emi
 	return true
 }
 
-func (m *machine) unary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
+func (m *Machine) unary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -531,7 +484,7 @@ func (m *machine) unary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit
 	return true
 }
 
-func (m *machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, width asm.RegWidth) bool {
+func (m *Machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, width asm.RegWidth) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
@@ -539,7 +492,7 @@ func (m *machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, wid
 	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != width {
 		return false
 	}
-	a.Emit(target.CBZLabel(y, m.deoptLabel(a)))
+	a.Emit(target.CBZLabel(y, m.failure(a)))
 	rem := op.Code == instr.I32_REM_S || op.Code == instr.I32_REM_U || op.Code == instr.I64_REM_S || op.Code == instr.I64_REM_U
 	if rem {
 		q := target.W16
@@ -562,7 +515,7 @@ func (m *machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, wid
 	return true
 }
 
-func (m *machine) eqz(a *asm.Assembler, op ssa.Operation, r compile.Regs, width asm.RegWidth) bool {
+func (m *Machine) eqz(a *asm.Assembler, op ssa.Operation, r compile.Regs, width asm.RegWidth) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -574,7 +527,9 @@ func (m *machine) eqz(a *asm.Assembler, op ssa.Operation, r compile.Regs, width 
 	return true
 }
 
-func (m *machine) compare(a *asm.Assembler, op ssa.Operation, r compile.Regs, cond uint8, width asm.RegWidth) bool {
+// compare sets dst from flags. After FCMP an unordered pair sets C and V:
+// EQ, MI (lt), LS (le), GT, and GE read false; NE reads true.
+func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, r compile.Regs, cond uint8, width asm.RegWidth) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
@@ -593,7 +548,7 @@ func (m *machine) compare(a *asm.Assembler, op ssa.Operation, r compile.Regs, co
 	return true
 }
 
-func (m *machine) convert(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
+func (m *Machine) convert(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -612,7 +567,7 @@ func (m *machine) convert(a *asm.Assembler, op ssa.Operation, r compile.Regs, em
 	return true
 }
 
-func (m *machine) truncate(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction, width asm.RegWidth) bool {
+func (m *Machine) truncate(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction, width asm.RegWidth) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -629,7 +584,7 @@ func (m *machine) truncate(a *asm.Assembler, op ssa.Operation, r compile.Regs, e
 	return true
 }
 
-func (m *machine) narrow(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+func (m *Machine) narrow(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -641,7 +596,7 @@ func (m *machine) narrow(a *asm.Assembler, op ssa.Operation, r compile.Regs) boo
 	return true
 }
 
-func (m *machine) reinterpret(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+func (m *Machine) reinterpret(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -653,7 +608,7 @@ func (m *machine) reinterpret(a *asm.Assembler, op ssa.Operation, r compile.Regs
 	return true
 }
 
-func (m *machine) choose(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+func (m *Machine) choose(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Args) != 3 || len(op.Results) != 1 {
 		return false
 	}
@@ -670,34 +625,29 @@ func (m *machine) choose(a *asm.Assembler, op ssa.Operation, r compile.Regs) boo
 	}
 	return true
 }
-func (m *machine) box(a *asm.Assembler, src asm.VReg, kind types.Kind, dst asm.PReg) {
-	switch kind {
-	case types.KindI1:
-		a.Emit(target.UXTW(dst, src))
-		a.Emit(target.ANDI(dst, dst, 1))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI1))...)
-	case types.KindI8:
-		a.Emit(target.UXTW(dst, src))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI8))...)
-	case types.KindI32:
-		a.Emit(target.UXTW(dst, src))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI32))...)
+
+// box returns the register holding src as a boxed word. An i64 outside the
+// inline range fails.
+func (m *Machine) box(a *asm.Assembler, src asm.VReg, k types.Kind) asm.Reg {
+	switch k {
+	case types.KindF64, types.KindRef:
+		return src
 	case types.KindI64:
-		a.Emit(target.ANDI(dst, src, mask49))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindI64))...)
+		a.Emit(target.LDI(target.X16, 1<<48)...)
+		a.Emit(
+			target.ADD(target.X17, src, target.X16),
+			target.LSRI(target.X17, target.X17, 49),
+			target.CBNZLabel(target.X17, m.failure(a)),
+			target.ANDI(target.X16, src, types.VMask),
+		)
 	case types.KindF32:
-		a.Emit(target.FMOV(dst, src))
-		a.Emit(target.ANDI(dst, dst, mask32))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindF32))...)
-	case types.KindF64:
-		a.Emit(target.FMOV(dst, src))
-	case types.KindRef:
-		a.Emit(target.MOV(dst, src))
-		return
+		a.Emit(target.FMOV(target.W16, src))
 	default:
-		return
+		a.Emit(target.UXTW(target.X16, src))
 	}
-	a.Emit(target.ORR(dst, dst, target.X17))
+	a.Emit(target.LDI(target.X17, types.Tag(k))...)
+	a.Emit(target.ORR(target.X16, target.X16, target.X17))
+	return target.X16
 }
 
 func kind(t ssa.Type) types.Kind {
@@ -717,10 +667,6 @@ func kind(t ssa.Type) types.Kind {
 	case ssa.TypeRef:
 		return types.KindRef
 	default:
-		return 0
+		panic("arm64: " + t.String() + " has no boxed kind")
 	}
-}
-func (m *machine) temp(typ asm.RegType, width asm.RegWidth) asm.VReg {
-	m.tempID--
-	return asm.NewVReg(m.tempID, typ, width)
 }

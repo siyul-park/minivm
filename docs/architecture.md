@@ -26,6 +26,8 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `internal/asm` | machine IR, register allocation, encoding, linking, executable memory, native stack and trampoline |
 | `internal/asm/arm64` | ARM64 encoding |
 | `internal/jit` | native runtime contract shared by the interpreter and the compiler |
+| `internal/jit/compile` | SSA to machine rows: block layout, value registers, edge moves, loop budget |
+| `internal/jit/arm64` | ARM64 lowering of SSA operations |
 | `pass` | pass lifecycle, pipelines, analysis cache |
 | `analysis` | reusable read-only facts |
 | `transform` | bytecode transforms, bytecode↔SSA conversion, SSA transforms |
@@ -43,7 +45,8 @@ The agent `MUST` place behavior by dominant ownership, not import convenience. I
 - `internal/asm` MUST remain below the runtime and compiler layers and MUST NOT know how native code is used: no trap, exit, or interpreter vocabulary.
 - `internal/jit` MUST NOT import `interp`.
 - ARM64 encoding MUST stay under `internal/asm/arm64`.
-- The planned native compiler MUST NOT become a dependency of `internal/ssa*` or `transform`.
+- `internal/jit/compile` MUST NOT name a physical register or target instruction; `internal/jit/arm64` MUST NOT walk SSA control flow.
+- The native compiler MUST NOT become a dependency of `internal/ssa*` or `transform`.
 - `program.Verify` `MUST` stay independent of runtime and optimization policy.
 
 ## Execution

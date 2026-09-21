@@ -44,6 +44,11 @@ func (f *Function) Block(id int) Block {
 	return f.blocks[id]
 }
 
+// Values bounds the value ids: every value of f is below it.
+func (f *Function) Values() int {
+	return len(f.types)
+}
+
 // Type returns v's type or zero for an invalid value.
 func (f *Function) Type(v Value) Type {
 	if v <= NoValue || int(v) >= len(f.types) {

@@ -18,6 +18,8 @@ The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimiz
 | Machine encoding, executable memory, native execution | `internal/asm/` |
 | ARM64 encoding | `internal/asm/arm64/` |
 | Native runtime contract | `internal/jit/` |
+| SSA lowering: layout, value registers, edge moves, loop budget | `internal/jit/compile/` |
+| ARM64 lowering | `internal/jit/arm64/` |
 | Profiling | `prof/` |
 
 ## Runtime contract
@@ -30,7 +32,7 @@ The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimiz
 | `asm.Enter(code, s)` / `asm.Resume(s)` | Switch to the native stack and call `code`, or continue the suspended activation (restore the register file, `SP = NSP`, `LR = PC`). Both report whether the activation is suspended at an exit rather than returned. |
 | exit | Native code `BLR`s the stub at `asm.OffsetStub`. **An exit is a call**: the stub saves the register file, `LR → PC`, `SP → NSP`, and returns to Go; `Resume` is that call returning, so code that exits keeps its own LR in a frame like around any call. |
 | `arm64.Ctx` (X26) | Holds the `*asm.State` while native code runs; pinned, never written by native code. X16/X17 are scratch for the exit protocol; X18/X28 are never touched. |
-| `jit.Context` | Embeds `asm.State` as its first field — the pinned register names both — and adds what native code writes before an exit: the `Trap` and the exit identifier, at `jit.OffsetTrap`/`jit.OffsetExit`. `Exit()` reads the identifier; what it names is the code publisher's to say. |
+| `jit.Context` | Embeds `asm.State` as its first field — the pinned register names both — and adds what native code writes before an exit: the `Trap` and the exit identifier, at `jit.OffsetTrap`/`jit.OffsetExit`. `Exit()` reads the identifier; what it names is the code publisher's to say. The interpreter writes the bases `Stack`, `Globals`, `RC`, `Natives` and the entry frame base `FB` before every `Enter`/`Resume`; `RC` moves when the heap grows, so native code loads it at each use. Native code maintains `Depth` and `Records` (one `Record` per activation) and counts `Budget` down. Every field has an `Offset*` constant. |
 | `jit.Trap` | `TrapReturn` (the activation returned; nothing to resume), `TrapDeopt` (abandon; the interpreter rebuilds state), `TrapBridge` (suspend; the interpreter acts, then resumes). |
 | `jit.Enter(code, ctx)` / `jit.Resume(ctx)` | `asm.Enter`/`asm.Resume` on the context's state, reporting the `Trap`: `TrapReturn` when the activation returned, else what native code wrote. |
 
@@ -42,28 +44,22 @@ Nesting: while a state is suspended, `Enter` starts below the suspended frames (
 
 Instruction-cache maintenance for published code is user-mode ARM64 (`DC CVAU`/`IC IVAU`) in `icache_arm64.s`; no cgo is involved.
 
-## Planned rebuild
+## Lowering
+
 `transform.Translate` translates a whole function from one entry — ip 0 or a loop header — and gives every `OpExec` the interpreter state at its own instruction, so which operations a backend lowers and which it bridges is the backend's decision alone.
 
-The rebuild targets one compiler pipeline:
-
 ```text
-bytecode
-  ↓
-transform.Translate
-  ↓
-internal/ssa
-  ↓
-SSA passes
-  ↓
-machine lowering
-  ↓
-internal/asm
-  ↓
-ARM64 native code
+bytecode → transform.Translate → internal/ssa → SSA passes → compile.Lower → asm.Assembler.Build → native code
 ```
 
-The runtime contract above is current. The target-neutral compiler under a JIT implementation package and the target lowering under a native architecture package are planned, not current.
+`compile.Lower(f, machine, params, locals)` lowers an entry-0 function: one virtual register per SSA value by static type, blocks in reverse postorder, block parameters written by a parallel move on each edge (an edge that moves gets a stub of its own; a cycle goes through one scratch register per bank and width). A loop header counts `Budget` down before its first operation that carries a state, so a safepoint there has a complete interpreter state; a header without one is `ErrUnsupported`. `compile.Machine` is the target: it emits rows and reports whether it lowers an operation; it never sees control flow.
+
+ARM64 activation ABI (`internal/jit/arm64`):
+
+- X25 is the frame base, the address of the activation's VM slot 0, loaded from `Context.FB` by the prologue; parameters and locals are `[X25, #8i]`. X16 and X17 are scratch inside one row sequence; all three are reserved from allocation (`Assembler.Reserve`).
+- The prologue pushes `Records[Depth] = {FB}`, increments `Depth`, and clears the locals after the parameters (the callee clears its own locals). Every return branches to one epilogue that decrements `Depth` and pops the frame.
+- `OpReturn` stores its results boxed from slot 0, where the interpreter's `RETURN` leaves them; `OpComplete` stores its operands past the locals.
+- A failed check (division by zero, an `i64` outside the inline range at a store, a spent budget) branches to `BRK` until exits exist.
 
 The rebuild MUST preserve threaded behavior as the semantic baseline. Native execution MUST resume through explicit runtime state rather than duplicate interpreter ownership.
 

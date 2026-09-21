@@ -10,7 +10,7 @@ Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may u
 | Kinds | `instr/kind.go` |
 | Runtime types | `types/type.go` |
 | Host conversion | `interp/codec.go`, `encode.go`, `decode.go` |
-| Planned native representation | JIT rebuild |
+| Native representation | `internal/jit/arm64` |
 
 ## Boxed Layout
 
@@ -88,6 +88,8 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MU
 | `f32` | 32-bit float lane |
 | `f64` | 64-bit float lane |
 | `ref` | boxed 64-bit value |
+
+Native code boxes and unboxes only where a value crosses a VM slot. A narrow or `f32` lane is the slot's low 32 bits; an `i64` sign-extends the 49-bit payload; `f64` and `ref` are the whole word. Storing an `i64` outside the inline range is a failed check: native code never promotes to the heap.
 
 Every interpreter, container, storage, or host boundary `MUST` restore the exact boxed representation and ownership.
 

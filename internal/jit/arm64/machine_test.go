@@ -1,8 +1,9 @@
 package arm64_test
 
 import (
+	"math"
+	"slices"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -11,303 +12,38 @@ import (
 	target "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/arm64"
-	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
 
-type regs struct {
-	values map[ssa.Value]asm.VReg
-	types  map[ssa.Value]ssa.Type
-}
+// regs names value v with the register its type is represented in.
+type regs map[ssa.Value]ssa.Type
 
-func (r regs) Reg(v ssa.Value) asm.VReg  { return r.values[v] }
-func (r regs) Type(v ssa.Value) ssa.Type { return r.types[v] }
+func (r regs) Type(v ssa.Value) ssa.Type { return r[v] }
 
-func vr(id int32, typ asm.RegType, width asm.RegWidth) asm.VReg {
-	return asm.NewVReg(id, typ, width)
-}
-func TestNew(t *testing.T) {
-	m := arm64.New()
-	require.NotNil(t, m)
-	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X25}, m.Reserve())
-}
-
-func TestLower(t *testing.T) {
-	t.Run("float", lowerFloat)
-	t.Run("arithmetic", lowerArithmetic)
-	t.Run("divide", lowerDivide)
-	t.Run("compare", lowerCompare)
-	t.Run("select", lowerSelect)
-	t.Run("branch", lowerBranch)
-	t.Run("table", lowerTable)
-	t.Run("global", lowerGlobal)
-	t.Run("global store", lowerGlobalStore)
-	t.Run("load", lowerLoad)
-	t.Run("store64", lowerStore64)
-	t.Run("reinterpret", lowerReinterpret)
-	t.Run("convert", lowerConvert)
-	t.Run("store", lowerStore)
-	t.Run("prologue", lowerPrologue)
-	t.Run("complete", lowerComplete)
-	t.Run("budget", lowerBudget)
-	t.Run("parameter", lowerParameterReturn)
-	t.Run("execute", lowerExecute)
-	t.Run("floatcompare", lowerFloatCompare)
-}
-
-func lowerFloatCompare(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{
-			1: vr(1, asm.RegTypeFloat, asm.Width64),
-			2: vr(2, asm.RegTypeFloat, asm.Width64),
-			3: vr(3, asm.RegTypeInt, asm.Width32),
-		},
-		types: map[ssa.Value]ssa.Type{1: ssa.TypeF64, 2: ssa.TypeF64, 3: ssa.TypeI1},
+func (r regs) Reg(v ssa.Value) asm.VReg {
+	switch r[v] {
+	case ssa.TypeI64, ssa.TypeRef:
+		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width64)
+	case ssa.TypeF32:
+		return asm.NewVReg(int32(v), asm.RegTypeFloat, asm.Width32)
+	case ssa.TypeF64:
+		return asm.NewVReg(int32(v), asm.RegTypeFloat, asm.Width64)
+	default:
+		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width32)
 	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_NE, Args: []ssa.Value{1, 2}, Results: []ssa.Value{3}}, r))
-	require.Equal(t, []asm.Instruction{target.FCMP(r.values[1], r.values[2]), target.CSET(r.values[3], target.CondNE)}, a.Rows())
 }
 
-func lowerArithmetic(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{
-			1: vr(1, asm.RegTypeInt, asm.Width32),
-			2: vr(2, asm.RegTypeInt, asm.Width32),
-			3: vr(3, asm.RegTypeInt, asm.Width32),
-		},
-		types: map[ssa.Value]ssa.Type{1: ssa.TypeI32, 2: ssa.TypeI32, 3: ssa.TypeI32},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpExec, Code: instr.I32_ADD,
-		Args: []ssa.Value{1, 2}, Results: []ssa.Value{3},
-	}, r))
-	require.Equal(t, []asm.Instruction{target.ADD(r.values[3], r.values[1], r.values[2])}, a.Rows())
+// fail is the label of the first failed check after Prologue binds the end.
+const fail = asm.Label(1)
+
+func TestMachine_Reserve(t *testing.T) {
+	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X25}, arm64.New().Reserve())
 }
 
-func lowerDivide(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{
-			1: vr(1, asm.RegTypeInt, asm.Width32),
-			2: vr(2, asm.RegTypeInt, asm.Width32),
-			3: vr(3, asm.RegTypeInt, asm.Width32),
-		},
-		types: map[ssa.Value]ssa.Type{1: ssa.TypeI32, 2: ssa.TypeI32, 3: ssa.TypeI32},
-	}
+func TestMachine_Prologue(t *testing.T) {
 	a := asm.New(target.New())
-	a.Label()
-	deopt := asm.Label(1)
-	m := arm64.New()
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpExec, Code: instr.I32_DIV_S,
-		Args: []ssa.Value{1, 2}, Results: []ssa.Value{3},
-	}, r))
-	want := []asm.Instruction{target.CBZLabel(r.values[2], deopt), target.SDIV(r.values[3], r.values[1], r.values[2])}
-	require.Equal(t, want, a.Rows())
-}
-
-func lowerCompare(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{
-			1: vr(1, asm.RegTypeInt, asm.Width32),
-			2: vr(2, asm.RegTypeInt, asm.Width32),
-			3: vr(3, asm.RegTypeInt, asm.Width32),
-		},
-		types: map[ssa.Value]ssa.Type{1: ssa.TypeI32, 2: ssa.TypeI32, 3: ssa.TypeI1},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpExec, Code: instr.I32_LT_U,
-		Args: []ssa.Value{1, 2}, Results: []ssa.Value{3},
-	}, r))
-	require.Equal(t, []asm.Instruction{
-		target.CMP(r.values[1], r.values[2]),
-		target.CSET(r.values[3], target.CondCC),
-	}, a.Rows())
-}
-func lowerFloat(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{
-			1: vr(1, asm.RegTypeFloat, asm.Width64),
-			2: vr(2, asm.RegTypeFloat, asm.Width64),
-			3: vr(3, asm.RegTypeFloat, asm.Width64),
-		},
-		types: map[ssa.Value]ssa.Type{1: ssa.TypeF64, 2: ssa.TypeF64, 3: ssa.TypeF64},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpExec, Code: instr.F64_ADD,
-		Args: []ssa.Value{1, 2}, Results: []ssa.Value{3},
-	}, r))
-	require.Equal(t, []asm.Instruction{
-		target.FADD(r.values[3], r.values[1], r.values[2]),
-	}, a.Rows())
-}
-
-func lowerSelect(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{
-			1: vr(1, asm.RegTypeInt, asm.Width32),
-			2: vr(2, asm.RegTypeInt, asm.Width32),
-			3: vr(3, asm.RegTypeInt, asm.Width32),
-			4: vr(4, asm.RegTypeInt, asm.Width32),
-		},
-		types: map[ssa.Value]ssa.Type{
-			1: ssa.TypeI32, 2: ssa.TypeI32, 3: ssa.TypeI32, 4: ssa.TypeI32,
-		},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpExec, Code: instr.SELECT,
-		Args: []ssa.Value{1, 2, 3}, Results: []ssa.Value{4},
-	}, r))
-	require.Equal(t, []asm.Instruction{
-		target.CMPI(r.values[3], 0),
-		target.CSEL(r.values[4], r.values[1], r.values[2], target.CondNE),
-	}, a.Rows())
-}
-func lowerBranch(t *testing.T) {
-	r := regs{values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)}}
-	m := arm64.New()
-	a := asm.New(target.New())
-	trueLabel, falseLabel := a.Label(), a.Label()
-	m.Branch(a, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{1}}, r, []asm.Label{trueLabel, falseLabel})
-	require.Equal(t, []asm.Instruction{
-		target.CBNZLabel(r.values[1], trueLabel),
-		target.BLabel(falseLabel),
-	}, a.Rows())
-}
-
-func lowerTable(t *testing.T) {
-	r := regs{values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)}}
-	m := arm64.New()
-	a := asm.New(target.New())
-	first, second, defaultLabel := a.Label(), a.Label(), a.Label()
-	m.Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, second, defaultLabel})
-	require.Equal(t, []asm.Instruction{
-		target.CMPI(r.values[1], 0),
-		target.BCondLabel(target.OpBEQ, first),
-		target.CMPI(r.values[1], 1),
-		target.BCondLabel(target.OpBEQ, second),
-		target.BLabel(defaultLabel),
-	}, a.Rows())
-}
-
-func lowerGlobal(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI32},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Results: []ssa.Value{1}}, r))
-	base := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
-	require.Equal(t, []asm.Instruction{
-		target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)),
-		target.LDR(r.values[1], base, 16),
-	}, a.Rows())
-}
-
-func lowerGlobalStore(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI32},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Args: []ssa.Value{1}}, r))
-	base := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
-	want := []asm.Instruction{target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)), target.UXTW(target.X16, r.values[1])}
-	want = append(want, target.LDI(target.X17, types.Tag(types.KindI32))...)
-	want = append(want, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, 16))
-	require.Equal(t, want, a.Rows())
-}
-
-func lowerLoad(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width64)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI64},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 2}, Results: []ssa.Value{1},
-	}, r))
-	require.Equal(t, []asm.Instruction{
-		target.LDR(r.values[1], target.X25, 16),
-		target.SBFX(r.values[1], r.values[1], 0, 49),
-	}, a.Rows())
-}
-
-func lowerStore64(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width64)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI64},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Args: []ssa.Value{1}}, r))
-	deopt := asm.Label(0)
-	want := append([]asm.Instruction{}, target.LDI(target.X16, 1<<48)...)
-	want = append(want,
-		target.ADD(target.X17, r.values[1], target.X16),
-		target.LSRI(target.X17, target.X17, 49),
-		target.CBNZLabel(target.X17, deopt),
-		target.ANDI(target.X16, r.values[1], uint64(types.VMask)),
-	)
-	want = append(want, target.LDI(target.X17, types.Tag(types.KindI64))...)
-	want = append(want, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, 8))
-	require.Equal(t, want, a.Rows())
-}
-
-func lowerReinterpret(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width64), 2: vr(2, asm.RegTypeFloat, asm.Width64)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI64, 2: ssa.TypeF64},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_REINTERPRET_F64, Args: []ssa.Value{1}, Results: []ssa.Value{2}}, r))
-	require.Equal(t, []asm.Instruction{target.FMOV(r.values[2], r.values[1])}, a.Rows())
-}
-
-func lowerConvert(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32), 2: vr(2, asm.RegTypeFloat, asm.Width64)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI32, 2: ssa.TypeF64},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_TO_F64_S, Args: []ssa.Value{1}, Results: []ssa.Value{2}}, r))
-	require.Equal(t, []asm.Instruction{target.SCVTF(r.values[2], r.values[1])}, a.Rows())
-}
-
-func lowerStore(t *testing.T) {
-	r := regs{
-		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)},
-		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI32},
-	}
-	m := arm64.New()
-	a := asm.New(target.New())
-	require.True(t, m.Lower(a, ssa.Operation{
-		Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 2}, Args: []ssa.Value{1},
-	}, r))
-	want := []asm.Instruction{target.UXTW(target.X16, r.values[1])}
-	want = append(want, target.LDI(target.X17, types.Tag(types.KindI32))...)
-	want = append(want, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, 16))
-	require.Equal(t, want, a.Rows())
-}
-func lowerPrologue(t *testing.T) {
-	m := arm64.New()
-	a := asm.New(target.New())
-	m.Prologue(a, 3, 1)
+	arm64.New().Prologue(a, 3, 1)
 	require.Equal(t, []asm.Instruction{
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
@@ -325,83 +61,398 @@ func lowerPrologue(t *testing.T) {
 	}, a.Rows())
 }
 
-func lowerComplete(t *testing.T) {
-	m := arm64.New()
-	a := asm.New(target.New())
-	m.Prologue(a, 2, 2)
-	start := len(a.Rows())
-	src := vr(1, asm.RegTypeInt, asm.Width32)
-	m.Complete(a, []asm.VReg{src}, []ssa.Type{ssa.TypeI32})
-	want := []asm.Instruction{target.UXTW(target.X16, src)}
-	want = append(want, target.LDI(target.X17, types.Tag(types.KindI32))...)
-	want = append(want, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, 16), target.BLabel(0))
-	require.Equal(t, want, a.Rows()[start:])
+func TestMachine_Epilogue(t *testing.T) {
+	pop := []asm.Instruction{
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		target.SUBI(target.X16, target.X16, 1),
+		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		{Op: uint16(target.OpADDI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
+		target.LDR(target.LR, target.SP, 8),
+		target.ADDI(target.SP, target.SP, 16),
+		target.RET(),
+	}
+
+	t.Run("pops the record and the frame", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, 0, 0)
+		start := len(a.Rows())
+		m.Epilogue(a)
+		require.Equal(t, pop, a.Rows()[start:])
+	})
+
+	t.Run("halts a failed check after the return", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, 0, 0)
+		m.Budget(a)
+		start := len(a.Rows())
+		m.Epilogue(a)
+		require.Equal(t, append(slices.Clone(pop), target.BRK(0)), a.Rows()[start:])
+	})
 }
 
-func lowerBudget(t *testing.T) {
-	m := arm64.New()
-	a := asm.New(target.New())
-	label := a.Label()
-	m.Budget(a, label)
+func TestMachine_Lower(t *testing.T) {
+	type emit2 = func(dst, src asm.Reg) asm.Instruction
+	type emit3 = func(dst, src1, src2 asm.Reg) asm.Instruction
+	type test struct {
+		name  string
+		regs  regs
+		op    ssa.Operation
+		rows  []asm.Instruction
+		lower bool
+	}
+	i32, i64, f32, f64 := ssa.TypeI32, ssa.TypeI64, ssa.TypeF32, ssa.TypeF64
+	reg := func(typ ssa.Type, v ssa.Value) asm.VReg { return regs{v: typ}.Reg(v) }
+	exec := func(code instr.Opcode, args ...ssa.Value) ssa.Operation {
+		return ssa.Operation{Op: ssa.OpExec, Code: code, Args: args, Results: []ssa.Value{ssa.Value(len(args) + 1)}}
+	}
+	boxed := func(k types.Kind, rows ...asm.Instruction) []asm.Instruction {
+		rows = append(rows, target.LDI(target.X17, types.Tag(k))...)
+		return append(rows, target.ORR(target.X16, target.X16, target.X17))
+	}
+	local := func(i int) ssa.Slot { return ssa.Slot{Space: ssa.SpaceLocal, Index: i} }
+	globals := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
+
+	var tests []test
+	for _, c := range []struct {
+		code instr.Opcode
+		typ  ssa.Type
+		emit emit3
+	}{
+		{instr.I32_ADD, i32, target.ADD}, {instr.I32_SUB, i32, target.SUB}, {instr.I32_MUL, i32, target.MUL},
+		{instr.I32_AND, i32, target.AND}, {instr.I32_OR, i32, target.ORR}, {instr.I32_XOR, i32, target.EOR},
+		{instr.I32_SHL, i32, target.LSL}, {instr.I32_SHR_S, i32, target.ASR}, {instr.I32_SHR_U, i32, target.LSR},
+		{instr.I64_ADD, i64, target.ADD}, {instr.I64_SUB, i64, target.SUB}, {instr.I64_MUL, i64, target.MUL},
+		{instr.I64_AND, i64, target.AND}, {instr.I64_OR, i64, target.ORR}, {instr.I64_XOR, i64, target.EOR},
+		{instr.I64_SHL, i64, target.LSL}, {instr.I64_SHR_S, i64, target.ASR}, {instr.I64_SHR_U, i64, target.LSR},
+		{instr.F32_ADD, f32, target.FADD}, {instr.F32_SUB, f32, target.FSUB}, {instr.F32_MUL, f32, target.FMUL},
+		{instr.F32_DIV, f32, target.FDIV}, {instr.F32_MIN, f32, target.FMIN}, {instr.F32_MAX, f32, target.FMAX},
+		{instr.F64_ADD, f64, target.FADD}, {instr.F64_SUB, f64, target.FSUB}, {instr.F64_MUL, f64, target.FMUL},
+		{instr.F64_DIV, f64, target.FDIV}, {instr.F64_MIN, f64, target.FMIN}, {instr.F64_MAX, f64, target.FMAX},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ, 3: c.typ},
+			op:   exec(c.code, 1, 2),
+			rows: []asm.Instruction{c.emit(reg(c.typ, 3), reg(c.typ, 1), reg(c.typ, 2))}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code instr.Opcode
+		typ  ssa.Type
+		cond uint8
+	}{
+		{instr.I32_EQ, i32, target.CondEQ}, {instr.I32_NE, i32, target.CondNE},
+		{instr.I32_LT_S, i32, target.CondLT}, {instr.I32_LT_U, i32, target.CondCC},
+		{instr.I32_GT_S, i32, target.CondGT}, {instr.I32_GT_U, i32, target.CondHI},
+		{instr.I32_LE_S, i32, target.CondLE}, {instr.I32_LE_U, i32, target.CondLS},
+		{instr.I32_GE_S, i32, target.CondGE}, {instr.I32_GE_U, i32, target.CondCS},
+		{instr.I64_EQ, i64, target.CondEQ}, {instr.I64_NE, i64, target.CondNE},
+		{instr.I64_LT_S, i64, target.CondLT}, {instr.I64_LT_U, i64, target.CondCC},
+		{instr.I64_GT_S, i64, target.CondGT}, {instr.I64_GT_U, i64, target.CondHI},
+		{instr.I64_LE_S, i64, target.CondLE}, {instr.I64_LE_U, i64, target.CondLS},
+		{instr.I64_GE_S, i64, target.CondGE}, {instr.I64_GE_U, i64, target.CondCS},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ, 3: ssa.TypeI1},
+			op:   exec(c.code, 1, 2),
+			rows: []asm.Instruction{target.CMP(reg(c.typ, 1), reg(c.typ, 2)), target.CSET(reg(ssa.TypeI1, 3), c.cond)}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code instr.Opcode
+		typ  ssa.Type
+		cond uint8
+	}{
+		{instr.F32_EQ, f32, target.CondEQ}, {instr.F32_NE, f32, target.CondNE}, {instr.F32_LT, f32, target.CondMI},
+		{instr.F32_GT, f32, target.CondGT}, {instr.F32_LE, f32, target.CondLS}, {instr.F32_GE, f32, target.CondGE},
+		{instr.F64_EQ, f64, target.CondEQ}, {instr.F64_NE, f64, target.CondNE}, {instr.F64_LT, f64, target.CondMI},
+		{instr.F64_GT, f64, target.CondGT}, {instr.F64_LE, f64, target.CondLS}, {instr.F64_GE, f64, target.CondGE},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ, 3: ssa.TypeI1},
+			op:   exec(c.code, 1, 2),
+			rows: []asm.Instruction{target.FCMP(reg(c.typ, 1), reg(c.typ, 2)), target.CSET(reg(ssa.TypeI1, 3), c.cond)}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code     instr.Opcode
+		from, to ssa.Type
+		emit     emit2
+	}{
+		{instr.I32_EXTEND8_S, i32, i32, target.SXTB}, {instr.I32_EXTEND16_S, i32, i32, target.SXTH},
+		{instr.I64_EXTEND8_S, i64, i64, target.SXTB}, {instr.I64_EXTEND16_S, i64, i64, target.SXTH},
+		{instr.I64_EXTEND32_S, i64, i64, target.SXTW},
+		{instr.F32_ABS, f32, f32, target.FABS}, {instr.F32_NEG, f32, f32, target.FNEG}, {instr.F32_SQRT, f32, f32, target.FSQRT},
+		{instr.F32_CEIL, f32, f32, target.FRINTP}, {instr.F32_FLOOR, f32, f32, target.FRINTM},
+		{instr.F32_TRUNC, f32, f32, target.FRINTZ}, {instr.F32_NEAREST, f32, f32, target.FRINTN},
+		{instr.F64_ABS, f64, f64, target.FABS}, {instr.F64_NEG, f64, f64, target.FNEG}, {instr.F64_SQRT, f64, f64, target.FSQRT},
+		{instr.F64_CEIL, f64, f64, target.FRINTP}, {instr.F64_FLOOR, f64, f64, target.FRINTM},
+		{instr.F64_TRUNC, f64, f64, target.FRINTZ}, {instr.F64_NEAREST, f64, f64, target.FRINTN},
+		{instr.I32_TO_I64_S, i32, i64, target.SXTW}, {instr.I32_TO_I64_U, i32, i64, target.UXTW},
+		{instr.I64_TO_I32, i64, i32, target.MOVW},
+		{instr.I32_TO_F32_S, i32, f32, target.SCVTF}, {instr.I32_TO_F32_U, i32, f32, target.UCVTF},
+		{instr.I32_TO_F64_S, i32, f64, target.SCVTF}, {instr.I32_TO_F64_U, i32, f64, target.UCVTF},
+		{instr.I64_TO_F32_S, i64, f32, target.SCVTF}, {instr.I64_TO_F32_U, i64, f32, target.UCVTF},
+		{instr.I64_TO_F64_S, i64, f64, target.SCVTF}, {instr.I64_TO_F64_U, i64, f64, target.UCVTF},
+		{instr.F32_TO_I32_S, f32, i32, target.FCVTZS}, {instr.F32_TO_I32_U, f32, i32, target.FCVTZU},
+		{instr.F32_TO_I64_S, f32, i64, target.FCVTZS}, {instr.F32_TO_I64_U, f32, i64, target.FCVTZU},
+		{instr.F64_TO_I32_S, f64, i32, target.FCVTZS}, {instr.F64_TO_I32_U, f64, i32, target.FCVTZU},
+		{instr.F64_TO_I64_S, f64, i64, target.FCVTZS}, {instr.F64_TO_I64_U, f64, i64, target.FCVTZU},
+		{instr.F32_TO_F64, f32, f64, target.FCVT}, {instr.F64_TO_F32, f64, f32, target.FCVT},
+		{instr.I32_REINTERPRET_F32, f32, i32, target.FMOV}, {instr.F32_REINTERPRET_I32, i32, f32, target.FMOV},
+		{instr.I64_REINTERPRET_F64, f64, i64, target.FMOV}, {instr.F64_REINTERPRET_I64, i64, f64, target.FMOV},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.from, 2: c.to},
+			op:   exec(c.code, 1),
+			rows: []asm.Instruction{c.emit(reg(c.to, 2), reg(c.from, 1))}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code instr.Opcode
+		typ  ssa.Type
+	}{{instr.I32_EQZ, i32}, {instr.I64_EQZ, i64}} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: ssa.TypeI1},
+			op:   exec(c.code, 1),
+			rows: []asm.Instruction{target.CMPI(reg(c.typ, 1), 0), target.CSET(reg(ssa.TypeI1, 2), target.CondEQ)}, lower: true,
+		})
+	}
+
+	x := func(v ssa.Value) asm.VReg { return reg(i64, v) }
+	w := func(v ssa.Value) asm.VReg { return reg(i32, v) }
+	tests = append(tests, []test{
+		{
+			name: "i64.div_s fails on a zero divisor",
+			regs: regs{1: i64, 2: i64, 3: i64},
+			op:   exec(instr.I64_DIV_S, 1, 2),
+			rows: []asm.Instruction{target.CBZLabel(x(2), fail), target.SDIV(x(3), x(1), x(2))}, lower: true,
+		},
+		{
+			name: "i32.div_u fails on a zero divisor",
+			regs: regs{1: i32, 2: i32, 3: i32},
+			op:   exec(instr.I32_DIV_U, 1, 2),
+			rows: []asm.Instruction{target.CBZLabel(w(2), fail), target.UDIV(w(3), w(1), w(2))}, lower: true,
+		},
+		{
+			name: "i32.rem_u subtracts the quotient",
+			regs: regs{1: i32, 2: i32, 3: i32},
+			op:   exec(instr.I32_REM_U, 1, 2),
+			rows: []asm.Instruction{
+				target.CBZLabel(w(2), fail), target.UDIV(target.W16, w(1), w(2)), target.MSUB(w(3), target.W16, w(2), w(1)),
+			}, lower: true,
+		},
+		{
+			name: "i64.rem_s subtracts the quotient",
+			regs: regs{1: i64, 2: i64, 3: i64},
+			op:   exec(instr.I64_REM_S, 1, 2),
+			rows: []asm.Instruction{
+				target.CBZLabel(x(2), fail), target.SDIV(target.X16, x(1), x(2)), target.MSUB(x(3), target.X16, x(2), x(1)),
+			}, lower: true,
+		},
+		{
+			name: "select takes the first operand on a nonzero condition",
+			regs: regs{1: i64, 2: i64, 3: i32, 4: i64},
+			op:   exec(instr.SELECT, 1, 2, 3),
+			rows: []asm.Instruction{target.CMPI(w(3), 0), target.CSEL(x(4), x(1), x(2), target.CondNE)}, lower: true,
+		},
+		{
+			name: "select chooses between float registers",
+			regs: regs{1: f64, 2: f64, 3: i32, 4: f64},
+			op:   exec(instr.SELECT, 1, 2, 3),
+			rows: []asm.Instruction{target.CMPI(w(3), 0), target.FCSEL(reg(f64, 4), reg(f64, 1), reg(f64, 2), target.CondNE)}, lower: true,
+		},
+		{
+			name: "const i1 is its truth value",
+			regs: regs{1: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxI1(true), Results: []ssa.Value{1}},
+			rows: target.LDI(w(1), 1), lower: true,
+		},
+		{
+			name: "const i8 is its sign-extended lane",
+			regs: regs{1: ssa.TypeI8},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxI8(-1), Results: []ssa.Value{1}},
+			rows: target.LDI(w(1), 0xffffffff), lower: true,
+		},
+		{
+			name: "const i64 is its value",
+			regs: regs{1: i64},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(-3), Results: []ssa.Value{1}},
+			rows: target.LDI(x(1), uint64(0xfffffffffffffffd)), lower: true,
+		},
+		{
+			name: "const f32 moves its bits through scratch",
+			regs: regs{1: f32},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxF32(1.5), Results: []ssa.Value{1}},
+			rows: append(target.LDI(target.X16, uint64(math.Float32bits(1.5))), target.FMOV(reg(f32, 1), target.W16)), lower: true,
+		},
+		{
+			name: "const f64 moves its bits through scratch",
+			regs: regs{1: f64},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxF64(1.5), Results: []ssa.Value{1}},
+			rows: append(target.LDI(target.X16, math.Float64bits(1.5)), target.FMOV(reg(f64, 1), target.X16)), lower: true,
+		},
+		{
+			name: "const ref is its boxed word",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(4), Results: []ssa.Value{1}},
+			rows: target.LDI(x(1), uint64(types.BoxRef(4))), lower: true,
+		},
+		{
+			name: "load i64 sign-extends its payload",
+			regs: regs{1: i64},
+			op:   ssa.Operation{Op: ssa.OpLoad, Slot: local(2), Results: []ssa.Value{1}},
+			rows: []asm.Instruction{target.LDR(x(1), target.X25, 16), target.SBFX(x(1), x(1), 0, 49)}, lower: true,
+		},
+		{
+			name: "load f32 reads the low word",
+			regs: regs{1: f32},
+			op:   ssa.Operation{Op: ssa.OpLoad, Slot: local(2), Results: []ssa.Value{1}},
+			rows: []asm.Instruction{target.LDR(reg(f32, 1), target.X25, 16)}, lower: true,
+		},
+		{
+			name: "load ref keeps its boxed word",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpLoad, Slot: local(2), Results: []ssa.Value{1}},
+			rows: []asm.Instruction{target.LDR(x(1), target.X25, 16)}, lower: true,
+		},
+		{
+			name: "load global addresses the globals base",
+			regs: regs{1: i32},
+			op:   ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Results: []ssa.Value{1}},
+			rows: []asm.Instruction{target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals)), target.LDR(w(1), globals, 16)}, lower: true,
+		},
+		{
+			name: "store i8 tags its lane",
+			regs: regs{1: ssa.TypeI8},
+			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(2), Args: []ssa.Value{1}},
+			rows: append(boxed(types.KindI8, target.UXTW(target.X16, w(1))), target.STR(target.X16, target.X25, 16)), lower: true,
+		},
+		{
+			name: "store i64 fails outside the inline range",
+			regs: regs{1: i64},
+			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{1}},
+			rows: append(boxed(types.KindI64, append(target.LDI(target.X16, 1<<48),
+				target.ADD(target.X17, x(1), target.X16),
+				target.LSRI(target.X17, target.X17, 49),
+				target.CBNZLabel(target.X17, fail),
+				target.ANDI(target.X16, x(1), types.VMask),
+			)...), target.STR(target.X16, target.X25, 8)), lower: true,
+		},
+		{
+			name: "store f32 tags its bits",
+			regs: regs{1: f32},
+			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{1}},
+			rows: append(boxed(types.KindF32, target.FMOV(target.W16, reg(f32, 1))), target.STR(target.X16, target.X25, 8)), lower: true,
+		},
+		{
+			name: "store f64 writes its bits",
+			regs: regs{1: f64},
+			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{1}},
+			rows: []asm.Instruction{target.STR(reg(f64, 1), target.X25, 8)}, lower: true,
+		},
+		{
+			name: "store global addresses the globals base",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Args: []ssa.Value{1}},
+			rows: []asm.Instruction{target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals)), target.STR(x(1), globals, 8)}, lower: true,
+		},
+		{
+			name: "declines an upvalue slot",
+			regs: regs{1: i32},
+			op:   ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval}, Results: []ssa.Value{1}},
+		},
+		{
+			name: "declines an opcode without a lowering",
+			regs: regs{1: ssa.TypeRef, 2: i32, 3: ssa.TypeRef},
+			op:   exec(instr.MAP_GET, 1, 2),
+		},
+	}...)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, a := arm64.New(), asm.New(target.New())
+			m.Prologue(a, 0, 0)
+			start := len(a.Rows())
+			require.Equal(t, tt.lower, m.Lower(a, tt.op, tt.regs))
+			if tt.lower {
+				require.Equal(t, tt.rows, a.Rows()[start:])
+			}
+		})
+	}
+}
+
+func TestMachine_Branch(t *testing.T) {
+	r := regs{1: ssa.TypeI32}
+	index := r.Reg(1)
+
+	t.Run("takes the first label on nonzero", func(t *testing.T) {
+		a := asm.New(target.New())
+		yes, no := a.Label(), a.Label()
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{1}}, r, []asm.Label{yes, no})
+		require.Equal(t, []asm.Instruction{target.CBNZLabel(index, yes), target.BLabel(no)}, a.Rows())
+	})
+
+	t.Run("takes the last label for an index out of range", func(t *testing.T) {
+		a := asm.New(target.New())
+		first, second, rest := a.Label(), a.Label(), a.Label()
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, second, rest})
+		require.Equal(t, []asm.Instruction{
+			target.CMPI(index, 0), target.BCondLabel(target.OpBEQ, first),
+			target.CMPI(index, 1), target.BCondLabel(target.OpBEQ, second),
+			target.BLabel(rest),
+		}, a.Rows())
+	})
+}
+
+func TestMachine_Return(t *testing.T) {
+	r := regs{1: ssa.TypeI32}
+	rows := func(slot int16) []asm.Instruction {
+		rows := []asm.Instruction{target.UXTW(target.X16, r.Reg(1))}
+		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
+		return append(rows, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, slot), target.BLabel(0))
+	}
+
+	t.Run("stores results from slot zero", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, 2, 0)
+		start := len(a.Rows())
+		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
+		require.Equal(t, rows(0), a.Rows()[start:])
+	})
+
+	t.Run("stores completed operands past the locals", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, 2, 0)
+		start := len(a.Rows())
+		m.Return(a, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{1}}, r)
+		require.Equal(t, rows(16), a.Rows()[start:])
+	})
+}
+
+func TestMachine_Budget(t *testing.T) {
+	m, a := arm64.New(), asm.New(target.New())
+	m.Prologue(a, 0, 0)
+	start := len(a.Rows())
+	m.Budget(a)
 	require.Equal(t, []asm.Instruction{
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
 		target.SUBSI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
-		target.BCondLabel(target.OpBLE, label),
-	}, a.Rows())
-}
-func lowerParameterReturn(t *testing.T) {
-	b := ssa.New("identity")
-	entry := b.Block()
-	param := b.Param(entry, ssa.TypeI8)
-	b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
-	f := b.Build()
-	code, err := compile.Lower(f, arm64.New(), 1, 0)
-	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	address, err := asm.Link(buffer, code)
-	require.NoError(t, err)
-	stack := []types.Boxed{types.BoxI8(-1)}
-	ctx, err := jit.NewContext(4096)
-	require.NoError(t, err)
-	ctx.FB = uintptr(unsafe.Pointer(&stack[0]))
-	require.Equal(t, jit.TrapReturn, jit.Enter(address, ctx))
-	require.Equal(t, types.BoxI8(-1), stack[0])
-	require.Zero(t, ctx.Depth)
+		target.BCondLabel(target.OpBLE, fail),
+	}, a.Rows()[start:])
 }
 
-func lowerExecute(t *testing.T) {
-	b := ssa.New("muladd")
-	entry := b.Block()
-	state := b.Value(ssa.TypeState)
-	a := b.Param(entry, ssa.TypeI32)
-	c := b.Param(entry, ssa.TypeI32)
-	product := b.Value(ssa.TypeI32)
-	one := b.Value(ssa.TypeI32)
-	result := b.Value(ssa.TypeI32)
-	b.Add(entry, ssa.Operation{Op: ssa.OpState, State: state})
-	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_MUL, Args: []ssa.Value{a, c}, Results: []ssa.Value{product}, State: state})
-	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
-	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{product, one}, Results: []ssa.Value{result}, State: state})
-	b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
-	f := b.Build()
-
-	code, err := compile.Lower(f, arm64.New(), 2, 0)
-	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	address, err := asm.Link(buffer, code)
-	require.NoError(t, err)
-
-	stack := []types.Boxed{types.BoxI32(6), types.BoxI32(7)}
-	ctx, err := jit.NewContext(4096)
-	require.NoError(t, err)
-	ctx.FB = uintptr(unsafe.Pointer(&stack[0]))
-
-	require.Equal(t, jit.TrapReturn, jit.Enter(address, ctx))
-	require.Equal(t, types.BoxI32(43), stack[0])
-	require.Zero(t, ctx.Depth)
+func TestMachine_Move(t *testing.T) {
+	a := asm.New(target.New())
+	m := arm64.New()
+	w1, w2 := asm.NewVReg(1, asm.RegTypeInt, asm.Width32), asm.NewVReg(2, asm.RegTypeInt, asm.Width32)
+	d1, d2 := asm.NewVReg(3, asm.RegTypeFloat, asm.Width64), asm.NewVReg(4, asm.RegTypeFloat, asm.Width64)
+	m.Move(a, w1, w2)
+	m.Move(a, d1, d2)
+	require.Equal(t, []asm.Instruction{target.MOV(w1, w2), target.FMOV(d1, d2)}, a.Rows())
 }

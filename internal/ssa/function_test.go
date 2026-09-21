@@ -116,3 +116,18 @@ func TestFunction_Type(t *testing.T) {
 		require.Equal(t, "invalid", f.Type(ssa.Value(99)).String())
 	})
 }
+
+func TestFunction_Values(t *testing.T) {
+	t.Run("bounds every value reserved", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		b.Param(entry, ssa.TypeI32)
+		v := b.Value(ssa.TypeF64)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		require.Equal(t, int(v)+1, b.Build().Values())
+	})
+
+	t.Run("bounds no value before one is reserved", func(t *testing.T) {
+		require.Equal(t, int(ssa.NoValue)+1, ssa.New("f").Build().Values())
+	})
+}
