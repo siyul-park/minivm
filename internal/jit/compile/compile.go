@@ -160,7 +160,7 @@ func (l *lowering) function(params, locals int) error {
 	}
 	for _, s := range l.stubs {
 		l.a.Bind(s.label)
-		l.m.Exit(l.a, s.id, l.exits[s.id].Kind, l.uses(s.id))
+		l.m.Exit(l.a, s.id, l.exits[s.id].Kind, l.live(s.id))
 		if l.exits[s.id].Kind != jit.ExitDeopt {
 			l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{s.resume})
 		}
@@ -170,8 +170,10 @@ func (l *lowering) function(params, locals int) error {
 }
 
 func (l *lowering) operation(op ssa.Operation) error {
-	if err := l.check(op.Args, op.Op == ssa.OpGuardKind); err != nil {
-		return err
+	if op.Op != ssa.OpGuardKind {
+		if err := l.validate(op.Args); err != nil {
+			return err
+		}
 	}
 	l.begin(op)
 	defer l.end()
@@ -197,7 +199,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 			results[i] = l.Reg(v)
 		}
 		id := l.exit(jit.ExitBridge)
-		l.m.Exit(l.a, id, jit.ExitBridge, l.uses(id))
+		l.m.Exit(l.a, id, jit.ExitBridge, l.live(id))
 		l.m.Results(l.a, results)
 		return l.err
 	case ssa.OpConst, ssa.OpStore, ssa.OpRetain, ssa.OpRelease:
@@ -217,7 +219,7 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	for _, e := range t.Edges {
 		args = append(args, e.Args...)
 	}
-	if err := l.check(append(args, t.Args...), false); err != nil {
+	if err := l.validate(append(args, t.Args...)); err != nil {
 		return err
 	}
 	l.begin(ssa.Operation{State: t.State})
@@ -228,7 +230,7 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 		return l.err
 	case ssa.OpExit:
 		id := l.exit(jit.ExitDeopt)
-		l.m.Exit(l.a, id, jit.ExitDeopt, l.uses(id))
+		l.m.Exit(l.a, id, jit.ExitDeopt, l.live(id))
 		return l.err
 	case ssa.OpJump, ssa.OpBranch, ssa.OpTable:
 	default:
@@ -266,11 +268,10 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	return nil
 }
 
-// check rejects a raw i64 slot word used anywhere but as the argument of its
-// kind guard: only the guard knows the word is an inline integer.
-func (l *lowering) check(args []ssa.Value, guard bool) error {
+// validate rejects a raw i64 slot word outside its kind guard.
+func (l *lowering) validate(args []ssa.Value) error {
 	for _, v := range args {
-		if l.raw[v] && !guard {
+		if l.raw[v] {
 			return fmt.Errorf("%w: unguarded i64 slot word v%d", ErrUnsupported, v)
 		}
 	}
@@ -376,7 +377,7 @@ func (l *lowering) place(id int, to *jit.Value, v ssa.Value) {
 	l.places[id] = append(l.places[id], place{to: to, reg: l.Reg(v)})
 }
 
-func (l *lowering) uses(id int) []asm.VReg {
+func (l *lowering) live(id int) []asm.VReg {
 	var regs []asm.VReg
 	for _, p := range l.places[id] {
 		if !slices.Contains(regs, p.reg) {

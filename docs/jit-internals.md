@@ -52,7 +52,7 @@ Instruction-cache maintenance for published code is user-mode ARM64 (`DC CVAU`/`
 bytecode → transform.Translate → internal/ssa → SSA passes → compile.Lower → asm.Assembler.Build → native code
 ```
 
-`compile.Lower(f, machine, params, locals)` lowers an entry-0 function: one virtual register per SSA value by static type, blocks in reverse postorder, block parameters written by a parallel move on each edge (an edge that moves gets a stub of its own; a cycle goes through one scratch register per bank and width). A loop header counts `Budget` down before its first operation that carries a state, so a safepoint there has a complete interpreter state; a header without one is `ErrUnsupported`. `compile.Machine` is the target: it emits rows and reports whether it lowers an operation; it never sees control flow.
+`compile.Lower(f, machine, params, locals)` lowers an entry-0 function: one virtual register per SSA value by static type, blocks in reverse postorder, block parameters written by a parallel move on each edge (an edge that moves gets a stub of its own; a cycle goes through one scratch register per bank and width). A loop header counts `Budget` down before its first operation that carries a state, so a safepoint there has a complete interpreter state; a header without one is `ErrUnsupported`. `compile.Machine` is the target: it emits rows for the operations and terminators `compile` walks; it does not own SSA control flow.
 
 ARM64 activation ABI (`internal/jit/arm64`):
 
