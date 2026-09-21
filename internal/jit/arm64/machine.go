@@ -18,21 +18,16 @@ const (
 )
 
 type machine struct {
-	tempID    int32
-	end       asm.Label
-	deopt     asm.Label
-	deoptSet  bool
-	types     map[int32]ssa.Type
-	prologued bool
+	tempID   int32
+	slots    int
+	end      asm.Label
+	deopt    asm.Label
+	deoptSet bool
 }
 
-type typed interface {
-	compile.Regs
-	Type(ssa.Value) ssa.Type
-}
-
-func New() compile.Machine {
-	return &machine{types: make(map[int32]ssa.Type), tempID: -1}
+// New returns the ARM64 lowering machine.
+func New() *machine {
+	return &machine{tempID: -1}
 }
 
 func (m *machine) Arch() asm.Arch { return target.New() }
@@ -40,6 +35,7 @@ func (m *machine) Arch() asm.Arch { return target.New() }
 func (m *machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X17, target.X25} }
 
 func (m *machine) Prologue(a *asm.Assembler, slots, params int) {
+	m.slots = slots
 	m.end = a.Label()
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -56,7 +52,6 @@ func (m *machine) Prologue(a *asm.Assembler, slots, params int) {
 	for i := params; i < slots; i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 	}
-	m.prologued = true
 }
 
 func (m *machine) record(a *asm.Assembler) {
@@ -72,9 +67,6 @@ func (m *machine) record(a *asm.Assembler) {
 }
 
 func (m *machine) Epilogue(a *asm.Assembler) {
-	if !m.prologued {
-		return
-	}
 	a.Bind(m.end)
 	a.Emit(
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
@@ -99,11 +91,6 @@ func (m *machine) Move(a *asm.Assembler, dst, src asm.VReg) {
 	a.Emit(target.MOV(dst, src))
 }
 func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
-	if t, ok := r.(typed); ok {
-		for _, v := range op.Results {
-			m.types[int32(v)] = t.Type(v)
-		}
-	}
 	switch op.Op {
 	case ssa.OpConst:
 		return m.constant(a, op, r)
@@ -133,28 +120,27 @@ func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, r compile.Regs, lab
 	}
 }
 
-func (m *machine) Return(a *asm.Assembler, args []asm.VReg) {
-	for i, arg := range args {
-		m.boxReturn(a, arg, i)
-	}
+func (m *machine) Return(a *asm.Assembler, args []asm.VReg, types []ssa.Type) {
+	m.write(a, args, types, 0)
 	a.Emit(target.BLabel(m.end))
 }
 
-func (m *machine) boxReturn(a *asm.Assembler, src asm.VReg, slot int) {
-	kind := types.KindI32
-	if t, ok := m.types[src.ID()]; ok {
-		kind = tKind(t)
-	} else {
-		kind = kindFromReg(src)
+func (m *machine) Complete(a *asm.Assembler, args []asm.VReg, types []ssa.Type) {
+	m.write(a, args, types, m.slots)
+	a.Emit(target.BLabel(m.end))
+}
+
+func (m *machine) write(a *asm.Assembler, args []asm.VReg, types []ssa.Type, base int) {
+	for i, src := range args {
+		m.box(a, src, kind(types[i]), target.X16)
+		a.Emit(target.STR(target.X16, target.X25, int16((base+i)*8)))
 	}
-	m.box(a, src, kind, target.X16)
-	a.Emit(target.STR(target.X16, target.X25, int16(slot*8)))
 }
 
 func (m *machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	a.Emit(
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
-		target.SUBI(target.X16, target.X16, 1),
+		target.SUBSI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
 		target.BCondLabel(target.OpBLE, safepoint),
 	)
@@ -174,7 +160,11 @@ func (m *machine) constant(a *asm.Assembler, op ssa.Operation, r compile.Regs) b
 	dst := r.Reg(op.Results[0])
 	switch op.Const.Kind() {
 	case types.KindI1:
-		a.Emit(target.LDI(dst, boolValue(op.Const))...)
+		value := uint64(0)
+		if op.Const.Bool() {
+			value = 1
+		}
+		a.Emit(target.LDI(dst, value)...)
 	case types.KindI8, types.KindI32:
 		a.Emit(target.LDI(dst, uint64(uint32(op.Const.I32())))...)
 	case types.KindI64:
@@ -198,11 +188,11 @@ func (m *machine) load(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool 
 		return false
 	}
 	dst := r.Reg(op.Results[0])
-	base, ok := m.slotBase(a, op.Slot)
+	base, ok := m.base(a, op.Slot)
 	if !ok {
 		return false
 	}
-	kind := m.valueType(r, op.Results[0], dst)
+	kind := kind(r.Type(op.Results[0]))
 	off := int16(op.Slot.Index * 8)
 	switch kind {
 	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
@@ -219,8 +209,8 @@ func (m *machine) store(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool
 		return false
 	}
 	src := r.Reg(op.Args[0])
-	kind := m.valueType(r, op.Args[0], src)
-	base, ok := m.slotBase(a, op.Slot)
+	kind := kind(r.Type(op.Args[0]))
+	base, ok := m.base(a, op.Slot)
 	if !ok {
 		return false
 	}
@@ -241,7 +231,7 @@ func (m *machine) store(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool
 		a.Emit(target.LDI(target.X17, types.Tag(types.KindI32))...)
 		a.Emit(target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, off))
 	case types.KindI64:
-		return m.store64(a, src, base, off)
+		return m.wide(a, src, base, off)
 	case types.KindF32:
 		a.Emit(target.FMOV(target.X16, src))
 		a.Emit(target.ANDI(target.X16, target.X16, mask32))
@@ -255,8 +245,8 @@ func (m *machine) store(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool
 	return true
 }
 
-func (m *machine) slotBase(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
-	if slot.Index < 0 || slot.Index > 511 {
+func (m *machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
+	if slot.Index < 0 || slot.Index > 4095 {
 		return asm.PReg{}, false
 	}
 	switch slot.Space {
@@ -274,7 +264,7 @@ func (m *machine) slotBase(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 	}
 }
 
-func (m *machine) store64(a *asm.Assembler, src asm.VReg, base asm.Reg, off int16) bool {
+func (m *machine) wide(a *asm.Assembler, src asm.VReg, base asm.Reg, off int16) bool {
 	label := m.deoptLabel(a)
 	a.Emit(target.LDI(target.X16, 1<<48)...)
 	a.Emit(target.ADD(target.X17, src, target.X16))
@@ -308,29 +298,29 @@ func (m *machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool 
 	case instr.I32_SHR_U:
 		return m.binary(a, op, r, target.LSR)
 	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U:
-		return m.divide(a, op, r, true)
+		return m.divide(a, op, r, asm.Width32)
 	case instr.I32_EQZ:
-		return m.eqz(a, op, r, true)
+		return m.eqz(a, op, r, asm.Width32)
 	case instr.I32_EQ:
-		return m.compare(a, op, r, target.CondEQ, true)
+		return m.compare(a, op, r, target.CondEQ, asm.Width32)
 	case instr.I32_NE:
-		return m.compare(a, op, r, target.CondNE, true)
+		return m.compare(a, op, r, target.CondNE, asm.Width32)
 	case instr.I32_LT_S:
-		return m.compare(a, op, r, target.CondLT, true)
+		return m.compare(a, op, r, target.CondLT, asm.Width32)
 	case instr.I32_LT_U:
-		return m.compare(a, op, r, target.CondCC, true)
+		return m.compare(a, op, r, target.CondCC, asm.Width32)
 	case instr.I32_GT_S:
-		return m.compare(a, op, r, target.CondGT, true)
+		return m.compare(a, op, r, target.CondGT, asm.Width32)
 	case instr.I32_GT_U:
-		return m.compare(a, op, r, target.CondHI, true)
+		return m.compare(a, op, r, target.CondHI, asm.Width32)
 	case instr.I32_LE_S:
-		return m.compare(a, op, r, target.CondLE, true)
+		return m.compare(a, op, r, target.CondLE, asm.Width32)
 	case instr.I32_LE_U:
-		return m.compare(a, op, r, target.CondLS, true)
+		return m.compare(a, op, r, target.CondLS, asm.Width32)
 	case instr.I32_GE_S:
-		return m.compare(a, op, r, target.CondGE, true)
+		return m.compare(a, op, r, target.CondGE, asm.Width32)
 	case instr.I32_GE_U:
-		return m.compare(a, op, r, target.CondCS, true)
+		return m.compare(a, op, r, target.CondCS, asm.Width32)
 	case instr.I32_EXTEND8_S:
 		return m.unary(a, op, r, target.SXTB)
 	case instr.I32_EXTEND16_S:
@@ -340,13 +330,13 @@ func (m *machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool 
 	case instr.I32_TO_I64_U:
 		return m.convert(a, op, r, target.UXTW)
 	case instr.I32_TO_F32_S:
-		return m.floatConvert(a, op, r, target.SCVTF)
+		return m.convert(a, op, r, target.SCVTF)
 	case instr.I32_TO_F32_U:
-		return m.floatConvert(a, op, r, target.UCVTF)
+		return m.convert(a, op, r, target.UCVTF)
 	case instr.I32_TO_F64_S:
-		return m.floatConvert(a, op, r, target.SCVTF)
+		return m.convert(a, op, r, target.SCVTF)
 	case instr.I32_TO_F64_U:
-		return m.floatConvert(a, op, r, target.UCVTF)
+		return m.convert(a, op, r, target.UCVTF)
 	case instr.I32_REINTERPRET_F32:
 		return m.reinterpret(a, op, r)
 	case instr.I64_ADD:
@@ -368,29 +358,29 @@ func (m *machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool 
 	case instr.I64_SHR_U:
 		return m.binary(a, op, r, target.LSR)
 	case instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-		return m.divide(a, op, r, false)
+		return m.divide(a, op, r, asm.Width64)
 	case instr.I64_EQZ:
-		return m.eqz(a, op, r, false)
+		return m.eqz(a, op, r, asm.Width64)
 	case instr.I64_EQ:
-		return m.compare(a, op, r, target.CondEQ, false)
+		return m.compare(a, op, r, target.CondEQ, asm.Width64)
 	case instr.I64_NE:
-		return m.compare(a, op, r, target.CondNE, false)
+		return m.compare(a, op, r, target.CondNE, asm.Width64)
 	case instr.I64_LT_S:
-		return m.compare(a, op, r, target.CondLT, false)
+		return m.compare(a, op, r, target.CondLT, asm.Width64)
 	case instr.I64_LT_U:
-		return m.compare(a, op, r, target.CondCC, false)
+		return m.compare(a, op, r, target.CondCC, asm.Width64)
 	case instr.I64_GT_S:
-		return m.compare(a, op, r, target.CondGT, false)
+		return m.compare(a, op, r, target.CondGT, asm.Width64)
 	case instr.I64_GT_U:
-		return m.compare(a, op, r, target.CondHI, false)
+		return m.compare(a, op, r, target.CondHI, asm.Width64)
 	case instr.I64_LE_S:
-		return m.compare(a, op, r, target.CondLE, false)
+		return m.compare(a, op, r, target.CondLE, asm.Width64)
 	case instr.I64_LE_U:
-		return m.compare(a, op, r, target.CondLS, false)
+		return m.compare(a, op, r, target.CondLS, asm.Width64)
 	case instr.I64_GE_S:
-		return m.compare(a, op, r, target.CondGE, false)
+		return m.compare(a, op, r, target.CondGE, asm.Width64)
 	case instr.I64_GE_U:
-		return m.compare(a, op, r, target.CondCS, false)
+		return m.compare(a, op, r, target.CondCS, asm.Width64)
 	case instr.I64_EXTEND8_S:
 		return m.unary(a, op, r, target.SXTB)
 	case instr.I64_EXTEND16_S:
@@ -398,121 +388,121 @@ func (m *machine) exec(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool 
 	case instr.I64_EXTEND32_S:
 		return m.unary(a, op, r, target.SXTW)
 	case instr.I64_TO_I32:
-		return m.move32(a, op, r)
+		return m.narrow(a, op, r)
 	case instr.I64_TO_F32_S:
-		return m.floatConvert(a, op, r, target.SCVTF)
+		return m.convert(a, op, r, target.SCVTF)
 	case instr.I64_TO_F32_U:
-		return m.floatConvert(a, op, r, target.UCVTF)
+		return m.convert(a, op, r, target.UCVTF)
 	case instr.I64_TO_F64_S:
-		return m.floatConvert(a, op, r, target.SCVTF)
+		return m.convert(a, op, r, target.SCVTF)
 	case instr.I64_TO_F64_U:
-		return m.floatConvert(a, op, r, target.UCVTF)
+		return m.convert(a, op, r, target.UCVTF)
 	case instr.I64_REINTERPRET_F64:
 		return m.reinterpret(a, op, r)
 
 	case instr.F32_ADD:
-		return m.floatBinary(a, op, r, target.FADD, asm.Width32)
+		return m.binary(a, op, r, target.FADD)
 	case instr.F32_SUB:
-		return m.floatBinary(a, op, r, target.FSUB, asm.Width32)
+		return m.binary(a, op, r, target.FSUB)
 	case instr.F32_MUL:
-		return m.floatBinary(a, op, r, target.FMUL, asm.Width32)
+		return m.binary(a, op, r, target.FMUL)
 	case instr.F32_DIV:
-		return m.floatBinary(a, op, r, target.FDIV, asm.Width32)
+		return m.binary(a, op, r, target.FDIV)
 	case instr.F32_ABS:
-		return m.floatUnary(a, op, r, target.FABS, asm.Width32)
+		return m.unary(a, op, r, target.FABS)
 	case instr.F32_NEG:
-		return m.floatUnary(a, op, r, target.FNEG, asm.Width32)
+		return m.unary(a, op, r, target.FNEG)
 	case instr.F32_SQRT:
-		return m.floatUnary(a, op, r, target.FSQRT, asm.Width32)
+		return m.unary(a, op, r, target.FSQRT)
 	case instr.F32_CEIL:
-		return m.floatUnary(a, op, r, target.FRINTP, asm.Width32)
+		return m.unary(a, op, r, target.FRINTP)
 	case instr.F32_FLOOR:
-		return m.floatUnary(a, op, r, target.FRINTM, asm.Width32)
+		return m.unary(a, op, r, target.FRINTM)
 	case instr.F32_TRUNC:
-		return m.floatUnary(a, op, r, target.FRINTZ, asm.Width32)
+		return m.unary(a, op, r, target.FRINTZ)
 	case instr.F32_NEAREST:
-		return m.floatUnary(a, op, r, target.FRINTN, asm.Width32)
+		return m.unary(a, op, r, target.FRINTN)
 	case instr.F32_MIN:
-		return m.floatBinary(a, op, r, target.FMIN, asm.Width32)
+		return m.binary(a, op, r, target.FMIN)
 	case instr.F32_MAX:
-		return m.floatBinary(a, op, r, target.FMAX, asm.Width32)
+		return m.binary(a, op, r, target.FMAX)
 	case instr.F32_EQ:
-		return m.floatCompare(a, op, r, target.CondEQ, asm.Width32)
+		return m.compare(a, op, r, target.CondEQ, asm.Width32)
 	case instr.F32_NE:
-		return m.floatCompare(a, op, r, target.CondNE, asm.Width32)
+		return m.compare(a, op, r, target.CondNE, asm.Width32)
 	case instr.F32_LT:
-		return m.floatCompare(a, op, r, target.CondMI, asm.Width32)
+		return m.compare(a, op, r, target.CondMI, asm.Width32)
 	case instr.F32_LE:
-		return m.floatCompare(a, op, r, target.CondLS, asm.Width32)
+		return m.compare(a, op, r, target.CondLS, asm.Width32)
 	case instr.F32_GT:
-		return m.floatCompare(a, op, r, target.CondGT, asm.Width32)
+		return m.compare(a, op, r, target.CondGT, asm.Width32)
 	case instr.F32_GE:
-		return m.floatCompare(a, op, r, target.CondGE, asm.Width32)
+		return m.compare(a, op, r, target.CondGE, asm.Width32)
 	case instr.F32_TO_I32_S:
-		return m.floatToInt(a, op, r, target.FCVTZS, asm.Width32)
+		return m.truncate(a, op, r, target.FCVTZS, asm.Width32)
 	case instr.F32_TO_I32_U:
-		return m.floatToInt(a, op, r, target.FCVTZU, asm.Width32)
+		return m.truncate(a, op, r, target.FCVTZU, asm.Width32)
 	case instr.F32_TO_I64_S:
-		return m.floatToInt(a, op, r, target.FCVTZS, asm.Width64)
+		return m.truncate(a, op, r, target.FCVTZS, asm.Width64)
 	case instr.F32_TO_I64_U:
-		return m.floatToInt(a, op, r, target.FCVTZU, asm.Width64)
+		return m.truncate(a, op, r, target.FCVTZU, asm.Width64)
 	case instr.F32_TO_F64:
-		return m.floatConvert(a, op, r, target.FCVT)
+		return m.convert(a, op, r, target.FCVT)
 	case instr.F32_REINTERPRET_I32:
 		return m.reinterpret(a, op, r)
 
 	case instr.F64_ADD:
-		return m.floatBinary(a, op, r, target.FADD, asm.Width64)
+		return m.binary(a, op, r, target.FADD)
 	case instr.F64_SUB:
-		return m.floatBinary(a, op, r, target.FSUB, asm.Width64)
+		return m.binary(a, op, r, target.FSUB)
 	case instr.F64_MUL:
-		return m.floatBinary(a, op, r, target.FMUL, asm.Width64)
+		return m.binary(a, op, r, target.FMUL)
 	case instr.F64_DIV:
-		return m.floatBinary(a, op, r, target.FDIV, asm.Width64)
+		return m.binary(a, op, r, target.FDIV)
 	case instr.F64_ABS:
-		return m.floatUnary(a, op, r, target.FABS, asm.Width64)
+		return m.unary(a, op, r, target.FABS)
 	case instr.F64_NEG:
-		return m.floatUnary(a, op, r, target.FNEG, asm.Width64)
+		return m.unary(a, op, r, target.FNEG)
 	case instr.F64_SQRT:
-		return m.floatUnary(a, op, r, target.FSQRT, asm.Width64)
+		return m.unary(a, op, r, target.FSQRT)
 	case instr.F64_CEIL:
-		return m.floatUnary(a, op, r, target.FRINTP, asm.Width64)
+		return m.unary(a, op, r, target.FRINTP)
 	case instr.F64_FLOOR:
-		return m.floatUnary(a, op, r, target.FRINTM, asm.Width64)
+		return m.unary(a, op, r, target.FRINTM)
 	case instr.F64_TRUNC:
-		return m.floatUnary(a, op, r, target.FRINTZ, asm.Width64)
+		return m.unary(a, op, r, target.FRINTZ)
 	case instr.F64_NEAREST:
-		return m.floatUnary(a, op, r, target.FRINTN, asm.Width64)
+		return m.unary(a, op, r, target.FRINTN)
 	case instr.F64_MIN:
-		return m.floatBinary(a, op, r, target.FMIN, asm.Width64)
+		return m.binary(a, op, r, target.FMIN)
 	case instr.F64_MAX:
-		return m.floatBinary(a, op, r, target.FMAX, asm.Width64)
+		return m.binary(a, op, r, target.FMAX)
 	case instr.F64_EQ:
-		return m.floatCompare(a, op, r, target.CondEQ, asm.Width64)
+		return m.compare(a, op, r, target.CondEQ, asm.Width64)
 	case instr.F64_NE:
-		return m.floatCompare(a, op, r, target.CondNE, asm.Width64)
+		return m.compare(a, op, r, target.CondNE, asm.Width64)
 	case instr.F64_LT:
-		return m.floatCompare(a, op, r, target.CondMI, asm.Width64)
+		return m.compare(a, op, r, target.CondMI, asm.Width64)
 	case instr.F64_LE:
-		return m.floatCompare(a, op, r, target.CondLS, asm.Width64)
+		return m.compare(a, op, r, target.CondLS, asm.Width64)
 	case instr.F64_GT:
-		return m.floatCompare(a, op, r, target.CondGT, asm.Width64)
+		return m.compare(a, op, r, target.CondGT, asm.Width64)
 	case instr.F64_GE:
-		return m.floatCompare(a, op, r, target.CondGE, asm.Width64)
+		return m.compare(a, op, r, target.CondGE, asm.Width64)
 	case instr.F64_TO_I32_S:
-		return m.floatToInt(a, op, r, target.FCVTZS, asm.Width32)
+		return m.truncate(a, op, r, target.FCVTZS, asm.Width32)
 	case instr.F64_TO_I32_U:
-		return m.floatToInt(a, op, r, target.FCVTZU, asm.Width32)
+		return m.truncate(a, op, r, target.FCVTZU, asm.Width32)
 	case instr.F64_TO_I64_S:
-		return m.floatToInt(a, op, r, target.FCVTZS, asm.Width64)
+		return m.truncate(a, op, r, target.FCVTZS, asm.Width64)
 	case instr.F64_TO_I64_U:
-		return m.floatToInt(a, op, r, target.FCVTZU, asm.Width64)
+		return m.truncate(a, op, r, target.FCVTZU, asm.Width64)
 	case instr.F64_TO_F32:
-		return m.floatConvert(a, op, r, target.FCVT)
+		return m.convert(a, op, r, target.FCVT)
 	case instr.F64_REINTERPRET_I64:
 		return m.reinterpret(a, op, r)
 	case instr.SELECT:
-		return m.selectValue(a, op, r)
+		return m.choose(a, op, r)
 	default:
 		return false
 	}
@@ -522,8 +512,7 @@ func (m *machine) binary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emi
 		return false
 	}
 	x, y, dst := r.Reg(op.Args[0]), r.Reg(op.Args[1]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt ||
-		x.Width() != y.Width() || x.Width() != dst.Width() {
+	if x.Type() != y.Type() || dst.Type() != x.Type() || x.Width() != y.Width() || x.Width() != dst.Width() {
 		return false
 	}
 	a.Emit(emit(dst, x, y))
@@ -535,26 +524,27 @@ func (m *machine) unary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit
 		return false
 	}
 	x, dst := r.Reg(op.Args[0]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != dst.Width() {
+	if x.Type() != dst.Type() || x.Width() != dst.Width() {
 		return false
 	}
 	a.Emit(emit(dst, x))
 	return true
 }
 
-func (m *machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, wide bool) bool {
+func (m *machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, width asm.RegWidth) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
 	x, y, dst := r.Reg(op.Args[0]), r.Reg(op.Args[1]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != y.Width() || x.Width() != dst.Width() {
+	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != width {
 		return false
 	}
 	a.Emit(target.CBZLabel(y, m.deoptLabel(a)))
-	if op.Code == instr.I32_REM_S || op.Code == instr.I32_REM_U || op.Code == instr.I64_REM_S || op.Code == instr.I64_REM_U {
-		var q asm.Reg = target.X16
-		if wide {
-			q = target.W16
+	rem := op.Code == instr.I32_REM_S || op.Code == instr.I32_REM_U || op.Code == instr.I64_REM_S || op.Code == instr.I64_REM_U
+	if rem {
+		q := target.W16
+		if width == asm.Width64 {
+			q = target.X16
 		}
 		if op.Code == instr.I32_REM_S || op.Code == instr.I64_REM_S {
 			a.Emit(target.SDIV(q, x, y))
@@ -571,92 +561,58 @@ func (m *machine) divide(a *asm.Assembler, op ssa.Operation, r compile.Regs, wid
 	}
 	return true
 }
-func (m *machine) eqz(a *asm.Assembler, op ssa.Operation, r compile.Regs, wide bool) bool {
+
+func (m *machine) eqz(a *asm.Assembler, op ssa.Operation, r compile.Regs, width asm.RegWidth) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
 	src, dst := r.Reg(op.Args[0]), r.Reg(op.Results[0])
-	if src.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || dst.Width() != asm.Width32 {
-		return false
-	}
-	if wide && src.Width() != asm.Width32 || !wide && src.Width() != asm.Width64 {
+	if src.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || src.Width() != width || dst.Width() != asm.Width32 {
 		return false
 	}
 	a.Emit(target.CMPI(src, 0), target.CSET(dst, target.CondEQ))
 	return true
 }
 
-func (m *machine) compare(a *asm.Assembler, op ssa.Operation, r compile.Regs, cond uint8, wide bool) bool {
+func (m *machine) compare(a *asm.Assembler, op ssa.Operation, r compile.Regs, cond uint8, width asm.RegWidth) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
 	}
 	x, y, dst := r.Reg(op.Args[0]), r.Reg(op.Args[1]), r.Reg(op.Results[0])
-	width := asm.Width64
-	if wide {
-		width = asm.Width32
-	}
-	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt ||
-		x.Width() != width || y.Width() != width || dst.Width() != asm.Width32 {
+	if x.Type() != y.Type() || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != asm.Width32 {
 		return false
 	}
-	a.Emit(target.CMP(x, y), target.CSET(dst, cond))
+	if x.Type() == asm.RegTypeFloat {
+		a.Emit(target.FCMP(x, y))
+	} else if x.Type() == asm.RegTypeInt {
+		a.Emit(target.CMP(x, y))
+	} else {
+		return false
+	}
+	a.Emit(target.CSET(dst, cond))
 	return true
 }
 
-func (m *machine) floatBinary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src1, src2 asm.Reg) asm.Instruction, width asm.RegWidth) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := r.Reg(op.Args[0]), r.Reg(op.Args[1]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeFloat || y.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeFloat ||
-		x.Width() != width || y.Width() != width || dst.Width() != width {
-		return false
-	}
-	a.Emit(emit(dst, x, y))
-	return true
-}
-
-func (m *machine) floatUnary(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction, width asm.RegWidth) bool {
+func (m *machine) convert(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
 	x, dst := r.Reg(op.Args[0]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeFloat || x.Width() != width || dst.Width() != width {
-		return false
-	}
-	a.Emit(emit(dst, x))
-	return true
-}
-func (m *machine) floatCompare(a *asm.Assembler, op ssa.Operation, r compile.Regs, cond uint8, width asm.RegWidth) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := r.Reg(op.Args[0]), r.Reg(op.Args[1]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeFloat || y.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeInt ||
-		x.Width() != width || y.Width() != width || dst.Width() != asm.Width32 {
-		return false
-	}
-	a.Emit(target.FCMP(x, y), target.CSET(dst, cond))
-	return true
-}
-
-func (m *machine) floatConvert(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := r.Reg(op.Args[0]), r.Reg(op.Results[0])
-	if op.Code == instr.F32_TO_F64 || op.Code == instr.F64_TO_F32 {
-		if x.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeFloat {
+	if x.Type() == dst.Type() {
+		if x.Type() == asm.RegTypeFloat && op.Code != instr.F32_TO_F64 && op.Code != instr.F64_TO_F32 {
 			return false
 		}
-	} else if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeFloat {
+		if x.Type() == asm.RegTypeInt && x.Width() == dst.Width() {
+			return false
+		}
+	} else if !(x.Type() == asm.RegTypeInt && dst.Type() == asm.RegTypeFloat) {
 		return false
 	}
 	a.Emit(emit(dst, x))
 	return true
 }
 
-func (m *machine) floatToInt(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction, width asm.RegWidth) bool {
+func (m *machine) truncate(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction, width asm.RegWidth) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -673,18 +629,7 @@ func (m *machine) floatToInt(a *asm.Assembler, op ssa.Operation, r compile.Regs,
 	return true
 }
 
-func (m *machine) convert(a *asm.Assembler, op ssa.Operation, r compile.Regs, emit func(dst, src asm.Reg) asm.Instruction) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := r.Reg(op.Args[0]), r.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt {
-		return false
-	}
-	a.Emit(emit(dst, x))
-	return true
-}
-func (m *machine) move32(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+func (m *machine) narrow(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
 	}
@@ -701,14 +646,14 @@ func (m *machine) reinterpret(a *asm.Assembler, op ssa.Operation, r compile.Regs
 		return false
 	}
 	x, dst := r.Reg(op.Args[0]), r.Reg(op.Results[0])
-	if x.Type() != dst.Type() && x.Width() != dst.Width() {
+	if x.Type() == dst.Type() || x.Width() != dst.Width() {
 		return false
 	}
 	a.Emit(target.FMOV(dst, x))
 	return true
 }
 
-func (m *machine) selectValue(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
+func (m *machine) choose(a *asm.Assembler, op ssa.Operation, r compile.Regs) bool {
 	if len(op.Args) != 3 || len(op.Results) != 1 {
 		return false
 	}
@@ -755,21 +700,7 @@ func (m *machine) box(a *asm.Assembler, src asm.VReg, kind types.Kind, dst asm.P
 	a.Emit(target.ORR(dst, dst, target.X17))
 }
 
-func (m *machine) resultType(v ssa.Value, reg asm.VReg) types.Kind {
-	if t, ok := m.types[int32(v)]; ok {
-		return tKind(t)
-	}
-	return kindFromReg(reg)
-}
-
-func (m *machine) valueType(r compile.Regs, v ssa.Value, reg asm.VReg) types.Kind {
-	if t, ok := r.(typed); ok {
-		return tKind(t.Type(v))
-	}
-	return kindFromReg(reg)
-}
-
-func tKind(t ssa.Type) types.Kind {
+func kind(t ssa.Type) types.Kind {
 	switch t {
 	case ssa.TypeI1:
 		return types.KindI1
@@ -789,27 +720,7 @@ func tKind(t ssa.Type) types.Kind {
 		return 0
 	}
 }
-func kindFromReg(r asm.Reg) types.Kind {
-	if r.Type() == asm.RegTypeFloat {
-		if r.Width() == asm.Width32 {
-			return types.KindF32
-		}
-		return types.KindF64
-	}
-	if r.Width() == asm.Width32 {
-		return types.KindI32
-	}
-	return types.KindI64
-}
-
 func (m *machine) temp(typ asm.RegType, width asm.RegWidth) asm.VReg {
 	m.tempID--
 	return asm.NewVReg(m.tempID, typ, width)
-}
-
-func boolValue(v types.Boxed) uint64 {
-	if v.Bool() {
-		return 1
-	}
-	return 0
 }
