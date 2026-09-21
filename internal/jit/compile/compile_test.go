@@ -78,6 +78,7 @@ func boxed(kind types.Kind) types.Boxed {
 func TestLower(t *testing.T) {
 	t.Run("maps values by representation", testRepresentation)
 	t.Run("loads entry parameters", testParams)
+	t.Run("rejects parameter mismatch", testParamsMismatch)
 	t.Run("preserves return types", testReturn)
 	t.Run("lowers complete", testComplete)
 	t.Run("uses reverse postorder", testOrder)
@@ -145,6 +146,16 @@ func testParams(t *testing.T) {
 	require.Equal(t, 0, m.ops[0].Slot.Index)
 }
 
+func testParamsMismatch(t *testing.T) {
+	f := build("params", func(b *ssa.Builder) {
+		entry := b.Block()
+		b.Param(entry, ssa.TypeI8)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+	})
+	_, err := compile.Lower(f, new(machine), 0, 0)
+	require.ErrorIs(t, err, compile.ErrUnsupported)
+}
+
 func testReturn(t *testing.T) {
 	f := build("return", func(b *ssa.Builder) {
 		entry := b.Block()
@@ -209,7 +220,7 @@ func testBudget(t *testing.T) {
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
 	})
 	m := new(machine)
-	_, err := compile.Lower(f, m, 1, 0)
+	_, err := compile.Lower(f, m, 0, 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, m.budget)
 }

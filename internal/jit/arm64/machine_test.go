@@ -39,6 +39,10 @@ func TestLower(t *testing.T) {
 	t.Run("divide", lowerDivide)
 	t.Run("compare", lowerCompare)
 	t.Run("select", lowerSelect)
+	t.Run("branch", lowerBranch)
+	t.Run("table", lowerTable)
+	t.Run("global", lowerGlobal)
+	t.Run("global store", lowerGlobalStore)
 	t.Run("load", lowerLoad)
 	t.Run("store64", lowerStore64)
 	t.Run("reinterpret", lowerReinterpret)
@@ -169,6 +173,63 @@ func lowerSelect(t *testing.T) {
 		target.CSEL(r.values[4], r.values[1], r.values[2], target.CondNE),
 	}, a.Rows())
 }
+func lowerBranch(t *testing.T) {
+	r := regs{values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)}}
+	m := arm64.New()
+	a := asm.New(target.New())
+	trueLabel, falseLabel := a.Label(), a.Label()
+	m.Branch(a, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{1}}, r, []asm.Label{trueLabel, falseLabel})
+	require.Equal(t, []asm.Instruction{
+		target.CBNZLabel(r.values[1], trueLabel),
+		target.BLabel(falseLabel),
+	}, a.Rows())
+}
+
+func lowerTable(t *testing.T) {
+	r := regs{values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)}}
+	m := arm64.New()
+	a := asm.New(target.New())
+	first, second, defaultLabel := a.Label(), a.Label(), a.Label()
+	m.Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, second, defaultLabel})
+	require.Equal(t, []asm.Instruction{
+		target.CMPI(r.values[1], 0),
+		target.BCondLabel(target.OpBEQ, first),
+		target.CMPI(r.values[1], 1),
+		target.BCondLabel(target.OpBEQ, second),
+		target.BLabel(defaultLabel),
+	}, a.Rows())
+}
+
+func lowerGlobal(t *testing.T) {
+	r := regs{
+		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)},
+		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI32},
+	}
+	m := arm64.New()
+	a := asm.New(target.New())
+	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Results: []ssa.Value{1}}, r))
+	base := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
+	require.Equal(t, []asm.Instruction{
+		target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)),
+		target.LDR(r.values[1], base, 16),
+	}, a.Rows())
+}
+
+func lowerGlobalStore(t *testing.T) {
+	r := regs{
+		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width32)},
+		types:  map[ssa.Value]ssa.Type{1: ssa.TypeI32},
+	}
+	m := arm64.New()
+	a := asm.New(target.New())
+	require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Args: []ssa.Value{1}}, r))
+	base := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
+	want := []asm.Instruction{target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)), target.UXTW(target.X16, r.values[1])}
+	want = append(want, target.LDI(target.X17, types.Tag(types.KindI32))...)
+	want = append(want, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, base, 16))
+	require.Equal(t, want, a.Rows())
+}
+
 func lowerLoad(t *testing.T) {
 	r := regs{
 		values: map[ssa.Value]asm.VReg{1: vr(1, asm.RegTypeInt, asm.Width64)},
@@ -315,14 +376,12 @@ func lowerExecute(t *testing.T) {
 	b := ssa.New("muladd")
 	entry := b.Block()
 	state := b.Value(ssa.TypeState)
-	a := b.Value(ssa.TypeI32)
-	c := b.Value(ssa.TypeI32)
+	a := b.Param(entry, ssa.TypeI32)
+	c := b.Param(entry, ssa.TypeI32)
 	product := b.Value(ssa.TypeI32)
 	one := b.Value(ssa.TypeI32)
 	result := b.Value(ssa.TypeI32)
 	b.Add(entry, ssa.Operation{Op: ssa.OpState, State: state})
-	b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{a}})
-	b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Results: []ssa.Value{c}})
 	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_MUL, Args: []ssa.Value{a, c}, Results: []ssa.Value{product}, State: state})
 	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
 	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{product, one}, Results: []ssa.Value{result}, State: state})

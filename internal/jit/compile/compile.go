@@ -66,6 +66,9 @@ func Lower(f *ssa.Function, m Machine, params, locals int) ([]byte, error) {
 	if f == nil || m == nil || f.Len() == 0 || params < 0 || locals < 0 {
 		return nil, fmt.Errorf("%w: invalid lowering input", ErrUnsupported)
 	}
+	if len(f.Block(0).Params) != params {
+		return nil, fmt.Errorf("%w: parameters", ErrUnsupported)
+	}
 	r := values{function: f}
 	a := asm.New(m.Arch())
 	a.Reserve(m.Reserve()...)
@@ -277,17 +280,6 @@ func used(pending []movePair, skip int, src asm.VReg) bool {
 }
 
 func scratch(f *ssa.Function) func(asm.RegType, asm.RegWidth) asm.VReg {
-	intID := int32(maxValue(f) + 1)
-	floatID := intID + 1
-	return func(typ asm.RegType, width asm.RegWidth) asm.VReg {
-		if typ == asm.RegTypeFloat {
-			return asm.NewVReg(floatID, typ, width)
-		}
-		return asm.NewVReg(intID, typ, width)
-	}
-}
-
-func maxValue(f *ssa.Function) int {
 	max := 0
 	for block := range f.Len() {
 		b := f.Block(block)
@@ -321,5 +313,12 @@ func maxValue(f *ssa.Function) int {
 			}
 		}
 	}
-	return max
+	intID := int32(max + 1)
+	floatID := intID + 1
+	return func(typ asm.RegType, width asm.RegWidth) asm.VReg {
+		if typ == asm.RegTypeFloat {
+			return asm.NewVReg(floatID, typ, width)
+		}
+		return asm.NewVReg(intID, typ, width)
+	}
 }
