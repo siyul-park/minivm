@@ -358,6 +358,49 @@ func divFailProgram(t *testing.T, warm, fails int) *program.Program {
 		program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
 }
 
+// nestedConcatOuterFunction calls concatFunction(a, b) through a constant
+// callee, so a hot outer's native call enters concatFunction's native code
+// directly, two native activations deep, before concatFunction's own
+// STRING_CONCAT (arm64 lowers no string opcode) deopts them both; both then
+// run to a normal RETURN threaded, unlike an error unwind.
+func nestedConcatOuterFunction(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeString, types.TypeString}, Returns: []types.Type{types.TypeString}},
+		Code: instr.Marshal(code),
+	}
+}
+
+// nestedConcatProgram warms only its caller (constant 1) directly, so every
+// call to concatFunction (constant 0) goes through it: the early ones, while
+// concatFunction is still uncompiled, deoptimize outer alone through
+// ExitCall and replay threaded (which still counts toward concatFunction's
+// own threshold); once concatFunction compiles, outer's later native calls
+// enter it directly (a borrowed constant callee) before its own
+// STRING_CONCAT deopts both activations. The final call leaves its result
+// on the stack.
+func nestedConcatProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	inner := concatFunction(t)
+	outer := nestedConcatOuterFunction(t)
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.CONST_GET, 2).Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 1).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.CONST_GET, 2).Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32),
+		program.WithConstants(inner, outer, types.String("deep-"), types.String("concat")))
+}
+
 func TestWithThreshold(t *testing.T) {
 	t.Run("compiles a hot recursive function and enters its native code", func(t *testing.T) {
 		native(t)
@@ -550,6 +593,67 @@ func TestWithThreshold(t *testing.T) {
 		}, 5*time.Second, time.Millisecond)
 	})
 
+	t.Run("a deopt two native activations deep matches threaded, including the borrowed callee's RefCount", func(t *testing.T) {
+		native(t)
+		prog := nestedConcatProgram(t, 20000)
+		wantValue, wantCount := runProgramString(t, prog)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, count, err := popString(vm)
+			require.NoError(t, err)
+			if value != wantValue || count != wantCount {
+				return false
+			}
+			// concatFunction (constant 0, address 1) is retained exactly
+			// once by its caller's own call site and used only there, so it
+			// is borrowed: the deopt that rebuilds both activations, which
+			// then run to a normal RETURN threaded, must not leave it
+			// over- or under-counted.
+			innerCount, rcErr := vm.RefCount(1)
+			require.NoError(t, rcErr)
+			if innerCount != 1 {
+				return false
+			}
+			vm.Flush()
+			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("a borrowed callee's RefCount survives an ExitCall replay, matching threaded", func(t *testing.T) {
+		native(t)
+		prog := outerInnerProgram(t, 20000)
+		wantValue, wantCount := runProgramString(t, prog)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, count, err := popString(vm)
+			require.NoError(t, err)
+			if value != wantValue || count != wantCount {
+				return false
+			}
+			// inner (constant 0, address 1) is never itself warm enough to
+			// compile, so outer's every native call to it replays threaded
+			// through ExitCall; the replayed CALL releases what it adopts,
+			// so the borrowed reference deopt hands it must be real.
+			innerCount, rcErr := vm.RefCount(1)
+			require.NoError(t, rcErr)
+			if innerCount != 1 {
+				return false
+			}
+			vm.Flush()
+			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
 	t.Run("a wide i64 result from native code matches threaded", func(t *testing.T) {
 		native(t)
 		prog := wideI64Program(t, 1000)
@@ -672,6 +776,61 @@ func TestWithThreshold(t *testing.T) {
 		result, err := vm.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(7), result)
+	})
+
+	t.Run("a wide i64 argument deopting at a borrowed call keeps the callee alive", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal(code)}
+		b = instr.NewBuilder()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 50).Emit(instr.I64_SHL).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+		code, err = b.Assemble()
+		require.NoError(t, err)
+		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal(code)}
+		b = instr.NewBuilder()
+		warm, warmed := b.Label(), b.Label()
+		b.Bind(warm)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 20000).Emit(instr.I32_GE_S).BrIf(warmed)
+		b.Emit(instr.I64_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(warm)
+		b.Bind(warmed).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 20000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I64_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.I64_CONST, 1).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+		b.Emit(instr.I64_CONST, 1).Emit(instr.CONST_GET, 1).Emit(instr.CALL).Emit(instr.I32_ADD)
+		code, err = b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(callee, caller))
+		want := runProgram(t, prog)
+
+		var result types.Value
+		var rc int
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			if err = vm.Run(context.Background()); err != nil {
+				return true
+			}
+			result, _ = vm.Pop()
+			c, _ := vm.Const(0)
+			rc, _ = vm.RefCount(c.Ref())
+			vm.Flush()
+			deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return deopts > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, err)
+		require.Equal(t, want, result)
+		require.Equal(t, 1, rc)
 	})
 
 	t.Run("stays off by default: no vm_jit metrics are reported", func(t *testing.T) {

@@ -21,6 +21,9 @@ type Machine struct {
 	kinds []types.Kind
 	temp  int32
 	end   asm.Label
+	// entry is the function's own first row, what Context.Natives would
+	// hold for it: a self call branches here directly.
+	entry asm.Label
 }
 
 // New returns an ARM64 machine.
@@ -37,7 +40,8 @@ func (m *Machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X1
 // Prologue begins a function: it builds the frame, loads the frame base,
 // pushes the activation record, and clears the locals after params.
 func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int) {
-	*m = Machine{kinds: kinds, temp: -1, end: a.Label()}
+	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label()}
+	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
@@ -177,8 +181,10 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	}
 }
 
-// Call writes boxed arguments at the callee frame base and dispatches through
-// Context.Natives. Missing code, depth, or space takes ExitCall.
+// Call writes boxed arguments at the callee frame base and dispatches
+// through Context.Natives, or, when Self, branches directly to the unit's
+// own entry. Missing code, depth, or space takes ExitCall; an owned Callee
+// is released once the callee returns, a borrowed one left alone.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > 4095 {
 		return false
@@ -187,12 +193,14 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	for i, v := range c.Args {
 		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((c.Base+i)*8)))
 	}
-	code := m.vreg()
-	a.Emit(target.LDR(code, target.Ctx, int16(jit.OffsetNatives)))
-	a.Emit(target.LDI(target.X16, uint64(c.Address))...)
+	var code asm.VReg
+	if !c.Self {
+		code = m.vreg()
+		a.Emit(target.LDR(code, target.Ctx, int16(jit.OffsetNatives)))
+		a.Emit(target.LDI(target.X16, uint64(c.Address))...)
+		a.Emit(target.LDRR(code, code, target.X16), target.CBZLabel(code, c.Bridge))
+	}
 	a.Emit(
-		target.LDRR(code, code, target.X16),
-		target.CBZLabel(code, c.Bridge),
 		target.ADDI(target.X16, target.X25, uint16(8*(c.Base+c.Size))),
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 		target.CMP(target.X16, target.X17),
@@ -211,8 +219,12 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.STR(target.X17, target.X16, record(jit.RecordExit)),
 		target.ADDI(target.X16, target.X25, uint16(8*c.Base)),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetFB)),
-		target.BLR(code),
 	)
+	if c.Self {
+		a.Emit(target.BLLabel(m.entry))
+	} else {
+		a.Emit(target.BLR(code))
+	}
 	for _, u := range c.Live {
 		a.Emit(target.USE(u))
 	}
@@ -222,7 +234,9 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.ADD(target.X16, target.Ctx, target.X16),
 		target.LDR(target.X25, target.X16, record(jit.RecordFB)),
 	)
-	m.release(a, s.Reg(c.Callee), s)
+	if c.Owned {
+		m.release(a, s.Reg(c.Callee), s)
+	}
 	a.Bind(c.Resume)
 	for j, v := range c.Results {
 		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))

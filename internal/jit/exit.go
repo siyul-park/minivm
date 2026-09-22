@@ -15,6 +15,10 @@ type Exit struct {
 	Adopts int
 	// Callee is the function address resumed by an ExitCall.
 	Callee int
+	// Owned reports whether the call site retained Callee's reference: an
+	// ExitCall replay must retainBox a borrowed Callee before pushing it, so
+	// the interpreter's own CALL has a reference of its own to release.
+	Owned bool
 	// Frames are the interpreter frames at the exit, innermost last. An
 	// ExitRelease has none: it neither reads nor rebuilds them.
 	Frames []Frame

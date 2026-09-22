@@ -169,8 +169,14 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 		// Bound after construction (Alloc, Store): never compiled.
 		return false
 	}
+	if n.store.Code(addr) == nil {
+		n.count(i, addr, fn)
+		return false
+	}
 
 	n.store.Enter()
+	// Re-read: the code seen above may have been retired and reclaimed
+	// between that read and Enter.
 	code := n.store.Code(addr)
 	if code == nil {
 		n.store.Leave()
@@ -317,22 +323,32 @@ func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int)
 	depth := int(ctx.Depth)
 
 	maps := make([]jit.Frame, depth)
+	owns := make([]bool, depth)
 	maps[depth-1] = exit.Frames[0]
+	owns[0] = release
 	for k := depth - 2; k >= 0; k-- {
 		code := n.store.Find(ctx.Records[k+1].PC)
-		maps[k] = code.Exits[ctx.Records[k].Exit].Frames[0]
+		e := code.Exits[ctx.Records[k].Exit]
+		maps[k] = e.Frames[0]
+		owns[k+1] = e.Owned
 	}
 
 	start := i.fp
 	for k := 0; k < depth; k++ {
-		n.frame(i, ctx, start, k, maps[k], k > 0 || release)
+		n.frame(i, ctx, start, k, maps[k], owns[k])
 	}
 	inner := &i.frames[start+depth-1]
 
 	if exit.Kind == jit.ExitCall {
 		callee := i.heap[exit.Callee].(*types.Function)
 		i.sp += len(callee.Typ.Params)
-		i.stack[i.sp] = types.BoxRef(exit.Callee)
+		ref := types.BoxRef(exit.Callee)
+		if !exit.Owned {
+			// A borrowed callee carries no reference of its own; the
+			// replayed CALL releases whatever it adopts, so it needs one.
+			i.retainBox(ref)
+		}
+		i.stack[i.sp] = ref
 		i.sp++
 		// CALL is one byte (interp.go's handler walk relies on the same
 		// fact), so its own ip is the map's IP, recorded past it, minus one.
@@ -347,8 +363,10 @@ func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int)
 	ctx.Abandon()
 }
 
-// frame materializes activation k from m. Inner native activations own their
-// callee reference; the outer activation follows the entering call site.
+// frame materializes activation k from m. release reports whether k owns
+// the callee reference it was entered with: the outermost activation
+// follows the entering call site, and every other one follows the call
+// site's own Owned decision in the caller's compiled code.
 func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Frame, release bool) {
 	f := &i.frames[start+k]
 	f.addr = m.Address

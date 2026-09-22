@@ -4,12 +4,12 @@ Comparisons here are tier-matched.
 
 This document owns performance evidence; `testing.md` owns test contracts.
 
-minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the rebuilt native tier (S2-P8): `interp.WithThreshold` compiling a hot `*types.Function` to ARM64 native code, measured 2026-09-22 on the host below. The tier's scope in S2: functions only, entered from an interpreted `CALL`; no OSR into a running loop; any opcode, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). Rows labelled `default` are the previous, removed native tier (pre-2026-09) and are kept only where no current `jit` number exists yet, labelled historical; `jit` numbers below are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
+minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the rebuilt native tier (S2-P8, cheaper calls since S2-P9): `interp.WithThreshold` compiling a hot `*types.Function` to ARM64 native code, measured 2026-09-22 on the host below. The tier's scope in S2: functions only, entered from an interpreted `CALL`; no OSR into a running loop; any opcode, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). Rows labelled `default` are the previous, removed native tier (pre-2026-09) and are kept only where no current `jit` number exists yet, labelled historical; `jit` numbers below are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
 
 | Kernel | `jit` | `threaded` | Wazero |
 |---|---:|---:|---:|
-| `RecursiveFib(35)` | 105.19 ms | 453.93 ms | 44.4 ms |
-| `RecursiveFib(20)` | 79.77 µs | 316.60 µs | 33.2 µs |
+| `RecursiveFib(35)` | 74.46 ms | 428.78 ms | 44.4 ms |
+| `RecursiveFib(20)` | 77.62 µs | 319.77 µs | 33.2 µs |
 
 > **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
 > **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median. The `jit`/`threaded` numbers on this page are a deliberate exception (L17: an M4 Pro drifts ~10% run to run): two interleaved `-benchtime=1s -count=3` runs of `cd benchmarks && go test -run='^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=1s -count=3 .`, reporting the median of the combined six samples, measured 2026-09-22.
@@ -82,27 +82,27 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 316.60 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 319.77 µs | 0 | 0 |
 |  | CPython | 562.79 µs | 26 | 0 |
 |  | Tengo | 930.21 µs | 319,347 | 28,655 |
 |  | GopherLua | 1.07 ms | 704 | 2 |
 |  | Goja | 1.52 ms | 4,680 | 39 |
 |  | gpython | 3.89 ms | 9,807,919 | 109,494 |
 |  | Yaegi | 4.50 ms | 8,302,177 | 192,840 |
-| Native | minivm `jit` | **79.77 µs** | 0 | 0 |
+| Native | minivm `jit` | **77.62 µs** | 0 | 0 |
 |  | Wazero | **33.20 µs** | 8 | 1 |
 | Reference | Native Go | 14.61 µs | 0 | 0 |
 #### `IndirectRecursiveFib`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 592.60 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 559.44 µs | 0 | 0 |
 |  | Tengo | 944.71 µs | 319,359 | 28,655 |
 |  | GopherLua | 941.72 µs | 704 | 2 |
 |  | Goja | 1.37 ms | 4,680 | 39 |
 |  | gpython | 3.90 ms | 10,158,202 | 109,494 |
 |  | Yaegi | 10.98 ms | 13,059,853 | 394,041 |
-| Native | minivm `jit` | 754.44 µs | 0 | 0 |
+| Native | minivm `jit` | 666.69 µs | 0 | 0 |
 |  | Wazero | **42.34 µs** | 8 | 1 |
 | Reference | Native Go | 15.72 µs | 0 | 0 |
 #### `TailSum(1000)` and `TailPingPong(1000)`
@@ -190,22 +190,22 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 147.04 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 138.35 µs | 768 | 8 |
 |  | Tengo | 280.54 µs | 458,379 | 5,114 |
 |  | GopherLua | 545.66 µs | 818,512 | 11,253 |
 |  | Goja | 448.41 µs | 558,961 | 6,149 |
 |  | gpython | 1.26 ms | 2,570,669 | 34,797 |
 |  | Yaegi | 846.99 µs | 1,422,624 | 35,306 |
-| Native | minivm `jit` | 166.01 µs | 768 | 8 |
+| Native | minivm `jit` | 155.78 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
 #### `BinaryTrees(4..6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 992.52 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 962.60 µs | 768 | 8 |
 |  | CPython | 991.16 µs | 45 | 0 |
 |  | gpython | 9.87 ms | 19,457,623 | 280,714 |
-| Native | minivm `jit` | 1.08 ms | 768 | 8 |
+| Native | minivm `jit` | 1.04 ms | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
 #### `SortStress(128,2)`
 
@@ -253,19 +253,19 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 272.65 µs | 648 | 6 |
+| Interpreter | minivm `threaded` | 271.35 µs | 648 | 6 |
 |  | CPython | 415.89 µs | 20 | 0 |
 |  | gpython | 1.94 ms | 2,457,137 | 52,718 |
-| Native | minivm `jit` | **193.11 µs** | 648 | 6 |
+| Native | minivm `jit` | **175.41 µs** | 648 | 6 |
 | Reference | Native Go | 2.79 µs | 576 | 3 |
 #### `Mandelbrot(16x16)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 143.07 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 138.29 µs | 0 | 0 |
 |  | CPython | 181.52 µs | 9 | 0 |
 |  | gpython | 684.61 µs | 324,977 | 23,643 |
-| Native | minivm `jit` | **31.30 µs** | 0 | 0 |
+| Native | minivm `jit` | **29.85 µs** | 0 | 0 |
 | Reference | Native Go | 2.99 µs | 0 | 0 |
 #### `MatMul(16)`
 
@@ -342,7 +342,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-The S2 tier enters only from an interpreted `CALL` to `*types.Function`; it does not perform top-level or loop-only OSR. Kernels without calls therefore remain threaded. Called functions that lower cleanly can run natively; unsupported operations and `RETURN_CALL` return to threaded execution and still pay the native entry bookkeeping. S2-P8 replaced the store lookup with per-address atomic pointers and four maps of tiering state with slices; re-measured 2026-09-22, this reduced `IndirectRecursiveFib` from ~1.9x to ~1.3x threaded and `StructTreeWalk`/`BinaryTrees` from ~1.5x/~1.4x to ~1.1x. `NQueens`, `Fannkuch`, and `StringBuild` remain unmeasured. Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
+The S2 tier enters only from an interpreted `CALL` to `*types.Function`; it does not perform top-level or loop-only OSR. Kernels without calls therefore remain threaded. Called functions that lower cleanly can run natively; unsupported operations and `RETURN_CALL` return to threaded execution and still pay the native entry bookkeeping. S2-P8 replaced the store lookup with per-address atomic pointers and four maps of tiering state with slices; re-measured 2026-09-22, this reduced `IndirectRecursiveFib` from ~1.9x to ~1.3x threaded and `StructTreeWalk`/`BinaryTrees` from ~1.5x/~1.4x to ~1.1x. S2-P9 borrows a constant callee's already-alive reference instead of retaining and releasing it around the call, and a self call branches directly to the unit's own entry instead of through `Context.Natives`; re-measured 2026-09-22, this cut `RecursiveFib(35)/jit` ~26% (100.32 ms → 74.46 ms) — fib's own call is both borrowed and self — while `RecursiveFib(20)/jit` moved less (~3%), and every other re-measured kernel's `jit`/`threaded` row moved within noise of its S2-P8 figure. `NQueens`, `Fannkuch`, and `StringBuild` remain unmeasured. Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
 
 ## Benchmark Fixture Inventory
 

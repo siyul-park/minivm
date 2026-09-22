@@ -335,7 +335,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
 				[]asm.Instruction{
 					target.CMP(target.X16, target.X17),
-					target.BCondLabel(target.OpBNE, 1),
+					target.BCondLabel(target.OpBNE, 2),
 					target.SBFX(target.X17, x(1), 0, 32),
 				},
 				counter,
@@ -537,7 +537,7 @@ func TestMachine_Call(t *testing.T) {
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join, Owned: true,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -573,6 +573,123 @@ func TestMachine_Call(t *testing.T) {
 				target.ADDI(target.X16, target.X25, 32),
 				target.STR(target.X16, target.Ctx, int16(jit.OffsetFB)),
 				target.BLR(code),
+				target.USE(live),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+				target.LSLI(target.X16, target.X16, 5),
+				target.ADD(target.X16, target.Ctx, target.X16),
+				target.LDR(target.X25, target.X16, record(jit.RecordFB)),
+				target.LSRI(target.X16, callee, 49),
+			},
+			target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+			[]asm.Instruction{
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBNE, resume),
+				target.SBFX(target.X17, callee, 0, 32),
+				target.CBZLabel(target.X17, resume),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+				target.LSLI(target.X17, target.X17, 3),
+				target.ADD(target.X16, target.X16, target.X17),
+				target.LDR(target.X17, target.X16, 0),
+				target.CMPI(target.X17, 1),
+				target.BCondLabel(target.OpBLE, exit),
+				target.SUBI(target.X17, target.X17, 1),
+				target.STR(target.X17, target.X16, 0),
+				target.LDR(r.Reg(3), target.X25, 32),
+			},
+		), a.Rows()[start:])
+	})
+
+	t.Run("borrows a callee it does not own", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, nil, 0)
+		bridge, join := a.Label(), a.Label()
+		start := len(a.Rows())
+		require.True(t, m.Call(a, compile.Call{
+			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join,
+		}, r))
+
+		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
+		require.Equal(t, slices.Concat(
+			[]asm.Instruction{target.UXTW(target.X16, r.Reg(1))},
+			target.LDI(target.X17, types.Tag(types.KindI32)),
+			[]asm.Instruction{
+				target.ORR(target.X16, target.X16, target.X17),
+				target.STR(target.X16, target.X25, 32),
+				target.LDR(code, target.Ctx, int16(jit.OffsetNatives)),
+			},
+			target.LDI(target.X16, 5),
+			[]asm.Instruction{
+				target.LDRR(code, code, target.X16),
+				target.CBZLabel(code, bridge),
+				target.ADDI(target.X16, target.X25, 56),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBHI, bridge),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBCS, bridge),
+				target.LSLI(target.X16, target.X16, 5),
+				target.ADD(target.X16, target.Ctx, target.X16),
+				target.ADDI(target.X17, target.SP, 0),
+				target.STR(target.X17, target.X16, record(jit.RecordSP)),
+			},
+			target.LDI(target.X17, 7),
+			[]asm.Instruction{
+				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.ADDI(target.X16, target.X25, 32),
+				target.STR(target.X16, target.Ctx, int16(jit.OffsetFB)),
+				target.BLR(code),
+				target.USE(live),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+				target.LSLI(target.X16, target.X16, 5),
+				target.ADD(target.X16, target.Ctx, target.X16),
+				target.LDR(target.X25, target.X16, record(jit.RecordFB)),
+				target.LDR(r.Reg(3), target.X25, 32),
+			},
+		), a.Rows()[start:])
+	})
+
+	t.Run("calls its own entry directly when it is a self call", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, nil, 0)
+		bridge, join := a.Label(), a.Label()
+		start := len(a.Rows())
+		require.True(t, m.Call(a, compile.Call{
+			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join, Owned: true, Self: true,
+		}, r))
+
+		// entry is Prologue's own label, bound before any other row: the
+		// second label a fresh Assembler allocates (end is the first).
+		entry := asm.Label(1)
+		callee := r.Reg(2)
+		require.Equal(t, slices.Concat(
+			[]asm.Instruction{target.UXTW(target.X16, r.Reg(1))},
+			target.LDI(target.X17, types.Tag(types.KindI32)),
+			[]asm.Instruction{
+				target.ORR(target.X16, target.X16, target.X17),
+				target.STR(target.X16, target.X25, 32),
+				target.ADDI(target.X16, target.X25, 56),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBHI, bridge),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBCS, bridge),
+				target.LSLI(target.X16, target.X16, 5),
+				target.ADD(target.X16, target.Ctx, target.X16),
+				target.ADDI(target.X17, target.SP, 0),
+				target.STR(target.X17, target.X16, record(jit.RecordSP)),
+			},
+			target.LDI(target.X17, 7),
+			[]asm.Instruction{
+				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.ADDI(target.X16, target.X25, 32),
+				target.STR(target.X16, target.Ctx, int16(jit.OffsetFB)),
+				target.BLLabel(entry),
 				target.USE(live),
 				target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 				target.LSLI(target.X16, target.X16, 5),

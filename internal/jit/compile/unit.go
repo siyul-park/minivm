@@ -47,7 +47,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	code, exits, err := Lower(f, m, u.Function, u.Module.Objects)
+	code, exits, err := Lower(f, m, u.Function, u.Module.Objects, u.Address)
 	if err != nil {
 		return nil, err
 	}

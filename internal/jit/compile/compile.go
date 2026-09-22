@@ -59,9 +59,9 @@ type Site interface {
 type Call struct {
 	// Address is the callee's function address, its Context.Natives index.
 	Address int
-	// Callee is the function reference the call adopts; native code
-	// releases it once a native callee returns, as the interpreter releases
-	// the reference of a frame it pops.
+	// Callee is the function reference the call adopts when Owned; a
+	// borrowed Callee lives in the constant pool and native code neither
+	// retains nor releases it.
 	Callee        ssa.Value
 	Args, Results []ssa.Value
 	// Base is the callee's frame base in slots from this activation's, and
@@ -76,6 +76,12 @@ type Call struct {
 	// the activation is too deep, or the frame does not fit. It resumes at
 	// Resume, which Call binds where both paths load the results.
 	Bridge, Resume asm.Label
+	// Owned reports whether the call adopted Callee's reference, so it
+	// releases it once the callee returns.
+	Owned bool
+	// Self reports whether Address is the unit being lowered's own address:
+	// the call branches to its own entry instead of Context.Natives.
+	Self bool
 }
 
 type lowering struct {
@@ -83,18 +89,26 @@ type lowering struct {
 	m       Machine
 	a       *asm.Assembler
 	fn      *types.Function
+	address int
 	objects transform.Objects
 	states  map[ssa.Value]ssa.Operation
 	consts  map[ssa.Value]types.Boxed
 	raw     map[ssa.Value]bool
-	exits   []*jit.Exit
-	places  [][]place
-	edges   []edge
-	stubs   []stub
-	err     error
+	// borrow names a value an OpConst ref retained exactly once and used
+	// exactly once, as some call's callee: the retain is redundant, since
+	// the constant pool already holds the callee alive.
+	borrow map[ssa.Value]bool
+	exits  []*jit.Exit
+	places [][]place
+	edges  []edge
+	stubs  []stub
+	err    error
 
 	// op is the operation or terminator being lowered.
 	op ssa.Operation
+	// pending is a borrow candidate's retain deferred until the operation
+	// right after it either is, or is not, the call it feeds.
+	pending ssa.Value
 }
 
 // place is where exit map value to lives in the rows: register reg.
@@ -122,8 +136,9 @@ type stub struct {
 // ErrUnsupported reports SSA the backend does not lower.
 var ErrUnsupported = errors.New("unsupported lowering")
 
-// Lower emits code for the entry-0 translation and its exit maps.
-func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects) ([]byte, []jit.Exit, error) {
+// Lower emits code for the entry-0 translation and its exit maps. address is
+// the unit's own function address: a call to it is its own recursion.
+func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int) ([]byte, []jit.Exit, error) {
 	if f.Len() == 0 {
 		return nil, nil, fmt.Errorf("%w: function shape", ErrUnsupported)
 	}
@@ -131,8 +146,9 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		return nil, nil, fmt.Errorf("%w: entry parameters", ErrUnsupported)
 	}
 	l := &lowering{
-		f: f, m: m, a: asm.New(m.Arch()), fn: fn, objects: objects,
+		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
+		borrow: borrowed(f),
 	}
 	l.a.Reserve(m.Reserve()...)
 	if err := l.function(); err != nil {
@@ -154,6 +170,44 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		exits[id] = *e
 	}
 	return code, exits, nil
+}
+
+// borrowed reports, for every OpConst ref value f retains exactly once and
+// uses exactly once as some CALL's callee, that the retain is redundant: the
+// constant pool already holds the callee alive for the call's own duration.
+func borrowed(f *ssa.Function) map[ssa.Value]bool {
+	retains, uses, callees := map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
+	use := func(args []ssa.Value) {
+		for _, v := range args {
+			uses[v]++
+		}
+	}
+	for id := 0; id < f.Len(); id++ {
+		b := f.Block(id)
+		for _, op := range b.Operations {
+			switch op.Op {
+			case ssa.OpRetain:
+				retains[op.Args[0]]++
+			case ssa.OpRelease:
+			default:
+				use(op.Args)
+				if op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 {
+					callees[op.Args[len(op.Args)-1]] = true
+				}
+			}
+		}
+		use(b.Terminator.Args)
+		for _, e := range b.Terminator.Edges {
+			use(e.Args)
+		}
+	}
+	out := map[ssa.Value]bool{}
+	for v := range callees {
+		if retains[v] == 1 && uses[v] == 1 {
+			out[v] = true
+		}
+	}
+	return out
 }
 
 func (l *lowering) function() error {
@@ -188,6 +242,11 @@ func (l *lowering) function() error {
 		if !counted {
 			return fmt.Errorf("%w: loop header %d without state", ErrUnsupported, block)
 		}
+		if l.pending != ssa.NoValue {
+			if err := l.flush(); err != nil {
+				return err
+			}
+		}
 		if err := l.terminator(b.Terminator, labels); err != nil {
 			return err
 		}
@@ -209,6 +268,11 @@ func (l *lowering) function() error {
 }
 
 func (l *lowering) operation(op ssa.Operation) error {
+	if l.pending != ssa.NoValue && op.Op != ssa.OpState && !l.calls(op) {
+		if err := l.flush(); err != nil {
+			return err
+		}
+	}
 	if op.Op != ssa.OpGuardKind {
 		if err := l.validate(op.Args); err != nil {
 			return err
@@ -230,6 +294,11 @@ func (l *lowering) operation(op ssa.Operation) error {
 			l.m.Move(l.a, l.Reg(op.Results[0]), l.Reg(op.Args[0]))
 			return nil
 		}
+	case ssa.OpRetain:
+		if l.borrow[op.Args[0]] {
+			l.pending = op.Args[0]
+			return nil
+		}
 	case ssa.OpExec:
 		if op.Code == instr.CALL {
 			return l.call(op)
@@ -245,10 +314,32 @@ func (l *lowering) operation(op ssa.Operation) error {
 		l.m.Exit(l.a, id, jit.ExitBridge, l.live(id))
 		l.m.Results(l.a, results)
 		return l.err
-	case ssa.OpStore, ssa.OpRetain, ssa.OpRelease:
+	case ssa.OpStore, ssa.OpRelease:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
+	if !l.m.Lower(l.a, op, l) {
+		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
+	}
+	return l.err
+}
+
+// calls reports whether op is the CALL that consumes l.pending as its
+// callee: the only shape a borrow-candidate retain feeds. OpState never
+// intervenes (operation skips it above): it records a snapshot and emits no
+// row, so it never places an exit map between the retain and its call.
+func (l *lowering) calls(op ssa.Operation) bool {
+	return op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 && op.Args[len(op.Args)-1] == l.pending
+}
+
+// flush lowers a deferred retain whose call did not immediately follow it
+// (an operation genuinely came between, so an exit could name the value),
+// keeping today's code for that value.
+func (l *lowering) flush() error {
+	op := ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{l.pending}}
+	delete(l.borrow, l.pending)
+	l.pending = ssa.NoValue
+	l.op = op
 	if !l.m.Lower(l.a, op, l) {
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
@@ -394,8 +485,11 @@ func (l *lowering) call(op ssa.Operation) error {
 		return fmt.Errorf("%w: call without a state", ErrUnsupported)
 	}
 	below := len(state.Frames[len(state.Frames)-1].Stack) - len(op.Args)
+	owned := l.pending != callee
+	l.pending = ssa.NoValue
 	id := l.exit(jit.ExitCall)
 	l.exits[id].Callee = c.Ref()
+	l.exits[id].Owned = owned
 	bridge, resume := l.stub(id)
 	site := Call{
 		Address: c.Ref(),
@@ -408,6 +502,8 @@ func (l *lowering) call(op ssa.Operation) error {
 		Live:    l.live(id),
 		Bridge:  bridge,
 		Resume:  resume,
+		Owned:   owned,
+		Self:    c.Ref() == l.address,
 	}
 	if !l.m.Call(l.a, site, l) {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
@@ -460,7 +556,9 @@ func (l *lowering) exit(k jit.Kind) int {
 			f.Stack = make([]jit.Operand, len(stack))
 		}
 		for j, o := range stack {
-			f.Stack[j].Owned = o.Owned
+			// A borrowed callee's retain was never emitted: the materializer
+			// must retain it itself.
+			f.Stack[j].Owned = o.Owned && !l.borrow[o.Value]
 			l.place(id, &f.Stack[j].Value, o.Value)
 		}
 		if len(frame.Locals) > 0 {

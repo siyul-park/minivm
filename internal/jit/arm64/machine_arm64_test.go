@@ -24,7 +24,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(7)}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
@@ -35,7 +35,7 @@ func TestNew(t *testing.T) {
 	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
 		stack := []types.Boxed{types.BoxI32(10), types.BoxI32(99), types.BoxI32(99)}
 		fn := sum(t)
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
 		ctx := enter(t, stack)
 		ctx.Budget = 3
 
@@ -56,7 +56,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(0)}
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -81,7 +81,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil, 0)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -106,7 +106,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{wide}, State: ret})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -118,7 +118,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
 		})
 		fn.Typ.Returns = []types.Type{types.TypeI64}
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
 
 		inline := []types.Boxed{types.BoxI64(-42)}
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, inline)))
@@ -145,7 +145,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
@@ -174,7 +174,7 @@ func TestNew(t *testing.T) {
 
 		rc := []int{0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(2)}
-		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil)
+		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil, 0)
 		ctx := enter(t, stack)
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
 
@@ -193,7 +193,7 @@ func TestNew(t *testing.T) {
 		fn := function(t, []types.Type{types.TypeString}, nil, func(b *instr.Builder) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 		})
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
 
 		rc := []int{0, 0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(3)}
@@ -210,13 +210,14 @@ func TestNew(t *testing.T) {
 		require.Equal(t, types.BoxI32(1), stack[0])
 	})
 
-	t.Run("calls itself through the natives table", func(t *testing.T) {
+	t.Run("calls its own entry directly, bypassing the natives table", func(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		code, _ := lower(t, arm64.New(), f, fib, module.Objects)
+		code, _ := lower(t, arm64.New(), f, fib, module.Objects, 2)
 
-		natives := []uintptr{0, 0, code}
+		// natives[2] is deliberately wrong: a self call never reads it.
+		natives := []uintptr{0, 0, 0xdead}
 		rc := []int{0, 0, 1}
 		stack := make([]types.Boxed, 64)
 		stack[0] = types.BoxI32(10)
@@ -234,7 +235,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects)
+		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0)
 		require.NoError(t, err)
 		buffer, err := asm.NewBuffer(len(bytes))
 		require.NoError(t, err)
@@ -262,7 +263,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		code, exits := lower(t, arm64.New(), f, fib, module.Objects)
+		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0)
 
 		natives := []uintptr{0, 0, 0}
 		rc := []int{0, 0, 1}
@@ -289,14 +290,17 @@ func TestNew(t *testing.T) {
 		stack[2] = types.BoxI32(21)
 		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
 		require.Equal(t, types.BoxI32(55), stack[0])
-		require.Equal(t, []int{0, 0, 3}, rc)
+		// fib's own call site retains it exactly once and it feeds only that
+		// call, so it is borrowed: rc never moves off the pool's own count,
+		// even across three suspended bridges.
+		require.Equal(t, []int{0, 0, 1}, rc)
 	})
 
 	t.Run("bridges a call past the depth limit or the stack top", func(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		code, exits := lower(t, arm64.New(), f, fib, module.Objects)
+		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0)
 		natives := []uintptr{0, 0, code}
 		rc := []int{0, 0, 1}
 
@@ -331,7 +335,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: args, State: at})
 
 		stack := make([]types.Boxed, len(consts))
-		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil)
+		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil, 0)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, consts, stack)
 	})
@@ -347,10 +351,10 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 			b.Bind(other).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
 		})
-		lower(t, m, translate(t, first), first, nil)
+		lower(t, m, translate(t, first), first, nil, 0)
 
 		stack := []types.Boxed{types.BoxI32(0)}
-		code, _ := lower(t, m, translate(t, second), second, nil)
+		code, _ := lower(t, m, translate(t, second), second, nil, 0)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, types.BoxI32(1), stack[0])
 	})
@@ -414,17 +418,17 @@ func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
 	return v
 }
 
-// lower builds f, the translation of fn, with m and publishes it.
-func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects) (uintptr, []jit.Exit) {
+// lower builds f, the translation of fn at address, with m and publishes it.
+func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, exits, err := compile.Lower(f, m, fn, objects)
+	code, exits, err := compile.Lower(f, m, fn, objects, address)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	address, err := asm.Link(buffer, code)
+	entry, err := asm.Link(buffer, code)
 	require.NoError(t, err)
-	return address, exits
+	return entry, exits
 }
 
 // enter is a context whose next activation has its frame at stack[0].

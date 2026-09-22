@@ -15,6 +15,9 @@ type Store struct {
 	codes   []atomic.Pointer[Code]
 	retired []*Code
 	active  atomic.Int64
+	// pending is len(retired), readable without mu so Reclaim with nothing
+	// retired — the common case — takes no lock.
+	pending atomic.Int64
 
 	mu sync.Mutex
 }
@@ -79,6 +82,7 @@ func (s *Store) Publish(c *Code) bool {
 		s.codes[c.Address].Store(c)
 		if old != nil {
 			s.retired = append(s.retired, old)
+			s.pending.Add(1)
 		}
 	}
 	s.mu.Unlock()
@@ -105,12 +109,13 @@ func (s *Store) Retire(address int) {
 	atomic.StoreUintptr(&s.natives[address], 0)
 	s.codes[address].Store(nil)
 	s.retired = append(s.retired, c)
+	s.pending.Add(1)
 }
 
 // Enter brackets an interpreter's native execution, suspended exits
-// included. An interpreter MUST Enter before it reads Natives or Code to
-// enter native code: a code is retired only after its natives entry is
-// cleared, so an interpreter that saw the old entry is counted.
+// included. An interpreter MUST Enter before it uses a code it read: a code
+// is retired only after its natives entry is cleared, so an interpreter
+// that saw the old entry is counted.
 func (s *Store) Enter() {
 	s.active.Add(1)
 }
@@ -125,6 +130,9 @@ func (s *Store) Leave() {
 // count: a code retired later may be running in an interpreter that entered
 // after the read.
 func (s *Store) Reclaim() error {
+	if s.pending.Load() == 0 {
+		return nil
+	}
 	s.mu.Lock()
 	retired := s.retired
 	if s.active.Load() != 0 {
@@ -132,6 +140,7 @@ func (s *Store) Reclaim() error {
 		return nil
 	}
 	s.retired = nil
+	s.pending.Add(-int64(len(retired)))
 	s.mu.Unlock()
 
 	var err error
