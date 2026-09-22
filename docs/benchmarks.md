@@ -136,7 +136,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 201.64 µs | 120 | 6 |
 |  | CPython | 226.15 µs | 11 | 0 |
 |  | gpython | 782.30 µs | 363,441 | 4,156 |
-| Native | minivm `jit` | 213.17 µs | 120 | 6 |
+| Native | minivm `jit` | 199.89 µs | 120 | 6 |
 | Reference | Native Go | 4.21 µs | 0 | 0 |
 #### `Fannkuch(6)`
 
@@ -145,7 +145,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 401.58 µs | 34,608 | 1,442 |
 |  | CPython | 430.81 µs | 20 | 0 |
 |  | gpython | 1.57 ms | 1,367,678 | 16,944 |
-| Native | minivm `jit` | 446.68 µs | 34,608 | 1,442 |
+| Native | minivm `jit` | 406.90 µs | 34,608 | 1,442 |
 | Reference | Native Go | 17.54 µs | 17,280 | 720 |
 
 ### Memory and data structures
@@ -184,7 +184,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Goja | 262.24 µs | 122,504 | 765 |
 |  | gpython | 228.35 µs | 115,560 | 2,496 |
 |  | Yaegi | 174.84 µs | 112,600 | 5,591 |
-| Native | minivm `jit` | 77.29 µs | 14,336 | 128 |
+| Native | minivm `jit` | 76.44 µs | 14,336 | 128 |
 | Reference | Native Go | 1.08 µs | 0 | 0 |
 #### `StructTreeWalk(9)`
 
@@ -196,7 +196,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Goja | 448.41 µs | 558,961 | 6,149 |
 |  | gpython | 1.26 ms | 2,570,669 | 34,797 |
 |  | Yaegi | 846.99 µs | 1,422,624 | 35,306 |
-| Native | minivm `jit` | 155.78 µs | 768 | 8 |
+| Native | minivm `jit` | 156.29 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
 #### `BinaryTrees(4..6)`
 
@@ -205,7 +205,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 962.60 µs | 768 | 8 |
 |  | CPython | 991.16 µs | 45 | 0 |
 |  | gpython | 9.87 ms | 19,457,623 | 280,714 |
-| Native | minivm `jit` | 1.04 ms | 768 | 8 |
+| Native | minivm `jit` | 1.05 ms | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
 #### `SortStress(128,2)`
 
@@ -214,7 +214,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 192.38 µs | 5,136 | 512 |
 |  | CPython | 339.27 µs | 16 | 0 |
 |  | gpython | 870.26 µs | 23,448 | 2,034 |
-| Native | minivm `jit` | 192.96 µs | 5,136 | 512 |
+| Native | minivm `jit` | 43.92 µs | 5,136 | 512 |
 | Reference | Native Go | 4.38 µs | 1,024 | 2 |
 #### `StringBuild(512)`
 
@@ -223,7 +223,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 344.20 µs | 85,408 | 4,107 |
 |  | CPython | 368.74 µs | 17 | 0 |
 |  | gpython | 1.25 ms | 2,104,720 | 21,456 |
-| Native | minivm `jit` | 354.59 µs | 85,408 | 4,107 |
+| Native | minivm `jit` | 343.16 µs | 85,408 | 4,107 |
 | Reference | Native Go | 138.19 µs | 855,892 | 5,001 |
 
 ### Numeric
@@ -247,8 +247,10 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 311.95 µs | 504 | 14 |
 |  | CPython | **230.89 µs** | 11 | 0 |
 |  | gpython | 1.17 ms | 382,762 | 34,975 |
-| Native | minivm `jit` | 314.87 µs | 504 | 14 |
+| Native | minivm `jit` | 27.02 µs | 91,548 ± 89% | 1,568 ± 89% |
 | Reference | Native Go | 3.39 µs | 0 | 0 |
+
+`NBody/jit`'s B/op and allocs/op carry unusually high run-to-run variance (±89% across the six samples, vs ±0–2% for every other row here): `advance` now runs natively instead of bridging every call (see Interpretation), so its allocations are dominated by whether the async Baseline/Optimized compile queue is still draining during a given sample's timed loop rather than by steady-state per-call cost; ns/op itself stayed tight (±0%).
 #### `SpectralNorm(24,2)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -256,7 +258,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 271.35 µs | 648 | 6 |
 |  | CPython | 415.89 µs | 20 | 0 |
 |  | gpython | 1.94 ms | 2,457,137 | 52,718 |
-| Native | minivm `jit` | **175.41 µs** | 648 | 6 |
+| Native | minivm `jit` | **21.75 µs** | 648 | 6 |
 | Reference | Native Go | 2.79 µs | 576 | 3 |
 #### `Mandelbrot(16x16)`
 
@@ -342,7 +344,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-The S2 tier enters only from an interpreted `CALL` to `*types.Function`; it does not perform top-level or loop-only OSR. Kernels without calls therefore remain threaded. Called functions that lower cleanly can run natively; unsupported operations and `RETURN_CALL` return to threaded execution and still pay the native entry bookkeeping. S2-P8 replaced the store lookup with per-address atomic pointers and four maps of tiering state with slices; re-measured 2026-09-22, this reduced `IndirectRecursiveFib` from ~1.9x to ~1.3x threaded and `StructTreeWalk`/`BinaryTrees` from ~1.5x/~1.4x to ~1.1x. S2-P9 borrows a constant callee's already-alive reference instead of retaining and releasing it around the call, and a self call branches directly to the unit's own entry instead of through `Context.Natives`; re-measured 2026-09-22, this cut `RecursiveFib(35)/jit` ~26% (100.32 ms → 74.46 ms) — fib's own call is both borrowed and self — while `RecursiveFib(20)/jit` moved less (~3%), and every other re-measured kernel's `jit`/`threaded` row moved within noise of its S2-P8 figure. `NQueens`, `Fannkuch`, and `StringBuild` remain unmeasured. Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
+The S2 tier enters only from an interpreted `CALL` to `*types.Function`; it does not perform top-level or loop-only OSR. Kernels without calls therefore remain threaded. Called functions that lower cleanly can run natively; unsupported operations and `RETURN_CALL` return to threaded execution and still pay the native entry bookkeeping. S2-P8 replaced the store lookup with per-address atomic pointers and four maps of tiering state with slices; re-measured 2026-09-22, this reduced `IndirectRecursiveFib` from ~1.9x to ~1.3x threaded and `StructTreeWalk`/`BinaryTrees` from ~1.5x/~1.4x to ~1.1x. S2-P9 borrows a constant callee's already-alive reference instead of retaining and releasing it around the call, and a self call branches directly to the unit's own entry instead of through `Context.Natives`; re-measured 2026-09-22, this cut `RecursiveFib(35)/jit` ~26% (100.32 ms → 74.46 ms) — fib's own call is both borrowed and self — while `RecursiveFib(20)/jit` moved less (~3%), and every other re-measured kernel's `jit`/`threaded` row moved within noise of its S2-P8 figure. S2-P10 replaces `ssa.Shape`'s private token with a public `Kind`/`Struct` vocabulary and drops `transform.walk`'s call-free gate on declared array element kinds, so `array.get`/`array.set`/`array.len`/`struct.get`/`struct.set`/`ref.is_null` lower on ARM64 for the first time. Two defects surfaced by this A/B are fixed in the same pass, not worked around: (1) `internal/jit/arm64/container.go`'s `arraySet` stored a 4-byte `TypedArray[int32]` element with a full 64-bit `STR`, clobbering the following element (`internal/asm/arm64`'s store encoder is width-aware for a float source but was not for an integer one) — this, not a retire/republish defect, was the actual cause of `SortStress`'s wrong result under `interp.WithThreshold(0)`, now fixed by routing the 4-byte int case through `STRW`; and (2) a code that refuted (`native.refute` reached, S2-P10) previously only reset its tiering counters on retirement, so a function bridging every entry (any unsupported op, e.g. an allocation op none of `struct.new`/`array.new_default`/`string.concat` lower) recompiled the same unchanged code indefinitely, once per `refute`-sized cycle, for the life of the program; retirement now also marks the retiring code's own tier permanently failed, so that churn stops after at most one retirement per tier. Interleaved A/B (before = the S2-P9 HEAD worktree at `22cb438`, `-benchtime=1s -count=3` twice, 12 samples total per config, `benchstat`), re-measured 2026-09-22: `NBody/jit` 308.96 µs → 27.02 µs (-91.25%, `advance`'s 33 guards/24 `array.get`/9 `array.set` now run natively instead of bridging; B/op and allocs/op on this row carry ±89% variance from async-compile timing, see the row's own note) and `SpectralNorm/jit` 174.42 µs → 21.75 µs (-87.53%, its array was already guard-free but is now allocation-free too); `SortStress/jit` 194.88 µs → 43.92 µs (-77.46%, unblocked by the `STRW` fix above — `make_list`'s own `array.new_default` still bridges every call, but `insertion_sort`'s `array.get`/`array.set` loop now compiles and runs correctly). `NQueens`, `Fannkuch`, `StructTreeWalk`, `BinaryTrees`, and `StringBuild` still deopt on every entry at their own allocation op exactly as before S2-P10, but with the retire/refute fix above their `jit` rows are statistically indistinguishable from the S2-P9 baseline (`p >= 0.09` on every one, `StructTreeWalk/jit`'s `+0.82%` at `p=0.041` is the only row below `p=0.05` and is noise-sized) instead of the runaway B/op and allocs/op a churning retire loop produced pre-fix (e.g. `NQueens/jit` no longer shows 163,208 B/op and 3,656 allocs/op for a kernel whose `threaded` row allocates 120 B and 6 times — it now matches `threaded` almost exactly, because it retires once and then simply runs threaded for the rest of the benchmark instead of recompiling every eight deopts); `PermutationFlips/jit` also moved within noise. Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
 
 ## Benchmark Fixture Inventory
 

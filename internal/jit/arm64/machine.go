@@ -24,6 +24,11 @@ type Machine struct {
 	// entry is the function's own first row, what Context.Natives would
 	// hold for it: a self call branches here directly.
 	entry asm.Label
+	// guards is the shape every OpGuardShape result admits, so a container
+	// exec op can assert its own container argument is one (compile.Site
+	// carries no such query, and the fact is Machine-local across the whole
+	// function, like kinds and temp).
+	guards map[ssa.Value]ssa.Shape
 }
 
 // New returns an ARM64 machine.
@@ -40,7 +45,7 @@ func (m *Machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X1
 // Prologue begins a function: it builds the frame, loads the frame base,
 // pushes the activation record, and clears the locals after params.
 func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int) {
-	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label()}
+	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -88,6 +93,8 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return m.exec(a, op, s)
 	case ssa.OpGuardKind:
 		return m.guard(a, op, s)
+	case ssa.OpGuardShape:
+		return m.shape(a, op, s)
 	case ssa.OpRetain:
 		m.retain(a, s.Reg(op.Args[0]))
 		return true
@@ -554,6 +561,18 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.reinterpret(a, op, s)
 	case instr.SELECT:
 		return m.choose(a, op, s)
+	case instr.REF_IS_NULL:
+		return m.refIsNull(a, op, s)
+	case instr.ARRAY_GET:
+		return m.arrayGet(a, op, s)
+	case instr.ARRAY_SET:
+		return m.arraySet(a, op, s)
+	case instr.ARRAY_LEN:
+		return m.arrayLen(a, op, s)
+	case instr.STRUCT_GET:
+		return m.structGet(a, op, s)
+	case instr.STRUCT_SET:
+		return m.structSet(a, op, s)
 	default:
 		return false
 	}

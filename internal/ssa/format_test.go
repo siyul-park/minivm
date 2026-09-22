@@ -22,7 +22,7 @@ func TestFormat(t *testing.T) {
 		zero := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 0, Returns: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 0x2a}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero, zero}}}})
 
@@ -56,7 +56,7 @@ func TestFormat(t *testing.T) {
 			"blk0: ()\n"+
 			"\tv1:state = state {addr=1 base=0 ip=0 returns=1 stack=[]}\n"+
 			"\tv2:ref = load local[0]\n"+
-			"\tv3:ref = guard.shape v2 tag 0x2a state v1\n"+
+			"\tv3:ref = guard.shape v2 kind i32 state v1\n"+
 			"\tv4:i32 = const 0\n"+
 			"\tjump blk1(v4, v4)\n"+
 			"blk1: (v5:i32, v6:i32) <-- (blk0, blk2)\n"+
@@ -144,7 +144,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{fresh}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Shape: ssa.Shape{Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target, three}, State: state, Results: []ssa.Value{field}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Shape: ssa.Shape{Struct: true, Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target, three}, State: state, Results: []ssa.Value{field}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
 
 		b.Term(stop, ssa.Terminator{Op: ssa.OpSuspend, State: state})
@@ -168,7 +168,7 @@ func TestFormat(t *testing.T) {
 			"\tv8:i32 = call v2, v6 state v1\n"+
 			"\tv9:ref = array.new_default v8 state v1\n"+
 			"\trelease v9 state v1\n"+
-			"\tv10:i32 = struct.get v4, v6 type 0x40 host int16 state v1\n"+
+			"\tv10:i32 = struct.get v4, v6 struct type 0x40 host int16 state v1\n"+
 			"\ttable v10, blk1(), blk2(), blk3()\n"+
 			"blk1: () <-- (blk0)\n"+
 			"\tsuspend state v1\n"+

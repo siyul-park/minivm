@@ -158,7 +158,7 @@ func TestHoistPass_Run(t *testing.T) {
 		state := l.b.Value(ssa.TypeState)
 		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
 		guarded := l.b.Value(ssa.TypeRef)
-		l.b.Add(l.body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Tag: 7}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guarded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guarded}})
 		length := l.b.Value(ssa.TypeI32)
 		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guarded}, State: deoptState(l.b, l.pre), Results: []ssa.Value{length}})
 		fn := l.close()

@@ -28,6 +28,7 @@ type Context struct {
 
 	// Bases are written by the interpreter before every Enter and Resume.
 	Stack   uintptr
+	Heap    uintptr
 	Globals uintptr
 	RC      uintptr
 	Natives uintptr
@@ -61,6 +62,7 @@ const (
 	OffsetTrap    = unsafe.Offsetof(Context{}.trap)
 	OffsetExit    = unsafe.Offsetof(Context{}.exit)
 	OffsetStack   = unsafe.Offsetof(Context{}.Stack)
+	OffsetHeap    = unsafe.Offsetof(Context{}.Heap)
 	OffsetGlobals = unsafe.Offsetof(Context{}.Globals)
 	OffsetRC      = unsafe.Offsetof(Context{}.RC)
 	OffsetNatives = unsafe.Offsetof(Context{}.Natives)

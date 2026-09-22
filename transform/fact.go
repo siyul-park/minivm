@@ -14,7 +14,6 @@ type facts struct {
 	globals   []types.Kind
 	objects   Objects
 	types     []types.Type
-	callFree  bool
 }
 
 type activation struct {

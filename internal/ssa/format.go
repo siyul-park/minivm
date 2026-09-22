@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/siyul-park/minivm/instr"
 )
 
 // Format renders a readable SSA dump.
@@ -55,7 +57,7 @@ func op(function *Function, o Operation) string {
 	if len(args) > 0 {
 		fmt.Fprintf(&sb, " %s", strings.Join(args, ", "))
 	}
-	sb.WriteString(shape(o.Shape))
+	sb.WriteString(shape(o))
 	if o.State != NoValue {
 		fmt.Fprintf(&sb, " state v%d", o.State)
 	}
@@ -85,18 +87,38 @@ func slot(s Slot) string {
 	return fmt.Sprintf("%s[%d]", s.Space, s.Index)
 }
 
-func shape(s Shape) string {
-	var sb strings.Builder
-	if s.Tag != 0 {
-		fmt.Fprintf(&sb, " tag 0x%x", s.Tag)
+// shape renders o.Shape when o.Op admits one: only OpGuardShape and a
+// container OpExec ever set it, so every other operation's zero Shape (whose
+// Kind reads as the numerically-zero KindF64) prints nothing.
+func shape(o Operation) string {
+	if o.Op != OpGuardShape && !containerShaped(o.Code) {
+		return ""
 	}
-	if s.Type != 0 {
-		fmt.Fprintf(&sb, " type 0x%x", s.Type)
+	s := o.Shape
+	if s == (Shape{}) {
+		return ""
+	}
+	var sb strings.Builder
+	if s.Struct {
+		fmt.Fprintf(&sb, " struct type 0x%x", s.Type)
+	} else {
+		fmt.Fprintf(&sb, " kind %s", s.Kind)
 	}
 	if s.Host != reflect.Invalid {
 		fmt.Fprintf(&sb, " host %s", s.Host)
 	}
 	return sb.String()
+}
+
+// containerShaped reports whether code's container operand is a guard's own
+// admitted representation.
+func containerShaped(code instr.Opcode) bool {
+	switch code {
+	case instr.ARRAY_GET, instr.ARRAY_SET, instr.ARRAY_LEN, instr.STRUCT_GET, instr.STRUCT_SET:
+		return true
+	default:
+		return false
+	}
 }
 
 func definitions(function *Function, values []Value) string {

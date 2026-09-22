@@ -32,6 +32,7 @@ func TestContext_Layout(t *testing.T) {
 	}{
 		{"state", unsafe.Offsetof(jit.Context{}.State), 0},
 		{"stack", jit.OffsetStack, unsafe.Offsetof(jit.Context{}.Stack)},
+		{"heap", jit.OffsetHeap, unsafe.Offsetof(jit.Context{}.Heap)},
 		{"globals", jit.OffsetGlobals, unsafe.Offsetof(jit.Context{}.Globals)},
 		{"rc", jit.OffsetRC, unsafe.Offsetof(jit.Context{}.RC)},
 		{"natives", jit.OffsetNatives, unsafe.Offsetof(jit.Context{}.Natives)},

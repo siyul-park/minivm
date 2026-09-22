@@ -314,7 +314,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		l.m.Exit(l.a, id, jit.ExitBridge, l.live(id))
 		l.m.Results(l.a, results)
 		return l.err
-	case ssa.OpStore, ssa.OpRelease:
+	case ssa.OpStore, ssa.OpRelease, ssa.OpGuardShape:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}

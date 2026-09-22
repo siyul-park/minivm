@@ -478,7 +478,7 @@ func TestLower(t *testing.T) {
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
-	t.Run("rejects a shape guard", func(t *testing.T) {
+	t.Run("routes a shape guard to Machine.Lower", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		ref := constant(b, entry, types.BoxRef(1))
@@ -487,8 +487,10 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Args: []ssa.Value{ref}, State: at, Results: []ssa.Value{guarded}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0)
-		require.ErrorIs(t, err, compile.ErrUnsupported)
+		m := new(machine)
+		_, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0)
+		require.NoError(t, err)
+		require.Contains(t, m.calls, ssa.OpGuardShape.String())
 	})
 
 	t.Run("rejects a suspension", func(t *testing.T) {

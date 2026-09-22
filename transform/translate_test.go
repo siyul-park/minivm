@@ -245,6 +245,25 @@ blk3: (v6:ref) <-- (blk1)
 		require.NoError(t, ssa.Verify(out))
 	})
 
+	t.Run("guards an array load in a function that also calls", func(t *testing.T) {
+		callee := &types.Function{Typ: &types.FunctionType{}}
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).
+					Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+			})}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   transform.Objects{2: {Function: callee}}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Contains(t, ssa.Format(out), "guard.shape")
+	})
+
 	t.Run("guards an array load through a declared element kind", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
@@ -273,26 +292,27 @@ blk0: ()
 blk1: () <-- (blk0, blk3)
 	v3:ref = load local[0]
 	v5:state = state {addr=1 base=0 ip=9 returns=1 stack=[v3]}
-	v4:i32 = array.len v3 state v5
-	v6:i32 = load local[1]
-	v8:state = state {addr=1 base=0 ip=12 returns=1 stack=[v4, v6]}
-	v7:i1 = i32.le_s v4, v6 state v8
-	br v7, blk2(), blk3()
+	v4:ref = guard.shape v3 kind i32 state v5
+	v6:i32 = array.len v4 state v5
+	v7:i32 = load local[1]
+	v9:state = state {addr=1 base=0 ip=12 returns=1 stack=[v6, v7]}
+	v8:i1 = i32.le_s v6, v7 state v9
+	br v8, blk2(), blk3()
 blk2: () <-- (blk1)
-	v9:i32 = load local[1]
-	v10:state = state {addr=1 base=0 ip=31 returns=1 stack=[v9]}
-	return v9 state v10
+	v10:i32 = load local[1]
+	v11:state = state {addr=1 base=0 ip=31 returns=1 stack=[v10]}
+	return v10 state v11
 blk3: () <-- (blk1)
-	v11:ref = load local[0]
-	v12:i32 = load local[1]
-	v14:state = state {addr=1 base=0 ip=20 returns=1 stack=[v11, v12]}
-	v13:ref = guard.shape v11 tag 0x3 state v14
-	v15:i32 = array.get v13, v12 state v14
-	v16:i32 = load local[1]
-	v18:state = state {addr=1 base=0 ip=23 returns=1 stack=[v15, v16]}
-	v17:i32 = i32.add v15, v16 state v18
-	v19:state = state {addr=1 base=0 ip=24 returns=1 stack=[v17]}
-	store local[1], v17 state v19
+	v12:ref = load local[0]
+	v13:i32 = load local[1]
+	v15:state = state {addr=1 base=0 ip=20 returns=1 stack=[v12, v13]}
+	v14:ref = guard.shape v12 kind i32 state v15
+	v16:i32 = array.get v14, v13 state v15
+	v17:i32 = load local[1]
+	v19:state = state {addr=1 base=0 ip=23 returns=1 stack=[v16, v17]}
+	v18:i32 = i32.add v16, v17 state v19
+	v20:state = state {addr=1 base=0 ip=24 returns=1 stack=[v18]}
+	store local[1], v18 state v20
 	jump blk1()
 `, ssa.Format(out))
 	})
@@ -314,7 +334,7 @@ blk0: ()
 	v2:i32 = const 0
 	v3:i32 = const 5
 	v5:state = state {addr=1 base=0 ip=12 returns=0 stack=[v1, v2, v3]}
-	v4:ref = guard.shape v1 tag 0x3 state v5
+	v4:ref = guard.shape v1 kind i32 state v5
 	array.set v4, v2, v3 state v5
 	v6:state = state {addr=1 base=0 ip=13 returns=0 stack=[]}
 	return state v6
@@ -342,7 +362,7 @@ blk0: ()
 	v4:i32 = const 0
 	v5:i32 = const 5
 	v7:state = state {addr=1 base=0 ip=18 returns=0 stack=[v2 owned, v4, v5]}
-	v6:ref = guard.shape v2 tag 0x8 state v7
+	v6:ref = guard.shape v2 struct type 0x0 state v7
 	struct.set v6, v4, v5 state v7
 	release v6 state v7
 	v8:state = state {addr=1 base=0 ip=19 returns=0 stack=[]}
@@ -364,7 +384,7 @@ blk0: ()
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
-		require.Contains(t, ssa.Format(out), "v3:ref = guard.shape v1 tag 0x8 type ")
+		require.Contains(t, ssa.Format(out), "v3:ref = guard.shape v1 struct type ")
 		require.Contains(t, ssa.Format(out), "f64 = struct.get v3, v2")
 	})
 

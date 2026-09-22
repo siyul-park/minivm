@@ -326,8 +326,10 @@ func wideI64Program(t *testing.T, warm int) *program.Program {
 
 // divFailProgram warms divFunction with a nonzero divisor warm times, then
 // calls it with a zero divisor fails times in a loop whose body is one Try
-// region: every one of those native entries deoptimizes, so enough of them
-// retire the address and it tiers up again from a fresh Baseline compile.
+// region: every one of those native entries deoptimizes, so the address
+// retires once its deopt count reaches native.go's refute threshold, and
+// its Baseline tier is then marked permanently failed — it never
+// recompiles and every later call in the loop runs threaded.
 // Locals are [0]=warm counter, [1]=fail counter, so the Try region's entry
 // depth (params + locals + live operands, per instr.Handler) is 2.
 func divFailProgram(t *testing.T, warm, fails int) *program.Program {
@@ -399,6 +401,193 @@ func nestedConcatProgram(t *testing.T, warm int) *program.Program {
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32),
 		program.WithConstants(inner, outer, types.String("deep-"), types.String("concat")))
+}
+
+// identityFunction returns its i32 argument unchanged; used only to make a
+// caller's own code not call-free.
+func identityFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// typedArrayCallsProgram warms sumArray(arr) warm times, where sumArray
+// itself calls the identity function once per loop iteration (constant 0),
+// so its own array.get/array.len must translate despite the call: the exact
+// bug S2-P10 fixes in transform/walk.go's callFree gate. Constant 1 is the
+// i32 array to sum.
+func typedArrayCallsProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	ident := identityFunction()
+	sum := types.NewFunctionBuilder(&types.FunctionType{
+		Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32},
+	})
+	header, done := sum.Label(), sum.Label()
+	sum.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
+	sum.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
+	sum.Bind(header)
+	sum.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.I32_GE_S)).BrIf(done)
+	sum.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.DROP))
+	sum.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+	sum.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1))
+	sum.Br(header)
+	sum.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+	sumFn := sum.MustBuild()
+	sumFn.Locals = []types.Type{types.TypeI32, types.TypeI32}
+
+	arr := types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
+	b := instr.NewBuilder()
+	loop, loopDone := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(loopDone)
+	b.Emit(instr.CONST_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(loopDone).Emit(instr.CONST_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(sumFn, ident, arr))
+}
+
+// refArrayProgram warms readWrite(arr) warm times, where readWrite reads
+// element 0 (retaining it), releases it, writes a fresh string into element
+// 0 (releasing the old element, adopting the new one), and returns the new
+// element: array.get and array.set over KindRef elements, whose ownership
+// this proves through RefCount. Constant 1 is a two-element ref array whose
+// elements are throwaway strings the warmup loop replaces every time.
+func refArrayProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	rw := types.NewFunctionBuilder(&types.FunctionType{
+		Params: []types.Type{types.NewArrayType(types.TypeAny)}, Returns: []types.Type{types.TypeAny},
+	})
+	rw.Emit(
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.DROP),
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0),
+		instr.New(instr.CONST_GET, 1), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
+		instr.New(instr.ARRAY_SET),
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+		instr.New(instr.RETURN),
+	)
+	rwFn := rw.MustBuild()
+
+	arr := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxedNull, types.BoxedNull)
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32),
+		program.WithConstants(rwFn, types.String("held-"), types.String("open"), arr))
+}
+
+// structTreeProgram warms sumTree(node) warm times, walking a 3-node linked
+// list of structs {value i32, next any} through struct.get on both fields
+// and ref.is_null as the loop condition, summing value. Constants are
+// [walkFn, leaf(10), mid(20), root(30)]; the module's own code links
+// root->mid->leaf->null once, through struct.set, before ever calling
+// walkFn, since a struct constant's heap address exists only once the
+// interpreter loads it.
+func structTreeProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	record := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("value")), types.NewStructField(types.TypeAny, types.FieldWithName("next")))
+	// The next field's declared type is the record itself: a self-reference,
+	// wired after construction since a field cannot name its own type before
+	// it exists. This is what lets w.field (transform/walk.go) resolve
+	// struct.get's field kind statically for a value read back out of a
+	// "next" field, not only for the root parameter.
+	record.Fields[1].Type = record
+
+	walk := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{record}, Returns: []types.Type{types.TypeI32}})
+	header, done := walk.Label(), walk.Label()
+	walk.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_SET, 1))
+	walk.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
+	walk.Bind(header)
+	walk.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.REF_IS_NULL)).BrIf(done)
+	walk.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+	walk.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1))
+	walk.Br(header)
+	walk.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+	walkFn := walk.MustBuild()
+	walkFn.Locals = []types.Type{record, types.TypeI32}
+
+	leaf := types.NewStruct(record, types.BoxI32(10), types.BoxedNull)
+	mid := types.NewStruct(record, types.BoxI32(20), types.BoxedNull)
+	root := types.NewStruct(record, types.BoxI32(30), types.BoxedNull)
+
+	b := instr.NewBuilder()
+	b.Emit(instr.CONST_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 2).Emit(instr.STRUCT_SET)
+	b.Emit(instr.CONST_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRUCT_SET)
+	loop, done2 := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done2)
+	b.Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done2).Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32),
+		program.WithTypes(record), program.WithConstants(walkFn, leaf, mid, root))
+}
+
+// arrayOOBProgram warms readAt(arr, idx) warm times with an in-range index,
+// then calls it once more out of range inside a module-level Try that
+// catches the trap: a native array.get bounds check deopts and the replayed
+// threaded ARRAY_GET raises the identical ErrIndexOutOfRange a guest handler
+// catches, matching pure threaded execution exactly.
+func arrayOOBProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	at := types.NewFunctionBuilder(&types.FunctionType{
+		Params: []types.Type{types.NewArrayType(types.TypeI32), types.TypeI32}, Returns: []types.Type{types.TypeI32},
+	})
+	at.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN))
+	atFn := at.MustBuild()
+	arr := types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+
+	b := instr.NewBuilder()
+	warmLoop, warmDone, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(warmLoop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(warmDone)
+	b.Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(warmLoop)
+	b.Bind(warmDone)
+	b.Bind(start).Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 99).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Bind(end)
+	b.Bind(catch).Emit(instr.ERROR_CODE)
+	b.Try(start, end, catch, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(atFn, arr), program.WithHandlers(b.Handlers()...))
+}
+
+// hostArrayGlobalProgram declares global[0] as an i32 array and warms and
+// finally calls readLen(arr) over whatever the test seeds there. Seeded with
+// a Go-backed *interp.HostArray of the same declared element kind, every
+// native entry's shape guard fails on a representation it never admits and
+// deopts, matching threaded exactly (interp.arrayLen's own *HostArray case).
+func hostArrayGlobalProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	ln := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}})
+	ln.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))
+	lnFn := ln.MustBuild()
+
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithGlobals(types.NewArrayType(types.TypeI32)), program.WithConstants(lnFn))
 }
 
 func TestWithThreshold(t *testing.T) {
@@ -696,18 +885,27 @@ func TestWithThreshold(t *testing.T) {
 		}, 5*time.Second, time.Millisecond)
 	})
 
-	t.Run("a function that deoptimizes every call is retired and stops entering native code", func(t *testing.T) {
+	t.Run("a function that deoptimizes every call retires once and never re-enters native code", func(t *testing.T) {
 		native(t)
 		// warm is large enough (matching sumWarmProgram/sumTryProgram) that the
-		// async Baseline compile reliably finishes during warmup, so every one
-		// of fails' native entries deoptimizes: without retirement, every one
-		// of them reaches native code and vm_jit_exits_total{kind=deopt} equals
-		// fails exactly; retirement bounds it to a handful of refute-sized
-		// cycles instead.
+		// async Baseline compile reliably finishes during warmup — long
+		// enough, in fact, that Baseline usually promotes to Optimized before
+		// the fail loop starts. Retirement (native.refute reached) now marks
+		// the retiring code's own tier permanently failed: there is no
+		// feedback yet that would make a recompile of the same unchanged
+		// code at that tier differ. A fresh Baseline compile is not the same
+		// code Optimized retired, so at most one retirement per tier can
+		// occur — Optimized once, and (if it then falls back and warms
+		// Baseline again) Baseline once — bounding the deopt count at
+		// 2*refute (interp/native.go's unexported deopt-retire threshold),
+		// never growing unbounded with fails as the old retire-forget-only
+		// contract allowed.
 		const fails = 200
+		const refute = 8 // interp/native.go's unexported refute constant.
 		prog := divFailProgram(t, 200_000, fails)
 		want := runProgram(t, prog)
 
+		var deopts float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
@@ -719,9 +917,10 @@ func TestWithThreshold(t *testing.T) {
 				return false
 			}
 			vm.Flush()
-			deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-			return deopts > 0 && deopts < fails/2
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return deopts > 0
 		}, 5*time.Second, time.Millisecond)
+		require.LessOrEqual(t, deopts, float64(2*refute))
 	})
 
 	t.Run("a cancelled context during a native loop escapes guest handlers as the context error", func(t *testing.T) {
@@ -831,6 +1030,134 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, result)
 		require.Equal(t, 1, rc)
+	})
+
+	t.Run("sums a typed i32 array in a function that also calls, matching threaded", func(t *testing.T) {
+		native(t)
+		prog := typedArrayCallsProgram(t, 20000)
+		want := runProgram(t, prog)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			if result != want {
+				return false
+			}
+			vm.Flush()
+			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("reads and writes a ref array element natively, matching threaded RefCount", func(t *testing.T) {
+		native(t)
+		// Each interpreter gets its own freshly built program: array.set
+		// mutates the array constant in place, and program.Program shares
+		// that *types.Array Go object across every interp.New call that
+		// reuses it, so a program run to completion once must not be reused
+		// for a second run (want, then every retry below).
+		wantValue, wantCount := runProgramString(t, refArrayProgram(t, 20000))
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(refArrayProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, count, err := popString(vm)
+			require.NoError(t, err)
+			if value != wantValue || count != wantCount {
+				return false
+			}
+			vm.Flush()
+			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("walks a struct tree natively through struct.get and ref.is_null, matching threaded", func(t *testing.T) {
+		native(t)
+		// Each interpreter gets its own freshly built program: the module's
+		// own linking code (struct.set) mutates the leaf/mid/root struct
+		// constants in place, another instance of the refArrayProgram
+		// cross-run-reuse hazard above.
+		want := runProgram(t, structTreeProgram(t, 20000))
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(structTreeProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			if result != want {
+				return false
+			}
+			vm.Flush()
+			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("an out-of-bounds array.get deopts and is caught by a guest handler, matching threaded", func(t *testing.T) {
+		native(t)
+		prog := arrayOOBProgram(t, 20000)
+		want := runProgram(t, prog)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			if result != want {
+				return false
+			}
+			vm.Flush()
+			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+	})
+
+	t.Run("a host array fails its shape guard and deopts, matching threaded", func(t *testing.T) {
+		native(t)
+		prog := hostArrayGlobalProgram(t, 20000)
+
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		hostVal, err := threaded.Marshal([]int32{1, 2, 3, 4, 5})
+		require.NoError(t, err)
+		hostAddr, err := threaded.Alloc(hostVal)
+		require.NoError(t, err)
+		require.NoError(t, threaded.SetGlobal(0, types.BoxRef(hostAddr)))
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), want)
+
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			hostVal, err := vm.Marshal([]int32{1, 2, 3, 4, 5})
+			require.NoError(t, err)
+			hostAddr, err := vm.Alloc(hostVal)
+			require.NoError(t, err)
+			require.NoError(t, vm.SetGlobal(0, types.BoxRef(hostAddr)))
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			if result != want {
+				return false
+			}
+			vm.Flush()
+			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
 	})
 
 	t.Run("stays off by default: no vm_jit metrics are reported", func(t *testing.T) {

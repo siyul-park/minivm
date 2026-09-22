@@ -1,6 +1,7 @@
 package arm64_test
 
 import (
+	"math"
 	"slices"
 	"testing"
 	"unsafe"
@@ -357,6 +358,233 @@ func TestNew(t *testing.T) {
 		code, _ := lower(t, m, translate(t, second), second, nil, 0)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, types.BoxI32(1), stack[0])
+	})
+
+	t.Run("sums a typed i32 array through a guarded loop", func(t *testing.T) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+			header, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+			b.Bind(header)
+			b.Emit(instr.LOCAL_GET, 1)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN)
+			b.Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 2)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET)
+			b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Br(header)
+			b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
+		})
+
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		// RETURN releases every reference-capable slot, including the array
+		// param itself; rc[1] starts above one so that release never falls
+		// to the last reference and bridges.
+		rc := []int{0, 2}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI32(100), stack[0])
+		require.Zero(t, ctx.Depth)
+	})
+
+	t.Run("retains a ref element a guarded array.get reads, through Context.RC", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+		insts, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeAny)}, Returns: []types.Type{types.TypeAny}},
+			Code: instr.Marshal(insts),
+		}
+
+		array := &types.Array{Typ: types.NewArrayType(types.TypeAny), Elems: []types.Boxed{types.BoxRef(2)}}
+		heap := []types.Value{nil, array, nil}
+		rc := []int{0, 2, 1}
+		stack := []types.Boxed{types.BoxRef(1)}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxRef(2), stack[0])
+		require.Equal(t, 2, rc[2])
+	})
+
+	t.Run("reads and writes a struct field through its resolved record", func(t *testing.T) {
+		record := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("x")))
+		b := instr.NewBuilder()
+		b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).
+			Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
+			Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).
+			Emit(instr.STRUCT_SET).
+			Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
+			Emit(instr.RETURN)
+		insts, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal(insts),
+		}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   transform.Objects{2: {Type: record}},
+		}
+		f, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+
+		s := types.NewStruct(record, types.BoxI32(5))
+		heap := []types.Value{nil, nil, s}
+		stack := make([]types.Boxed, 4)
+		code, _ := lower(t, arm64.New(), f, fn, m.Objects, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI32(6), stack[0])
+		require.Equal(t, uint64(6), s.Data[0])
+	})
+
+	t.Run("struct.set stores an i8 field sign-extended to 32 bits and zero-extended to 64, matching Struct.SetField", func(t *testing.T) {
+		// types.(*Struct).SetField for KindI8 computes
+		// uint64(uint32(int32(val.I8()))): sign-extend to 32 bits, then
+		// zero-extend to 64. A raw 64-bit sign extension (SBFX into a
+		// 64-bit destination) diverges for any negative int8.
+		record := types.NewStructType(types.NewStructField(types.TypeI8, types.FieldWithName("x")))
+		b := ssa.New("f")
+		entry := b.Block()
+		ref := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(1), Results: []ssa.Value{ref}})
+		guarded := b.Value(ssa.TypeRef)
+		guardState := state(b, entry, ssa.Operand{Value: ref})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true}, Args: []ssa.Value{ref}, State: guardState, Results: []ssa.Value{guarded}})
+		idx := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{idx}})
+		val := b.Value(ssa.TypeI8)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI8(-1), Results: []ssa.Value{val}})
+		at := state(b, entry, ssa.Operand{Value: guarded}, ssa.Operand{Value: idx}, ssa.Operand{Value: val})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_SET, Args: []ssa.Value{guarded, idx, val}, State: at})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		s := types.NewStruct(record, types.BoxI32(0))
+		heap := []types.Value{nil, s}
+		stack := []types.Boxed{0}
+		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		// int8(-1) -> int32(-1) -> uint32(0xFFFFFFFF) -> uint64(0x00000000FFFFFFFF).
+		require.Equal(t, uint64(0xFFFFFFFF), s.Data[0])
+	})
+
+	t.Run("sorts a typed i32 array in place via a guarded insertion-sort loop", func(t *testing.T) {
+		b := instr.NewBuilder()
+		outerHeader, outerDone := b.Label(), b.Label()
+		innerHeader, innerDone := b.Label(), b.Label()
+
+		b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 1) // i = 1
+		b.Bind(outerHeader)
+		b.Emit(instr.LOCAL_GET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN)
+		b.Emit(instr.I32_GE_S).BrIf(outerDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.LOCAL_SET, 3) // key = a[i]
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_SET, 2)   // j = i - 1
+		b.Bind(innerHeader)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.I32_LT_S).BrIf(innerDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET)
+		b.Emit(instr.LOCAL_GET, 3)
+		b.Emit(instr.I32_LE_S).BrIf(innerDone)
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET)
+		b.Emit(instr.ARRAY_SET) // a[j+1] = a[j]
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_SET, 2)
+		b.Br(innerHeader)
+		b.Bind(innerDone)
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 3)
+		b.Emit(instr.ARRAY_SET) // a[j+1] = key
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(outerHeader)
+		b.Bind(outerDone)
+		b.Emit(instr.RETURN)
+		insts, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}},
+			Locals: []types.Type{types.TypeI32, types.TypeI32, types.TypeI32},
+			Code:   instr.Marshal(insts),
+		}
+
+		heap := []types.Value{nil, types.TypedArray[int32]{5, 3, 9, 1, 7, 2}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		rc := []int{0, 2}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.TypedArray[int32]{1, 2, 3, 5, 7, 9}, heap[1])
+	})
+
+	t.Run("array.set stores a 4-byte i32 element without clobbering its neighbor", func(t *testing.T) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, uint64(0xFFFFFFFF)).Emit(instr.ARRAY_SET)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		})
+
+		heap := []types.Value{nil, types.TypedArray[int32]{0, 42}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		rc := []int{0, 2}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.TypedArray[int32]{-1, 42}, heap[1])
+	})
+
+	t.Run("array.set stores a 4-byte f32 element without clobbering its neighbor", func(t *testing.T) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeF32)}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.F32_CONST, uint64(math.Float32bits(-1.5))).Emit(instr.ARRAY_SET)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		})
+
+		heap := []types.Value{nil, types.TypedArray[float32]{0, 42.5}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		rc := []int{0, 2}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.TypedArray[float32]{-1.5, 42.5}, heap[1])
+	})
+
+	t.Run("deopts an out-of-bounds array.get, matching threaded ErrIndexOutOfRange", func(t *testing.T) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+		})
+
+		heap := []types.Value{nil, types.TypedArray[int32]{1, 2}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		require.Equal(t, jit.ExitDeopt, exits[ctx.Exit()].Kind)
 	})
 }
 

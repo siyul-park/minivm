@@ -20,17 +20,6 @@ type walker struct {
 	state  ssa.Value
 }
 
-const (
-	shapeArrayI1 uintptr = iota + 1
-	shapeArrayI8
-	shapeArrayI32
-	shapeArrayI64
-	shapeArrayF32
-	shapeArrayF64
-	shapeArrayRef
-	shapeStruct
-)
-
 func (w *walker) adopt() {
 	for i := range w.stack {
 		w.own(i)
@@ -257,23 +246,34 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) < 2 {
 			return false
 		}
-		kind, tok, ok := w.element(w.stack[len(w.stack)-2].fact)
+		kind, ok := w.element(w.stack[len(w.stack)-2].fact)
 		if !ok {
 			return false
 		}
 		if operation == instr.ARRAY_GET {
-			w.guard(len(w.stack)-2, ssa.Shape{Tag: tok})
+			w.guard(len(w.stack)-2, ssa.Shape{Kind: kind})
 		}
 		return w.emit(operation, 2, []fact{{kind: kind}})
+	case instr.ARRAY_LEN:
+		if len(w.stack) < 1 {
+			return false
+		}
+		// The element kind is a best-effort hint: array.len needs no
+		// declared type to translate, but native code needs one to pick a
+		// representation, so guard only when the array's type is known.
+		if kind, ok := w.element(w.stack[len(w.stack)-1].fact); ok {
+			w.guard(len(w.stack)-1, ssa.Shape{Kind: kind})
+		}
+		return w.emit(operation, 1, []fact{{kind: types.KindI32}})
 	case instr.ARRAY_SET:
 		if len(w.stack) < 3 {
 			return false
 		}
-		tok, ok := token(w.stack[len(w.stack)-1].kind)
-		if !ok {
+		kind := w.stack[len(w.stack)-1].kind
+		if !kind.IsNumeric() && kind != types.KindRef {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Tag: tok})
+		w.guard(len(w.stack)-3, ssa.Shape{Kind: kind})
 		return w.emit(operation, 3, nil)
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
@@ -289,7 +289,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) < 3 {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Tag: shapeStruct})
+		w.guard(len(w.stack)-3, ssa.Shape{Struct: true})
 		return w.emit(operation, 3, nil)
 	case instr.REF_CAST:
 		if len(w.stack) == 0 {
@@ -371,33 +371,14 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 	return w.emit(operation, len(effect.Pop), results)
 }
 
-func token(kind types.Kind) (uintptr, bool) {
-	switch kind {
-	case types.KindI1:
-		return shapeArrayI1, true
-	case types.KindI8:
-		return shapeArrayI8, true
-	case types.KindI32:
-		return shapeArrayI32, true
-	case types.KindI64:
-		return shapeArrayI64, true
-	case types.KindF32:
-		return shapeArrayF32, true
-	case types.KindF64:
-		return shapeArrayF64, true
-	case types.KindRef:
-		return shapeArrayRef, true
-	default:
+// element resolves array's declared element kind, when known: the array's
+// own type is statically declared and it is a real minivm array, not a host
+// or dynamically-typed one.
+func (w *walker) element(array fact) (types.Kind, bool) {
+	if array.arrayType == nil || array.arrayType.ElemKind == instr.KindAny {
 		return 0, false
 	}
-}
-
-func (w *walker) element(array fact) (types.Kind, uintptr, bool) {
-	if !w.callFree || array.arrayType == nil || array.arrayType.ElemKind == instr.KindAny {
-		return 0, 0, false
-	}
-	tok, ok := token(array.arrayType.ElemKind)
-	return array.arrayType.ElemKind, tok, ok
+	return array.arrayType.ElemKind, true
 }
 
 func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
@@ -405,7 +386,7 @@ func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
 	if record == nil || !index.valueKnown || index.value < 0 || int(index.value) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
-	return record.Fields[index.value].Kind, ssa.Shape{Tag: shapeStruct, Type: uintptr(unsafe.Pointer(record))}, true
+	return record.Fields[index.value].Kind, ssa.Shape{Struct: true, Type: uintptr(unsafe.Pointer(record))}, true
 }
 
 func (w *walker) record(container fact) *types.StructType {
@@ -626,7 +607,7 @@ func (w *walker) suspend(ip int) ssa.Terminator {
 }
 
 func (w *walker) guard(at int, shape ssa.Shape) {
-	if w.stack[at].kind != types.KindRef || shape == (ssa.Shape{}) {
+	if w.stack[at].kind != types.KindRef {
 		return
 	}
 	value := w.builder.Value(ssa.TypeRef)

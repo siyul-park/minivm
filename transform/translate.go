@@ -77,7 +77,6 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		globals:   module.Globals,
 		objects:   module.Objects,
 		types:     module.Types,
-		callFree:  !calls(function.Code),
 	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {
@@ -106,17 +105,6 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		}
 	}
 	return f.build(activation, spans, states, root), nil
-}
-
-func calls(code []byte) bool {
-	for ip := 0; ip < len(code); {
-		inst := instr.Instruction(code[ip:])
-		if inst.Opcode().Writes(instr.Frame) {
-			return true
-		}
-		ip += inst.Width()
-	}
-	return false
 }
 
 func (o Objects) function(reference int) *types.Function {

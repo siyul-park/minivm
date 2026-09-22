@@ -187,6 +187,12 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 	n.store.Leave()
 	if retire {
 		n.store.Retire(addr)
+		// The code that just retired is unchanged bytecode compiled the
+		// same way it would be again: there is no feedback yet that could
+		// make a recompile at this tier differ, so mark it permanently
+		// failed rather than let count/promote resubmit it once counters
+		// reset below.
+		n.markFailed(addr, code.Tier)
 		n.forget(addr)
 	}
 	_ = n.store.Reclaim()
@@ -214,13 +220,19 @@ func (n *native) promote(addr int, fn *types.Function, code *jit.Code) {
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Optimized})
 }
 
-// refute counts deopts and reports when code should retire.
+// refute counts deopts and reports when code should retire. Retirement is
+// permanent for the retiring tier (call marks it failed): the code that
+// deopted refute times is the same unchanged compile a recompile would
+// reproduce exactly, with no feedback yet to make it differ.
 func (n *native) refute(addr int) bool {
 	n.deopts[addr]++
 	return n.deopts[addr] >= refute
 }
 
-// forget resets runtime tiering counters; compile failures remain recorded.
+// forget resets runtime tiering counters after a retirement; compile
+// failures remain recorded (call marks the retired tier failed separately),
+// so a still-eligible tier — e.g. Baseline, after Optimized retires — can
+// warm up again from zero while the retired one never resubmits.
 func (n *native) forget(addr int) {
 	n.calls[addr] = 0
 	n.entries[addr] = 0
@@ -266,6 +278,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 
 	ctx := n.ctx
 	ctx.Stack = base(i.stack)
+	ctx.Heap = heapBase(i.heap)
 	ctx.Globals = base(i.globals)
 	ctx.RC = rcBase(i.rc)
 	ctx.Natives = n.store.Natives()
@@ -299,6 +312,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 				n.deopt(i, exit, release, advance)
 				return n.refute(addr)
 			}
+			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
 			trap = jit.Resume(ctx)
@@ -306,6 +320,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {
 				i.release(ref)
 			}
+			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
 		default:
@@ -477,4 +492,11 @@ func end(s []types.Boxed) uintptr {
 
 func rcBase(rc []int) uintptr {
 	return uintptr(unsafe.Pointer(unsafe.SliceData(rc)))
+}
+
+// heapBase is the address of heap's backing array: jit.SizeofValue bytes
+// (an interface word pair) per address, read-only to native code except for
+// the non-pointer element/field words a guarded exec op writes in place.
+func heapBase(heap []types.Value) uintptr {
+	return uintptr(unsafe.Pointer(unsafe.SliceData(heap)))
 }
