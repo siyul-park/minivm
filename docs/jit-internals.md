@@ -1,12 +1,12 @@
 # JIT Internals
 
-Current status and planned ownership for the JIT rebuild.
+Current native runtime, compiler ownership, and execution contract.
 
 `architecture.md` owns package boundaries; `coding-patterns.md` owns code design; `testing.md` owns test contracts; `jit-lessons.md` owns historical evidence.
 
 ## Status
 
-The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimization remain the semantic baseline; the native tier is being rebuilt as one compiler pipeline. As of S2-P6c/P7, `interp.WithThreshold(n)` is opt-in and ARM64-only: it lets the interpreter enter compiled native code for a `*types.Function` after `n` calls to it. `ExitSafepoint` and `ExitRelease` resume the native activation; every other exit — a bridge, an unsupported call, or a terminator with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) — deoptimizes it back to threaded execution (see Runtime below and `instruction-set.md` for per-opcode status). A Baseline address that is entered `native.promote`-many times submits an Optimized compile for the same function; an address that deoptimizes `native.refute`-many times is retired and tiers up again from a fresh Baseline compile if it is still called. A Pool may share one published-code store, compile queue, and constant module across its interpreters. S3 work is tracked in GitHub issues.
+The previous ARM64 JIT was removed (2026-09). Threaded execution and AOT optimization remain the semantic baseline; the native tier is implemented as one SSA-to-native pipeline. As of S2-P8, `interp.WithThreshold(n)` is opt-in and ARM64-only: it lets the interpreter enter compiled native code for a `*types.Function` after `n` calls to it. `ExitSafepoint` and `ExitRelease` resume the native activation; every other exit — a bridge, an unsupported call, or a terminator with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) — deoptimizes it back to threaded execution (see Runtime below and `instruction-set.md` for per-opcode status). A Baseline address that is entered `native.promote`-many times submits an Optimized compile for the same function; an address that deoptimizes `native.refute`-many times is retired and tiers up again from a fresh Baseline compile if it is still called. A Pool may share one published-code store, compile queue, and constant module across its interpreters. S3 work is tracked in GitHub issues.
 
 ## Current owners
 
@@ -48,7 +48,7 @@ Instruction-cache maintenance for published code is user-mode ARM64 (`DC CVAU`/`
 
 ## Lowering
 
-`transform.Translate` translates a whole function from one entry — ip 0 or a loop header — and gives every `OpExec`, return, and completion the interpreter state at its own instruction, so which operations a backend lowers and which it bridges is the backend's decision alone.
+`transform.Translate` translates a whole function from one entry — ip 0 or a loop header — and gives every `OpExec`, return, and completion the interpreter state at its own instruction, so which operations a backend lowers and which it bridges is the backend's decision alone. S2 native compilation uses entry 0 only; loop-header entry and OSR are deferred to S3.
 
 ```text
 bytecode → transform.Translate → internal/ssa → SSA passes → compile.Lower → asm.Assembler.Build → native code
@@ -62,21 +62,21 @@ ARM64 activation ABI (`internal/jit/arm64`):
 - The prologue pushes `Records[Depth] = {FB}`, stores its return address in `Record.PC`, increments `Depth`, and clears the locals after the parameters (the callee clears its own locals). Every return branches to one epilogue that decrements `Depth` and pops the frame.
 - `OpReturn` first releases every slot whose kind can hold a reference (anything but `i32`/`f32`/`f64` after `Repr`) and clears it, as the interpreter's `RETURN` releases the frame it pops, then stores its results boxed from slot 0, where `RETURN` leaves them. A return over an owned operand that is not a result is `ErrUnsupported`. `OpComplete` stores its operands past the locals.
 - A `CALL` of a constant function reference stores its arguments boxed at the callee's frame base (`X25 + 8*(slots + operands below)`), writes this activation's record `{SP, Exit}`, sets `Context.FB`, and `BLR`s `Context.Natives[address]`; afterwards it reloads `X25` from its record, releases the callee reference the call adopted, and loads the results from the callee's frame base. A callee without native code, `Depth` at `Context.Limit`, or a frame that would pass `Context.Top` takes an `ExitCall` instead. A call returning an `i64` is `ErrUnsupported`.
-- An exit writes its id and trap to the `Context` and calls the exit stub (`X16` scratch). `ExitDeopt` never returns (a `BRK` follows); every other exit returns when the interpreter resumes it.
+- An exit writes its id and trap to the `Context` and calls the exit stub (`X16` scratch). Deopt exits are never resumed; resumable exits return to the native activation only when the interpreter calls `Resume`.
 
 Exits (`jit.Exit`, one map per exit id, returned by `compile.Lower`):
 
 | Kind | Taken at | The interpreter | Native code then |
 |---|---|---|---|
 | `ExitDeopt` | a failed check — division by zero, an `i64` outside the inline range at a store or return, an `i64` slot word that is no inline integer — or an `OpExit` | rebuilds `Frames` and continues threaded | never resumes |
-| `ExitBridge` | an `OpExec` the machine does not lower | performs `Code` at the innermost frame, retaining the popped operands it does not `Adopts`, and writes its results to `Context.Results` raw by `Results` kind | loads the results and continues |
+| `ExitBridge` | an `OpExec` the machine does not lower | materializes the exit and resumes the operation in exact threaded code, retaining the popped operands it does not `Adopts` | S2 never resumes native code; later bridge resumption is deferred |
 | `ExitSafepoint` | a loop header, when `Budget` is spent | runs its safepoint and refills `Budget` | continues into the header |
 | `ExitRelease` | an `OpRelease`, return, or call dropping a last reference | releases `Release`; the map has no `Frames` | continues |
-| `ExitCall` | a `CALL` that cannot run natively | calls `Callee` with the arguments at its frame base; the callee's frame owns them and the callee reference | loads the results from the callee's frame base and continues |
+| `ExitCall` | a `CALL` that cannot run natively | materializes the caller state and replays the `CALL` in exact threaded code | S2 never resumes native code |
 
 Every value a map names is live up to its exit (an `asm/arm64` `USE` row) and has one `asm.Loc` for its life: a register the saved register file holds (`State.Reg`) or a spill slot (`State.Slot`). `Frames` read from the operation's `OpState`, except an `ExitCall`'s: the caller's state after the call, its operand stack cut below the arguments and its IP past the `CALL`. That map is also the one `Record.Exit` names while a native callee runs, and its values stay live across the call, so they sit in spill slots at `Record.SP`. A return or completion carries the state of its own instruction, so a wide `i64` result deopts there and the interpreter promotes it. An `i64` slot load is the slot word, unboxed only by its `OpGuardKind`; a word used any other way is `ErrUnsupported`, as are the shape, bounds, and value guards and `OpSuspend`.
 
-The rebuild MUST preserve threaded behavior as the semantic baseline. Native execution MUST resume through explicit runtime state rather than duplicate interpreter ownership.
+The native tier MUST preserve threaded behavior as the semantic baseline. Native execution MUST use explicit runtime state rather than duplicate interpreter ownership.
 
 ### Tiers and the compile queue
 

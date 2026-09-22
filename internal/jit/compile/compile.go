@@ -15,8 +15,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Machine emits the rows of one target. A Machine lowers one function at a
-// time: Prologue begins a function and Epilogue ends it.
+// Machine emits target rows for one function.
 type Machine interface {
 	Arch() asm.Arch
 	Reserve() []asm.PReg
@@ -56,7 +55,7 @@ type Site interface {
 	Release(ref asm.VReg) (exit, resume asm.Label)
 }
 
-// Call is a CALL of a function resolved at compile time.
+// Call describes a statically resolved CALL.
 type Call struct {
 	// Address is the callee's function address, its Context.Natives index.
 	Address int
@@ -123,9 +122,7 @@ type stub struct {
 // ErrUnsupported reports SSA the backend does not lower.
 var ErrUnsupported = errors.New("unsupported lowering")
 
-// Lower emits native code for f, the entry-0 translation of fn whose calls
-// resolve through objects, and the map of every exit it takes, indexed by
-// exit id.
+// Lower emits code for the entry-0 translation and its exit maps.
 func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects) ([]byte, []jit.Exit, error) {
 	if f.Len() == 0 {
 		return nil, nil, fmt.Errorf("%w: function shape", ErrUnsupported)
@@ -319,7 +316,7 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	return nil
 }
 
-// validate rejects a raw i64 slot word outside its kind guard.
+// validate rejects an unguarded promoted i64 slot word.
 func (l *lowering) validate(args []ssa.Value) error {
 	for _, v := range args {
 		if l.raw[v] {
@@ -376,9 +373,7 @@ func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	return s.label, s.resume
 }
 
-// call lowers a CALL of a constant function reference. Its map is the
-// caller's state once the callee returns: the arguments and callee popped,
-// the instruction after the call next.
+// call lowers a statically resolved CALL and records the post-call state.
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
 	c, ok := l.consts[callee]

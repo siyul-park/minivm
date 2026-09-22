@@ -8,9 +8,15 @@ Applied naming/vocabulary reference.
 
 Current implementation vocabulary is owned by package docs. The rows below are historical/rebuild terms and MUST NOT be used to describe current symbols.
 
-## Rebuild Vocabulary
+## Native Vocabulary
 
-The native rebuild is planned. Future compiler, backend, and target packages MUST define terminology in their owner docs before implementation.
+Current native terminology is defined by the owner docs and packages below. New compiler or target terminology MUST be introduced in the owning package or topic doc before use.
+
+| Package | Naming domain |
+|---|---|
+| `internal/jit` | native runtime and tiering |
+| `internal/jit/compile` | native compilation and lowering coordination |
+| `internal/jit/arm64` | ARM64 lowering |
 
 ## Ownership Vocabulary
 

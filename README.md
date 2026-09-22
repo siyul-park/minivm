@@ -40,7 +40,7 @@ if err := vm.Run(context.Background()); err != nil {
 }
 
 result, _ := vm.Pop() // types.I32(42)
-```go
+```
 
 minivm keeps the execution model explicit: bytecode in, controlled runtime, typed value out.
 
@@ -77,7 +77,7 @@ lookup := interp.NewHostFunction(
         return []types.Boxed{types.BoxI32(price)}, nil
     },
 )
-```go
+```
 
 Parameters and results stay in typed `[]types.Boxed` values. The direct path does not require reflection or `interface{}` boxing.
 
@@ -85,7 +85,7 @@ See [Host Integration](docs/host-integration.md) for marshaling, host objects, a
 
 ## Performance
 
-The threaded interpreter is the current execution baseline. A native tier is available opt-in on arm64 via `interp.WithThreshold`; current measurements and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
+Threaded execution is the semantic baseline. ARM64 native execution is opt-in via `interp.WithThreshold`; measurements and reproduction live in [Benchmarks](docs/benchmarks.md).
 
 ## Runtime Tooling
 
@@ -95,7 +95,7 @@ The threaded interpreter is the current execution baseline. A native tier is ava
 if err := program.Verify(prog); err != nil {
     log.Fatal(err)
 }
-```go
+```
 
 The verifier rejects malformed control flow, invalid stack behavior, and type mismatches before execution. The `run` CLI verifies loaded programs by default.
 
@@ -103,7 +103,7 @@ The verifier rejects malformed control flow, invalid stack behavior, and type mi
 
 ```go
 prog, err := optimize.New(optimize.O2).Optimize(prog)
-```go
+```
 
 Optimization levels range from local constant folding and deduplication to dead-code elimination and cross-block global value numbering.
 
@@ -117,7 +117,7 @@ vm := interp.New(prog,
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
-```text
+```
 
 Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instruction-accurate breakpoints and stepping.
 
@@ -125,7 +125,7 @@ Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instructio
 
 ```text
 Program -> verifier / optimizer -> threaded interpreter
-```text
+```
 
 The threaded interpreter is the complete execution engine and the semantic baseline. Native compilation is opt-in via `interp.WithThreshold` and arm64-only: it compiles a hot `*types.Function` to native code and deoptimizes back to threaded execution wherever it cannot run natively.
 

@@ -9,22 +9,18 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
-// Record identifies one suspended native activation.
+// Record identifies one native activation.
 type Record struct {
 	FB uintptr
-	// SP is the activation's spill base: its values that stay live across a
-	// native call sit at SP + 8*slot.
+	// SP is the spill base used by values live across a native call.
 	SP uintptr
-	// PC is the activation's return address; for an activation a native
-	// caller entered, it lies in the caller's Code.
+	// PC is the caller return address.
 	PC   uintptr
 	Exit uint64
 }
 
-// Context is the state one native execution and the interpreter share. Its
-// machine half is the asm.State native code is entered with; the rest is
-// what native code writes before it exits, addressed off the same pinned
-// register through the offsets below.
+// Context is the runtime state shared by native code and the interpreter.
+// asm.State leads the layout; the remaining fields are native exit state.
 type Context struct {
 	asm.State
 	trap Trap
@@ -119,12 +115,8 @@ func (c *Context) Exit() uint64 {
 	return c.exit
 }
 
-// Read returns the raw native value v names in activation record: for the
-// innermost activation (record == Depth-1) a register from the saved
-// register file or v's own spill slot; for an outer activation, always the
-// spill slot at Records[record].SP + 8*slot, since that activation's values
-// stay live in memory across the call. A register location there is a
-// programmer error no compiled map produces.
+// Read returns the raw value named by v. Outer activations use their saved
+// spill base because registers are clobbered across calls.
 func (c *Context) Read(record int, v Value) uint64 {
 	if record == int(c.Depth)-1 {
 		if v.Loc.Spilled {

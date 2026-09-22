@@ -5,17 +5,10 @@ import (
 	"unsafe"
 )
 
-// State is the machine state one native execution and the Go code around it
-// share: the native stack, the Go registers saved while native code runs,
-// and where and with which registers the last exit left. Native code holds
-// its address in the pinned state register and leaves through the stub at
-// OffsetStub. Whoever needs more than the machine embeds State as its first
-// field, so the one address names both.
-//
-// It is a heap object Go never moves, and native code writes only its scalar
-// fields, so no write barrier is ever owed. The native stack it owns is
-// noscan memory: a Go pointer stored there is invisible to the collector,
-// which is why native code stores none.
+// State is the native machine state shared with Go. Native code reaches it
+// through the pinned register and exits through OffsetStub. It must lead any
+// embedding runtime context. Its native stack is noscan; native code stores no
+// Go pointers there.
 type State struct {
 	stub  uintptr
 	stack []uint64
@@ -32,10 +25,7 @@ type State struct {
 // register. The trampoline reads every other field through go_asm.h.
 const OffsetStub = unsafe.Offsetof(State{}.stub)
 
-// NewState returns a state owning a native stack of size bytes, with the
-// native stack pointer at the stack's 16-byte-aligned top. Nothing in it
-// depends on its own address until Enter, which takes it by pointer and so
-// keeps it off the goroutine stack.
+// NewState returns a state with a 16-byte-aligned native stack top.
 func NewState(size int) (State, error) {
 	if size <= 0 {
 		return State{}, fmt.Errorf("%w: stack size %d", ErrInvalidArgs, size)

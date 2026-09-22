@@ -2,7 +2,7 @@
 
 Runtime sampling and execution metrics.
 
-`jit-internals.md` owns the planned native rebuild.
+`jit-internals.md` owns the native runtime contract and compiler architecture.
 
 ## Signals
 
@@ -12,7 +12,7 @@ Runtime sampling and execution metrics.
 
 `interp.Run` samples after every `WithTick` instructions; the default is `128`.
 
-Samples contain function, bytecode IP, and opcode. The tick path also handles context polling, fuel, hooks, and pool coordination; runs without required work skip the extra work.
+Samples record function, bytecode IP, and opcode. The tick path also polls context, fuel, hooks, and pool state; idle paths skip the extra work.
 
 Lower ticks increase sampling density and cost. Debugger and REPL `.profile` use exact instruction sampling.
 
@@ -26,7 +26,7 @@ if err := vm.Close(); err != nil { return err }
 metrics := p.Metrics()
 ```
 
-`WithProfiler` attaches a profiler to an interpreter or pool. `Flush` publishes pending samples without closing; pool members flush on return/close.
+`WithProfiler` attaches a profiler to an interpreter or pool. `Flush` publishes samples without closing; pool members flush on return/close.
 
 ## Metrics
 

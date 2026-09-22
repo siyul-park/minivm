@@ -1,6 +1,6 @@
 # Agent Instructions
 
-`minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; native compilation is a planned optimization rebuild.
+`minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; ARM64 native compilation is an opt-in execution tier.
 
 ## Precedence
 

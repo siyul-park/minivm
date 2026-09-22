@@ -13,13 +13,8 @@ type Loc struct {
 	Spilled bool
 }
 
-// allocator assigns every virtual register a location by linear scan over
-// live intervals, with no interval splitting: a value that cannot stay in one
-// register for its whole life is spilled everywhere instead, its rows
-// rewritten to reload it into a fresh two-row register before each read and
-// park it after each write, and the scan is rerun over the rewritten rows.
-// Those fresh registers never cross a call or a block boundary, so the rerun
-// only ever has less to do; the loop ends when a scan spills nothing.
+// allocator assigns whole-life locations by linear scan. Spilled values are
+// rewritten around each use/definition, then allocation repeats.
 type allocator struct {
 	frame     Frame
 	insts     []Instruction
@@ -92,9 +87,7 @@ func (a *allocator) allocate() ([]Instruction, map[Label]int, error) {
 	}
 }
 
-// intervals computes every value's occupied row range: the rows where it is
-// live or written, taken as one range with any holes ignored, which is the
-// imprecision linear scan without splitting accepts.
+// intervals computes whole-life ranges used by unsplit linear scan.
 func (a *allocator) intervals() []interval {
 	blocks, out := a.liveness()
 	ivs := map[value]*interval{}
@@ -278,10 +271,8 @@ func (a *allocator) value(r Reg) (value, bool) {
 	}
 }
 
-// scan assigns a register to every virtual interval in start order and
-// returns the assignment, or the values that must spill first: those live
-// across a call, and those evicted when a bank runs out. An eviction takes
-// the interval that ends last, never a tiny reload or park register.
+// scan assigns registers in start order. Call-live values spill first; under
+// pressure it evicts the longest-lived non-tiny value.
 func (a *allocator) scan(ivs []interval) (map[value]PReg, []value, error) {
 	var spilled []value
 	fixed := map[value][]interval{}
@@ -369,10 +360,8 @@ func (a *allocator) victim(iv interval, active []interval) (interval, bool) {
 	return best, ok
 }
 
-// rewrite spills every value in spilled: a row that reads it reloads a fresh
-// register just before and a row that writes it parks that register just
-// after, one register per value and row, so a row that reads and writes it
-// through tied operands updates what it reloaded.
+// rewrite surrounds spilled reads/writes with reload/park rows using fresh
+// temporaries, preserving tied operands.
 func (a *allocator) rewrite(spilled []value) {
 	slot := map[value]int{}
 	for _, v := range spilled {

@@ -6,17 +6,14 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Exit is the map of one exit site: why native code left there and where
-// the interpreter state it left behind lives.
+// Exit maps one native exit to its interpreter state.
 type Exit struct {
 	Kind Kind
-	// Code is the opcode an ExitBridge asks the interpreter to perform.
+	// Code is the opcode resumed by an ExitBridge.
 	Code instr.Opcode
-	// Adopts is how many popped operands Code takes ownership of; the
-	// interpreter retains the rest, which native code still releases.
+	// Adopts is the number of popped operands transferred to Code.
 	Adopts int
-	// Callee is the function address an ExitCall asks the interpreter to
-	// call with the arguments native code stored at the callee's frame base.
+	// Callee is the function address resumed by an ExitCall.
 	Callee int
 	// Frames are the interpreter frames at the exit, innermost last. An
 	// ExitRelease has none: it neither reads nor rebuilds them.

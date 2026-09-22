@@ -7,12 +7,12 @@ Supported platforms and native-tier availability.
 | Platform | Threaded | AOT | Native |
 |---|---:|---:|---:|
 | Other Go-supported platforms | ✅ | ✅ | — |
-| Darwin / ARM64 | ✅ | ✅ | planned |
-| Linux / ARM64 | ✅ | ✅ | planned |
+| Darwin / ARM64 | ✅ | ✅ | ✅ |
+| Linux / ARM64 | ✅ | ✅ | ✅ |
 | Darwin / x86-64 | ✅ | ✅ | — |
 | Linux / x86-64 | ✅ | ✅ | — |
 
-ARM64 is the executable-memory and encoding target (`internal/asm`, `internal/asm/arm64`); no native tier is installed today. AMD64 has no encoder.
+ARM64 is the native target. The runtime entry and icache paths are build-tagged in `internal/asm`; lowering is in `internal/jit/arm64`. AMD64 has no encoder or native tier.
 
 The minimum Go version is the version declared in `go.mod`.
 

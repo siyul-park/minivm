@@ -29,9 +29,9 @@ SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`
 
 ## Bytecode
 
-A size-changing transform `MUST` repair all position-sensitive metadata or leave the function unchanged. `transform.SSAPass` re-emits from SSA and `MUST` decline when the encoding is invalid.
+A size-changing transform `MUST` repair position-sensitive metadata or leave the function unchanged. `transform.SSAPass` `MUST` decline invalid encodings.
 
-The agent `SHOULD` prefer local passes, `SHOULD` reuse existing analyses, and `MUST` keep target-specific policy out of target-independent passes.
+Passes `SHOULD` stay local, reuse existing analyses, and keep target policy out of target-independent code.
 
 ## Related
 

@@ -28,7 +28,7 @@ trial []int
 work  []int
 ```
 
-Future native paths MUST preserve the threaded ownership totals.
+Native execution MUST preserve the threaded ownership totals.
 
 ## Ownership
 
@@ -44,7 +44,7 @@ Future native paths MUST preserve the threaded ownership totals.
 | `CLOSURE_NEW` | transfers function/capture ownership |
 | `RETURN` | releases retiring frame ownership |
 
-Each transfer above `MUST` be implemented exactly as stated. Deferred native refs `MAY` borrow backing ownership only until an interpreter-visible transfer; deopt and bridges `MUST` restore interpreter ownership.
+Each transfer `MUST` preserve this ownership exactly. Native refs `MAY` borrow backing storage until an interpreter-visible transfer; deopt and exits `MUST` restore interpreter ownership.
 
 ## Reference Counting
 

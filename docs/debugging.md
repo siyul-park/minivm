@@ -13,7 +13,7 @@ Bytecode-level debugger for `interp.Run`.
 | stop result | `interp.ErrStopped` |
 | REPL commands | `guides/repl.md` |
 
-Debugger provides breakpoints, stepping, function/IP inspection, frames, operand stack, locals, globals, constants, and heap lookup.
+Debugger provides breakpoints, stepping, bytecode location, frames, stack, locals, globals, constants, and heap inspection.
 
 `WithDebugger` sets `WithTick(1)` and execution stops at bytecode boundaries.
 

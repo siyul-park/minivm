@@ -28,7 +28,7 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Native status is per opcode. Threaded execution is the semantic baseline for every opcode; `internal/jit/arm64` additionally lowers a subset directly to native code when `interp.WithThreshold` compiles a function (see `jit-internals.md`). An opcode the machine does not lower bridges into the interpreter (`ExitBridge`) or, for a terminator with no native form (`RETURN_CALL`, `YIELD`, `RESUME`), deoptimizes the whole activation back to threaded execution; either way execution continues correct and threaded.
+Native status is per opcode. Threaded execution is the semantic baseline for every opcode; `internal/jit/arm64` additionally lowers a subset directly to native code when `interp.WithThreshold` compiles a function (see `jit-internals.md`). The compiler records an unsupported operation as `ExitBridge`; the current interpreter integration materializes that exit and deoptimizes back to threaded execution. Terminators with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) deoptimize directly.
 
 | Status | Meaning |
 |---|---|

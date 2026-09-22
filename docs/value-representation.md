@@ -89,7 +89,7 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MU
 | `f64` | 64-bit float lane |
 | `ref` | boxed 64-bit value |
 
-Native code boxes and unboxes only where a value crosses a VM slot. A narrow or `f32` lane is the slot's low 32 bits; `f64` and `ref` are the whole word. An `i64` slot may hold a reference to a promoted value, so its kind guard checks the tag before sign-extending the 49-bit payload. Boxing an `i64` outside the inline range deopts: native code never promotes to the heap.
+Native code boxes only at VM-slot boundaries. Narrow and `f32` values use the low 32 bits; `f64` and `ref` use the full word. An `i64` slot is guarded before unboxing because a promoted value is a `KindRef`; an out-of-range native `i64` deopts rather than allocating.
 
 Every interpreter, container, storage, or host boundary `MUST` restore the exact boxed representation and ownership.
 

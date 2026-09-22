@@ -40,7 +40,7 @@ if err := vm.Run(context.Background()); err != nil {
 }
 
 result, _ := vm.Pop() // types.I32(42)
-```go
+```
 
 minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 통제된 런타임에서 실행한 뒤, 타입이 지정된 값을 꺼냅니다.
 
@@ -77,7 +77,7 @@ lookup := interp.NewHostFunction(
         return []types.Boxed{types.BoxI32(price)}, nil
     },
 )
-```go
+```
 
 파라미터와 결과는 타입이 지정된 `[]types.Boxed`로 유지됩니다. 직접 호출 경로에는 리플렉션이나 `interface{}` 박싱이 필요하지 않습니다.
 
@@ -95,7 +95,7 @@ lookup := interp.NewHostFunction(
 if err := program.Verify(prog); err != nil {
     log.Fatal(err)
 }
-```go
+```
 
 검증기는 실행 전에 잘못된 제어 흐름, 스택 동작, 타입 불일치를 거부합니다. `run` CLI는 불러온 프로그램을 기본적으로 검증합니다.
 
@@ -103,7 +103,7 @@ if err := program.Verify(prog); err != nil {
 
 ```go
 prog, err := optimize.New(optimize.O2).Optimize(prog)
-```go
+```
 
 최적화 단계는 로컬 상수 폴딩과 중복 제거부터 데드 코드 제거, 블록 간 전역 값 번호화까지 지원합니다.
 
@@ -117,15 +117,15 @@ vm := interp.New(prog,
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
-```text
+```
 
-정책 검사는 hook을 사용하고, 명령어 단위 중단점과 단계 실행은 `NewDebugger`와 `WithDebugger`를 사용합니다.
+정책 검사는 hook으로, 명령어 단위 중단점과 단계 실행은 `NewDebugger`와 `WithDebugger`로 처리합니다.
 
 ## 아키텍처
 
 ```text
 Program -> verifier / optimizer -> threaded interpreter
-```text
+```
 
 스레디드 인터프리터가 완전한 실행 엔진이자 의미론적 기준입니다. 네이티브 컴파일은 `interp.WithThreshold`를 통한 옵트인이며 arm64 전용입니다: 활성화된 `*types.Function`을 네이티브 코드로 컴파일하고, 네이티브로 실행할 수 없는 지점에서는 스레디드 실행으로 역최적화합니다.
 

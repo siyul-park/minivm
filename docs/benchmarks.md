@@ -4,7 +4,7 @@ Comparisons here are tier-matched.
 
 This document owns performance evidence; `testing.md` owns test contracts.
 
-minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the rebuilt native tier (S2-P6c/P7): `interp.WithThreshold` compiling a hot `*types.Function` to ARM64 native code, measured 2026-09-22 on the host below. The tier's scope in S2: functions only, entered from an interpreted `CALL`; no OSR into a running loop; any opcode, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). Rows labelled `default` are the previous, removed native tier (pre-2026-09) and are kept only where no current `jit` number exists yet, labelled historical; `jit` numbers below are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
+minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the rebuilt native tier (S2-P8): `interp.WithThreshold` compiling a hot `*types.Function` to ARM64 native code, measured 2026-09-22 on the host below. The tier's scope in S2: functions only, entered from an interpreted `CALL`; no OSR into a running loop; any opcode, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). Rows labelled `default` are the previous, removed native tier (pre-2026-09) and are kept only where no current `jit` number exists yet, labelled historical; `jit` numbers below are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
 
 | Kernel | `jit` | `threaded` | Wazero |
 |---|---:|---:|---:|
@@ -14,13 +14,25 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 > **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
 > **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median. The `jit`/`threaded` numbers on this page are a deliberate exception (L17: an M4 Pro drifts ~10% run to run): two interleaved `-benchtime=1s -count=3` runs of `cd benchmarks && go test -run='^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=1s -count=3 .`, reporting the median of the combined six samples, measured 2026-09-22.
 
+## PR Smoke
+
+`make benchmark-pr` passed on 2026-09-22 (Apple M4 Pro, darwin/arm64, Go 1.26.2). The command uses its default `benchmark-pr-time=100ms`; these are smoke measurements, not canonical comparison rows.
+
+| Kernel | threaded | jit |
+|---|---:|---:|
+| `IterativeFib(30)` | 623.0 ns/op | 495.3 ns/op |
+| `TypedArraySum(256)` | 2,761 ns/op | 2,698 ns/op |
+| `BranchTree(96)` | 499.2 ns/op | 509.0 ns/op |
+| `RecursiveFib(20)` | 350.024 ms/op | 76.877 ms/op |
+| `RecursiveFib(35)` | 426.158 ms/op | 100.026 ms/op |
+
 ## Controls
 
 | Tier | Control | Meaning |
 |---|---|---|
 | Interpreter | minivm `threaded` | Generated threaded execution. |
 | Interpreter | CPython, Tengo, GopherLua, Goja, gpython, Yaegi | Bytecode or AST interpreters with no native code generation. |
-| Native | minivm `jit` | `interp.WithThreshold` compiling to ARM64 native code (S2-P6c/P7). |
+| Native | minivm `jit` | `interp.WithThreshold` compiling to ARM64 native code (S2-P8). |
 | Native | minivm `default` | Historical rows from the removed native tier, kept only where no current `jit` number exists yet. |
 | Native | Wazero | WebAssembly runtime using its optimizing compiler backend on arm64. |
 | Reference | Native Go | The same kernel written directly in Go. A lower bound, not a peer. |
@@ -273,10 +285,8 @@ These measure the cost of a public operation itself. Unlike the workload tables 
 |---|---|---:|---:|---:|
 | `New` | Empty | 4,133 | 35,290 | 28 |
 | `New` | Program | 4,376 | 35,368 | 31 |
-| `New` | default | pending rebuild comparison | — | — |
 | `Reset` | Scalar | 47.19 | 0 | 0 |
 | `Reset` | Heap | 84.72 | 8 | 1 |
-| `Reset` | threaded state | pending rebuild comparison | — | — |
 | `Push` | Scalar | 21.87 | 0 | 0 |
 | `Push` | Reference | 100.5 | 16 | 1 |
 | `Pop` | — | 18.70 | 0 | 0 |
@@ -287,7 +297,6 @@ These measure the cost of a public operation itself. Unlike the workload tables 
 | `Release` | — | 20.38 | 0 | 0 |
 | `Pool.Get` | Uncontended | 30.64 | 0 | 0 |
 | `Pool.Get` | Miss | 3.270 µs | 35,144 | 25 |
-| `Pool.Get` | Uncontended | pending rebuild comparison | — | — |
 | `Pool.Get` | ParallelRoundTrip | 327.0 ns | 1 | 0 |
 | `Pool.Put` | Uncontended | 136.3 ns | 0 | 0 |
 | `StructGetLocalFusion` | — | 227.112 ms | 221,640 | 33 |
@@ -333,7 +342,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-The S2 native tier only ever enters at an interpreted `CALL` to a `*types.Function` (`instruction-set.md`); it never compiles top-level or loop-only code with no calls in it. A kernel with no `CALL` at all (`IterativeFib`, `Sieve`, `BranchTree`, `TypedArraySum`, `AllocationGraph`, `PermutationFlips`, `MatMul`, …) therefore measures identically under `jit` and `threaded` — the native tier never runs. A kernel whose called function lowers cleanly and stays hot (`RecursiveFib`, `SpectralNorm`, `Mandelbrot`) gets a large win. A kernel whose called function hits an opcode `internal/jit/arm64` does not lower, or a `RETURN_CALL` (`TailSum`, `TailPingPong`), pays the call-path bookkeeping (`native.call`'s `Store.Enter`/`Code`/`Leave` and counters) on every call without ever completing natively. As of S2-P8 (`jit.Store.Code` reads a lock-free `atomic.Pointer[Code]` per address instead of taking a mutex and doing a map lookup, and `native`'s per-address call/entry/deopt/failure state is slice-indexed instead of four maps), that bookkeeping is far cheaper: `StructTreeWalk` and `BinaryTrees` moved from ~1.5x and ~1.4x threaded to ~1.1x, and `IndirectRecursiveFib` from ~1.9x to ~1.3x, all re-measured 2026-09-22. `NQueens`, `Fannkuch`, and `StringBuild` were not re-measured this stage and are expected to improve by a comparable margin but still carry the same always-on hook cost — their exact ratio to `threaded` is unconfirmed until measured. The agent `MUST` read results by row and tier and `MUST NOT` aggregate unlike tiers.
+The S2 tier enters only from an interpreted `CALL` to `*types.Function`; it does not perform top-level or loop-only OSR. Kernels without calls therefore remain threaded. Called functions that lower cleanly can run natively; unsupported operations and `RETURN_CALL` return to threaded execution and still pay the native entry bookkeeping. S2-P8 replaced the store lookup with per-address atomic pointers and four maps of tiering state with slices; re-measured 2026-09-22, this reduced `IndirectRecursiveFib` from ~1.9x to ~1.3x threaded and `StructTreeWalk`/`BinaryTrees` from ~1.5x/~1.4x to ~1.1x. `NQueens`, `Fannkuch`, and `StringBuild` remain unmeasured. Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
 
 ## Benchmark Fixture Inventory
 

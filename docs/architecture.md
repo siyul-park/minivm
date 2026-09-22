@@ -36,7 +36,7 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `debug` | debugging policy |
 | `cli` | command parsing and presentation |
 
-The agent `MUST` place behavior by dominant ownership, not import convenience. It `MUST` extend an owner before adding a coordinator.
+Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUST` be extended before adding a coordinator.
 
 ## Dependencies
 
@@ -74,9 +74,9 @@ The following invariants `MUST` hold, and the agent `MUST` preserve them:
 - External bytecode is verified before execution.
 - Debugger mode disables JIT and preserves bytecode boundaries.
 
-## Planned Native Boundary
+## Native Boundary
 
-The native rebuild is a future consumer of `transform`, `internal/ssa`, and `internal/asm`. It MUST NOT change ownership of threaded execution or AOT optimization.
+The native tier consumes `transform`, `internal/ssa`, and `internal/asm`; `interp` owns native entry, exit, materialization, and tiering.
 
 ## Related
 

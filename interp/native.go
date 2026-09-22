@@ -15,52 +15,31 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// native holds one interpreter's JIT runtime: its own native execution
-// context and per-address tiering state, plus the shared published code,
-// compile queue, and constant module a Pool may lend to every interpreter of
-// one Program. It is nil on an interpreter built without WithThreshold.
+// native holds per-interpreter native state and shared compiled-code state.
 type native struct {
 	ctx *jit.Context
 	*shared
 
 	threshold int
-	// calls, entries, deopts, and failed are indexed by address, up to
-	// len(i.code): Store.Publish already refuses an address beyond that, so
-	// no address past it ever compiles.
+	// Per-address tiering state is indexed by function address.
 	calls   []int
 	entries []int
 	deopts  []int
-	// failed marks a permanently failed compile attempt: bit tierBit(tier)
-	// of failed[addr] is set once tier has failed at addr. A Baseline
-	// failure never blocks a later Optimized attempt at the same address,
-	// and vice versa.
+	// failed records permanent compile failure per address and tier.
 	failed []uint8
 
-	// exact caches deoptimization's own compile of each address: i.code[addr]
-	// may be fused, and a fusion leaves no handler at the IPs it absorbs (see
-	// threader.Compile), so a materialized frame must run code compiled
-	// exactly, which this builds once per address and keeps for every later
-	// deoptimization at it.
+	// exact caches unfused threaded code for materialized frames.
 	exact map[int][]func(*Interpreter)
 
-	// compile is i.compile, captured once here rather than called on i
-	// directly: threaded[] stores the CALL handler that reaches native.call,
-	// so a direct reference from deoptimization back to compile's own
-	// threader.Compile (which threaded[] indexes) would be a package
-	// initialization cycle. Going through this field instead of the method
-	// stays outside that static reference graph.
+	// compile is captured once so deoptimization does not add a static
+	// dependency from generated threaded handlers back to their compiler.
+	// Calling i.compile here directly creates the threaded/fusions
+	// initialization cycle.
 	compile func(fn *types.Function, exact bool) []func(*Interpreter)
 }
 
-// shared is the part of a native's JIT runtime a Pool may lend to every
-// interpreter of one Program: the published code, the compile queue, and the
-// constant module every compile reads (L11). Nothing here is interpreter-
-// specific; jit.Context and the tiering counters are not, and stay on native
-// itself. refs counts how many natives are using it, closing it only once
-// the last one releases — Put on a closed Pool can defer an outstanding
-// Interpreter's Close to a later call, so a Pool cannot always name the
-// native that closes last, and reference counting is the rule that is
-// correct regardless.
+// shared contains the pool-shareable native runtime: Store, Queue, and Module.
+// refs closes it after the last interpreter releases it.
 type shared struct {
 	store  *jit.Store
 	queue  *compile.Queue
@@ -69,19 +48,16 @@ type shared struct {
 	refs atomic.Int64
 }
 
-// nativeStack is the size of the Go-allocated stack native code runs on.
+// nativeStack is the native stack size per interpreter.
 const nativeStack = 1 << 20
 
-// budget is Context.Budget's refill: how many loop back-edges native code
-// takes before it reaches a safepoint.
+// budget is the back-edge count between safepoints.
 const budget = 1 << 16
 
-// promote is how many times an address's Baseline code is entered before it
-// is submitted for an Optimized compile.
+// promote is the Baseline-to-Optimized entry threshold.
 const promote = 1000
 
-// refute is how many times an address deoptimizes before its code is
-// retired and its tiering counts reset, so it may compile again.
+// refute is the deopt threshold that retires native code.
 const refute = 8
 
 const (
@@ -211,8 +187,7 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 	return true
 }
 
-// count tracks calls to addr and submits it for Baseline compilation once
-// the threshold is reached, unless Baseline already failed there.
+// count tracks cold calls and requests Baseline compilation.
 func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	n.calls[addr]++
 	if n.calls[addr] < n.threshold || n.hasFailed(addr, jit.Baseline) {
@@ -221,9 +196,7 @@ func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Baseline})
 }
 
-// promote counts a native entry to addr's Baseline code and submits it for
-// an Optimized compile once entries reach the promote threshold, unless
-// Optimized already failed there.
+// promote tracks Baseline entries and requests Optimized compilation.
 func (n *native) promote(addr int, fn *types.Function, code *jit.Code) {
 	if code.Tier != jit.Baseline {
 		return
@@ -235,18 +208,13 @@ func (n *native) promote(addr int, fn *types.Function, code *jit.Code) {
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Optimized})
 }
 
-// refute counts a deoptimization of addr and reports whether it reached the
-// refute threshold, at which point call retires addr's code and resets its
-// tiering counts.
+// refute counts deopts and reports when code should retire.
 func (n *native) refute(addr int) bool {
 	n.deopts[addr]++
 	return n.deopts[addr] >= refute
 }
 
-// forget resets addr's call, entry, and deopt counts after call retires its
-// code, so it tiers up again from a fresh Baseline compile if it is still
-// called. A permanent compile failure (failed) is not runtime behavior and
-// stays.
+// forget resets runtime tiering counters; compile failures remain recorded.
 func (n *native) forget(addr int) {
 	n.calls[addr] = 0
 	n.entries[addr] = 0
@@ -268,10 +236,7 @@ func tierBit(tier jit.Tier) uint8 {
 	return 1 << (tier - 1)
 }
 
-// drain collects every job the queue has finished — including one a Pool's
-// other interpreter submitted, when the runtime is shared, since Publish is
-// safe and idempotent on a stale result — publishing successful code and
-// marking a failed (address, tier) so it is never resubmitted.
+// drain publishes completed jobs and records permanent compile failures.
 func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
 		if job.Err != nil {
@@ -284,9 +249,7 @@ func (n *native) drain(i *Interpreter) {
 	}
 }
 
-// run drives code to completion for a call to fn at addr whose frame would
-// begin at bp, the same bp pushFrame would have computed. It reports whether
-// addr deoptimized enough times for call to retire its code.
+// run executes one native call and reports whether it should retire.
 func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, release bool, advance int) bool {
 	params := len(fn.Typ.Params)
 	returns := len(fn.Typ.Returns)
@@ -346,13 +309,9 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	}
 }
 
-// deopt materializes every activation ctx.Depth counts as an interpreter
-// frame, outermost first, and leaves the interpreter positioned to continue
-// threaded at the innermost one. exit is the map of whichever exit brought
-// native code here; release and advance are the call site's own, since the
-// outermost frame's ownership and the entering caller's ip advance must match
-// it exactly (a fused CONST_GET;CALL borrows its target and advances by its
-// own width, unlike a dynamic CALL).
+// deopt materializes native activations outermost-first and positions the
+// interpreter at the innermost threaded frame. release/advance preserve the
+// entering call site's ownership and IP semantics.
 func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int) {
 	ctx := n.ctx
 	depth := int(ctx.Depth)
@@ -388,10 +347,8 @@ func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int)
 	ctx.Abandon()
 }
 
-// frame materializes activation k of ctx, whose exit map is m, as interpreter
-// frame base+k. Every native activation was entered by a CALL that adopted
-// its callee reference, so release is true except for the outermost, which
-// carries the entering call site's own release.
+// frame materializes activation k from m. Inner native activations own their
+// callee reference; the outer activation follows the entering call site.
 func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Frame, release bool) {
 	f := &i.frames[start+k]
 	f.addr = m.Address
@@ -441,10 +398,8 @@ func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
 	return code
 }
 
-// box materializes a native word of kind into the interpreter's Boxed
-// representation: i1/i8/i32 and f32 take it from the low 32 bits, f64 and ref
-// carry it unchanged, and a wide i64 promotes through boxI64 exactly as a
-// slot store would.
+// box converts a native word to the interpreter's Boxed representation.
+// Wide i64 values use the normal heap-promotion path.
 func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
 	switch kind {
 	case types.KindI1:

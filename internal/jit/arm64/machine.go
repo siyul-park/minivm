@@ -112,11 +112,8 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 	}
 }
 
-// Return boxes t's arguments into the VM slots the interpreter reads them
-// from: slot 0 on for OpReturn, past the locals for OpComplete. An OpReturn
-// first releases and clears every slot whose kind can hold a reference, as
-// the interpreter's RETURN releases the frame it pops; a cleared slot holds
-// no reference should a result still deopt.
+// Return boxes results into the interpreter's return slots. OpReturn first
+// releases reference-capable frame slots, matching threaded RETURN.
 func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 	base := len(m.kinds)
 	if t.Op == ssa.OpReturn {
@@ -180,12 +177,8 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	}
 }
 
-// Call stores c's arguments boxed at the callee's frame base and calls the
-// callee's native code through Context.Natives, pushing nothing itself: the
-// callee's prologue pushes its record, and this activation's record names
-// its stack pointer and the call's map meanwhile. A callee that is not native,
-// an activation at Context.Limit, or a frame past Context.Top takes the
-// bridge instead. Both paths load the results from the callee's frame base.
+// Call writes boxed arguments at the callee frame base and dispatches through
+// Context.Natives. Missing code, depth, or space takes ExitCall.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > 4095 {
 		return false

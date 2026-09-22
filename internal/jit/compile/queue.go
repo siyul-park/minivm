@@ -14,7 +14,7 @@ type Job struct {
 	Err  error
 }
 
-// Queue compiles units on worker goroutines, one unit per address at a time.
+// Queue compiles at most one unit per address at a time.
 type Queue struct {
 	machine func() Machine
 

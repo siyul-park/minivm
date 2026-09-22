@@ -53,7 +53,7 @@ Exact mode disables fusion. Runtime guards retain bounds, segmentation, type, an
 
 ## JIT
 
-Threaded fusion remains in the interpreter. Native fusion can be reconsidered as part of the planned rebuild.
+Threaded fusion remains in the interpreter. Native code consumes the resulting bytecode semantics and does not own fusion.
 
 ## Ownership
 

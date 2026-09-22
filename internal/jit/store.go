@@ -7,15 +7,11 @@ import (
 	"unsafe"
 )
 
-// Store publishes native code. It owns the natives table native calls read
-// and every Code handed to Publish until that Code is freed.
+// Store owns published code and the native entry table.
 type Store struct {
-	// natives is Context.Natives: native code reads its entries, so writes
-	// to them go through atomic.StoreUintptr.
+	// natives is the table read by native CALLs.
 	natives []uintptr
-	// codes is published code by address, one atomic.Pointer per address so
-	// Code reads it without the mutex: every interpreted CALL to an
-	// uncompiled address reads here first.
+	// codes publishes one atomic pointer per address.
 	codes   []atomic.Pointer[Code]
 	retired []*Code
 	active  atomic.Int64

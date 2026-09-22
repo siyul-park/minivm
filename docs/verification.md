@@ -26,13 +26,7 @@ Static validation of untrusted bytecode.
 
 ## Checks
 
-The verifier `MUST` perform these checks in order:
-
-1. **Structure** — decoding, operands, bounds, constants, types.
-2. **Control flow** — branch targets, reachable blocks, handler ranges.
-3. **Termination** — fallthrough, returns, throws, terminals.
-4. **Stack** — height, fixed/dynamic effects, operand kinds.
-5. **Calls** — callable shape, arity, return compatibility.
+The verifier `MUST` check, in order: structure; control flow; termination; stack; calls.
 
 Dynamic arity instructions `MUST` use only statically known counts/metadata. Otherwise verification `MUST` reject the program rather than guessing.
 

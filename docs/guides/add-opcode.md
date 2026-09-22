@@ -54,15 +54,15 @@ The agent `MUST` preserve:
 - borrow/retain/release ownership;
 - existing runtime error/panic conventions.
 
-## JIT
+## Native
 
-An opcode with no case in `internal/jit/arm64` (`Machine.exec` for `OpExec`, or `Machine.Lower`'s other `ssa.Op` cases) already bridges into the interpreter through `ExitBridge`; adding ARM64 lowering is optional and, when added, `MUST` keep guards and fallback explicit:
+An opcode without an ARM64 lowering is handled by the existing exit/deopt path. A new lowering MUST:
 
-- decline (`return false`) before mutating lowering state when unsupported, so `compile.Lower` bridges the operation instead of emitting incomplete code;
-- prefer terminal fallback (bridge or deopt) over duplicated interpreter behavior;
-- preserve stack/local/global/upvalue/ref ownership, matching the release/retain the threaded handler performs.
+- return `false` before changing lowering state when unsupported;
+- preserve the threaded ownership and failure semantics;
+- use the runtime contract in `jit-internals.md` rather than duplicate interpreter behavior.
 
-See `jit-internals.md` and `internal/jit/arm64/machine.go` for the current lowered set.
+See `jit-internals.md` and `internal/jit/arm64/machine.go` for the current set.
 
 ## Tests
 
@@ -89,7 +89,7 @@ make check-generated
 make check-tidy check-fmt vet
 ```
 
-With the native rebuild, the agent MUST run the relevant ARM64 tests/benchmarks on ARM64.
+When ARM64 lowering is affected, the agent MUST run the affected ARM64 tests and benchmark gates.
 
 ## Related
 
