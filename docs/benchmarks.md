@@ -8,8 +8,8 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 
 | Kernel | `jit` | `threaded` | Wazero |
 |---|---:|---:|---:|
-| `RecursiveFib(35)` | 100.35 ms | 433.59 ms | 44.4 ms |
-| `RecursiveFib(20)` | 79.83 µs | 317.93 µs | 33.2 µs |
+| `RecursiveFib(35)` | 105.19 ms | 453.93 ms | 44.4 ms |
+| `RecursiveFib(20)` | 79.77 µs | 316.60 µs | 33.2 µs |
 
 > **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
 > **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median. The `jit`/`threaded` numbers on this page are a deliberate exception (L17: an M4 Pro drifts ~10% run to run): two interleaved `-benchtime=1s -count=3` runs of `cd benchmarks && go test -run='^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=1s -count=3 .`, reporting the median of the combined six samples, measured 2026-09-22.
@@ -70,27 +70,27 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 317.93 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 316.60 µs | 0 | 0 |
 |  | CPython | 562.79 µs | 26 | 0 |
 |  | Tengo | 930.21 µs | 319,347 | 28,655 |
 |  | GopherLua | 1.07 ms | 704 | 2 |
 |  | Goja | 1.52 ms | 4,680 | 39 |
 |  | gpython | 3.89 ms | 9,807,919 | 109,494 |
 |  | Yaegi | 4.50 ms | 8,302,177 | 192,840 |
-| Native | minivm `jit` | **79.83 µs** | 0 | 0 |
+| Native | minivm `jit` | **79.77 µs** | 0 | 0 |
 |  | Wazero | **33.20 µs** | 8 | 1 |
 | Reference | Native Go | 14.61 µs | 0 | 0 |
 #### `IndirectRecursiveFib`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 561.64 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 592.60 µs | 0 | 0 |
 |  | Tengo | 944.71 µs | 319,359 | 28,655 |
 |  | GopherLua | 941.72 µs | 704 | 2 |
 |  | Goja | 1.37 ms | 4,680 | 39 |
 |  | gpython | 3.90 ms | 10,158,202 | 109,494 |
 |  | Yaegi | 10.98 ms | 13,059,853 | 394,041 |
-| Native | minivm `jit` | 1.05 ms | 0 | 0 |
+| Native | minivm `jit` | 754.44 µs | 0 | 0 |
 |  | Wazero | **42.34 µs** | 8 | 1 |
 | Reference | Native Go | 15.72 µs | 0 | 0 |
 #### `TailSum(1000)` and `TailPingPong(1000)`
@@ -178,22 +178,22 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 140.31 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 147.04 µs | 768 | 8 |
 |  | Tengo | 280.54 µs | 458,379 | 5,114 |
 |  | GopherLua | 545.66 µs | 818,512 | 11,253 |
 |  | Goja | 448.41 µs | 558,961 | 6,149 |
 |  | gpython | 1.26 ms | 2,570,669 | 34,797 |
 |  | Yaegi | 846.99 µs | 1,422,624 | 35,306 |
-| Native | minivm `jit` | 213.17 µs | 768 | 8 |
+| Native | minivm `jit` | 166.01 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
 #### `BinaryTrees(4..6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 967.43 µs | 768 | 8 |
+| Interpreter | minivm `threaded` | 992.52 µs | 768 | 8 |
 |  | CPython | 991.16 µs | 45 | 0 |
 |  | gpython | 9.87 ms | 19,457,623 | 280,714 |
-| Native | minivm `jit` | 1.37 ms | 768 | 8 |
+| Native | minivm `jit` | 1.08 ms | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
 #### `SortStress(128,2)`
 
@@ -250,10 +250,10 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 138.81 µs | 0 | 0 |
+| Interpreter | minivm `threaded` | 143.07 µs | 0 | 0 |
 |  | CPython | 181.52 µs | 9 | 0 |
 |  | gpython | 684.61 µs | 324,977 | 23,643 |
-| Native | minivm `jit` | **31.52 µs** | 0 | 0 |
+| Native | minivm `jit` | **31.30 µs** | 0 | 0 |
 | Reference | Native Go | 2.99 µs | 0 | 0 |
 #### `MatMul(16)`
 
@@ -333,7 +333,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-The S2 native tier only ever enters at an interpreted `CALL` to a `*types.Function` (`instruction-set.md`); it never compiles top-level or loop-only code with no calls in it. A kernel with no `CALL` at all (`IterativeFib`, `Sieve`, `BranchTree`, `TypedArraySum`, `AllocationGraph`, `PermutationFlips`, `MatMul`, …) therefore measures identically under `jit` and `threaded` — the native tier never runs. A kernel whose called function lowers cleanly and stays hot (`RecursiveFib`, `SpectralNorm`, `Mandelbrot`) gets a large win. A kernel whose called function hits an opcode `internal/jit/arm64` does not lower, or a `RETURN_CALL` (`TailSum`, `TailPingPong`), pays the always-on call-path bookkeeping (`native.call`'s `Store.Enter`/`Code`/`Leave` and counters) on every call without ever completing natively, and `jit` measures slightly slower than `threaded` (`IndirectRecursiveFib`, `NQueens`, `Fannkuch`, `StructTreeWalk`, `BinaryTrees`, `StringBuild`). The agent `MUST` read results by row and tier and `MUST NOT` aggregate unlike tiers.
+The S2 native tier only ever enters at an interpreted `CALL` to a `*types.Function` (`instruction-set.md`); it never compiles top-level or loop-only code with no calls in it. A kernel with no `CALL` at all (`IterativeFib`, `Sieve`, `BranchTree`, `TypedArraySum`, `AllocationGraph`, `PermutationFlips`, `MatMul`, …) therefore measures identically under `jit` and `threaded` — the native tier never runs. A kernel whose called function lowers cleanly and stays hot (`RecursiveFib`, `SpectralNorm`, `Mandelbrot`) gets a large win. A kernel whose called function hits an opcode `internal/jit/arm64` does not lower, or a `RETURN_CALL` (`TailSum`, `TailPingPong`), pays the call-path bookkeeping (`native.call`'s `Store.Enter`/`Code`/`Leave` and counters) on every call without ever completing natively. As of S2-P8 (`jit.Store.Code` reads a lock-free `atomic.Pointer[Code]` per address instead of taking a mutex and doing a map lookup, and `native`'s per-address call/entry/deopt/failure state is slice-indexed instead of four maps), that bookkeeping is far cheaper: `StructTreeWalk` and `BinaryTrees` moved from ~1.5x and ~1.4x threaded to ~1.1x, and `IndirectRecursiveFib` from ~1.9x to ~1.3x, all re-measured 2026-09-22. `NQueens`, `Fannkuch`, and `StringBuild` were not re-measured this stage and are expected to improve by a comparable margin but still carry the same always-on hook cost — their exact ratio to `threaded` is unconfirmed until measured. The agent `MUST` read results by row and tier and `MUST NOT` aggregate unlike tiers.
 
 ## Benchmark Fixture Inventory
 

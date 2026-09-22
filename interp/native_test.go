@@ -650,6 +650,30 @@ func TestWithThreshold(t *testing.T) {
 		}, 20*time.Second, time.Second)
 	})
 
+	t.Run("a function allocated after construction runs interpreted", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 7).Emit(instr.RETURN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal(code)}
+		b = instr.NewBuilder()
+		b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CALL)
+		code, err = b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithGlobals(types.TypeAny))
+
+		vm := interp.New(prog, interp.WithThreshold(0))
+		defer vm.Close()
+		addr, err := vm.Alloc(fn)
+		require.NoError(t, err)
+		require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+		require.NoError(t, vm.Run(context.Background()))
+		result, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), result)
+	})
+
 	t.Run("stays off by default: no vm_jit metrics are reported", func(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(fibCallsProgram(t, 3), interp.WithProfiler(profiler))

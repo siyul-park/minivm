@@ -13,7 +13,10 @@ type Store struct {
 	// natives is Context.Natives: native code reads its entries, so writes
 	// to them go through atomic.StoreUintptr.
 	natives []uintptr
-	codes   map[int]*Code
+	// codes is published code by address, one atomic.Pointer per address so
+	// Code reads it without the mutex: every interpreted CALL to an
+	// uncompiled address reads here first.
+	codes   []atomic.Pointer[Code]
 	retired []*Code
 	active  atomic.Int64
 
@@ -25,7 +28,7 @@ func NewStore(size int) *Store {
 	if size < 1 {
 		panic("jit: store size must be positive")
 	}
-	return &Store{natives: make([]uintptr, size), codes: map[int]*Code{}}
+	return &Store{natives: make([]uintptr, size), codes: make([]atomic.Pointer[Code], size)}
 }
 
 // Natives returns the address of the natives table, stable for the Store's
@@ -34,19 +37,20 @@ func (s *Store) Natives() uintptr {
 	return uintptr(unsafe.Pointer(&s.natives[0]))
 }
 
-// Code returns the published code at address, or nil.
+// Code returns the published code at address, or nil. It never blocks.
 func (s *Store) Code(address int) *Code {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.codes[address]
+	if address < 0 || address >= len(s.codes) {
+		return nil
+	}
+	return s.codes[address].Load()
 }
 
 // Find returns the published or retired code whose range holds pc, or nil.
 func (s *Store) Find(pc uintptr) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, c := range s.codes {
-		if holds(c, pc) {
+	for i := range s.codes {
+		if c := s.codes[i].Load(); c != nil && holds(c, pc) {
 			return c
 		}
 	}
@@ -67,7 +71,7 @@ func (s *Store) Publish(c *Code) bool {
 	installed := c.Address >= 0 && c.Address < len(s.natives)
 	var old *Code
 	if installed {
-		old = s.codes[c.Address]
+		old = s.codes[c.Address].Load()
 		var published Tier
 		if old != nil {
 			published = old.Tier
@@ -76,7 +80,7 @@ func (s *Store) Publish(c *Code) bool {
 	}
 	if installed {
 		atomic.StoreUintptr(&s.natives[c.Address], c.entry)
-		s.codes[c.Address] = c
+		s.codes[c.Address].Store(c)
 		if old != nil {
 			s.retired = append(s.retired, old)
 		}
@@ -95,12 +99,15 @@ func (s *Store) Publish(c *Code) bool {
 func (s *Store) Retire(address int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, ok := s.codes[address]
-	if !ok {
+	if address < 0 || address >= len(s.codes) {
+		return
+	}
+	c := s.codes[address].Load()
+	if c == nil {
 		return
 	}
 	atomic.StoreUintptr(&s.natives[address], 0)
-	delete(s.codes, address)
+	s.codes[address].Store(nil)
 	s.retired = append(s.retired, c)
 }
 
@@ -147,8 +154,10 @@ func (s *Store) Close() error {
 	s.mu.Unlock()
 
 	var err error
-	for _, c := range codes {
-		err = errors.Join(err, c.Free())
+	for i := range codes {
+		if c := codes[i].Load(); c != nil {
+			err = errors.Join(err, c.Free())
+		}
 	}
 	for _, c := range retired {
 		err = errors.Join(err, c.Free())

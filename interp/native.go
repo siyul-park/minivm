@@ -24,10 +24,17 @@ type native struct {
 	*shared
 
 	threshold int
-	calls     map[int]int
-	entries   map[int]int
-	deopts    map[int]int
-	failed    map[key]bool
+	// calls, entries, deopts, and failed are indexed by address, up to
+	// len(i.code): Store.Publish already refuses an address beyond that, so
+	// no address past it ever compiles.
+	calls   []int
+	entries []int
+	deopts  []int
+	// failed marks a permanently failed compile attempt: bit tierBit(tier)
+	// of failed[addr] is set once tier has failed at addr. A Baseline
+	// failure never blocks a later Optimized attempt at the same address,
+	// and vice versa.
+	failed []uint8
 
 	// exact caches deoptimization's own compile of each address: i.code[addr]
 	// may be fused, and a fusion leaves no handler at the IPs it absorbs (see
@@ -43,14 +50,6 @@ type native struct {
 	// initialization cycle. Going through this field instead of the method
 	// stays outside that static reference graph.
 	compile func(fn *types.Function, exact bool) []func(*Interpreter)
-}
-
-// key is a failed compile attempt's identity: an address and the tier that
-// failed there. A Baseline failure never blocks a later Optimized attempt at
-// the same address, and vice versa.
-type key struct {
-	addr int
-	tier jit.Tier
 }
 
 // shared is the part of a native's JIT runtime a Pool may lend to every
@@ -168,10 +167,10 @@ func newNative(i *Interpreter, threshold int) *native {
 		ctx:       ctx,
 		shared:    newShared(i),
 		threshold: threshold,
-		calls:     map[int]int{},
-		entries:   map[int]int{},
-		deopts:    map[int]int{},
-		failed:    map[key]bool{},
+		calls:     make([]int, len(i.code)),
+		entries:   make([]int, len(i.code)),
+		deopts:    make([]int, len(i.code)),
+		failed:    make([]uint8, len(i.code)),
 		exact:     map[int][]func(*Interpreter){},
 		compile:   i.compile,
 	}
@@ -190,6 +189,10 @@ func (n *native) close() error {
 // would.
 func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
 	n.drain(i)
+	if addr >= len(n.calls) {
+		// Bound after construction (Alloc, Store): never compiled.
+		return false
+	}
 
 	n.store.Enter()
 	code := n.store.Code(addr)
@@ -212,7 +215,7 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 // the threshold is reached, unless Baseline already failed there.
 func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	n.calls[addr]++
-	if n.calls[addr] < n.threshold || n.failed[key{addr, jit.Baseline}] {
+	if n.calls[addr] < n.threshold || n.hasFailed(addr, jit.Baseline) {
 		return
 	}
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Baseline})
@@ -226,7 +229,7 @@ func (n *native) promote(addr int, fn *types.Function, code *jit.Code) {
 		return
 	}
 	n.entries[addr]++
-	if n.entries[addr] < promote || n.failed[key{addr, jit.Optimized}] {
+	if n.entries[addr] < promote || n.hasFailed(addr, jit.Optimized) {
 		return
 	}
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Optimized})
@@ -240,14 +243,29 @@ func (n *native) refute(addr int) bool {
 	return n.deopts[addr] >= refute
 }
 
-// forget clears addr's call, entry, and deopt counts after call retires its
+// forget resets addr's call, entry, and deopt counts after call retires its
 // code, so it tiers up again from a fresh Baseline compile if it is still
 // called. A permanent compile failure (failed) is not runtime behavior and
 // stays.
 func (n *native) forget(addr int) {
-	delete(n.calls, addr)
-	delete(n.entries, addr)
-	delete(n.deopts, addr)
+	n.calls[addr] = 0
+	n.entries[addr] = 0
+	n.deopts[addr] = 0
+}
+
+// hasFailed reports whether addr's compile at tier permanently failed.
+func (n *native) hasFailed(addr int, tier jit.Tier) bool {
+	return n.failed[addr]&tierBit(tier) != 0
+}
+
+// markFailed permanently marks addr's compile at tier as failed.
+func (n *native) markFailed(addr int, tier jit.Tier) {
+	n.failed[addr] |= tierBit(tier)
+}
+
+// tierBit is tier's bit in a failed[addr] mark.
+func tierBit(tier jit.Tier) uint8 {
+	return 1 << (tier - 1)
 }
 
 // drain collects every job the queue has finished — including one a Pool's
@@ -257,7 +275,7 @@ func (n *native) forget(addr int) {
 func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
 		if job.Err != nil {
-			n.failed[key{job.Unit.Address, job.Unit.Tier}] = true
+			n.markFailed(job.Unit.Address, job.Unit.Tier)
 			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome(job.Err)})
 			continue
 		}
