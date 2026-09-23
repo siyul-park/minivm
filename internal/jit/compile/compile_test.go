@@ -547,6 +547,22 @@ func TestLower(t *testing.T) {
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
+	t.Run("checks only the returning frame", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		ref := constant(b, entry, types.BoxRef(2))
+		value := constant(b, entry, types.BoxI32(1))
+		at := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
+			{Address: 2, Stack: []ssa.Operand{{Value: ref, Owned: true}}},
+			{Address: 1, Stack: []ssa.Operand{{Value: value}}},
+		}, Results: []ssa.Value{at}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: at})
+
+		_, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+	})
+
 	t.Run("routes a shape guard to Machine.Lower", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

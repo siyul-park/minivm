@@ -616,18 +616,16 @@ func (l *lowering) call(op ssa.Operation) error {
 	return l.err
 }
 
-// leave checks that returning t releases nothing the interpreter's RETURN
-// would: every owned operand is a result.
+// leave rejects owned values the native return path would not release.
 func (l *lowering) leave(t ssa.Terminator) error {
 	state, ok := l.states[t.State]
-	if !ok {
+	if !ok || len(state.Frames) == 0 {
 		return nil
 	}
-	for _, frame := range state.Frames {
-		for _, o := range frame.Stack[:max(len(frame.Stack)-len(t.Args), 0)] {
-			if o.Owned {
-				return fmt.Errorf("%w: return over owned v%d", ErrUnsupported, o.Value)
-			}
+	frame := state.Frames[len(state.Frames)-1]
+	for _, o := range frame.Stack[:max(len(frame.Stack)-len(t.Args), 0)] {
+		if o.Owned {
+			return fmt.Errorf("%w: return over owned v%d", ErrUnsupported, o.Value)
 		}
 	}
 	return nil

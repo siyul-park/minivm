@@ -3,6 +3,7 @@ package interp_test
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"runtime"
 	"testing"
@@ -858,6 +859,58 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, popErr)
 		require.NoError(t, refErr)
 		require.Equal(t, 1, count)
+	})
+
+	t.Run("native float comparisons treat NaN as unordered", func(t *testing.T) {
+		native(t)
+		const warm = 100
+		nan := uint64(math.Float32bits(float32(math.NaN())))
+		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
+		for _, op := range []instr.Opcode{instr.F32_EQ, instr.F32_NE, instr.F32_LE} {
+			b.Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0))
+			b.Emit(instr.New(instr.F32_CONST, nan), instr.New(instr.F32_CONST, nan), instr.New(op), instr.New(instr.SELECT))
+			if op != instr.F32_EQ {
+				b.Emit(instr.New(instr.I32_ADD))
+			}
+		}
+		fn := b.Emit(instr.New(instr.RETURN)).MustBuild()
+
+		module := instr.NewBuilder()
+		loop, done := module.Label(), module.Label()
+		module.Bind(loop)
+		module.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, warm).Emit(instr.I32_GE_S).BrIf(done)
+		module.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		module.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		module.Br(loop)
+		module.Bind(done).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := module.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fn))
+		want := runProgram(t, prog)
+		require.Equal(t, types.I32(1), want)
+
+		var runErr, popErr error
+		var result types.Value
+		var entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("a native division by zero is caught by a guest handler, matching threaded", func(t *testing.T) {

@@ -182,22 +182,38 @@ func TestMachine_Lower(t *testing.T) {
 			rows: []asm.Instruction{target.CMP(reg(c.typ, 1), reg(c.typ, 2)), target.CSET(reg(ssa.TypeI1, 3), c.cond)}, lower: true,
 		})
 	}
+	flag := reg(ssa.TypeI1, 3)
 	for _, c := range []struct {
 		code instr.Opcode
 		typ  ssa.Type
-		cond uint8
+		rows []asm.Instruction
 	}{
-		{instr.F32_EQ, f32, target.CondEQ}, {instr.F32_NE, f32, target.CondNE}, {instr.F32_LT, f32, target.CondMI},
-		{instr.F32_GT, f32, target.CondGT}, {instr.F32_LE, f32, target.CondLS}, {instr.F32_GE, f32, target.CondGE},
-		{instr.F64_EQ, f64, target.CondEQ}, {instr.F64_NE, f64, target.CondNE}, {instr.F64_LT, f64, target.CondMI},
-		{instr.F64_GT, f64, target.CondGT}, {instr.F64_LE, f64, target.CondLS}, {instr.F64_GE, f64, target.CondGE},
+		{instr.F32_EQ, f32, []asm.Instruction{
+			target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondEQ), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
+		}},
+		{instr.F32_NE, f32, []asm.Instruction{
+			target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondNE), target.CSET(target.W16, target.CondVS), target.ORR(flag, flag, target.W16),
+		}},
+		{instr.F32_LT, f32, []asm.Instruction{target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondMI)}},
+		{instr.F32_GT, f32, []asm.Instruction{target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondGT)}},
+		{instr.F32_LE, f32, []asm.Instruction{
+			target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondLS), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
+		}},
+		{instr.F32_GE, f32, []asm.Instruction{target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondGE)}},
+		{instr.F64_EQ, f64, []asm.Instruction{
+			target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondEQ), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
+		}},
+		{instr.F64_NE, f64, []asm.Instruction{
+			target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondNE), target.CSET(target.W16, target.CondVS), target.ORR(flag, flag, target.W16),
+		}},
+		{instr.F64_LT, f64, []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondMI)}},
+		{instr.F64_GT, f64, []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondGT)}},
+		{instr.F64_LE, f64, []asm.Instruction{
+			target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondLS), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
+		}},
+		{instr.F64_GE, f64, []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondGE)}},
 	} {
-		tests = append(tests, test{
-			name: instr.TypeOf(c.code).Mnemonic,
-			regs: regs{1: c.typ, 2: c.typ, 3: ssa.TypeI1},
-			op:   exec(c.code, 1, 2),
-			rows: []asm.Instruction{target.FCMP(reg(c.typ, 1), reg(c.typ, 2)), target.CSET(reg(ssa.TypeI1, 3), c.cond)}, lower: true,
-		})
+		tests = append(tests, test{name: instr.TypeOf(c.code).Mnemonic, regs: regs{1: c.typ, 2: c.typ, 3: ssa.TypeI1}, op: exec(c.code, 1, 2), rows: c.rows, lower: true})
 	}
 	for _, c := range []struct {
 		code     instr.Opcode

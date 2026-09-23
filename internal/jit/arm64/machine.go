@@ -665,8 +665,7 @@ func (m *Machine) eqz(a *asm.Assembler, op ssa.Operation, s compile.Site, width 
 	return true
 }
 
-// compare sets dst from flags. After FCMP an unordered pair sets C and V:
-// EQ, MI (lt), LS (le), GT, and GE read false; NE reads true.
+// compare lowers integer comparisons and masks unordered float results.
 func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, cond uint8, width asm.RegWidth) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -677,12 +676,21 @@ func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, co
 	}
 	if x.Type() == asm.RegTypeFloat {
 		a.Emit(target.FCMP(x, y))
-	} else if x.Type() == asm.RegTypeInt {
-		a.Emit(target.CMP(x, y))
-	} else {
+		// FCMP marks unordered with VS; EQ/LE otherwise read unordered as true.
+		switch cond {
+		case target.CondEQ, target.CondLS:
+			a.Emit(target.CSET(dst, cond), target.CSETM(target.W16, target.CondVS), target.BIC(dst, dst, target.W16))
+		case target.CondNE:
+			a.Emit(target.CSET(dst, cond), target.CSET(target.W16, target.CondVS), target.ORR(dst, dst, target.W16))
+		default:
+			a.Emit(target.CSET(dst, cond))
+		}
+		return true
+	}
+	if x.Type() != asm.RegTypeInt {
 		return false
 	}
-	a.Emit(target.CSET(dst, cond))
+	a.Emit(target.CMP(x, y), target.CSET(dst, cond))
 	return true
 }
 
