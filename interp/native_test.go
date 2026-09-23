@@ -454,6 +454,31 @@ func fibOverflowProgram(t *testing.T, warm, n int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib))
 }
 
+// caught is fibOverflowProgram with the deep call wrapped
+// in a guest handler, so RefCount after Run is comparable across threaded
+// and native: land unwinds every frame above the handler and releases the
+// operand stack above it, so an uncaught error's abandoned references (which
+// neither run's frames are ever cleaned of) cannot appear in the count.
+func caught(t *testing.T, warm, n int) *program.Program {
+	t.Helper()
+	fib := fibFunction()
+	b := instr.NewBuilder()
+	loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 5).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	b.Bind(start).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Bind(end)
+	b.Bind(catch).Emit(instr.ERROR_CODE)
+	b.Try(start, end, catch, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib), program.WithHandlers(b.Handlers()...))
+}
+
 // wideI64Function returns n << 50. A literal outside the inline-boxable
 // range is not itself translatable (transform.Translate rejects it), so the
 // width has to arise from computation: for n=1 the shift's result exceeds
@@ -1160,6 +1185,48 @@ func TestWithThreshold(t *testing.T) {
 		}, 5*time.Second, time.Millisecond)
 		require.Error(t, gotErr)
 		require.True(t, overflowEqual(gotErr, wantErr))
+	})
+
+	t.Run("a self-recursive fib deopting at a frame limit keeps the CSE'd callee's RefCount equal to threaded", func(t *testing.T) {
+		native(t)
+		// The handler unwinds every native and interpreter frame the deopt
+		// left above it and releases the operand stack, so RefCount after a
+		// successful Run reflects only durable state, comparable across
+		// threaded and native runs. (An uncaught error leaves abandoned
+		// frames on both paths, by design, and is not comparable this way.)
+		prog := caught(t, 1000, 30)
+		wantVM := interp.New(prog, interp.WithFrame(10))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		wantConst, err := wantVM.Const(0)
+		require.NoError(t, err)
+		wantRC, err := wantVM.RefCount(wantConst.Ref())
+		require.NoError(t, err)
+		require.Equal(t, 1, wantRC)
+
+		var runErr, rcErr error
+		var gotRC int
+		var exits float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(10), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			c, _ := vm.Const(0)
+			gotRC, rcErr = vm.RefCount(c.Ref())
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, rcErr)
+		// The module's own constant pool is fib's only live reference: a
+		// mid-depth deopt through the CSE'd, borrowed callee must neither
+		// leak an extra retain nor drop the constant pool's own.
+		require.Equal(t, wantRC, gotRC)
 	})
 
 	t.Run("a native call to an uncompiled function deoptimizes an ExitCall, matching threaded", func(t *testing.T) {

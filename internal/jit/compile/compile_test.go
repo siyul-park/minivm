@@ -399,6 +399,34 @@ func TestLower(t *testing.T) {
 		require.True(t, exits[0].Owned)
 	})
 
+	t.Run("borrows a CSE'd constant callee used by two calls", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI32(7))
+		callee := constant(b, entry, types.BoxRef(2))
+		// CSE unifies both calls' callee constant onto one value: one retain
+		// per call site, two calls, no other use. Both are redundant.
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		at1 := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		got1 := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at1, Results: []ssa.Value{got1}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		at2 := state(b, entry, 1, ssa.Operand{Value: got1}, ssa.Operand{Value: callee, Owned: true})
+		got2 := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{got1, callee}, State: at2, Results: []ssa.Value{got2}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got2}})
+
+		m := new(machine)
+		caller := function(1, 1, instr.New(instr.CALL), instr.New(instr.CALL))
+		_, exits, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		require.NoError(t, err)
+		// No "retain" row before either call.
+		require.Equal(t, []string{"prologue", "const", "const", "call", "call", "return", "exit 0 4", "jump", "exit 1 4", "jump", "epilogue"}, m.calls)
+		require.Len(t, exits, 2)
+		require.False(t, exits[0].Owned)
+		require.False(t, exits[1].Owned)
+	})
+
 	t.Run("branches to its own entry directly on a self call", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

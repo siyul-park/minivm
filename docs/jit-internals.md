@@ -60,7 +60,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 - `Lower` assigns one register per SSA value by type, orders blocks in reverse postorder, and resolves block parameters by parallel moves on edges.
 - A loop header needs a state-bearing operation before its budget check, or lowering fails.
 - An OSR unit loads block-0 parameters (the operand stack at the header) in its prologue and clears no locals.
-- A constant callee used once is borrowed: no retain/release around the call.
+- A constant callee is borrowed, no retain/release around any of its calls, when its retains and uses equal its call-site count: this also covers one CSE'd callee shared by several call sites, each with its own retain-before-call pair.
 
 ## ARM64 activation
 

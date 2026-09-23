@@ -109,9 +109,9 @@ type lowering struct {
 	states  map[ssa.Value]ssa.Operation
 	consts  map[ssa.Value]types.Boxed
 	raw     map[ssa.Value]bool
-	// borrow names a value an OpConst ref retained exactly once and used
-	// exactly once, as some call's callee: the retain is redundant, since
-	// the constant pool already holds the callee alive.
+	// borrow names a value an OpConst ref retained and used only as some
+	// call's callee, once per call site: every one of those retains is
+	// redundant, since the constant pool already holds the callee alive.
 	borrow map[ssa.Value]bool
 	homes  map[int]int
 	exits  []*jit.Exit
@@ -227,11 +227,11 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	return code, exits, nil
 }
 
-// borrowed reports, for every OpConst ref value f retains exactly once and
-// uses exactly once as some CALL's callee, that the retain is redundant: the
-// constant pool already holds the callee alive for the call's own duration.
+// borrowed reports every OpConst ref value used only as CALL callees and
+// retained once per such call: the constant pool keeps it alive, so every
+// retain is redundant.
 func borrowed(f *ssa.Function) map[ssa.Value]bool {
-	retains, uses, callees := map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
+	retains, uses, callees := map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]int{}
 	use := func(args []ssa.Value) {
 		for _, v := range args {
 			uses[v]++
@@ -247,7 +247,7 @@ func borrowed(f *ssa.Function) map[ssa.Value]bool {
 			default:
 				use(op.Args)
 				if op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 {
-					callees[op.Args[len(op.Args)-1]] = true
+					callees[op.Args[len(op.Args)-1]]++
 				}
 			}
 		}
@@ -257,8 +257,8 @@ func borrowed(f *ssa.Function) map[ssa.Value]bool {
 		}
 	}
 	out := map[ssa.Value]bool{}
-	for v := range callees {
-		if retains[v] == 1 && uses[v] == 1 {
+	for v, n := range callees {
+		if retains[v] == n && uses[v] == n {
 			out[v] = true
 		}
 	}
