@@ -39,11 +39,14 @@ The agent `MUST NOT` delegate a vague objective. Parallel work `MUST` have disjo
 
 | Work | Model | Use |
 |---|---|---|
-| Exploration | Haiku / Sonnet | bounded search, tracing, evidence |
+| Exploration | Haiku | bounded search, tracing, evidence |
 | Implementation | Sonnet | TDD implementation, focused refactor |
+| Complex debugging | Opus | root-causing miscompiles, allocator/ABI/runtime faults, multi-component failures |
 | Design / escalation | Opus | ownership, representation, architecture, high-risk sequencing |
 
-If a problem exceeds the agent's current capability to resolve reliably, the agent `MUST` consult an adviser for help from a higher-capability model.
+Exploration `MUST` use Haiku.
+
+When a task exceeds the agent's own capability to resolve reliably, the agent `MUST` delegate it to an adviser of higher capability (Sonnet above Haiku; Opus above Sonnet) instead of guessing, working around, or declaring it out of scope. The handoff `MUST` carry the evidence gathered so far and the smallest unresolved decision.
 
 ## Workflow
 
