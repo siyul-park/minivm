@@ -863,7 +863,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("native float comparisons treat NaN as unordered", func(t *testing.T) {
 		native(t)
-		const warm = 100
+		const warm = 1000
 		nan := uint64(math.Float32bits(float32(math.NaN())))
 		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
 		for _, op := range []instr.Opcode{instr.F32_EQ, instr.F32_NE, instr.F32_LE} {

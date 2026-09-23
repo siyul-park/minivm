@@ -92,6 +92,9 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				if !hoistable(operation) {
 					continue
 				}
+				if state, ok := location(operation.State); ok && body[state] {
+					continue
+				}
 				invariant := true
 				for _, a := range operation.Args {
 					loc, ok := location(a)

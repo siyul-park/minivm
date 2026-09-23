@@ -18,6 +18,13 @@ func TestNewCompactPass(t *testing.T) {
 }
 
 func TestCompactPass_Run(t *testing.T) {
+	t.Run("reports preserved when the pools are already compact", func(t *testing.T) {
+		p := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
+		preserved, err := transform.NewCompactPass().Run(pass.NewManager(), p)
+		require.NoError(t, err)
+		require.True(t, preserved)
+	})
+
 	tests := []struct {
 		name     string
 		program  *program.Program

@@ -30,6 +30,7 @@ func (p *CompactPass) Run(_ *pass.Manager, program *program.Program) (bool, erro
 
 	constants := program.Constants
 	typs := program.Types
+	constantLen, typeLen := len(constants), len(typs)
 
 	constUsed := make([]bool, len(constants))
 	typeUsed := make([]bool, len(typs))
@@ -97,7 +98,7 @@ func (p *CompactPass) Run(_ *pass.Manager, program *program.Program) (bool, erro
 	program.Constants = constants
 	program.Types = typs
 
-	return false, nil
+	return constantLen == constSize && typeLen == typesSize, nil
 }
 
 func compactValues(items []types.Value, used []bool) ([]int, int) {

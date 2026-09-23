@@ -50,6 +50,26 @@ func TestHoistPass_Run(t *testing.T) {
 		require.Equal(t, 2, strings.Count(after, "i32.add"))
 	})
 
+	t.Run("does not hoist an operation with loop-local state", func(t *testing.T) {
+		l := newCountedLoop()
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
+		x, y := l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
+		sum := l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: state, Results: []ssa.Value{sum}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.True(t, hasCode(fn.Block(l.body).Operations, instr.I32_ADD))
+		require.False(t, hasCode(fn.Block(l.pre).Operations, instr.I32_ADD))
+	})
+
 	t.Run("does not hoist an operation whose argument is loop-variant", func(t *testing.T) {
 		l := newCountedLoop()
 		doubled := l.b.Value(ssa.TypeI32)
