@@ -104,7 +104,8 @@ func returnOp() jen.Code {
 			jen.Return(
 				jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
 					jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(jen.Panic(jen.Id("ErrFrameUnderflow"))),
-					jen.Block(retire(jen.Id("owned").Op("||").Id("i").Dot("sp").Op("!=").Id("f").Dot("bp").Op("+").Id("slots").Op("+").Id("f").Dot("returns"))...),
+					jen.Id("f").Op(":=").Id("i").Dot("fr"),
+					jen.Id("i").Dot("retire").Call(jen.Id("owned").Op("||").Id("i").Dot("sp").Op("!=").Id("f").Dot("bp").Op("+").Id("slots").Op("+").Id("f").Dot("returns")),
 				),
 			),
 		)

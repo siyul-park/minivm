@@ -12,7 +12,10 @@ type Store struct {
 	// natives is the table read by native CALLs.
 	natives []uintptr
 	// codes publishes one atomic pointer per address.
-	codes   []atomic.Pointer[Code]
+	codes []atomic.Pointer[Code]
+	// osr publishes OSR code per (address, IP): never a call target, so it
+	// is never in natives, and is looked up only through Find or CodeAt.
+	osr     map[key]*Code
 	retired []*Code
 	active  atomic.Int64
 	// pending is len(retired), readable without mu so Reclaim with nothing
@@ -20,6 +23,11 @@ type Store struct {
 	pending atomic.Int64
 
 	mu sync.Mutex
+}
+
+// key identifies one OSR unit's published code.
+type key struct {
+	address, ip int
 }
 
 // NewStore returns a Store serving addresses [0, size).
@@ -44,12 +52,26 @@ func (s *Store) Code(address int) *Code {
 	return s.codes[address].Load()
 }
 
+// CodeAt returns the published OSR code at (address, ip), or nil. Unlike
+// Code, it takes the mutex — an OSR site calls it only when its own counter
+// crosses a publish-check interval, never every iteration.
+func (s *Store) CodeAt(address, ip int) *Code {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.osr[key{address, ip}]
+}
+
 // Find returns the published or retired code whose range holds pc, or nil.
 func (s *Store) Find(pc uintptr) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.codes {
 		if c := s.codes[i].Load(); c != nil && holds(c, pc) {
+			return c
+		}
+	}
+	for _, c := range s.osr {
+		if holds(c, pc) {
 			return c
 		}
 	}
@@ -61,13 +83,31 @@ func (s *Store) Find(pc uintptr) *Code {
 	return nil
 }
 
-// Publish takes ownership of c. It installs c — natives[c.Address] =
-// c.Entry() — when c.Address is in range and c.Tier is above the published
-// code's tier (none published counts as zero), retiring the code it
-// replaces, and reports true. A stale c is freed instead and reports false.
+// Publish takes ownership of c. An OSR code (c.OSR) is never a call target:
+// it installs into the (address, IP) map, once, instead of natives[c.Address].
+// Otherwise it installs c — natives[c.Address] = c.Entry() — when c.Address
+// is in range and c.Tier is above the published code's tier (none published
+// counts as zero), retiring the code it replaces. Either way it reports
+// whether c installed; a stale c is freed instead.
 func (s *Store) Publish(c *Code) bool {
 	s.mu.Lock()
 	installed := c.Address >= 0 && c.Address < len(s.natives)
+	if installed && c.OSR {
+		k := key{c.Address, c.IP}
+		if _, ok := s.osr[k]; ok {
+			installed = false
+		} else {
+			if s.osr == nil {
+				s.osr = map[key]*Code{}
+			}
+			s.osr[k] = c
+		}
+		s.mu.Unlock()
+		if !installed {
+			_ = c.Free()
+		}
+		return installed
+	}
 	var old *Code
 	if installed {
 		old = s.codes[c.Address].Load()
@@ -108,6 +148,22 @@ func (s *Store) Retire(address int) {
 	}
 	atomic.StoreUintptr(&s.natives[address], 0)
 	s.codes[address].Store(nil)
+	s.retired = append(s.retired, c)
+	s.pending.Add(1)
+}
+
+// RetireAt moves the published OSR code at (address, ip) to the retired
+// list; a no-op when nothing is published there. A retired code stays
+// findable until Reclaim.
+func (s *Store) RetireAt(address, ip int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := key{address, ip}
+	c, ok := s.osr[k]
+	if !ok {
+		return
+	}
+	delete(s.osr, k)
 	s.retired = append(s.retired, c)
 	s.pending.Add(1)
 }
@@ -154,8 +210,8 @@ func (s *Store) Reclaim() error {
 // interpreter is inside native code first.
 func (s *Store) Close() error {
 	s.mu.Lock()
-	codes, retired := s.codes, s.retired
-	s.codes, s.retired = nil, nil
+	codes, osr, retired := s.codes, s.osr, s.retired
+	s.codes, s.osr, s.retired = nil, nil, nil
 	s.mu.Unlock()
 
 	var err error
@@ -163,6 +219,9 @@ func (s *Store) Close() error {
 		if c := codes[i].Load(); c != nil {
 			err = errors.Join(err, c.Free())
 		}
+	}
+	for _, c := range osr {
+		err = errors.Join(err, c.Free())
 	}
 	for _, c := range retired {
 		err = errors.Join(err, c.Free())

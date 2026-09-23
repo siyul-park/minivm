@@ -147,6 +147,62 @@ func TestCompile(t *testing.T) {
 		}
 	})
 
+	t.Run("compiles and runs an OSR unit at every tier", func(t *testing.T) {
+		native(t)
+		// acc lives on the operand stack across the header; n (the
+		// function's own parameter) and bonus (an ordinary local) stay in
+		// VM slots throughout.
+		b := instr.NewBuilder()
+		header, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(header)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(header)
+		b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32, types.TypeI32},
+			Code:   instr.Marshal(code),
+		}
+		entry := instr.New(instr.I32_CONST, 0).Width()*2 + instr.New(instr.LOCAL_SET, 1).Width()
+
+		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
+			// n=5, i=3 (partway through the loop), bonus=100, acc=3 (the
+			// operand-stack value the interpreter left at the header).
+			stack := []types.Boxed{types.BoxI32(5), types.BoxI32(3), types.BoxI32(100), types.BoxI32(3)}
+			u := compile.Unit{Address: 1, Function: fn, Tier: tier, Entry: entry, OSR: true}
+			ctx, trap := run(t, u, stack)
+			require.Equal(t, jit.TrapReturn, trap)
+			require.Equal(t, types.BoxI32(105), stack[0])
+			require.Zero(t, ctx.Depth)
+		}
+	})
+
+	t.Run("keeps module code's own completion value count", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{Code: instr.Marshal(code)}
+
+		c, err := compile.Compile(compile.Unit{Function: fn, Tier: jit.Baseline}, arm64.New())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, c.Free()) })
+		require.Equal(t, 2, c.Results)
+	})
+
+	t.Run("leaves an ordinary function's completion value count at zero", func(t *testing.T) {
+		c, err := compile.Compile(compile.Unit{Function: noop(t), Tier: jit.Baseline}, arm64.New())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, c.Free()) })
+		require.Zero(t, c.Results)
+	})
+
 	t.Run("runs fib through its own native code at every tier", func(t *testing.T) {
 		native(t)
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {

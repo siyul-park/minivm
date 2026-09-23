@@ -139,7 +139,7 @@ func newNative(i *Interpreter, threshold int) *native {
 	if err != nil {
 		panic(err)
 	}
-	return &native{
+	n := &native{
 		ctx:       ctx,
 		shared:    newShared(i),
 		threshold: threshold,
@@ -150,6 +150,16 @@ func newNative(i *Interpreter, threshold int) *native {
 		exact:     map[int][]func(*Interpreter){},
 		compile:   i.compile,
 	}
+	// OSR observes every loop header of every function i compiled at
+	// construction, module code (address 0) included; a function bound
+	// later (a dynamic closure) is not.
+	n.observe(i, 0, i.module)
+	for addr, obj := range n.module.Objects {
+		if obj.Function != nil {
+			n.observe(i, addr, obj.Function)
+		}
+	}
+	return n
 }
 
 // close releases n's reference to its shared runtime.
@@ -258,7 +268,11 @@ func tierBit(tier jit.Tier) uint8 {
 func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
 		if job.Err != nil {
-			n.markFailed(job.Unit.Address, job.Unit.Tier)
+			// failed is the entry-0 call site's own tiering; an OSR unit is
+			// a different site, so only a non-OSR failure marks it.
+			if !job.Unit.OSR {
+				n.markFailed(job.Unit.Address, job.Unit.Tier)
+			}
 			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome(job.Err)})
 			continue
 		}
@@ -394,8 +408,7 @@ func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Fra
 	f.upvals = nil
 	f.coro = 0
 
-	fn := i.heap[m.Address].(*types.Function)
-	sp := f.bp + len(fn.Declared())
+	sp := f.bp + len(i.function(m.Address).Declared())
 	for j, o := range m.Stack {
 		boxed := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
 		if !o.Owned {
@@ -426,7 +439,7 @@ func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
 	if code, ok := n.exact[addr]; ok {
 		return code
 	}
-	code := n.compile(i.heap[addr].(*types.Function), true)
+	code := n.compile(i.function(addr), true)
 	n.exact[addr] = code
 	return code
 }

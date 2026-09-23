@@ -9,10 +9,18 @@ import (
 	"github.com/siyul-park/minivm/internal/jit"
 )
 
-// code returns a fresh, unpublished Code at address of tier.
+// code returns a fresh, unpublished, non-OSR Code at address of tier.
 func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
 	t.Helper()
-	c, err := jit.NewCode(address, tier, ret(), nil)
+	c, err := jit.NewCode(address, 0, false, tier, 0, ret(), nil)
+	require.NoError(t, err)
+	return c
+}
+
+// osrCode returns a fresh, unpublished OSR Code at address rooted at ip.
+func osrCode(t *testing.T, address, ip int, tier jit.Tier) *jit.Code {
+	t.Helper()
+	c, err := jit.NewCode(address, ip, true, tier, 0, ret(), nil)
 	require.NoError(t, err)
 	return c
 }
@@ -92,6 +100,51 @@ func TestStore_Publish(t *testing.T) {
 		require.False(t, s.Publish(c))
 		require.NoError(t, c.Free())
 	})
+
+	t.Run("installs an OSR code per (address, IP), leaving natives untouched", func(t *testing.T) {
+		s := jit.NewStore(2)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		c := osrCode(t, 1, 12, jit.Optimized)
+		require.True(t, s.Publish(c))
+		require.Equal(t, c, s.CodeAt(1, 12))
+		require.Nil(t, s.Code(1))
+	})
+
+	t.Run("refuses a second OSR publish at the same (address, IP)", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		first := osrCode(t, 0, 12, jit.Optimized)
+		require.True(t, s.Publish(first))
+
+		second := osrCode(t, 0, 12, jit.Optimized)
+		require.False(t, s.Publish(second))
+		require.Equal(t, first, s.CodeAt(0, 12))
+		require.NoError(t, second.Free())
+	})
+
+	t.Run("distinguishes two OSR headers of the same function", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		a := osrCode(t, 0, 12, jit.Optimized)
+		b := osrCode(t, 0, 40, jit.Optimized)
+		require.True(t, s.Publish(a))
+		require.True(t, s.Publish(b))
+		require.Equal(t, a, s.CodeAt(0, 12))
+		require.Equal(t, b, s.CodeAt(0, 40))
+	})
+
+	t.Run("installs an OSR code whose header sits at IP 0 as OSR, not as ordinary entry code", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		c := osrCode(t, 0, 0, jit.Baseline)
+		require.True(t, s.Publish(c))
+		require.Equal(t, c, s.CodeAt(0, 0))
+		require.Nil(t, s.Code(0))
+	})
 }
 
 func TestStore_Retire(t *testing.T) {
@@ -120,6 +173,41 @@ func TestStore_Retire(t *testing.T) {
 	})
 }
 
+func TestStore_CodeAt(t *testing.T) {
+	s := jit.NewStore(2)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	require.Nil(t, s.CodeAt(1, 12))
+	c := osrCode(t, 1, 12, jit.Optimized)
+	require.True(t, s.Publish(c))
+	require.Equal(t, c, s.CodeAt(1, 12))
+	// An OSR code is never a call target: it never reaches the ordinary
+	// per-address publish path Code reads.
+	require.Nil(t, s.Code(1))
+}
+
+func TestStore_RetireAt(t *testing.T) {
+	t.Run("clears the published OSR code and keeps it findable while retired", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		c := osrCode(t, 0, 12, jit.Optimized)
+		require.True(t, s.Publish(c))
+
+		s.RetireAt(0, 12)
+		require.Nil(t, s.CodeAt(0, 12))
+		require.Equal(t, c, s.Find(c.Entry()))
+	})
+
+	t.Run("is a no-op when nothing is published there", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		s.RetireAt(0, 12)
+		require.Nil(t, s.CodeAt(0, 12))
+	})
+}
+
 func TestStore_Find(t *testing.T) {
 	s := jit.NewStore(1)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
@@ -134,20 +222,34 @@ func TestStore_Find(t *testing.T) {
 }
 
 func TestStore_Reclaim(t *testing.T) {
-	s := jit.NewStore(1)
-	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	t.Run("frees a retired code only once no interpreter is inside native code", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
-	c := code(t, 0, jit.Baseline)
-	require.True(t, s.Publish(c))
-	s.Retire(0)
+		c := code(t, 0, jit.Baseline)
+		require.True(t, s.Publish(c))
+		s.Retire(0)
 
-	s.Enter()
-	require.NoError(t, s.Reclaim())
-	require.Equal(t, c, s.Find(c.Entry()))
+		s.Enter()
+		require.NoError(t, s.Reclaim())
+		require.Equal(t, c, s.Find(c.Entry()))
 
-	s.Leave()
-	require.NoError(t, s.Reclaim())
-	require.Nil(t, s.Find(c.Entry()))
+		s.Leave()
+		require.NoError(t, s.Reclaim())
+		require.Nil(t, s.Find(c.Entry()))
+	})
+
+	t.Run("frees an OSR code retired through RetireAt", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		c := osrCode(t, 0, 12, jit.Optimized)
+		require.True(t, s.Publish(c))
+		s.RetireAt(0, 12)
+
+		require.NoError(t, s.Reclaim())
+		require.Nil(t, s.Find(c.Entry()))
+	})
 }
 
 func TestStore_Close(t *testing.T) {
@@ -156,6 +258,8 @@ func TestStore_Close(t *testing.T) {
 	require.True(t, s.Publish(base))
 	opt := code(t, 0, jit.Optimized)
 	require.True(t, s.Publish(opt))
+	osr := osrCode(t, 1, 12, jit.Optimized)
+	require.True(t, s.Publish(osr))
 
 	require.NoError(t, s.Close())
 }
@@ -174,6 +278,14 @@ func TestStore_Race(t *testing.T) {
 				s.Publish(c)
 			}(c)
 		}
+		osr := osrCode(t, addr, 12, jit.Optimized)
+		wg.Add(1)
+		go func(c *jit.Code) {
+			defer wg.Done()
+			s.Publish(c)
+			_ = s.CodeAt(addr, 12)
+			s.RetireAt(addr, 12)
+		}(osr)
 	}
 	for range 4 {
 		wg.Add(1)

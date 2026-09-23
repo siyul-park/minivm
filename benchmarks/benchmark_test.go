@@ -69,7 +69,7 @@ func TestKernels(t *testing.T) {
 		{name: "threaded"},
 		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
 	}
-	// rounds exceeds the historical 2 so a mode whose compiles publish
+	// rounds is high enough that a mode whose compiles publish
 	// asynchronously (jit) is also exercised once its native code is live,
 	// not only on the calls that first submitted it.
 	const rounds = 5

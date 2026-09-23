@@ -17,11 +17,18 @@ type Unit struct {
 	Function *types.Function
 	Module   transform.Module
 	Tier     jit.Tier
+	// Entry is the bytecode offset translation and lowering root at.
+	Entry int
+	// OSR marks u as rooted at a loop header instead of the function's own
+	// entry: Entry alone cannot say this, since a header can sit at offset
+	// 0 too.
+	OSR bool
 }
 
-// Compile translates u, optimizes it for its tier, and lowers it with m.
+// Compile translates u at its Entry, optimizes it for its tier, and lowers
+// it with m.
 func Compile(u Unit, m Machine) (*jit.Code, error) {
-	f, err := transform.Translate(u.Module, u.Address, u.Function, 0)
+	f, err := transform.Translate(u.Module, u.Address, u.Function, u.Entry)
 	if err != nil {
 		return nil, fmt.Errorf("compile: translate: %w", err)
 	}
@@ -47,15 +54,27 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	code, exits, err := Lower(f, m, u.Function, u.Module.Objects, u.Address)
+	code, exits, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR)
 	if err != nil {
 		return nil, err
 	}
-	c, err := jit.NewCode(u.Address, u.Tier, code, exits)
+	c, err := jit.NewCode(u.Address, u.Entry, u.OSR, u.Tier, completion(f), code, exits)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}
 	return c, nil
+}
+
+// completion is the value count a TrapReturn from f's own OpComplete
+// leaves, 0 when f never completes (an ordinary function's RETURN count
+// comes from its own Typ.Returns instead).
+func completion(f *ssa.Function) int {
+	for id := 0; id < f.Len(); id++ {
+		if t := f.Block(id).Terminator; t.Op == ssa.OpComplete {
+			return len(t.Args)
+		}
+	}
+	return 0
 }
 
 // passes is the tier's pipeline: Baseline folds and eliminates dead code;

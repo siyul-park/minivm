@@ -56,9 +56,13 @@ func deopt(stack []operand) []ssa.Operand {
 	return out
 }
 
-func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][]fact, bool) {
+// analyze returns the facts live at each span's entry and which spans are
+// reached from root. A reached span's states entry is nil, not just absent,
+// when nothing is live there (e.g. an empty operand stack at a loop
+// header): seen is what tells reached apart from never visited.
+func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][]fact, []bool, bool) {
 	if len(entry.function.Handlers) > 0 {
-		return nil, false
+		return nil, nil, false
 	}
 	states := make([][]fact, len(spans))
 	seen := make([]bool, len(spans))
@@ -70,7 +74,7 @@ func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][
 		work = work[:len(work)-1]
 		exit, ok := f.transfer(entry, spans[id], states[id])
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
 		for _, succ := range spans[id].flow {
 			if !seen[succ] {
@@ -80,13 +84,13 @@ func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][
 				continue
 			}
 			if len(states[succ]) != len(exit) {
-				return nil, false
+				return nil, nil, false
 			}
 			changed := false
 			for i := range exit {
 				moved, ok := states[succ][i].merge(exit[i])
 				if !ok {
-					return nil, false
+					return nil, nil, false
 				}
 				changed = changed || moved
 			}
@@ -95,7 +99,7 @@ func (f facts) analyze(entry activation, spans []span, root int, in []fact) ([][
 			}
 		}
 	}
-	return states, true
+	return states, seen, true
 }
 
 func (f facts) transfer(activation activation, s span, in []fact) ([]fact, bool) {

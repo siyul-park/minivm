@@ -77,12 +77,6 @@ func promotable(function *ssa.Function) map[int]ssa.Type {
 }
 
 func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function, bool) {
-	if len(function.Pred(0)) > 0 {
-		if len(function.Block(0).Params) > 0 {
-			return nil, false
-		}
-		function = head(function)
-	}
 	indexes := slices.Sorted(maps.Keys(localTypes))
 
 	dominance := graph.NewDominance(function)
@@ -143,24 +137,6 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 	walk(0, map[int]ssa.Value{})
 
 	return rebuilder.builder.Build(), true
-}
-
-func head(function *ssa.Function) *ssa.Function {
-	rebuilder := newRebuilder(function)
-	first := rebuilder.builder.Block()
-	for _, block := range graph.Order(function) {
-		id := rebuilder.block(block)
-		currentBlock := function.Block(block)
-		for _, param := range currentBlock.Params {
-			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
-		}
-		for _, operation := range currentBlock.Operations {
-			rebuilder.builder.Add(id, rebuilder.define(function, rebuilder.operation(operation)))
-		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
-	}
-	rebuilder.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: rebuilder.block(0)}}})
-	return rebuilder.builder.Build()
 }
 
 func placements(function *ssa.Function, dominance *graph.Dominance, localTypes map[int]ssa.Type, indexes []int) [][]int {

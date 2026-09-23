@@ -6,6 +6,7 @@ import (
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
@@ -91,20 +92,51 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		return nil, nil
 	}
 	activation := activation{function: function, address: address, slots: function.Declared()}
-	states, ok := f.analyze(activation, spans, 0, nil)
+	states, seen, ok := f.analyze(activation, spans, 0, nil)
 	if !ok {
 		return nil, nil
 	}
 	if root != 0 {
-		if states[root] == nil {
+		if !seen[root] {
 			return nil, nil
 		}
-		states, ok = f.analyze(activation, spans, root, owned(states[root]))
+		states, _, ok = f.analyze(activation, spans, root, owned(states[root]))
 		if !ok {
 			return nil, nil
 		}
 	}
-	return f.build(activation, spans, states, root), nil
+	built := f.build(activation, spans, states, root)
+	if built != nil && len(built.Pred(0)) > 0 {
+		built = rotate(built)
+	}
+	return built, nil
+}
+
+// rotate prepends an empty block ahead of f's own block 0 when it has a
+// predecessor — root is a loop header, reached from both outside f and its
+// own back edge — so block 0 has none: every later pass and Lower assume
+// this. The new block carries block 0's own params, forwarded unchanged.
+func rotate(f *ssa.Function) *ssa.Function {
+	rebuilder := newRebuilder(f)
+	first := rebuilder.builder.Block()
+	origin := f.Block(0).Params
+	args := make([]ssa.Value, len(origin))
+	for i, p := range origin {
+		args[i] = rebuilder.builder.Param(first, f.Type(p))
+	}
+	for _, block := range graph.Order(f) {
+		id := rebuilder.block(block)
+		b := f.Block(block)
+		for _, param := range b.Params {
+			rebuilder.alias(param, rebuilder.builder.Param(id, f.Type(param)))
+		}
+		for _, operation := range b.Operations {
+			rebuilder.builder.Add(id, rebuilder.define(f, rebuilder.operation(operation)))
+		}
+		rebuilder.builder.Term(id, rebuilder.terminator(b.Terminator))
+	}
+	rebuilder.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: rebuilder.block(0), Args: args}}})
+	return rebuilder.builder.Build()
 }
 
 func (o Objects) function(reference int) *types.Function {

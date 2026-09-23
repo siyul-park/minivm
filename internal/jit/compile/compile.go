@@ -90,6 +90,9 @@ type lowering struct {
 	a       *asm.Assembler
 	fn      *types.Function
 	address int
+	// osr reports whether this unit is rooted at a loop header instead of
+	// its function's own entry.
+	osr     bool
 	objects transform.Objects
 	states  map[ssa.Value]ssa.Operation
 	consts  map[ssa.Value]types.Boxed
@@ -136,17 +139,29 @@ type stub struct {
 // ErrUnsupported reports SSA the backend does not lower.
 var ErrUnsupported = errors.New("unsupported lowering")
 
-// Lower emits code for the entry-0 translation and its exit maps. address is
-// the unit's own function address: a call to it is its own recursion.
-func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int) ([]byte, []jit.Exit, error) {
+// Lower emits code for f and its exit maps. address is the unit's own
+// function address: a call to it is its own recursion. An OSR unit's block
+// 0 may carry parameters, the operand stack the interpreter left at its
+// header (transform.Translate roots there); Lower loads them itself (see
+// params) instead of rejecting them.
+func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr bool) ([]byte, []jit.Exit, error) {
 	if f.Len() == 0 {
 		return nil, nil, fmt.Errorf("%w: function shape", ErrUnsupported)
 	}
-	if len(f.Block(0).Params) > 0 {
+	if !osr && len(f.Block(0).Params) > 0 {
 		return nil, nil, fmt.Errorf("%w: entry parameters", ErrUnsupported)
 	}
+	for _, p := range f.Block(0).Params {
+		// A not-yet-loaded i64 param would need every later block-0 param's
+		// deopt map to distinguish "raw slot word" from "guarded" by
+		// position, which this backend does not implement; refuse rather
+		// than risk misboxing one on a guard failure.
+		if f.Type(p) == ssa.TypeI64 {
+			return nil, nil, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
+		}
+	}
 	l := &lowering{
-		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, objects: objects,
+		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
 		borrow: borrowed(f),
 	}
@@ -218,11 +233,22 @@ func (l *lowering) function() error {
 	}
 	headers := graph.Headers(l.f, graph.NewDominance(l.f))
 
+	kinds := l.fn.Slots()
 	params := 0
 	if l.fn.Typ != nil {
 		params = len(l.fn.Typ.Params)
 	}
-	l.m.Prologue(l.a, l.fn.Slots(), params)
+	if l.osr {
+		// Every slot is a live local at a header, not just the params the
+		// function was called with: the prologue must clear none of them.
+		params = len(kinds)
+	}
+	l.m.Prologue(l.a, kinds, params)
+	if l.osr {
+		if err := l.preload(); err != nil {
+			return err
+		}
+	}
 	for _, block := range order {
 		b := l.f.Block(block)
 		l.a.Bind(labels[block])
@@ -265,6 +291,21 @@ func (l *lowering) function() error {
 	}
 	l.m.Epilogue(l.a)
 	return l.err
+}
+
+// preload loads block 0's parameters from the operand-stack slots the
+// interpreter left them at (translate.go roots an OSR unit at the header,
+// block 0's parameters bottom first at len(fn.Slots())+i), boxed exactly as
+// OpLoad unboxes a slot: Lower already refused any i64 one.
+func (l *lowering) preload() error {
+	slots := len(l.fn.Slots())
+	for i, p := range l.f.Block(0).Params {
+		op := ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: slots + i}, Results: []ssa.Value{p}}
+		if !l.m.Lower(l.a, op, l) {
+			return fmt.Errorf("%w: OSR parameter %d", ErrUnsupported, i)
+		}
+	}
+	return nil
 }
 
 func (l *lowering) operation(op ssa.Operation) error {

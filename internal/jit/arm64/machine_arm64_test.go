@@ -25,7 +25,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(7)}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
@@ -36,7 +36,7 @@ func TestNew(t *testing.T) {
 	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
 		stack := []types.Boxed{types.BoxI32(10), types.BoxI32(99), types.BoxI32(99)}
 		fn := sum(t)
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Budget = 3
 
@@ -57,7 +57,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(0)}
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -82,7 +82,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil, 0)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -107,7 +107,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{wide}, State: ret})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
@@ -119,7 +119,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
 		})
 		fn.Typ.Returns = []types.Type{types.TypeI64}
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 
 		inline := []types.Boxed{types.BoxI64(-42)}
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, inline)))
@@ -146,7 +146,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
@@ -175,7 +175,7 @@ func TestNew(t *testing.T) {
 
 		rc := []int{0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(2)}
-		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil, 0)
+		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
 
@@ -194,7 +194,7 @@ func TestNew(t *testing.T) {
 		fn := function(t, []types.Type{types.TypeString}, nil, func(b *instr.Builder) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 		})
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 
 		rc := []int{0, 0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(3)}
@@ -215,7 +215,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		code, _ := lower(t, arm64.New(), f, fib, module.Objects, 2)
+		code, _ := lower(t, arm64.New(), f, fib, module.Objects, 2, false)
 
 		// natives[2] is deliberately wrong: a self call never reads it.
 		natives := []uintptr{0, 0, 0xdead}
@@ -236,7 +236,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0)
+		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false)
 		require.NoError(t, err)
 		buffer, err := asm.NewBuffer(len(bytes))
 		require.NoError(t, err)
@@ -264,7 +264,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0)
+		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0, false)
 
 		natives := []uintptr{0, 0, 0}
 		rc := []int{0, 0, 1}
@@ -301,7 +301,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0)
+		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0, false)
 		natives := []uintptr{0, 0, code}
 		rc := []int{0, 0, 1}
 
@@ -336,7 +336,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: args, State: at})
 
 		stack := make([]types.Boxed, len(consts))
-		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil, 0)
+		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil, 0, false)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, consts, stack)
 	})
@@ -352,10 +352,10 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 			b.Bind(other).Emit(instr.I32_CONST, 2).Emit(instr.RETURN)
 		})
-		lower(t, m, translate(t, first), first, nil, 0)
+		lower(t, m, translate(t, first), first, nil, 0, false)
 
 		stack := []types.Boxed{types.BoxI32(0)}
-		code, _ := lower(t, m, translate(t, second), second, nil, 0)
+		code, _ := lower(t, m, translate(t, second), second, nil, 0, false)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, types.BoxI32(1), stack[0])
 	})
@@ -383,7 +383,7 @@ func TestNew(t *testing.T) {
 		// param itself; rc[1] starts above one so that release never falls
 		// to the last reference and bridges.
 		rc := []int{0, 2}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
@@ -407,7 +407,7 @@ func TestNew(t *testing.T) {
 		heap := []types.Value{nil, array, nil}
 		rc := []int{0, 2, 1}
 		stack := []types.Boxed{types.BoxRef(1)}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
@@ -442,7 +442,7 @@ func TestNew(t *testing.T) {
 		s := types.NewStruct(record, types.BoxI32(5))
 		heap := []types.Value{nil, nil, s}
 		stack := make([]types.Boxed, 4)
-		code, _ := lower(t, arm64.New(), f, fn, m.Objects, 0)
+		code, _ := lower(t, arm64.New(), f, fn, m.Objects, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 
@@ -475,7 +475,7 @@ func TestNew(t *testing.T) {
 		s := types.NewStruct(record, types.BoxI32(0))
 		heap := []types.Value{nil, s}
 		stack := []types.Boxed{0}
-		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0)
+		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 
@@ -527,7 +527,7 @@ func TestNew(t *testing.T) {
 		heap := []types.Value{nil, types.TypedArray[int32]{5, 3, 9, 1, 7, 2}}
 		stack := []types.Boxed{types.BoxRef(1)}
 		rc := []int{0, 2}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
@@ -545,7 +545,7 @@ func TestNew(t *testing.T) {
 		heap := []types.Value{nil, types.TypedArray[int32]{0, 42}}
 		stack := []types.Boxed{types.BoxRef(1)}
 		rc := []int{0, 2}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
@@ -563,7 +563,7 @@ func TestNew(t *testing.T) {
 		heap := []types.Value{nil, types.TypedArray[float32]{0, 42.5}}
 		stack := []types.Boxed{types.BoxRef(1)}
 		rc := []int{0, 2}
-		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
@@ -579,12 +579,94 @@ func TestNew(t *testing.T) {
 
 		heap := []types.Value{nil, types.TypedArray[int32]{1, 2}}
 		stack := []types.Boxed{types.BoxRef(1)}
-		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0)
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		require.Equal(t, jit.ExitDeopt, exits[ctx.Exit()].Kind)
+	})
+
+	t.Run("enters at a loop header, loading its operand-stack parameter and leaving other locals unset by the prologue", func(t *testing.T) {
+		// acc lives on the operand stack across the header (never stored to
+		// a local), n and bonus are locals: n is this function's own
+		// parameter, bonus an ordinary local an entry-0 prologue would clear.
+		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+			header, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+			b.Bind(header)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Br(header)
+			b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
+		})
+		entry := instr.New(instr.I32_CONST, 0).Width()*2 + instr.New(instr.LOCAL_SET, 1).Width()
+		f, err := transform.Translate(transform.Module{}, 1, fn, entry)
+		require.NoError(t, err)
+		require.Len(t, f.Block(0).Params, 1)
+
+		code, _ := lower(t, arm64.New(), f, fn, nil, 1, true)
+		// n=5, i=3 (partway through the loop), bonus=100: acc starts at 3
+		// (the value the interpreter left on the operand stack, slot 3).
+		stack := []types.Boxed{types.BoxI32(5), types.BoxI32(3), types.BoxI32(100), types.BoxI32(3)}
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		// A cleared bonus (an entry-0 prologue's mistake here) would return 2.
+		require.Equal(t, types.BoxI32(105), stack[0])
+		require.Zero(t, ctx.Depth)
+	})
+
+	t.Run("deopts an OSR entry's own body with the right IP and values, locals left as the interpreter set them", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32}, func(b *instr.Builder) {
+			join := b.Label()
+			b.Emit(instr.LOCAL_GET, 0).BrIf(join)
+			b.Bind(join)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
+		})
+		entry := instr.New(instr.LOCAL_GET, 0).Width() + instr.New(instr.BR_IF, 0).Width()
+		f, err := transform.Translate(transform.Module{}, 1, fn, entry)
+		require.NoError(t, err)
+		require.Empty(t, f.Block(0).Params)
+
+		code, exits := lower(t, arm64.New(), f, fn, nil, 1, true)
+
+		ok := []types.Boxed{types.BoxI32(6), types.BoxI32(3)}
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, ok)))
+		require.Equal(t, types.BoxI32(2), ok[0])
+
+		bad := []types.Boxed{types.BoxI32(6), types.BoxI32(0)}
+		ctx := enter(t, bad)
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitDeopt, exit.Kind)
+		require.Equal(t, entry+instr.New(instr.LOCAL_GET, 0).Width()*2, exit.Frames[0].IP)
+		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frames[0]))
+	})
+
+	t.Run("completes module code from a header entry", func(t *testing.T) {
+		b := instr.NewBuilder()
+		join := b.Label()
+		b.Emit(instr.I32_CONST, 1).BrIf(join)
+		b.Bind(join).Emit(instr.I32_CONST, 42)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{Code: instr.Marshal(code)}
+
+		entry := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.BR_IF, 0).Width()
+		f, err := transform.Translate(transform.Module{}, 0, fn, entry)
+		require.NoError(t, err)
+		require.Empty(t, f.Block(0).Params)
+
+		native, exits := lower(t, arm64.New(), f, fn, nil, 0, true)
+		require.Empty(t, exits)
+		stack := []types.Boxed{0}
+		ctx := enter(t, stack)
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(native, ctx))
+		require.Equal(t, types.BoxI32(42), stack[0])
 	})
 }
 
@@ -646,10 +728,11 @@ func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
 	return v
 }
 
-// lower builds f, the translation of fn at address, with m and publishes it.
-func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int) (uintptr, []jit.Exit) {
+// lower builds f, the translation of fn at address (an OSR unit when osr),
+// with m and publishes it.
+func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int, osr bool) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, exits, err := compile.Lower(f, m, fn, objects, address)
+	code, exits, err := compile.Lower(f, m, fn, objects, address, osr)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)

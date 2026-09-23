@@ -70,38 +70,6 @@ func TestPromotePass_Run(t *testing.T) {
 		require.Equal(t, ssa.OpLoad, entry.Operations[0].Op)
 	})
 
-	t.Run("gives an entry that is its own loop header a block to load in", func(t *testing.T) {
-		b := ssa.New("f")
-		header, exit := b.Block(), b.Block()
-		held := b.Value(ssa.TypeI32)
-		b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-		one := b.Value(ssa.TypeI32)
-		b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
-		next := b.Value(ssa.TypeI32)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{held, one}, State: deoptState(b, header), Results: []ssa.Value{next}})
-		state := b.Value(ssa.TypeState)
-		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
-		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: state})
-		cond := b.Value(ssa.TypeI1)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_EQZ, Args: []ssa.Value{next}, State: deoptState(b, header), Results: []ssa.Value{cond}})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: exit}, {Block: header}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
-		fn := b.Build()
-		require.NoError(t, ssa.Verify(fn))
-		require.Equal(t, 2, fn.Len())
-
-		_, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
-		require.NoError(t, err)
-		require.NoError(t, ssa.Verify(fn))
-
-		require.Equal(t, 3, fn.Len())
-		require.Empty(t, fn.Pred(0))
-		require.Equal(t, ssa.OpLoad, fn.Block(0).Operations[0].Op)
-		require.Equal(t, ssa.OpJump, fn.Block(0).Terminator.Op)
-		require.Equal(t, 1, countOperations(fn, ssa.OpLoad))
-		require.Zero(t, countOperations(fn, ssa.OpStore))
-	})
-
 	t.Run("leaves a slot alone when nothing stores it", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
@@ -216,28 +184,6 @@ func TestPromotePass_Run(t *testing.T) {
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
-	t.Run("declines a function whose entry both takes operands and is a loop header", func(t *testing.T) {
-		b := ssa.New("f")
-		header, exit := b.Block(), b.Block()
-		seed := b.Param(header, ssa.TypeI32)
-		state := b.Value(ssa.TypeState)
-		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
-		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{seed}, State: state})
-		held := b.Value(ssa.TypeI32)
-		b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-		cond := b.Value(ssa.TypeI1)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_EQZ, Args: []ssa.Value{held}, State: state, Results: []ssa.Value{cond}})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: exit}, {Block: header, Args: []ssa.Value{held}}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
-		fn := b.Build()
-		require.NoError(t, ssa.Verify(fn))
-		before := ssa.Format(fn)
-
-		preserved, err := transform.NewPromotePass().Run(pass.NewManager(), fn)
-		require.NoError(t, err)
-		require.True(t, preserved)
-		require.Equal(t, before, ssa.Format(fn))
-	})
 }
 
 func slotFunction() *ssa.Function {

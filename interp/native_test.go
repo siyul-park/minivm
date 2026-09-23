@@ -50,6 +50,25 @@ func fibCallsProgram(t *testing.T, calls int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithConstants(fib))
 }
 
+// fibFlatCallsProgram calls fib(15) calls times through straight-line module
+// code, no back edge anywhere: unlike fibCallsProgram's own driving loop,
+// module code here is never a loop header, so it can never itself OSR-enter
+// and start dispatching fib's own calls through native-to-native CALLs,
+// which promote's own entry counter (fed only by the interpreter's own
+// CALL dispatch) would never see.
+func fibFlatCallsProgram(t *testing.T, calls int) *program.Program {
+	t.Helper()
+	fib := fibFunction()
+	b := instr.NewBuilder()
+	for range calls {
+		b.Emit(instr.I32_CONST, 15).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	}
+	b.Emit(instr.I32_CONST, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(fib))
+}
+
 // sumFunction is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
 func sumFunction(t *testing.T) *types.Function {
 	t.Helper()
@@ -866,9 +885,11 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("a hot function tiers up to Optimized after enough native entries", func(t *testing.T) {
 		native(t)
-		prog := fibCallsProgram(t, 2000)
+		prog := fibFlatCallsProgram(t, 2000)
 		want := runProgram(t, prog)
 
+		var got types.Value
+		var compiles float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
@@ -876,13 +897,12 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, vm.Run(context.Background()))
 			result, err := vm.Pop()
 			require.NoError(t, err)
-			if result != want {
-				return false
-			}
 			vm.Flush()
-			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			got = result
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0
 		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, want, got)
 	})
 
 	t.Run("a function that deoptimizes every call retires once and never re-enters native code", func(t *testing.T) {
@@ -1171,6 +1191,320 @@ func TestWithThreshold(t *testing.T) {
 			require.NotContains(t, m.Name, "vm_jit_")
 		}
 	})
+
+	t.Run("OSR enters a module-code loop natively, matching threaded", func(t *testing.T) {
+		native(t)
+		prog := iterativeFibProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Flush()
+			got = result
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("OSR resolved during earlier calls enters at a function's loop header mid-call", func(t *testing.T) {
+		native(t)
+		// warmCalls*warmEach back edges warm sum's own loop-header OSR site
+		// across calls too few (warmCalls) to ever reach its entry-0 CALL
+		// threshold on their own, so entry-0 never compiles: the final call
+		// starts threaded and can only enter native code through OSR, mid-call,
+		// once the site resolves.
+		const threshold, warmCalls, warmEach, n = 1000, 20, 300, 200_000
+		prog := sumHeaderProgram(t, warmCalls, warmEach, n)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Flush()
+			got = result
+			// warmCalls+1 total calls to sum never reach threshold, so
+			// entry-0 CALL-based compilation never even submits; any
+			// native entry observed can only be OSR.
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a deopt inside an OSR'd loop called from module code is caught by a guest handler, matching threaded including RefCount", func(t *testing.T) {
+		native(t)
+		// A module with a handler of its own can never OSR-compile (a
+		// function's own Handlers alone gate compile.Compile, module
+		// included), so the OSR-eligible loop lives in a called function
+		// with no handlers of its own; the module's handler wraps the call
+		// and catches the real trap once it unwinds out of that frame.
+		prog := moduleDivCaughtProgram(t, 2_000_000, 1_500_000)
+		wantValue, wantCode := runModuleDivCaught(t, prog)
+
+		var gotCode types.Boxed
+		var gotValue int
+		var exits float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			code, err := vm.PopBoxed()
+			require.NoError(t, err)
+			str, err := vm.Const(0)
+			require.NoError(t, err)
+			count, err := vm.RefCount(str.Ref())
+			require.NoError(t, err)
+			vm.Flush()
+			gotCode, gotValue = code, count
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, wantCode, gotCode)
+		require.Equal(t, wantValue, gotValue)
+	})
+
+	t.Run("a loop header without a trapping operation cannot compile: OSR unwraps and still matches threaded", func(t *testing.T) {
+		native(t)
+		prog := emptyHeaderProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var unsupported float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Flush()
+			got = result
+			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"})
+			return unsupported > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, want, got)
+		// A site submits its OSR unit once: the failed compile is never
+		// resubmitted, however many further back edges the loop takes.
+		require.Equal(t, float64(1), unsupported)
+	})
+
+	t.Run("OSR survives Reset: a second run reuses the resolved site", func(t *testing.T) {
+		native(t)
+		prog := iterativeFibProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		var gotFirst, gotSecond types.Value
+		var entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+
+			require.NoError(t, vm.Run(context.Background()))
+			first, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Reset()
+
+			require.NoError(t, vm.Run(context.Background()))
+			second, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Flush()
+			gotFirst, gotSecond = first, second
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, want, gotFirst)
+		require.Equal(t, want, gotSecond)
+	})
+
+	t.Run("a Pool of two interpreters shares a published OSR code", func(t *testing.T) {
+		native(t)
+		prog := iterativeFibProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		var gotFirst, gotSecond types.Value
+		var entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			pool := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer pool.Close()
+
+			// Both Get calls land before either Put, so the pool (size 2,
+			// nothing idle yet) hands out two distinct Interpreters rather
+			// than reusing one.
+			first, err := pool.Get(context.Background())
+			require.NoError(t, err)
+			second, err := pool.Get(context.Background())
+			require.NoError(t, err)
+
+			require.NoError(t, first.Run(context.Background()))
+			firstResult, err := first.Pop()
+			require.NoError(t, err)
+
+			require.NoError(t, second.Run(context.Background()))
+			secondResult, err := second.Pop()
+			require.NoError(t, err)
+
+			first.Flush()
+			second.Flush()
+			gotFirst, gotSecond = firstResult, secondResult
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+
+			pool.Put(first)
+			pool.Put(second)
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Equal(t, want, gotFirst)
+		require.Equal(t, want, gotSecond)
+	})
+}
+
+// iterativeFibProgram computes the nth Fibonacci number in a module-level
+// loop, carrying every value in locals so the loop header's own operand
+// stack is empty: a module-code OSR site, address 0 included.
+func iterativeFibProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1) // a = 0
+	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 2) // b = 1
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3) // tmp = a+b
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)                                              // a = b
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_SET, 2)                                              // b = tmp
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0) // i++
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32))
+}
+
+// sumHeaderProgram calls sum(warmEach) warmCalls times, then sum(n) once,
+// leaving the final call's result on the stack. warmCalls*warmEach back
+// edges warm sum's own loop-header OSR site across calls, but warmCalls
+// itself stays far below any reasonable CALL threshold, so entry-0 never
+// gets its own CALL-based compile: the final call starts threaded and can
+// only enter native code through the already-resolved OSR site, mid-call.
+func sumHeaderProgram(t *testing.T, warmCalls, warmEach, n int) *program.Program {
+	t.Helper()
+	sum := sumFunction(t)
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warmCalls)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, uint64(warmEach)).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(sum))
+}
+
+// loopDivFunction sums 100/(i-k) for i in [0,n), k fixed well past OSR's own
+// submit threshold: i==k divides by zero mid-loop, after OSR has resolved
+// and entered. It has no handlers of its own, so its loop header stays
+// OSR-eligible even though the module that calls it does (a function's own
+// Handlers alone gate compile.Compile, matching translate.go's "declines...
+// a protected region" contract).
+func loopDivFunction(t *testing.T, n, k int) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1) // sum = 0
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1)
+	b.Emit(instr.I32_CONST, 100)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_SUB) // i-k
+	b.Emit(instr.I32_DIV_S)
+	b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		Locals: []types.Type{types.TypeI32, types.TypeI32},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// moduleDivCaughtProgram calls loopDivFunction inside a module-level Try:
+// the callee's own loop OSR-compiles and, once it deopts on the trapping
+// iteration, the real trap unwinds the callee's frame (no handler there) up
+// to the module's own handler. The call is fused CONST_GET;CALL, borrowing
+// loopDivFunction's own reference, so its RefCount must return to the
+// constant pool's own baseline once the unwind completes.
+func moduleDivCaughtProgram(t *testing.T, n, k int) *program.Program {
+	t.Helper()
+	fn := loopDivFunction(t, n, k)
+	b := instr.NewBuilder()
+	start, end, catch := b.Label(), b.Label(), b.Label()
+	b.Bind(start).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Bind(end)
+	b.Bind(catch).Emit(instr.ERROR_CODE)
+	b.Try(start, end, catch, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
+}
+
+// runModuleDivCaught runs prog threaded and returns the "caught" constant's
+// baseline RefCount and the caught error code moduleDivCaughtProgram leaves.
+func runModuleDivCaught(t *testing.T, prog *program.Program) (int, types.Boxed) {
+	t.Helper()
+	vm := interp.New(prog)
+	defer vm.Close()
+	require.NoError(t, vm.Run(context.Background()))
+	code, err := vm.PopBoxed()
+	require.NoError(t, err)
+	str, err := vm.Const(0)
+	require.NoError(t, err)
+	count, err := vm.RefCount(str.Ref())
+	require.NoError(t, err)
+	return count, code
+}
+
+// emptyHeaderProgram loops n times purely on raw local reads at its own
+// header (LOCAL_GET flag; BrIf done — no comparison, so no operation there
+// ever carries a deopt state): compile.Lower refuses a header without one,
+// so its OSR site can never compile.
+func emptyHeaderProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	header, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // counter = 0
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1) // flag = 0
+	b.Bind(header)
+	b.Emit(instr.LOCAL_GET, 1).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)          // counter++
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).Emit(instr.LOCAL_SET, 1) // flag = counter >= n
+	b.Br(header)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32))
 }
 
 // native skips a case that runs native code off arm64.

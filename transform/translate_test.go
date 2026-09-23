@@ -121,21 +121,27 @@ blk0: ()
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(root))
 		require.Equal(t, `func 1:2
-blk0: (v1:ref) <-- (blk2)
-	v2:i32 = load local[1]
-	br v2, blk1(v1), blk2(v1)
-blk1: (v3:ref) <-- (blk0)
-	v4:state = state {addr=1 base=0 ip=20 returns=1 stack=[v3 owned]}
-	return v3 state v4
-blk2: (v5:ref) <-- (blk0)
-	v6:i32 = load local[1]
-	v7:i32 = const 1
-	v9:state = state {addr=1 base=0 ip=14 returns=1 stack=[v5 owned, v6, v7]}
-	v8:i32 = i32.sub v6, v7 state v9
-	v10:state = state {addr=1 base=0 ip=15 returns=1 stack=[v5 owned, v8]}
-	store local[1], v8 state v10
-	jump blk0(v5)
+blk0: (v1:ref)
+	jump blk1(v1)
+blk1: (v2:ref) <-- (blk0, blk3)
+	v3:i32 = load local[1]
+	br v3, blk2(v2), blk3(v2)
+blk2: (v10:ref) <-- (blk1)
+	v11:state = state {addr=1 base=0 ip=20 returns=1 stack=[v10 owned]}
+	return v10 state v11
+blk3: (v4:ref) <-- (blk1)
+	v5:i32 = load local[1]
+	v6:i32 = const 1
+	v7:state = state {addr=1 base=0 ip=14 returns=1 stack=[v4 owned, v5, v6]}
+	v8:i32 = i32.sub v5, v6 state v7
+	v9:state = state {addr=1 base=0 ip=15 returns=1 stack=[v4 owned, v8]}
+	store local[1], v8 state v9
+	jump blk1(v4)
 `, ssa.Format(root))
+		// blk0 is a synthetic entry rotate() prepends because blk1, the
+		// loop header this unit is rooted at, has a back-edge predecessor
+		// (blk3): every later pass and Lower assume block 0 has none.
+		require.Empty(t, root.Pred(0))
 
 		entry, err := transform.Translate(transform.Module{}, 1, fn, 0)
 		require.NoError(t, err)
@@ -160,6 +166,28 @@ blk3: (v6:ref) <-- (blk1)
 	store local[1], v9 state v11
 	jump blk1(v6)
 `, ssa.Format(entry))
+	})
+
+	t.Run("translates from a header reached with an empty operand stack", func(t *testing.T) {
+		// A join with no live facts at all ("no block param needed") records
+		// the same nil in analyze's states as a span analyze never reached;
+		// translate must tell them apart through reachability, not content.
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+			Code: assemble(t, func(b *instr.Builder) {
+				join := b.Label()
+				b.Emit(instr.LOCAL_GET, 0).BrIf(join)
+				b.Bind(join).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
+			})}
+		header := instr.New(instr.LOCAL_GET, 0).Width() + instr.New(instr.BR_IF, 0).Width()
+
+		out, err := transform.Translate(transform.Module{}, 1, fn, header)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Empty(t, out.Block(0).Params)
+		require.Contains(t, ssa.Format(out), "i32.div_s")
 	})
 
 	t.Run("rejects an entry that starts no block", func(t *testing.T) {

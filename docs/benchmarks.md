@@ -4,27 +4,26 @@ Comparisons here are tier-matched.
 
 This document owns performance evidence; `testing.md` owns test contracts.
 
-minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the rebuilt native tier (S2-P8, cheaper calls since S2-P9): `interp.WithThreshold` compiling a hot `*types.Function` to ARM64 native code, measured 2026-09-22 on the host below. The tier's scope in S2: functions only, entered from an interpreted `CALL`; no OSR into a running loop; any opcode, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). Rows labelled `default` are the previous, removed native tier (pre-2026-09) and are kept only where no current `jit` number exists yet, labelled historical; `jit` numbers below are compared against Wazero's compiler backend. Native Go is a reference bound, not a peer.
+minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the native tier: `interp.WithThreshold` compiles a hot `*types.Function` to ARM64 native code from an interpreted `CALL`, and compiles a hot loop header to ARM64 native code on-stack (OSR) — module-level loops included — from the interpreter's own threaded dispatch. An operation, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). `jit` numbers are compared against Wazero's compiler backend; Native Go is a reference bound, not a peer.
 
 | Kernel | `jit` | `threaded` | Wazero |
 |---|---:|---:|---:|
 | `RecursiveFib(35)` | 74.46 ms | 428.78 ms | 44.4 ms |
 | `RecursiveFib(20)` | 77.62 µs | 319.77 µs | 33.2 µs |
 
-> **Environment**: Apple M4 Pro - darwin/arm64 - Go 1.26.2.
-> **Statistics**: canonical rows use `-benchtime=300ms -count=3` and report the median. The `jit`/`threaded` numbers on this page are a deliberate exception (L17: an M4 Pro drifts ~10% run to run): two interleaved `-benchtime=1s -count=3` runs of `cd benchmarks && go test -run='^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=1s -count=3 .`, reporting the median of the combined six samples, measured 2026-09-22.
+> **Methodology**: Apple M4 Pro · darwin/arm64 · Go 1.26.2 · measured 2026-09-23. Canonical rows use `-benchtime=300ms -count=3` and report the median. `jit`/`threaded` rows on this page use two interleaved `-benchtime=1s -count=3` runs of `cd benchmarks && go test -run='^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=1s -count=3 .`, reporting the median of the combined six samples.
 
 ## PR Smoke
 
-`make benchmark-pr` passed on 2026-09-22 (Apple M4 Pro, darwin/arm64, Go 1.26.2). The command uses its default `benchmark-pr-time=100ms`; these are smoke measurements, not canonical comparison rows.
+`make benchmark-pr` (Apple M4 Pro, darwin/arm64, Go 1.26.2, 2026-09-23). The command uses its default `benchmark-pr-time=100ms`; these are smoke measurements, not canonical comparison rows.
 
 | Kernel | threaded | jit |
 |---|---:|---:|
-| `IterativeFib(30)` | 623.0 ns/op | 495.3 ns/op |
-| `TypedArraySum(256)` | 2,761 ns/op | 2,698 ns/op |
-| `BranchTree(96)` | 499.2 ns/op | 509.0 ns/op |
-| `RecursiveFib(20)` | 350.024 ms/op | 76.877 ms/op |
-| `RecursiveFib(35)` | 426.158 ms/op | 100.026 ms/op |
+| `IterativeFib(30)` | 566.6 ns/op | 161.6 ns/op |
+| `TypedArraySum(256)` | 2,696 ns/op | 3,044 ns/op |
+| `BranchTree(96)` | 485.2 ns/op | 485.6 ns/op |
+| `RecursiveFib(20)` | 330.9 µs/op | 67.4 µs/op |
+| `RecursiveFib(35)` | 450.5 ms/op | 73.8 ms/op |
 
 ## Controls
 
@@ -32,8 +31,7 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 |---|---|---|
 | Interpreter | minivm `threaded` | Generated threaded execution. |
 | Interpreter | CPython, Tengo, GopherLua, Goja, gpython, Yaegi | Bytecode or AST interpreters with no native code generation. |
-| Native | minivm `jit` | `interp.WithThreshold` compiling to ARM64 native code (S2-P8). |
-| Native | minivm `default` | Historical rows from the removed native tier, kept only where no current `jit` number exists yet. |
+| Native | minivm `jit` | `interp.WithThreshold` compiling to ARM64 native code. |
 | Native | Wazero | WebAssembly runtime using its optimizing compiler backend on arm64. |
 | Reference | Native Go | The same kernel written directly in Go. A lower bound, not a peer. |
 
@@ -60,9 +58,11 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 |  | Goja | 2.21 µs | 368 | 20 |
 |  | gpython | 2.57 µs | 2,448 | 88 |
 |  | Yaegi | 2.84 µs | 2,036 | 101 |
-| Native | minivm `jit` | 481.6 ns | 0 | 0 |
+| Native | minivm `jit` | **179.8 ns** | 0 | 0 |
 |  | Wazero | 52.8 ns | 8 | 1 |
 | Reference | Native Go | 9.6 ns | 0 | 0 |
+
+`jit` is OSR: the loop is module-level code, not a `CALL`-native candidate.
 #### `Sieve(256)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -73,9 +73,11 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 |  | Goja | 43.29 µs | 1,872 | 25 |
 |  | gpython | 35.62 µs | 5,704 | 30 |
 |  | Yaegi | 18.92 µs | 1,800 | 37 |
-| Native | minivm `jit` | 7.80 µs | 1,048 | 2 |
+| Native | minivm `jit` | **2.09 µs** | 1,048–9,032 | 2–113 |
 |  | Wazero | **677.0 ns** | 8 | 1 |
 | Reference | Native Go | 268.6 ns | 0 | 0 |
+
+`jit` is OSR; B/op and allocs/op vary sample to sample, same async-compile-timing cause as `NBody/jit` below.
 
 ### Calls
 #### `RecursiveFib(20)`
@@ -107,7 +109,7 @@ For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent
 | Reference | Native Go | 15.72 µs | 0 | 0 |
 #### `TailSum(1000)` and `TailPingPong(1000)`
 
-The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deoptimizes at it (S2 scope: no native lowering for `RETURN_CALL`, see `instruction-set.md`). Measured on Apple M4 Pro, Go 1.26.2, 2026-09-22, `-benchtime=1s -count=3`, two interleaved runs, median of six, no external runtimes.
+The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deoptimizes at it (`RETURN_CALL` has no native lowering, see `instruction-set.md`). No external runtimes for this pair.
 
 | Kernel | Tier | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
@@ -138,6 +140,8 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | gpython | 782.30 µs | 363,441 | 4,156 |
 | Native | minivm `jit` | 199.89 µs | 120 | 6 |
 | Reference | Native Go | 4.21 µs | 0 | 0 |
+
+`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`), so it runs close to `threaded`.
 #### `Fannkuch(6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -147,6 +151,8 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | gpython | 1.57 ms | 1,367,678 | 16,944 |
 | Native | minivm `jit` | 406.90 µs | 34,608 | 1,442 |
 | Reference | Native Go | 17.54 µs | 17,280 | 720 |
+
+`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`), so it runs close to `threaded`.
 
 ### Memory and data structures
 #### `TypedArraySum(256)`
@@ -159,9 +165,11 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Goja | 13.29 µs | 2,080 | 238 |
 |  | gpython | 7.63 µs | 2,496 | 246 |
 |  | Yaegi | 4.23 µs | 296 | 8 |
-| Native | minivm `jit` | 2.77 µs | 0 | 0 |
+| Native | minivm `jit` | 3.18 µs | 0 | 0 |
 |  | Wazero | **161.0 ns** | 8 | 1 |
 | Reference | Native Go | 70.8 ns | 0 | 0 |
+
+`jit` is slower than `threaded` here: this loop's per-iteration work (one `array.get` plus an add) is small enough that the OSR observer's own steady-state cost and Baseline's un-optimized array-bounds guard outweigh what native code saves.
 #### `AllocationGraph(128)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -172,8 +180,10 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Goja | 25.84 µs | 78,016 | 770 |
 |  | gpython | 5.84 µs | 5,712 | 266 |
 |  | Yaegi | 13.81 µs | 1,492 | 142 |
-| Native | minivm `jit` | 4.16 µs | 1,024 | 128 |
+| Native | minivm `jit` | 4.18 µs | 1,024 | 128 |
 | Reference | Native Go | 944.1 ns | 1,024 | 128 |
+
+`jit` and `threaded` are close: this kernel is allocation-bound, not loop-bound.
 #### `PermutationFlips(24,64)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -198,6 +208,8 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Yaegi | 846.99 µs | 1,422,624 | 35,306 |
 | Native | minivm `jit` | 156.29 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
+
+`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`).
 #### `BinaryTrees(4..6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -207,6 +219,8 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | gpython | 9.87 ms | 19,457,623 | 280,714 |
 | Native | minivm `jit` | 1.05 ms | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
+
+`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`), so it runs slower than `threaded`.
 #### `SortStress(128,2)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -216,6 +230,8 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | gpython | 870.26 µs | 23,448 | 2,034 |
 | Native | minivm `jit` | 43.92 µs | 5,136 | 512 |
 | Reference | Native Go | 4.38 µs | 1,024 | 2 |
+
+`jit`'s `array.get`/`array.set` loop lowers and runs natively; the array's own allocation op still deopts once per call.
 #### `StringBuild(512)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -225,6 +241,8 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | gpython | 1.25 ms | 2,104,720 | 21,456 |
 | Native | minivm `jit` | 343.16 µs | 85,408 | 4,107 |
 | Reference | Native Go | 138.19 µs | 855,892 | 5,001 |
+
+`jit` deopts on every entry at `string.concat` (unlowered — see `instruction-set.md`), so it runs close to `threaded`.
 
 ### Numeric
 #### `BranchTree(96)`
@@ -237,9 +255,11 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Goja | 13.91 µs | 1,992 | 196 |
 |  | gpython | 12.75 µs | 2,168 | 203 |
 |  | Yaegi | 10.56 µs | 1,832 | 308 |
-| Native | minivm `jit` | 500.1 ns | 0 | 0 |
+| Native | minivm `jit` | 508.5 ns | 0 | 0 |
 |  | Wazero | **167.0 ns** | 16 | 1 |
 | Reference | Native Go | 78.4 ns | 0 | 0 |
+
+OSR observes this kernel's loop too; the observer's own steady-state cost (one field read, one call) is visible against this kernel's ~500 ns floor.
 #### `NBody(5,100)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -250,7 +270,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Native | minivm `jit` | 27.02 µs | 91,548 ± 89% | 1,568 ± 89% |
 | Reference | Native Go | 3.39 µs | 0 | 0 |
 
-`NBody/jit`'s B/op and allocs/op carry unusually high run-to-run variance (±89% across the six samples, vs ±0–2% for every other row here): `advance` now runs natively instead of bridging every call (see Interpretation), so its allocations are dominated by whether the async Baseline/Optimized compile queue is still draining during a given sample's timed loop rather than by steady-state per-call cost; ns/op itself stayed tight (±0%).
+`NBody/jit`'s B/op and allocs/op vary sample to sample because `advance` runs mostly natively but its allocation count depends on whether the async compile queue is still draining during a given sample's timed loop; ns/op itself is stable.
 #### `SpectralNorm(24,2)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -267,7 +287,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 138.29 µs | 0 | 0 |
 |  | CPython | 181.52 µs | 9 | 0 |
 |  | gpython | 684.61 µs | 324,977 | 23,643 |
-| Native | minivm `jit` | **29.85 µs** | 0 | 0 |
+| Native | minivm `jit` | **13.36 µs** | 0–19,272 | 0–252 |
 | Reference | Native Go | 2.99 µs | 0 | 0 |
 #### `MatMul(16)`
 
@@ -276,12 +296,14 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Interpreter | minivm `threaded` | 174.44 µs | 6,216 | 6 |
 |  | CPython | 210.72 µs | 10 | 0 |
 |  | gpython | 701.09 µs | 90,712 | 9,350 |
-| Native | minivm `jit` | 173.02 µs | 6,216 | 6 |
+| Native | minivm `jit` | **13.83 µs** | 6,216–26,336 | 6–213 |
 | Reference | Native Go | 2.66 µs | 6,144 | 3 |
+
+`jit` is OSR: the loop is module-level code, not a `CALL`-native candidate; B/op and allocs/op vary sample to sample, same cause as `NBody/jit`.
 
 ## Direct Interpreter Operations
 
-These measure the cost of a public operation itself. Unlike the workload tables there is no `default`/`threaded`/`jit` axis for an API that has none, so each operation lists its own contrast cases instead.
+These measure the cost of a public operation itself. Unlike the workload tables there is no `threaded`/`jit` axis for an API that has none, so each operation lists its own contrast cases instead.
 
 | Operation | Case | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
@@ -344,7 +366,9 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-The S2 tier enters only from an interpreted `CALL` to `*types.Function`; it does not perform top-level or loop-only OSR. Kernels without calls therefore remain threaded. Called functions that lower cleanly can run natively; unsupported operations and `RETURN_CALL` return to threaded execution and still pay the native entry bookkeeping. S2-P8 replaced the store lookup with per-address atomic pointers and four maps of tiering state with slices; re-measured 2026-09-22, this reduced `IndirectRecursiveFib` from ~1.9x to ~1.3x threaded and `StructTreeWalk`/`BinaryTrees` from ~1.5x/~1.4x to ~1.1x. S2-P9 borrows a constant callee's already-alive reference instead of retaining and releasing it around the call, and a self call branches directly to the unit's own entry instead of through `Context.Natives`; re-measured 2026-09-22, this cut `RecursiveFib(35)/jit` ~26% (100.32 ms → 74.46 ms) — fib's own call is both borrowed and self — while `RecursiveFib(20)/jit` moved less (~3%), and every other re-measured kernel's `jit`/`threaded` row moved within noise of its S2-P8 figure. S2-P10 replaces `ssa.Shape`'s private token with a public `Kind`/`Struct` vocabulary and drops `transform.walk`'s call-free gate on declared array element kinds, so `array.get`/`array.set`/`array.len`/`struct.get`/`struct.set`/`ref.is_null` lower on ARM64 for the first time. Two defects surfaced by this A/B are fixed in the same pass, not worked around: (1) `internal/jit/arm64/container.go`'s `arraySet` stored a 4-byte `TypedArray[int32]` element with a full 64-bit `STR`, clobbering the following element (`internal/asm/arm64`'s store encoder is width-aware for a float source but was not for an integer one) — this, not a retire/republish defect, was the actual cause of `SortStress`'s wrong result under `interp.WithThreshold(0)`, now fixed by routing the 4-byte int case through `STRW`; and (2) a code that refuted (`native.refute` reached, S2-P10) previously only reset its tiering counters on retirement, so a function bridging every entry (any unsupported op, e.g. an allocation op none of `struct.new`/`array.new_default`/`string.concat` lower) recompiled the same unchanged code indefinitely, once per `refute`-sized cycle, for the life of the program; retirement now also marks the retiring code's own tier permanently failed, so that churn stops after at most one retirement per tier. Interleaved A/B (before = the S2-P9 HEAD worktree at `22cb438`, `-benchtime=1s -count=3` twice, 12 samples total per config, `benchstat`), re-measured 2026-09-22: `NBody/jit` 308.96 µs → 27.02 µs (-91.25%, `advance`'s 33 guards/24 `array.get`/9 `array.set` now run natively instead of bridging; B/op and allocs/op on this row carry ±89% variance from async-compile timing, see the row's own note) and `SpectralNorm/jit` 174.42 µs → 21.75 µs (-87.53%, its array was already guard-free but is now allocation-free too); `SortStress/jit` 194.88 µs → 43.92 µs (-77.46%, unblocked by the `STRW` fix above — `make_list`'s own `array.new_default` still bridges every call, but `insertion_sort`'s `array.get`/`array.set` loop now compiles and runs correctly). `NQueens`, `Fannkuch`, `StructTreeWalk`, `BinaryTrees`, and `StringBuild` still deopt on every entry at their own allocation op exactly as before S2-P10, but with the retire/refute fix above their `jit` rows are statistically indistinguishable from the S2-P9 baseline (`p >= 0.09` on every one, `StructTreeWalk/jit`'s `+0.82%` at `p=0.041` is the only row below `p=0.05` and is noise-sized) instead of the runaway B/op and allocs/op a churning retire loop produced pre-fix (e.g. `NQueens/jit` no longer shows 163,208 B/op and 3,656 allocs/op for a kernel whose `threaded` row allocates 120 B and 6 times — it now matches `threaded` almost exactly, because it retires once and then simply runs threaded for the rest of the benchmark instead of recompiling every eight deopts); `PermutationFlips/jit` also moved within noise. Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
+`jit` rows enter native code two ways: an interpreted `CALL` to a `*types.Function` (Baseline, then Optimized once Baseline is hot enough), or on-stack at a hot loop header (OSR), module-level code included, with no call boundary. A called function that lowers cleanly runs natively; an unsupported operation, `RETURN_CALL`, or a loop header OSR cannot compile returns to threaded execution and still pays native entry bookkeeping. OSR units compile at Baseline only: `PromotePass` is unsafe for a function that promotes one local while leaving another (e.g. a ref-typed one) unpromoted across the same loop, and Baseline never runs `PromotePass`.
+
+Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
 
 ## Benchmark Fixture Inventory
 

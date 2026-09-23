@@ -1031,6 +1031,88 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 	i.fr = f
 }
 
+// retire finishes the current frame exactly as threaded RETURN does: results
+// at bp, sp, frame pop, and the frame's release of its callee ref. Generated
+// RETURN and native's own OSR return path share it so the two never diverge.
+// sweep, the codegen's own compile-time fact, skips releasing intermediate
+// operands a frame provably holds none of; always true is always correct.
+func (i *Interpreter) retire(sweep bool) {
+	f := i.fr
+	if i.sp < f.returns {
+		panic(ErrStackUnderflow)
+	}
+	if f.coro != 0 {
+		i.retireCoroutine(f)
+		return
+	}
+	if sweep {
+		for _, value := range i.stack[f.bp : i.sp-f.returns] {
+			i.releaseBox(value)
+		}
+	}
+	switch f.returns {
+	case 0:
+	case 1:
+		i.stack[f.bp] = i.stack[i.sp-1]
+	default:
+		copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
+	}
+	i.leave(f, f.bp+f.returns)
+}
+
+// leave pops f once its results already sit at f.bp..sp and the rest of its
+// operand stack is accounted for, releasing the frame's own callee ref.
+// retire calls it after its copy; native's OSR return path, whose compiled
+// RETURN already writes results at f.bp itself, needs no copy and calls it
+// directly.
+func (i *Interpreter) leave(f *frame, sp int) {
+	i.sp = sp
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+// retireCoroutine finishes f as retire does when f belongs to a coroutine:
+// the result becomes the coroutine's value instead of moving to the caller.
+func (i *Interpreter) retireCoroutine(f *frame) {
+	coAddr := f.coro
+	co, ok := i.heap[coAddr].(*coroutine)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	if f.returns > 0 {
+		for _, value := range i.stack[f.bp : i.sp-1] {
+			i.releaseBox(value)
+		}
+		co.value = i.stack[i.sp-1]
+	} else {
+		for _, value := range i.stack[f.bp:i.sp] {
+			i.releaseBox(value)
+		}
+		i.retain(0)
+		co.value = types.BoxedNull
+	}
+	co.done = true
+	co.image = co.image[:0]
+	co.upvals = nil
+	if f.release {
+		i.release(f.ref)
+	}
+	co.ref = 0
+	co.release = false
+	bp := f.bp
+	f.code = nil
+	f.upvals = nil
+	f.coro = 0
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+	i.stack[bp] = types.BoxRef(coAddr)
+	i.sp = bp + 1
+}
+
 // discard releases an unwound frame's activation: its function reference and any
 // in-flight coroutine handle. Operand slots are released by land in one sweep.
 func (i *Interpreter) discard(f *frame) {
@@ -1544,6 +1626,17 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if dynamic {
 		i.dynamic[addr] = true
 	}
+}
+
+// function returns the *types.Function addr names: i.module for address 0,
+// the heap object at addr otherwise. native's frame and exact code lookups
+// share it, since deopt materialization can name address 0 once OSR can
+// enter native code from within module code.
+func (i *Interpreter) function(addr int) *types.Function {
+	if addr == 0 {
+		return i.module
+	}
+	return i.heap[addr].(*types.Function)
 }
 
 // globalDecls returns the declared kinds for threaded handler selection,
