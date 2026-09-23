@@ -16,17 +16,16 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// machine records every call Lower makes, in order, and emits the fewest
-// rows that give each value a location: a definition per result, a use per
-// exit value, and branches that follow the labels it is given.
+// machine records every call Lower makes, in order.
 type machine struct {
-	calls []string
-	kinds []types.Kind
-	count bool
-	regs  map[ssa.Value]asm.VReg
-	moves [][2]asm.VReg
-	uses  [][]asm.VReg
-	sites []compile.Call
+	calls  []string
+	kinds  []types.Kind
+	count  bool
+	regs   map[ssa.Value]asm.VReg
+	moves  [][2]asm.VReg
+	uses   [][]asm.VReg
+	spills []int
+	sites  []compile.Call
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
@@ -80,6 +79,11 @@ func (m *machine) Return(a *asm.Assembler, t ssa.Terminator, _ compile.Site) {
 func (m *machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	m.calls = append(m.calls, "budget")
 	a.Emit(arm64.BCondLabel(arm64.OpBLE, safepoint))
+}
+
+func (m *machine) Spill(a *asm.Assembler, reg asm.VReg, slot int) {
+	m.spills = append(m.spills, slot)
+	a.Emit(arm64.STR(reg, arm64.SP, int16(8*slot)))
 }
 
 func (m *machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
@@ -152,6 +156,48 @@ func constant(b *ssa.Builder, block int, c types.Boxed) ssa.Value {
 }
 
 func TestLower(t *testing.T) {
+	t.Run("saves a deopt-only local on the side exit", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		v := constant(b, entry, types.BoxI32(7))
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1, Locals: []ssa.Local{{Index: 0, Value: v}}}}, Results: []ssa.Value{state}})
+		one := constant(b, entry, types.BoxI32(1))
+		result := b.Value(ssa.TypeI32)
+		dividend := constant(b, entry, types.BoxI32(8))
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{dividend, one}, State: state, Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		_, exits, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, exits, 1)
+		require.Equal(t, []int{0}, m.spills)
+		require.Empty(t, m.uses[0])
+		require.Equal(t, []jit.Local{{Index: 0, Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}}}, exits[0].Frames[0].Locals)
+	})
+
+	t.Run("keeps a deopt-only local live across a call that a callee deopt can materialize", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI32(1))
+		callee := constant(b, entry, types.BoxRef(9))
+		v := constant(b, entry, types.BoxI32(7))
+		at := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 0, Returns: 1, Stack: []ssa.Operand{{Value: v}, {Value: arg}, {Value: callee}}, Locals: []ssa.Local{{Index: 0, Value: v}}}}, Results: []ssa.Value{at}})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}})
+
+		m := new(machine)
+		_, exits, err := compile.Lower(b.Build(), m, function(1, 1, instr.New(instr.CALL)), transform.Objects{9: {Function: function(1, 1)}}, 0, false, true)
+		require.NoError(t, err)
+		require.Empty(t, m.spills)
+		require.Contains(t, m.sites[0].Live, m.regs[v])
+		frame := exits[0].Frames[0]
+		require.Equal(t, []jit.Local{{Index: 0, Value: frame.Stack[0].Value}}, frame.Locals)
+	})
+
 	t.Run("maps each value to a register of its representation", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
@@ -267,7 +313,7 @@ func TestLower(t *testing.T) {
 		m := new(machine)
 		_, exits, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "const", "exec", "return", "exit 0 0", "epilogue"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "const", "exec", "jump", "exit 0 0", "return", "epilogue"}, m.calls)
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
 		require.Equal(t, 3, exits[0].Frames[0].IP)
@@ -370,6 +416,26 @@ func TestLower(t *testing.T) {
 		site := m.sites[0]
 		require.Equal(t, 9, site.Address)
 		require.True(t, site.Self)
+	})
+
+	t.Run("dispatches an OSR unit's call to its own address through the natives table", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI32(7))
+		callee := constant(b, entry, types.BoxRef(9))
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		caller := function(1, 1, instr.New(instr.CALL))
+		_, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, true, false)
+		require.NoError(t, err)
+		site := m.sites[0]
+		require.Equal(t, 9, site.Address)
+		require.False(t, site.Self)
 	})
 	t.Run("hands the machine the kinds of its slots", func(t *testing.T) {
 		b := ssa.New("f")

@@ -45,7 +45,7 @@ type interval struct {
 	call       bool
 }
 
-func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserved map[PReg]bool) *allocator {
+func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserved map[PReg]bool, slots int) *allocator {
 	a := &allocator{
 		frame:  frame,
 		insts:  insts,
@@ -53,6 +53,7 @@ func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserv
 		usable: map[value]bool{},
 		locs:   map[VReg]Loc{},
 		tiny:   map[VReg]bool{},
+		slots:  slots,
 	}
 	for _, typ := range []RegType{RegTypeInt, RegTypeFloat} {
 		registers := slices.Clone(frame.Registers(typ))

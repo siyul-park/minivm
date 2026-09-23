@@ -275,7 +275,7 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
-	t.Run("accepts a frame written back with a promoted local", func(t *testing.T) {
+	t.Run("accepts a frame carrying a local value", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		state := b.Value(ssa.TypeState)
@@ -286,7 +286,7 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
-	t.Run("rejects a promoted local holding a reference", func(t *testing.T) {
+	t.Run("rejects a local value holding a reference", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		state := b.Value(ssa.TypeState)
@@ -297,7 +297,7 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
-	t.Run("rejects a promoted local naming no slot of its frame", func(t *testing.T) {
+	t.Run("rejects a local value naming no slot of its frame", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		state := b.Value(ssa.TypeState)
@@ -308,7 +308,7 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
-	t.Run("rejects a promoted local its definition does not dominate", func(t *testing.T) {
+	t.Run("rejects a local value its definition does not dominate", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, arm, join := b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI1)

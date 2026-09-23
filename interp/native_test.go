@@ -1440,6 +1440,27 @@ func TestWithThreshold(t *testing.T) {
 		require.Greater(t, compiles, float64(0))
 	})
 
+	t.Run("a callee deopting under an Optimized loop restores the loop's promoted locals", func(t *testing.T) {
+		native(t)
+		const n = 200_000
+		want := runProgram(t, deopt(t, n, n-10))
+		prog := deopt(t, n, n-10)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		vm.Flush()
+
+		require.Equal(t, want, got)
+		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.Greater(t, compiles, float64(0))
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		require.Greater(t, deopts, float64(0))
+	})
+
 	t.Run("a callee reached only from native code still tiers up to Optimized", func(t *testing.T) {
 		native(t)
 		const n = 200_000
@@ -1727,6 +1748,44 @@ func concat(t *testing.T, n int) *program.Program {
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
 		program.WithConstants(types.String("seed-"), types.String("tail")))
+}
+
+// deopt loops at module level over n calls of f(i) = i, except f(k), which
+// adds string.len of a constant: an operation native code does not lower, so
+// f's native code deoptimizes there while the loop's promoted locals live in
+// the caller's native frame.
+func deopt(t *testing.T, n, k int) *program.Program {
+	t.Helper()
+	fb := instr.NewBuilder()
+	slow := fb.Label()
+	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
+	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRING_LEN).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	fcode, err := fb.Assemble()
+	require.NoError(t, err)
+	f := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal(fcode),
+	}
+
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	for slot := range 4 {
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, uint64(slot))
+	}
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
+		program.WithConstants(f, types.String("abc")))
 }
 
 // fib loops at module level and calls fib(8). Once the header is native,

@@ -96,6 +96,28 @@ func TestDCEPass_Run(t *testing.T) {
 		require.Contains(t, out, "stack=[v3]")
 	})
 
+	t.Run("keeps a value only a frame local reads", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: sum}}}}, Results: []ssa.Value{state}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
+		require.Contains(t, out, "i32.add")
+		require.Contains(t, out, "locals=[0=v3]")
+	})
+
 	t.Run("keeps a reference only a frame's owned entry names, still owned once renumbered", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

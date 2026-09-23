@@ -176,10 +176,10 @@ func operation(function *Function, sites []position, o Operation) error {
 			}
 			for _, local := range frame.Locals {
 				if local.Index < 0 {
-					return fmt.Errorf("%w: %s promotes local %d", ErrState, o.name(), local.Index)
+					return fmt.Errorf("%w: %s has local %d", ErrState, o.name(), local.Index)
 				}
 				if function.Type(local.Value) == TypeRef {
-					return fmt.Errorf("%w: %s promotes %s", ErrType, o.name(), TypeRef)
+					return fmt.Errorf("%w: %s has %s local", ErrType, o.name(), TypeRef)
 				}
 			}
 		}

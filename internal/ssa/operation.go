@@ -51,7 +51,7 @@ type Frame struct {
 	Returns int
 	// Stack is the frame operand stack.
 	Stack []Operand
-	// Locals are promoted slots written back on resume.
+	// Locals are promoted slot values, saved only for deoptimization.
 	Locals []Local
 }
 
@@ -59,7 +59,7 @@ type Frame struct {
 type Local struct {
 	// Index identifies the slot.
 	Index int
-	// Value is written back to the slot.
+	// Value is written back to the slot on deoptimization.
 	Value Value
 }
 

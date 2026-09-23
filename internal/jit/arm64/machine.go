@@ -189,6 +189,11 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	}
 }
 
+// Spill saves a value in a fixed spill slot.
+func (m *Machine) Spill(a *asm.Assembler, reg asm.VReg, slot int) {
+	a.Emit(target.New().Spill(reg, slot))
+}
+
 // Results loads each bridge result from Context.Results.
 func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	for i, r := range regs {

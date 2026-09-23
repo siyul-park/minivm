@@ -35,6 +35,8 @@ type Machine interface {
 	// Exit leaves native code through exit id of kind k; uses must stay live
 	// up to it. Control continues after Exit when the interpreter resumes.
 	Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg)
+	// Spill stores reg into fixed spill slot slot.
+	Spill(a *asm.Assembler, reg asm.VReg, slot int)
 	// Results loads a bridge's results from the Context into regs.
 	Results(a *asm.Assembler, regs []asm.VReg)
 	// Call emits call site c and reports false when the target cannot.
@@ -80,8 +82,9 @@ type Call struct {
 	// Owned reports whether the call adopted Callee's reference, so it
 	// releases it once the callee returns.
 	Owned bool
-	// Self reports whether Address is the unit being lowered's own address:
-	// the call branches to its own entry instead of Context.Natives.
+	// Self reports whether Address is the unit being lowered's own address
+	// and the unit is not OSR (its entry is a loop header): the call branches
+	// to its own entry instead of Context.Natives.
 	Self bool
 }
 
@@ -103,8 +106,11 @@ type lowering struct {
 	// exactly once, as some call's callee: the retain is redundant, since
 	// the constant pool already holds the callee alive.
 	borrow map[ssa.Value]bool
+	homes  map[int]int
 	exits  []*jit.Exit
 	places [][]place
+	saves  [][]save
+	deopts []stub
 	edges  []edge
 	stubs  []stub
 	err    error
@@ -138,6 +144,11 @@ type stub struct {
 	resume asm.Label
 }
 
+type save struct {
+	reg  asm.VReg
+	slot int
+}
+
 // ErrUnsupported reports SSA the backend does not lower.
 var ErrUnsupported = errors.New("unsupported lowering")
 
@@ -163,12 +174,31 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 			return nil, nil, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
 		}
 	}
+	homes := map[int]int{}
+	for block := 0; block < f.Len(); block++ {
+		for _, op := range f.Block(block).Operations {
+			if op.Op != ssa.OpState {
+				continue
+			}
+			for _, frame := range op.Frames {
+				if frame.Base != 0 && len(frame.Locals) > 0 {
+					return nil, nil, fmt.Errorf("%w: outer-frame deopt", ErrUnsupported)
+				}
+				for _, local := range frame.Locals {
+					if _, ok := homes[local.Index]; !ok {
+						homes[local.Index] = len(homes)
+					}
+				}
+			}
+		}
+	}
 	l := &lowering{
 		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
-		borrow: borrowed(f),
+		borrow: borrowed(f), homes: homes,
 	}
 	l.a.Reserve(m.Reserve()...)
+	l.a.ReserveSlots(len(homes))
 	if err := l.function(); err != nil {
 		return nil, nil, err
 	}
@@ -287,7 +317,7 @@ func (l *lowering) function() error {
 	}
 	for _, s := range l.stubs {
 		l.a.Bind(s.label)
-		l.m.Exit(l.a, s.id, l.exits[s.id].Kind, l.live(s.id))
+		l.emit(s.id)
 		if l.exits[s.id].Kind != jit.ExitDeopt {
 			l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{s.resume})
 		}
@@ -348,6 +378,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 			return l.call(op)
 		}
 		if l.m.Lower(l.a, op, l) {
+			l.deopt()
 			return l.err
 		}
 		results := make([]asm.VReg, len(op.Results))
@@ -355,7 +386,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 			results[i] = l.Reg(v)
 		}
 		id := l.exit(jit.ExitBridge)
-		l.m.Exit(l.a, id, jit.ExitBridge, l.live(id))
+		l.emit(id)
 		l.m.Results(l.a, results)
 		return l.err
 	case ssa.OpStore, ssa.OpRelease, ssa.OpGuardShape:
@@ -365,7 +396,22 @@ func (l *lowering) operation(op ssa.Operation) error {
 	if !l.m.Lower(l.a, op, l) {
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
+	l.deopt()
 	return l.err
+}
+
+func (l *lowering) deopt() {
+	if len(l.deopts) == 0 {
+		return
+	}
+	resume := l.a.Label()
+	l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{resume})
+	for _, stub := range l.deopts {
+		l.a.Bind(stub.label)
+		l.emit(stub.id)
+	}
+	l.a.Bind(resume)
+	l.deopts = nil
 }
 
 // calls reports whether op is the CALL that consumes l.pending as its
@@ -407,13 +453,15 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 			return err
 		}
 		l.m.Return(l.a, t, l)
+		l.deopt()
 		return l.err
 	case ssa.OpComplete:
 		l.m.Return(l.a, t, l)
+		l.deopt()
 		return l.err
 	case ssa.OpExit:
 		id := l.exit(jit.ExitDeopt)
-		l.m.Exit(l.a, id, jit.ExitDeopt, l.live(id))
+		l.emit(id)
 		return l.err
 	case ssa.OpJump, ssa.OpBranch, ssa.OpTable:
 	default:
@@ -495,8 +543,10 @@ func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
 
 // Deopt places a deopt stub at the current state.
 func (l *lowering) Deopt() asm.Label {
-	exit, _ := l.stub(l.exit(jit.ExitDeopt))
-	return exit
+	id := l.exit(jit.ExitDeopt)
+	label := l.a.Label()
+	l.deopts = append(l.deopts, stub{label: label, id: id})
+	return label
 }
 
 // Release places a release stub for ref.
@@ -558,7 +608,7 @@ func (l *lowering) call(op ssa.Operation) error {
 		Bridge:  bridge,
 		Resume:  resume,
 		Owned:   owned,
-		Self:    c.Ref() == l.address,
+		Self:    !l.osr && c.Ref() == l.address,
 	}
 	if !l.m.Call(l.a, site, l) {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
@@ -583,12 +633,21 @@ func (l *lowering) leave(t ssa.Terminator) error {
 	return nil
 }
 
+// emit saves deferred deopt values and leaves native code through exit id.
+func (l *lowering) emit(id int) {
+	for _, save := range l.saves[id] {
+		l.m.Spill(l.a, save.reg, save.slot)
+	}
+	l.m.Exit(l.a, id, l.exits[id].Kind, l.live(id))
+}
+
 // exit records the map of an exit of kind k at the current operation's state.
 func (l *lowering) exit(k jit.Kind) int {
 	id := len(l.exits)
 	e := &jit.Exit{Kind: k}
 	l.exits = append(l.exits, e)
 	l.places = append(l.places, nil)
+	l.saves = append(l.saves, nil)
 
 	if k == jit.ExitRelease {
 		return id
@@ -620,8 +679,25 @@ func (l *lowering) exit(k jit.Kind) int {
 			f.Locals = make([]jit.Local, len(frame.Locals))
 		}
 		for j, local := range frame.Locals {
-			f.Locals[j].Index = local.Index
-			l.place(id, &f.Locals[j].Value, local.Value)
+			to := &f.Locals[j]
+			to.Index = local.Index
+			// A call's map also describes the caller while a callee runs, so
+			// its promoted locals must stay live across the call itself.
+			if k == jit.ExitCall || slices.Contains(l.op.Args, local.Value) {
+				l.place(id, &to.Value, local.Value)
+				continue
+			}
+			slot, ok := l.homes[local.Index]
+			if !ok {
+				l.fail(fmt.Errorf("%w: deopt local %d has no home", ErrUnsupported, local.Index))
+				continue
+			}
+			if l.raw[local.Value] {
+				l.fail(fmt.Errorf("%w: exit %d names unguarded i64 slot word v%d", ErrUnsupported, id, local.Value))
+				continue
+			}
+			to.Value = jit.Value{Kind: l.f.Type(local.Value).Kind(), Loc: asm.Loc{Slot: slot, Spilled: true}}
+			l.saves[id] = append(l.saves[id], save{reg: l.Reg(local.Value), slot: slot})
 		}
 	}
 	if k == jit.ExitBridge {

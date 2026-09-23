@@ -117,7 +117,9 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 				continue
 			case operation.Op == ssa.OpState:
 				at := entry(operation)
-				operation.Frames[at].Locals = pinned(operation.Frames[at].Locals, indexes, reaching)
+				for _, index := range indexes {
+					operation.Frames[at].Locals = append(operation.Frames[at].Locals, ssa.Local{Index: index, Value: reaching[index]})
+				}
 			}
 			rebuilder.builder.Add(id, rebuilder.define(function, operation))
 		}
@@ -180,16 +182,6 @@ func promoted(localTypes map[int]ssa.Type, s ssa.Slot) bool {
 	}
 	_, ok := localTypes[s.Index]
 	return ok
-}
-
-func pinned(already []ssa.Local, indexes []int, reaching map[int]ssa.Value) []ssa.Local {
-	locals := make([]ssa.Local, 0, len(already)+len(indexes))
-	locals = append(locals, already...)
-	for _, index := range indexes {
-		locals = append(locals, ssa.Local{Index: index, Value: reaching[index]})
-	}
-	slices.SortFunc(locals, func(a, b ssa.Local) int { return a.Index - b.Index })
-	return locals
 }
 
 func entry(operation ssa.Operation) int {

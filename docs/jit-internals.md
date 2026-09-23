@@ -47,7 +47,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so loops poll `Budget`.
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
 - Registers: X25 frame base, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X24, X27, D0–D31.
-- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. The exit stub preserves every allocatable register; `Machine.Exit` places its map's `USE` rows after `EXIT` so mapped values stay live through the stub.
+- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: a call keeps them live across itself; any other exit saves a non-live one on its cold path into a fixed spill home.
 
 ## Pipeline
 

@@ -30,6 +30,7 @@ func (stub) Branch(*asm.Assembler, ssa.Terminator, compile.Site, []asm.Label) { 
 func (stub) Return(*asm.Assembler, ssa.Terminator, compile.Site)              { panic("unused") }
 func (stub) Budget(*asm.Assembler, asm.Label)                                 { panic("unused") }
 func (stub) Exit(*asm.Assembler, int, jit.Kind, []asm.VReg)                   { panic("unused") }
+func (stub) Spill(*asm.Assembler, asm.VReg, int)                              { panic("unused") }
 func (stub) Results(*asm.Assembler, []asm.VReg)                               { panic("unused") }
 func (stub) Call(*asm.Assembler, compile.Call, compile.Site) bool             { panic("unused") }
 func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg)                          { panic("unused") }

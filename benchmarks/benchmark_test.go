@@ -69,10 +69,10 @@ func TestKernels(t *testing.T) {
 		{name: "threaded"},
 		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
 	}
-	// rounds is high enough that a mode whose compiles publish
-	// asynchronously (jit) is also exercised once its native code is live,
-	// not only on the calls that first submitted it.
-	const rounds = 5
+	// A jit run must also cover native code published after the first runs
+	// and promoted to Optimized: at least minimum rounds, then more until
+	// maximum rounds or budget elapses.
+	const minimum, maximum, budget = 5, 50, 200 * time.Millisecond
 	for _, kernel := range kernels {
 		for _, mode := range modes {
 			name, prog, want, opts := kernel.name+"/"+mode.name, kernel.prog, kernel.want, mode.opts
@@ -80,7 +80,8 @@ func TestKernels(t *testing.T) {
 				require.NoError(t, program.Verify(prog))
 				vm := interp.New(prog, opts...)
 				defer vm.Close()
-				for range rounds {
+				start := time.Now()
+				for round := 0; round < minimum || (round < maximum && time.Since(start) < budget); round++ {
 					require.NoError(t, vm.Run(t.Context()))
 					value, err := vm.PopBoxed()
 					require.NoError(t, err)

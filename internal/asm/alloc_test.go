@@ -73,6 +73,23 @@ func TestAssembler_Reserve(t *testing.T) {
 	require.NotEqual(t, arm64.X0, loc.Reg)
 }
 
+func TestAssembler_ReserveSlots(t *testing.T) {
+	a := asm.New(arm64.New())
+	a.ReserveSlots(2)
+	a.Emit(
+		arm64.MOVI(vint(0), 1),
+		arm64.BLR(arm64.X1),
+		arm64.STR(vint(0), arm64.SP, 16),
+		arm64.RET(),
+	)
+
+	_, err := a.Build()
+	require.NoError(t, err)
+	loc, ok := a.Loc(vint(0))
+	require.True(t, ok)
+	require.Equal(t, asm.Loc{Slot: 2, Spilled: true}, loc)
+}
+
 func TestAssembler_Loc(t *testing.T) {
 	a := asm.New(arm64.New())
 	a.Emit(

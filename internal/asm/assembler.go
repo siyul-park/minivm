@@ -26,6 +26,7 @@ type Assembler struct {
 	labels   map[Label]int
 	nextLbl  Label
 	locs     map[VReg]Loc
+	slots    int
 }
 
 var (
@@ -72,6 +73,11 @@ func (a *Assembler) Reserve(regs ...PReg) {
 	}
 }
 
+// ReserveSlots reserves spill slots at the start of the frame.
+func (a *Assembler) ReserveSlots(n int) {
+	a.slots = max(a.slots, n)
+}
+
 // Build finalizes the instruction list into machine code. When the
 // architecture is a Frame, every virtual register is allocated first and
 // every Slots operand becomes the spill area's size; otherwise a virtual
@@ -80,9 +86,9 @@ func (a *Assembler) Build() ([]byte, error) {
 	if a.arch == nil {
 		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
 	}
-	insts, labels, slots := slices.Clone(a.insts), maps.Clone(a.labels), 0
+	insts, labels, slots := slices.Clone(a.insts), maps.Clone(a.labels), a.slots
 	if frame, ok := a.arch.(Frame); ok && virtual(insts) {
-		alloc := newAllocator(frame, insts, labels, a.reserved)
+		alloc := newAllocator(frame, insts, labels, a.reserved, a.slots)
 		var err error
 		if insts, labels, err = alloc.allocate(); err != nil {
 			return nil, err
