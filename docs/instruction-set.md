@@ -28,7 +28,7 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Native status is per opcode. Threaded execution is the semantic baseline for every opcode; `internal/jit/arm64` additionally lowers a subset directly to native code when `interp.WithThreshold` compiles a function (see `jit-internals.md`). The compiler records an unsupported operation as `ExitBridge`; the current interpreter integration materializes that exit and deoptimizes back to threaded execution. Terminators with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) deoptimize directly.
+Native status is per opcode. Threaded execution is the semantic baseline for every opcode; `internal/jit/arm64` additionally lowers a subset directly to native code when `interp.WithThreshold` compiles a function (see `jit-internals.md`). The compiler records an unsupported operation as `ExitBridge`; the interpreter runs `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` once through their own threaded handler and resumes native code (`interp.bridgeable`), and materializes every other `ExitBridge` and deoptimizes back to threaded execution. Terminators with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) deoptimize directly.
 
 | Status | Meaning |
 |---|---|
@@ -263,7 +263,7 @@ One opcode per row, in opcode-value order.
 | Strings | `STRING_GE` | `string.ge` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | guarded, else bridges |
 | Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | guarded, else bridges |
@@ -272,8 +272,8 @@ One opcode per row, in opcode-value order.
 | Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges |
 | Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |

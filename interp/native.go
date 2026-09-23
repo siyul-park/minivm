@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/jit/compile"
@@ -28,6 +29,10 @@ type native struct {
 	// native-to-native entries.
 	entries []int64
 	deopts  []int
+	// bridged counts resumed bridges unamortized by real native work since
+	// the last one that was, per address (see resume/amortize); reaching
+	// resume retires the address.
+	bridged []int
 	// failed records permanent compile failure per address and tier.
 	failed []uint8
 	// candidates holds every address with published Baseline code not yet
@@ -38,8 +43,8 @@ type native struct {
 	// failed OSR unit's site up here to restore its threaded handler.
 	sites map[key]*site
 
-	// exact caches unfused threaded code for materialized frames.
-	exact map[int][]func(*Interpreter)
+	// exact caches unfused threaded code for materialized frames, by address.
+	exact [][]func(*Interpreter)
 
 	// compile is captured once so deoptimization does not add a static
 	// dependency from generated threaded handlers back to their compiler.
@@ -66,6 +71,26 @@ const budget = 1 << 16
 
 // refute is the deopt threshold that retires native code.
 const refute = 8
+
+// resume is how many unamortized bridges in a row (see amortized) retire a
+// site: a resumed bridge round-trips through Go on every occurrence, so a
+// site whose native work between bridges never pays for that cost (measured:
+// AllocationGraph and BinaryTrees, whose bridges recur with no intervening
+// loop work, cost more staying native than deopting once and running
+// threaded) must stop resuming rather than pay the round trip forever.
+// Matches refute: both give a site the same number of chances before giving
+// up on its current tier.
+const resume = refute
+
+// amortize is the fewest back edges between two bridges (Context.Budget's
+// own fall since the prior mark) that counts the second one as amortized by
+// real native work rather than against resume. PermutationFlips recurses
+// natively per call with ~47 back edges (two array fill/swap loops) between
+// each array.new_default; AllocationGraph's own loop header takes exactly
+// one back edge per bridge; BinaryTrees' struct.new_default recurses with
+// none at all (no loop between two levels). 2 separates the first from the
+// other two on both measured kernels.
+const amortize = 2
 
 const (
 	metricCompiles = "vm_jit_compiles_total"
@@ -157,8 +182,9 @@ func newNative(i *Interpreter, threshold int) *native {
 		calls:     make([]int, len(i.code)),
 		entries:   make([]int64, len(i.code)),
 		deopts:    make([]int, len(i.code)),
+		bridged:   make([]int, len(i.code)),
 		failed:    make([]uint8, len(i.code)),
-		exact:     map[int][]func(*Interpreter){},
+		exact:     make([][]func(*Interpreter), len(i.code)),
 		sites:     map[key]*site{},
 		compile:   i.compile,
 	}
@@ -240,6 +266,7 @@ func (n *native) forget(addr int) {
 	n.calls[addr] = 0
 	n.entries[addr] = 0
 	n.deopts[addr] = 0
+	n.bridged[addr] = 0
 }
 
 // hasFailed reports whether addr's compile at tier permanently failed.
@@ -321,8 +348,11 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp))
 	ctx.Budget = budget
 	ctx.Depth = 0
+	mark := ctx.Budget
 
-	n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
+	if i.profiler != nil {
+		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
+	}
 
 	trap := jit.Enter(code.Entry(), ctx)
 	for {
@@ -335,8 +365,10 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			return false
 		}
 
-		exit := n.store.Find(ctx.PC()).Exits[ctx.Exit()]
-		n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		exit := n.exit(ctx, code)
+		if i.profiler != nil {
+			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		}
 		switch exit.Kind {
 		case jit.ExitSafepoint:
 			if cancelled(i) {
@@ -348,6 +380,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
+			mark = ctx.Budget
 			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
@@ -357,11 +390,136 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
+		case jit.ExitBridge:
+			// Checked before bridging: a deopt after a bridge would run the op twice.
+			if n.bridged[addr] < resume && bridgeable(exit.Code) && n.bridge(i, exit) {
+				n.bridged[addr] = n.amortized(mark, ctx.Budget, n.bridged[addr])
+				mark = ctx.Budget
+				ctx.Heap = heapBase(i.heap)
+				ctx.RC = rcBase(i.rc)
+				trap = jit.Resume(ctx)
+				continue
+			}
+			n.deopt(i, exit, release, advance)
+			if n.bridged[addr] >= resume {
+				// The site bridged every native entry with nothing else
+				// between: retire rather than pay the round trip forever.
+				return true
+			}
+			return n.refute(addr)
 		default:
 			n.deopt(i, exit, release, advance)
 			return n.refute(addr)
 		}
 	}
+}
+
+// bridgeable reports whether code's threaded handler may run once, in place,
+// to resume native code: it never releases a heap reference or overwrites
+// its own argument stack slots before its only possible panic (allocation
+// failure), so a decline neither double-mutates nor loses what bridge
+// retained for cleanup. STRING_CONCAT is excluded: its handler releases
+// both operands before allocating the joined result, so a decline there
+// would re-release on threaded retry. array.new is excluded: its true pop
+// count can exceed the SSA Args this backend records for it (a variadic
+// length), unlike the three allowlisted here whose Args always equal their
+// real pop count.
+func bridgeable(code instr.Opcode) bool {
+	switch code {
+	case instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT, instr.ARRAY_NEW_DEFAULT:
+		return true
+	default:
+		return false
+	}
+}
+
+// bridge runs exit's opcode once through its own threaded handler against a
+// scratch operand stack, and reports whether native code may resume.
+// Promoted locals and other live values stay in native registers and spill
+// slots, entirely untouched: asm.Resume already restores every allocatable
+// register regardless of what bridge does. Operands cross through boxed
+// interpreter values; a borrowed one (Owned false), or one native will
+// independently release downstream (outside the top Adopts operands, per
+// transform.Adopts), is retained fresh so the handler's own consumption
+// never touches native's copy. A ref result is left owned by the handler's
+// own push, matching native code's own expectation of an owned value.
+//
+// A trap declines instead of unwinding: on a Go call chain from n.run/
+// osr.settle through native.call/native.enter, only a normal return runs
+// n.store.Leave(); re-raising the panic here would skip it and corrupt the
+// store's in-native accounting. Declining releases bridge's own extra
+// retains and lets the caller's existing deopt path (unchanged) rebuild the
+// interpreter frame from the same exit map and let real threaded execution
+// hit the same trap once, under dispatch's own recover.
+func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
+	if i.fp >= len(i.frames) {
+		return false
+	}
+
+	ctx := n.ctx
+	k := int(ctx.Depth) - 1
+	m := exit.Frames[0]
+	bp := int((ctx.Records[k].FB - ctx.Stack) / unsafe.Sizeof(types.Boxed(0)))
+	sp := bp + len(i.function(m.Address).Declared())
+
+	tail := m.Stack[len(m.Stack)-exit.Pops:]
+	top := len(tail) - exit.Adopts
+	for j, o := range tail {
+		v := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
+		if !o.Owned || j < top {
+			i.retainBox(v)
+		}
+		i.stack[sp+j] = v
+	}
+
+	savedFr, savedSP := i.fr, i.sp
+	f := &i.frames[i.fp]
+	*f = frame{addr: m.Address, code: n.exactCode(i, m.Address), bp: bp, ip: m.IP}
+	i.fr = f
+	i.sp = sp + len(tail)
+
+	ok := n.exec(i, f, exit.Results)
+
+	i.fr = savedFr
+	if !ok {
+		// A bridgeable handler never writes its argument slots before it can
+		// panic, so i.stack[sp+j] still holds what was retained above.
+		for j, o := range tail {
+			if !o.Owned || j < top {
+				i.releaseBox(i.stack[sp+j])
+			}
+		}
+		i.sp = savedSP
+	}
+	return ok
+}
+
+// exec runs f's own instruction and, on success, unboxes the len(results)
+// values it pushed into Context.Results. A panic is recovered and reported
+// as a decline; nothing i.heap/i.rc-visible happens before it for any
+// bridgeable opcode (see bridgeable), so a decline needs no further cleanup
+// of what the handler itself touched.
+func (n *native) exec(i *Interpreter, f *frame, results []types.Kind) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	f.code[f.ip](i)
+	for j, kind := range results {
+		n.ctx.Results[j] = n.word(i, kind, i.stack[i.sp-len(results)+j])
+	}
+	return true
+}
+
+// word converts a KindRef boxed value to its raw native word: refs are
+// boxed words natively (no runtime tag transform), so this is a plain
+// reinterpretation. Every bridgeable opcode's own result is a ref.
+func (n *native) word(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
+	if kind != types.KindRef {
+		panic("interp: bridge result kind " + kind.String() + " is not a ref")
+	}
+	return uint64(v)
 }
 
 // deopt materializes native activations outermost-first and positions the
@@ -456,7 +614,7 @@ func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Fra
 // exactCode returns addr's threaded code compiled exact, building and caching
 // it the first time a deoptimization at addr needs it.
 func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
-	if code, ok := n.exact[addr]; ok {
+	if code := n.exact[addr]; code != nil {
 		return code
 	}
 	code := n.compile(i.function(addr), true)
@@ -485,6 +643,30 @@ func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
 	default:
 		panic("interp: invalid native value kind " + kind.String())
 	}
+}
+
+// exit resolves ctx's current exit map. Depth 1 means the activation that
+// exited is the one entered, own: no native call has run since, so its
+// code is entered's own, avoiding Store.Find's locked scan (osr/bridge
+// resume loops keep Depth at 1 for as long as the unit makes no native
+// call, the common shape of a bridge-dominated loop). A deeper Depth means
+// some native call changed which code is running, so only Find resolves it.
+func (n *native) exit(ctx *jit.Context, entered *jit.Code) jit.Exit {
+	code := entered
+	if ctx.Depth != 1 {
+		code = n.store.Find(ctx.PC())
+	}
+	return code.Exits[ctx.Exit()]
+}
+
+// amortized reports bridged's next value: reset to 0 when at least amortize
+// back edges (mark - now, Context.Budget only falls between refills) ran
+// since the prior bridge, else bridged+1.
+func (n *native) amortized(mark, now int64, bridged int) int {
+	if mark-now >= amortize {
+		return 0
+	}
+	return bridged + 1
 }
 
 func (n *native) metric(i *Interpreter, name string, labels ...prof.Label) {

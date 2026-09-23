@@ -32,6 +32,11 @@ type site struct {
 	// until then, and again once the site fails.
 	code   *jit.Code
 	deopts int
+	// bridged counts resumed bridges unamortized by real native work since
+	// the last one that was (see native.go's resume/amortize); it does not
+	// share native.bridged, since a site's own retirement is independent of
+	// any CALL entry at the same address.
+	bridged int
 }
 
 // refute counts one deopt against s and reports when it should retire.
@@ -121,11 +126,14 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp+1))
 	ctx.Budget = budget
 	ctx.Depth = 0
+	mark := ctx.Budget
 
-	n.metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
+	if i.profiler != nil {
+		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
+	}
 
 	trap := jit.Enter(c.Entry(), ctx)
-	if n.settle(i, s, c, trap) {
+	if n.settle(i, s, c, trap, mark) {
 		n.store.RetireAt(s.address, s.ip)
 		code[s.ip] = inner
 		s.code = nil
@@ -140,9 +148,10 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 // or a permanent refute, materializing every exit but a safepoint or
 // release into i's own current frame — record 0 is this activation,
 // entered without a call — deeper suspended activations, if any, as new
-// frames above it, exactly as native.deopt does for a CALL-entered one. It
-// reports whether the site should retire.
-func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap) bool {
+// frames above it, exactly as native.deopt does for a CALL-entered one. mark
+// is Context.Budget as of entry, the amortized baseline for s's first
+// bridge. It reports whether the site should retire.
+func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap, mark int64) bool {
 	ctx := n.ctx
 	for {
 		if trap == jit.TrapReturn {
@@ -150,8 +159,10 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap) boo
 			return false
 		}
 
-		exit := n.store.Find(ctx.PC()).Exits[ctx.Exit()]
-		n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		exit := n.exit(ctx, c)
+		if i.profiler != nil {
+			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		}
 		switch exit.Kind {
 		case jit.ExitSafepoint:
 			if cancelled(i) {
@@ -161,6 +172,7 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap) boo
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
+			mark = ctx.Budget
 			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
@@ -170,6 +182,24 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap) boo
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
+		case jit.ExitBridge:
+			// The limit is checked before attempting the bridge: running it
+			// and then materializing anyway would run Code twice.
+			if s.bridged < resume && bridgeable(exit.Code) && n.bridge(i, exit) {
+				s.bridged = n.amortized(mark, ctx.Budget, s.bridged)
+				mark = ctx.Budget
+				ctx.Heap = heapBase(i.heap)
+				ctx.RC = rcBase(i.rc)
+				trap = jit.Resume(ctx)
+				continue
+			}
+			n.materialize(i, exit)
+			if s.bridged >= resume {
+				// The site bridged every native entry with nothing else
+				// between: retire rather than pay the round trip forever.
+				return true
+			}
+			return s.refute()
 		default:
 			n.materialize(i, exit)
 			return s.refute()

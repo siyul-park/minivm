@@ -74,12 +74,14 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | Kind | Taken at | Resumes native |
 |---|---|---|
 | `ExitDeopt` | failed check, `OpExit` | no |
-| `ExitBridge` | unlowered `OpExec` | no |
+| `ExitBridge` | unlowered `OpExec` | yes, when `bridgeable` |
 | `ExitSafepoint` | loop header, `Budget` spent | yes |
 | `ExitRelease` | dropping a last reference | yes |
 | `ExitCall` | `CALL` that cannot run natively | no |
 
 A non-resuming exit rebuilds every native activation as an interpreter frame, outermost first, and continues threaded. `jit.Enter` never nests.
+
+`interp.bridgeable` (`STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT`) names the `ExitBridge` opcodes whose threaded handler `native.bridge` may run once, in place: it boxes `Exit.Pops` trailing operands from the exit map (retaining a borrowed one, or one native itself will separately release, per `Exit.Adopts`), runs the handler against a scratch stack past the frame's declared locals, and on success unboxes its results into `Context.Results` and resumes. Promoted locals and other live values are untouched — `asm.Resume` already restores every allocatable register regardless. A trap declines instead of unwinding: it undoes its own extra retains and falls to the unchanged deopt path, so the failed instruction runs exactly once, under `dispatch`'s own recover, with correct frame state. Any other `ExitBridge` opcode (containers reaching a `*HostArray`/`*HostMap`/`*HostStruct`, which can call back into the interpreter, and `STRING_CONCAT`, whose handler releases its operands before its own only possible panic) still deopts. `Exit.Pops` (an `ExitBridge`-only field alongside `Code`/`Adopts`) is the count of `Frame.Stack`'s own trailing entries the resumed op reads as its arguments — set at compile time from the lowered op's own SSA `Args`, since a bridge must not touch the rest of the operand stack a full deopt's `Frame.Stack` also carries.
 
 ## Store
 
@@ -92,6 +94,7 @@ A non-resuming exit rebuilds every native activation as an interpreter frame, ou
 - Baseline function prologues count `Context.Entries[address]`, including interpreted and native-to-native entries. When a published Baseline reaches `jit.Promote`, `drain` submits Optimized; Optimized and OSR entries do not pay the counter cost.
 - Promotion is checked only for addresses whose published code is still Baseline.
 - Deopts reach `refute` → retire; that tier never recompiles for the address. A `CALL` to an address whose Baseline failed costs one check.
+- `resume` consecutive bridges unamortized by real native work (fewer than `amortize` back edges since the last amortized one) also retire, exactly like a refuted deopt: the round trip a resumed bridge pays for is only worth staying native when other native work offsets it.
 - Compiles are async on `compile.Queue`, one unit per address; the interpreter drains and publishes at its next call, header observation, or safepoint.
 - A `Pool` shares `Store`, `Queue`, and module data; each interpreter has its own `jit.Context`.
 
@@ -110,7 +113,8 @@ With `WithProfiler`: `vm_jit_compiles_total{tier,outcome}`, `vm_jit_entries_tota
 
 - No `i64` OSR block-0 parameter; no `i64` `CALL` result.
 - Container ops lower behind `guard.shape`, which deopts on null or a mismatched representation.
-- Unlowered opcodes bridge; see `instruction-set.md`. `RETURN_CALL`, `YIELD`, `RESUME` have no native form.
+- Unlowered opcodes bridge; see `instruction-set.md`. Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` resume (see Exits); every other bridge still deopts, `ExitCall` still deopts (no nested `jit.Enter`; the callee runs interpreted and the caller resumes threaded). `RETURN_CALL`, `YIELD`, `RESUME` have no native form.
+- A resumed bridge round-trips through Go, so a site whose bridges recur with fewer than `amortize` back edges between them (no intervening loop work to pay for the trip) retires after `resume` such bridges in a row, same as a refuted deopt (see Tiers/OSR).
 
 ## Related
 

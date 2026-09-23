@@ -292,6 +292,7 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []jit.Exit{{
 			Kind: jit.ExitBridge,
 			Code: instr.MAP_GET,
+			Pops: 2,
 			Frames: []jit.Frame{{Address: 1, IP: 7, Returns: 1, Stack: []jit.Operand{
 				{Value: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}}, Owned: true},
 				{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W1}}},

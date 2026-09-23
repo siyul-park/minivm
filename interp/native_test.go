@@ -262,6 +262,130 @@ func concatProgram(t *testing.T, warm int) *program.Program {
 		program.WithConstants(fn, types.String("bridge-"), types.String("concat")))
 }
 
+// node is the struct type structs (below) allocates each iteration: an i32
+// counter and an any-typed held reference.
+func node() *types.StructType {
+	return types.NewStructType(
+		types.NewStructField(types.TypeI32, types.FieldWithName("n")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("held")),
+	)
+}
+
+// structs loops n times at module level. Each pass builds a fresh struct.new
+// whose held field is a shared string constant, storing the struct over the
+// previous one: LOCAL_SET releases the prior struct, cascading a release of
+// its own held field. arm64 lowers no struct.new, so every native entry
+// bridges; struct.new's own Adopts is 0, so a resumed bridge must retain a
+// fresh reference for held regardless of its Owned bit, matching
+// structNew()'s own no-release field transfer. An inner 4-iteration loop
+// after each struct.new gives native.go's amortize check real back edges,
+// so the site stays native for the whole run instead of retiring after
+// resume unamortized bridges in a row (see arrays below for the same
+// pattern; a held field built by STRING_CONCAT instead, tried first, is not
+// bridgeable — see bridgeable — and its own decline dominates every pass
+// before struct.new is ever reached). The loop-carried local is declared as
+// record itself, not TypeAny: a TypeAny-declared local seeded by REF_NULL
+// joins two structurally different facts at the loop header (unrefined null
+// vs. a record-typed struct), which transform.Translate declines to merge,
+// unrelated to bridging. Seeding with struct.new_default instead keeps both
+// the preheader and back-edge facts record-typed, so the header's join and
+// translation succeed. The final value is the surviving struct's held
+// field, retained by struct.get.
+func structs(t *testing.T, n int) *program.Program {
+	t.Helper()
+	record := node()
+	b := instr.NewBuilder()
+	loop, done, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0)
+	b.Emit(instr.CONST_GET, 0)
+	b.Emit(instr.STRUCT_NEW, 0)
+	b.Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(inner)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Br(inner)
+	b.Bind(innerDone)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.STRUCT_GET)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, record, types.TypeI32), program.WithTypes(record),
+		program.WithConstants(types.String("held")))
+}
+
+// arrays loops n times at module level, each pass allocating a
+// fixed-length i32-typed array.new_default and summing its own length
+// before letting it die: a pure-scalar bridge candidate with no ref
+// ownership. arm64 lowers no array.new_default, so every native entry
+// bridges. The length is a small constant, not the loop counter: a growing
+// length would allocate O(n^2) total elements across the loop.
+func arrays(t *testing.T, n int) *program.Program {
+	t.Helper()
+	const length = 4
+	elem := types.NewArrayType(types.TypeI32)
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, length).Emit(instr.ARRAY_NEW_DEFAULT, 0)
+	b.Emit(instr.ARRAY_LEN)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithTypes(elem))
+}
+
+// trap loops warm+1 times at module level over the same native loop header
+// array.new_default resumes through, calling array.new_default(1) every
+// iteration but the last, whose length is negative (0-1): straight-line
+// code outside any loop or call never enters native code at all, so the
+// trapping call must share the warmup's own header to ever reach native.
+// An inner 4-iteration loop after each bridge gives native.go's amortize
+// check real back edges to see, so the site never retires before the
+// trapping call reaches it (resume would otherwise retire this
+// bridge-per-iteration site well before warm iterations, same as arrays
+// below, and the trap would then run threaded — not through a native
+// decline at all). arm64's bridge attempt runs arrayNewDefault()'s own
+// ErrSegmentationFault check Go-side and must decline rather than resume
+// there, matching threaded.
+func trap(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	elem := types.NewArrayType(types.TypeI32)
+	b := instr.NewBuilder()
+	loop, done, bad, length, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)+1).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_EQ).BrIf(bad)
+	b.Emit(instr.I32_CONST, 1).Br(length)
+	b.Bind(bad).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+	b.Bind(length)
+	b.Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.ARRAY_LEN).Emit(instr.DROP)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(inner)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(inner)
+	b.Bind(innerDone)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithTypes(elem))
+}
+
 // dynamicConcatProgram exercises native.call's dynamic-CALL entry (release
 // true): the callee reference is seeded into local 1 once, then loaded with
 // LOCAL_GET (which retains) at each call site instead of an immediately
@@ -811,6 +935,99 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
 		require.Equal(t, wantCount, count)
+	})
+
+	t.Run("a bridged STRUCT_NEW resumes native code and matches threaded, including a field's RefCount", func(t *testing.T) {
+		native(t)
+		prog := structs(t, 200_000)
+		wantValue, wantCount := runProgramString(t, prog)
+
+		var runErr, popErr error
+		var value string
+		var count int
+		var bridges, deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return bridges > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+		// Every STRUCT_NEW bridge resumes: none of them fall back to a deopt.
+		require.Equal(t, float64(0), deopts)
+	})
+
+	t.Run("a bridged ARRAY_NEW_DEFAULT resumes native code and matches threaded", func(t *testing.T) {
+		native(t)
+		prog := arrays(t, 200_000)
+		want := runProgram(t, prog)
+
+		var runErr, popErr error
+		var result types.Value
+		var bridges, deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return bridges > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
+		require.Equal(t, float64(0), deopts)
+	})
+
+	t.Run("a trapping ARRAY_NEW_DEFAULT declines and matches threaded's error", func(t *testing.T) {
+		native(t)
+		prog := trap(t, 200_000)
+		wantErr := runProgramErr(t, prog)
+		require.Error(t, wantErr)
+
+		// A declined bridge's own exit is still kind=bridge (the metric
+		// names the exit, not its outcome), so only error/stack-trace parity
+		// with threaded execution proves native code correctly handed the
+		// trapping instruction back instead of silently accepting it.
+		var gotErr error
+		var bridges float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			gotErr = vm.Run(context.Background())
+			if gotErr == nil {
+				return false
+			}
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return bridges > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Error(t, gotErr)
+		require.True(t, errorsEqual(gotErr, wantErr))
 	})
 
 	t.Run("native OpStore releases a ref-typed slot's old value, matching threaded RefCount", func(t *testing.T) {
