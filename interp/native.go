@@ -94,7 +94,11 @@ func newModule(i *Interpreter) transform.Module {
 		case *types.Function:
 			objects[addr] = transform.Object{Function: v}
 		case *types.Struct:
-			objects[addr] = transform.Object{Type: v.Typ}
+			objects[addr] = transform.Object{Struct: v.Typ}
+		default:
+			if at, ok := v.Type().(*types.ArrayType); ok {
+				objects[addr] = transform.Object{Array: at}
+			}
 		}
 	}
 	return transform.Module{

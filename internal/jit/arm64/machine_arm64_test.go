@@ -435,7 +435,7 @@ func TestNew(t *testing.T) {
 		}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Objects:   transform.Objects{2: {Type: record}},
+			Objects:   transform.Objects{2: {Struct: record}},
 		}
 		f, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)

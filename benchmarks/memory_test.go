@@ -508,15 +508,15 @@ func allocationGraph(depth int32) *program.Program {
 
 // permutationFlipsListing builds a self-recursive walk (constant 0; params:
 // 0=depth; locals: 1=arr, 2=i, 3=lo, 4=hi, 5=t) that reverses a fresh
-// size-length []any array each call and adds arr[size-1] to the recursive
+// size-length []i32 array each call and adds arr[size-1] to the recursive
 // result. %[1]d substitutes size, %[2]d substitutes size-1, %[3]d substitutes
 // depth.
 const permutationFlipsListing = `
 .types
-[]any
+[]i32
 .constants
 func(i32) i32
-	any
+	[]i32
 	i32
 	i32
 	i32

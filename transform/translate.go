@@ -30,8 +30,10 @@ type Objects map[int]Object
 type Object struct {
 	// Function is the referenced function, when known.
 	Function *types.Function
-	// Type is the referenced struct type, when known.
-	Type *types.StructType
+	// Struct is the referenced struct type, when known.
+	Struct *types.StructType
+	// Array is the referenced array's own type, when known.
+	Array *types.ArrayType
 }
 
 // ErrEntry reports an entry offset that does not start a basic block.

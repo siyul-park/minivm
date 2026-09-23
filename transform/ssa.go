@@ -163,8 +163,11 @@ func resolved(v types.Value) Object {
 	case *types.Function:
 		return Object{Function: v}
 	case *types.Struct:
-		return Object{Type: v.Typ}
+		return Object{Struct: v.Typ}
 	default:
+		if at, ok := v.Type().(*types.ArrayType); ok {
+			return Object{Array: at}
+		}
 		return Object{}
 	}
 }

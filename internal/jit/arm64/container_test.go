@@ -240,6 +240,37 @@ func TestMachine_Container(t *testing.T) {
 		require.Equal(t, rows, a.Rows()[start:])
 	})
 
+	t.Run("array.set boxes a scalar written into a []any element", func(t *testing.T) {
+		r := regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI32, 4: ssa.TypeI32}
+		m, a := guarded(t, r, refarray)
+		start := len(a.Rows())
+		op := ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}}
+		require.True(t, m.Lower(a, op, r))
+
+		rows := []asm.Instruction{
+			target.SBFX(vr(2), r.Reg(2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+			target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+			target.ADD(vr(2), target.X16, vr(2)),
+			target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+			target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
+			target.LDR(vr(4), vr(3), 0),
+			target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+			target.SXTW(vr(6), r.Reg(3)),
+			target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+			target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+			target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
+			target.UXTW(target.X16, r.Reg(4)),
+		}
+		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
+		rows = append(rows,
+			target.ORR(target.X16, target.X16, target.X17),
+			target.LDR(vr(8), vr(7), 0),
+			target.STR(target.X16, vr(7), 0),
+		)
+		rows = append(rows, releaseRows(vr(8))...)
+		require.Equal(t, rows, a.Rows()[start:])
+	})
+
 	t.Run("array.set stores a 4-byte i32 element with the narrow STRW form", func(t *testing.T) {
 		r := regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI32, 4: ssa.TypeI32}
 		m, a := guarded(t, r, i32array)

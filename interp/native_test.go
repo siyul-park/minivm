@@ -107,8 +107,9 @@ func sumWarmProgram(t *testing.T, warm, n int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(sum))
 }
 
-// sumTryProgram is sumWarmProgram whose final call sits in a Try region that
-// catches any trap: a cancellation must still escape it.
+// sumTryProgram is sumWarmProgram whose final call repeats forever inside a
+// Try region that catches any trap: only a cancellation ends it, and it must
+// escape the handler.
 func sumTryProgram(t *testing.T, warm, n int) *program.Program {
 	t.Helper()
 	sum := sumFunction(t)
@@ -120,7 +121,8 @@ func sumTryProgram(t *testing.T, warm, n int) *program.Program {
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 	b.Br(loop)
 	b.Bind(done)
-	b.Bind(start).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Bind(start).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Br(start)
 	b.Bind(end)
 	b.Bind(catch).Emit(instr.ERROR_CODE)
 	b.Try(start, end, catch, 1)
@@ -1089,13 +1091,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("a cancelled context during a native loop escapes guest handlers as the context error", func(t *testing.T) {
 		native(t)
-		// warm is large enough that the async Baseline compile reliably
-		// finishes partway through the threaded warmup loop, so later
-		// warmup calls and the huge final call both run natively; the huge
-		// call's own loop then takes many safepoints, giving the cancellation
-		// timer a wide native window to land in. The 1s delay is generous
-		// enough to clear the threaded warmup loop even under -race, whose
-		// instrumentation (unlike the native loop itself) slows it down.
+		// The final call repeats natively until the timer cancels it.
 		prog := sumTryProgram(t, 200_000, 2_000_000_000)
 
 		var runErr error

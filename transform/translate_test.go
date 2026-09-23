@@ -369,6 +369,55 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
+	t.Run("guards an array load through a constant cell's resolved element type", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+			})}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   transform.Objects{2: {Array: types.NewArrayType(types.TypeI32)}}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Contains(t, ssa.Format(out), "guard.shape")
+	})
+
+	t.Run("attaches array.new_default's declared element type to its result", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, 0).
+					Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+			})}
+		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeI32)}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Contains(t, ssa.Format(out), "guard.shape")
+	})
+
+	t.Run("guards a []any array store through the container's element kind, not the stored value's own", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, 0).
+					Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
+			})}
+		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeAny)}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Contains(t, ssa.Format(out), "kind ref")
+	})
+
 	t.Run("guards a struct store through a generic struct shape", func(t *testing.T) {
 		record := types.NewStructType(types.NewStructField(types.TypeI32))
 		fn := &types.Function{
@@ -407,7 +456,7 @@ blk0: ()
 			})}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Objects:   transform.Objects{2: {Type: record}}}
+			Objects:   transform.Objects{2: {Struct: record}}}
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)

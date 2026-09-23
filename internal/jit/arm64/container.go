@@ -171,9 +171,11 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	default:
 		off := m.offset(a, ptr, idx, 3)
 		if shape.Kind == types.KindRef {
+			// A []any element is a Boxed word; box is a no-op for a ref.
+			boxed := m.box(a, s, op.Args[2])
 			old := m.vreg()
 			a.Emit(target.LDR(old, off, 0))
-			a.Emit(target.STR(val, off, 0))
+			a.Emit(target.STR(boxed, off, 0))
 			m.release(a, old, s)
 		} else {
 			a.Emit(target.STR(val, off, 0))

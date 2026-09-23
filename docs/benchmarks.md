@@ -20,7 +20,7 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 | Kernel | threaded | jit |
 |---|---:|---:|
 | `IterativeFib(30)` | 566.6 ns/op | 161.6 ns/op |
-| `TypedArraySum(256)` | 2,696 ns/op | 3,044 ns/op |
+| `TypedArraySum(256)` | 2,831 ns/op | 311.3 ns/op |
 | `BranchTree(96)` | 485.2 ns/op | 485.6 ns/op |
 | `RecursiveFib(20)` | 330.9 µs/op | 67.4 µs/op |
 | `RecursiveFib(35)` | 450.5 ms/op | 73.8 ms/op |
@@ -165,11 +165,11 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 |  | Goja | 13.29 µs | 2,080 | 238 |
 |  | gpython | 7.63 µs | 2,496 | 246 |
 |  | Yaegi | 4.23 µs | 296 | 8 |
-| Native | minivm `jit` | 3.18 µs | 0 | 0 |
+| Native | minivm `jit` | 311.3 ns | 0 | 0 |
 |  | Wazero | **161.0 ns** | 8 | 1 |
 | Reference | Native Go | 70.8 ns | 0 | 0 |
 
-`jit` is slower than `threaded` here: this loop's per-iteration work (one `array.get` plus an add) is small enough that the OSR observer's own steady-state cost and Baseline's un-optimized array-bounds guard outweigh what native code saves.
+`jit` resolves the constant array's element kind, so the loop's `array.get` runs natively.
 #### `AllocationGraph(128)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -188,14 +188,16 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| Interpreter | minivm `threaded` | 75.90 µs | 14,336 | 128 |
+| Interpreter | minivm `threaded` | 52.60 µs | 7,680 | 128 |
 |  | Tengo | 321.12 µs | 292,858 | 9,856 |
 |  | GopherLua | **101.03 µs** | 78,808 | 451 |
 |  | Goja | 262.24 µs | 122,504 | 765 |
 |  | gpython | 228.35 µs | 115,560 | 2,496 |
 |  | Yaegi | 174.84 µs | 112,600 | 5,591 |
-| Native | minivm `jit` | 76.44 µs | 14,336 | 128 |
+| Native | minivm `jit` | 52.36 µs | 45,640 | 835 |
 | Reference | Native Go | 1.08 µs | 0 | 0 |
+
+`jit` ties `threaded`: `array.new_default` has no native form, so each native entry bridges at it and the call finishes threaded; the extra B/op and allocs/op are that bridge's cost.
 #### `StructTreeWalk(9)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |

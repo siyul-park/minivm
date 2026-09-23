@@ -270,7 +270,10 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		kind := w.stack[len(w.stack)-1].kind
-		if !kind.IsNumeric() && kind != types.KindRef {
+		if elem, ok := w.element(w.stack[len(w.stack)-3].fact); ok && elem == types.KindRef {
+			// A []any stores Boxed words of any kind: guard the container.
+			kind = types.KindRef
+		} else if !kind.IsNumeric() && kind != types.KindRef {
 			return false
 		}
 		w.guard(len(w.stack)-3, ssa.Shape{Kind: kind})
@@ -338,6 +341,19 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		return w.emit(operation, len(record.Fields), []fact{{kind: types.KindRef, structType: record}})
+	case instr.ARRAY_NEW_DEFAULT:
+		if len(w.stack) == 0 {
+			return false
+		}
+		idx := int(inst.Operand(0))
+		if idx >= len(w.types) {
+			return false
+		}
+		array, ok := w.types[idx].(*types.ArrayType)
+		if !ok {
+			return false
+		}
+		return w.emit(operation, 1, []fact{{kind: types.KindRef, arrayType: array}})
 	case instr.ARRAY_NEW, instr.MAP_NEW, instr.ARRAY_APPEND:
 		if len(w.stack) == 0 {
 			return false
@@ -372,13 +388,17 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 }
 
 // element resolves array's declared element kind, when known: the array's
-// own type is statically declared and it is a real minivm array, not a host
-// or dynamically-typed one.
+// type is declared on the fact or resolved through a constant cell. A []any
+// resolves to KindRef: its elements are Boxed words.
 func (w *walker) element(array fact) (types.Kind, bool) {
-	if array.arrayType == nil || array.arrayType.ElemKind == instr.KindAny {
+	t := array.arrayType
+	if t == nil && array.referenceKnown && array.reference > 0 {
+		t = w.objects[array.reference].Array
+	}
+	if t == nil {
 		return 0, false
 	}
-	return array.arrayType.ElemKind, true
+	return t.ElemKind, true
 }
 
 func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
@@ -394,7 +414,7 @@ func (w *walker) record(container fact) *types.StructType {
 		return container.structType
 	}
 	if container.referenceKnown && container.reference > 0 {
-		return w.objects[container.reference].Type
+		return w.objects[container.reference].Struct
 	}
 	return nil
 }

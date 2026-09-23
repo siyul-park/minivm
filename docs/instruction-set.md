@@ -113,7 +113,7 @@ One opcode per row, in opcode-value order.
 | References | `REF_SET` | `ref.set` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | S2-P10 |
+| References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | |
 | References | `REF_EQ` | `ref.eq` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | References | `REF_NE` | `ref.ne` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Integers | `I32_CONST` | `i32.const` | ✅ | 🔲 | lowered on ARM64 |
@@ -264,9 +264,9 @@ One opcode per row, in opcode-value order.
 | Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | S2-P10; guarded, else bridges |
-| Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | S2-P10; guarded, else bridges |
-| Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | S2-P10; guarded, else bridges |
+| Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges |
+| Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | guarded, else bridges |
+| Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | guarded, else bridges |
 | Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | bridges to threaded on ARM64 |
@@ -274,8 +274,8 @@ One opcode per row, in opcode-value order.
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | S2-P10; guarded, else bridges |
-| Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | S2-P10; guarded, else bridges |
+| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges |
+| Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Maps | `MAP_LEN` | `map.len` | ⬜ | 🔲 | bridges to threaded on ARM64 |
