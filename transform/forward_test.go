@@ -100,19 +100,20 @@ func TestForwardPass_Run(t *testing.T) {
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 
-	t.Run("keeps a global read a call separates but forwards a local one", func(t *testing.T) {
+	t.Run("keeps a global read and a local read a call separates", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := b.Param(entry, ssa.TypeRef)
-		global, held, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		global, held, redundant, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{global}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{held}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{redundant}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
 		again, local0 := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{again}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{local0}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{global, held, again, local0}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{global, held, redundant, again, local0}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -123,7 +124,7 @@ func TestForwardPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Equal(t, 2, strings.Count(out, "load global[0]"))
-		require.Equal(t, 1, strings.Count(out, "load local[0]"))
+		require.Equal(t, 2, strings.Count(out, "load local[0]"))
 	})
 
 	t.Run("keeps a read in a block more than one edge reaches", func(t *testing.T) {

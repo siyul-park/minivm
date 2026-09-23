@@ -56,7 +56,9 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 				delete(held, operation.Slot)
 			case ssa.OpExec:
 				for slot := range held {
-					if operation.Code.Writes(effects[slot.Space]) {
+					// A local is reloaded after CALL: a load is cheaper than a
+					// value kept live, and so spilled, across the call.
+					if operation.Code.Writes(effects[slot.Space]) || (slot.Space == ssa.SpaceLocal && operation.Code == instr.CALL) {
 						delete(held, slot)
 					}
 				}
