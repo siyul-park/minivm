@@ -29,6 +29,13 @@ const (
 
 func (r regs) Type(v ssa.Value) ssa.Type { return r[v] }
 
+func (r regs) Slot(s ssa.Slot) ssa.Type {
+	if s.Space == ssa.SpaceGlobal {
+		return ssa.TypeRef
+	}
+	return 0
+}
+
 func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
@@ -52,7 +59,7 @@ func TestMachine_Reserve(t *testing.T) {
 
 func TestMachine_Prologue(t *testing.T) {
 	a := asm.New(target.New())
-	arm64.New().Prologue(a, []types.Kind{types.KindI32, types.KindI64, types.KindRef}, 1)
+	arm64.New().Prologue(a, []types.Kind{types.KindI32, types.KindI64, types.KindRef}, 1, true, 3)
 	require.Equal(t, []asm.Instruction{
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
@@ -65,9 +72,20 @@ func TestMachine_Prologue(t *testing.T) {
 		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
 		target.ADDI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
+		target.LDR(target.X17, target.X16, 24),
+		target.ADDI(target.X17, target.X17, 1),
+		target.STR(target.X17, target.X16, 24),
 		target.STR(target.XZR, target.X25, 8),
 		target.STR(target.XZR, target.X25, 16),
 	}, a.Rows())
+
+	t.Run("skips entry count", func(t *testing.T) {
+		a := asm.New(target.New())
+		arm64.New().Prologue(a, []types.Kind{types.KindI32, types.KindI64, types.KindRef}, 1, false, 3)
+		require.Len(t, a.Rows(), 13)
+		require.NotContains(t, a.Rows(), target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
+	})
 }
 
 func TestMachine_Epilogue(t *testing.T) {
@@ -82,7 +100,7 @@ func TestMachine_Epilogue(t *testing.T) {
 	}
 
 	m, a := arm64.New(), asm.New(target.New())
-	m.Prologue(a, nil, 0)
+	m.Prologue(a, nil, 0, true, 0)
 	start := len(a.Rows())
 	m.Epilogue(a)
 	require.Equal(t, pop, a.Rows()[start:])
@@ -109,6 +127,7 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	local := func(i int) ssa.Slot { return ssa.Slot{Space: ssa.SpaceLocal, Index: i} }
 	globals := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
+	old := asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)
 	counter := []asm.Instruction{
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
 		target.LSLI(target.X17, target.X17, 3),
@@ -415,7 +434,28 @@ func TestMachine_Lower(t *testing.T) {
 			name: "store global addresses the globals base",
 			regs: regs{1: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Args: []ssa.Value{1}},
-			rows: []asm.Instruction{target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals)), target.STR(x(1), globals, 8)}, lower: true,
+			rows: slices.Concat(
+				[]asm.Instruction{
+					target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals)),
+					target.LDR(old, globals, 8),
+					target.LSRI(target.X16, old, 49),
+				},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, resume),
+					target.SBFX(target.X17, old, 0, 32),
+					target.CBZLabel(target.X17, resume),
+				},
+				counter,
+				[]asm.Instruction{
+					target.CMPI(target.X17, 1),
+					target.BCondLabel(target.OpBLE, exit),
+					target.SUBI(target.X17, target.X17, 1),
+					target.STR(target.X17, target.X16, 0),
+					target.STR(x(1), globals, 8),
+				},
+			), lower: true,
 		},
 		{
 			name: "declines an upvalue slot",
@@ -432,7 +472,7 @@ func TestMachine_Lower(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, a := arm64.New(), asm.New(target.New())
-			m.Prologue(a, nil, 0)
+			m.Prologue(a, nil, 0, true, 0)
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, tt.regs))
 			if tt.lower {
@@ -476,7 +516,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("stores results from slot zero", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, scalars, 0)
+		m.Prologue(a, scalars, 0, true, 0)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
 		require.Equal(t, rows(0), a.Rows()[start:])
@@ -484,7 +524,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("stores completed operands past the locals", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, scalars, 0)
+		m.Prologue(a, scalars, 0, true, 0)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{1}}, r)
 		require.Equal(t, rows(16), a.Rows()[start:])
@@ -514,7 +554,7 @@ func TestMachine_Return(t *testing.T) {
 		}
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, []types.Kind{types.KindI32, types.KindRef, types.KindI8, types.KindI64}, 1)
+		m.Prologue(a, []types.Kind{types.KindI32, types.KindRef, types.KindI8, types.KindI64}, 1, true, 0)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
 		require.Equal(t, slices.Concat(
@@ -532,7 +572,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("calls through the natives table and bridges when it cannot", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, nil, 0)
+		m.Prologue(a, nil, 0, true, 0)
 		bridge, join := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -601,7 +641,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("borrows a callee it does not own", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, nil, 0)
+		m.Prologue(a, nil, 0, true, 0)
 		bridge, join := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -653,7 +693,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("calls its own entry directly when it is a self call", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, nil, 0)
+		m.Prologue(a, nil, 0, true, 0)
 		bridge, join := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -718,14 +758,14 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("declines a frame beyond the reach of an immediate", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, nil, 0)
+		m.Prologue(a, nil, 0, true, 0)
 		require.False(t, m.Call(a, compile.Call{Address: 5, Callee: 2, Base: 510, Size: 2}, r))
 	})
 }
 
 func TestMachine_Budget(t *testing.T) {
 	m, a := arm64.New(), asm.New(target.New())
-	m.Prologue(a, nil, 0)
+	m.Prologue(a, nil, 0, true, 0)
 	start := len(a.Rows())
 	m.Budget(a, exit)
 	require.Equal(t, []asm.Instruction{
@@ -740,14 +780,15 @@ func TestMachine_Exit(t *testing.T) {
 	uses := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
 	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
 		return slices.Concat(
-			[]asm.Instruction{target.USE(uses[0]), target.USE(uses[1])},
 			target.LDI(target.X16, id),
 			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
 			target.LDI(target.X16, uint64(trap)),
 			[]asm.Instruction{
 				target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
 				target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
-				target.BLR(target.X16),
+				target.EXIT(target.X16),
+				target.USE(uses[0]),
+				target.USE(uses[1]),
 			},
 		)
 	}

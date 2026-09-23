@@ -22,8 +22,11 @@ type native struct {
 
 	threshold int
 	// Per-address tiering state is indexed by function address.
-	calls   []int
-	entries []int
+	calls []int
+	// entries is native-writable: Context.Entries points at it, and every
+	// Baseline function prologue increments its own address there, including
+	// native-to-native entries.
+	entries []int64
 	deopts  []int
 	// failed records permanent compile failure per address and tier.
 	failed []uint8
@@ -144,7 +147,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		shared:    newShared(i),
 		threshold: threshold,
 		calls:     make([]int, len(i.code)),
-		entries:   make([]int, len(i.code)),
+		entries:   make([]int64, len(i.code)),
 		deopts:    make([]int, len(i.code)),
 		failed:    make([]uint8, len(i.code)),
 		exact:     map[int][]func(*Interpreter){},
@@ -185,8 +188,7 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 	}
 
 	n.store.Enter()
-	// Re-read: the code seen above may have been retired and reclaimed
-	// between that read and Enter.
+	// Re-read after Enter; the code may have been retired between lookups.
 	code := n.store.Code(addr)
 	if code == nil {
 		n.store.Leave()
@@ -197,11 +199,7 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 	n.store.Leave()
 	if retire {
 		n.store.Retire(addr)
-		// The code that just retired is unchanged bytecode compiled the
-		// same way it would be again: there is no feedback yet that could
-		// make a recompile at this tier differ, so mark it permanently
-		// failed rather than let count/promote resubmit it once counters
-		// reset below.
+		// The unchanged input has no new feedback for a recompile at this tier.
 		n.markFailed(addr, code.Tier)
 		n.forget(addr)
 	}
@@ -218,31 +216,13 @@ func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Baseline})
 }
 
-// promote tracks Baseline entries and requests Optimized compilation.
-func (n *native) promote(addr int, fn *types.Function, code *jit.Code) {
-	if code.Tier != jit.Baseline {
-		return
-	}
-	n.entries[addr]++
-	if n.entries[addr] < promote || n.hasFailed(addr, jit.Optimized) {
-		return
-	}
-	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Optimized})
-}
-
-// refute counts deopts and reports when code should retire. Retirement is
-// permanent for the retiring tier (call marks it failed): the code that
-// deopted refute times is the same unchanged compile a recompile would
-// reproduce exactly, with no feedback yet to make it differ.
+// refute counts deopts; refute retires the code at its current tier.
 func (n *native) refute(addr int) bool {
 	n.deopts[addr]++
 	return n.deopts[addr] >= refute
 }
 
-// forget resets runtime tiering counters after a retirement; compile
-// failures remain recorded (call marks the retired tier failed separately),
-// so a still-eligible tier — e.g. Baseline, after Optimized retires — can
-// warm up again from zero while the retired one never resubmits.
+// forget resets runtime tiering counters; failed tiers remain blocked.
 func (n *native) forget(addr int) {
 	n.calls[addr] = 0
 	n.entries[addr] = 0
@@ -264,7 +244,8 @@ func tierBit(tier jit.Tier) uint8 {
 	return 1 << (tier - 1)
 }
 
-// drain publishes completed jobs and records permanent compile failures.
+// drain publishes completed jobs, records permanent compile failures, and
+// tiers every address the prologue's own entry count has since promoted.
 func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
 		if job.Err != nil {
@@ -278,6 +259,16 @@ func (n *native) drain(i *Interpreter) {
 		}
 		n.store.Publish(job.Code)
 		n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
+	}
+	for addr, count := range n.entries {
+		if count < promote || n.hasFailed(addr, jit.Optimized) {
+			continue
+		}
+		code := n.store.Code(addr)
+		if code == nil || code.Tier != jit.Baseline {
+			continue
+		}
+		n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.module, Tier: jit.Optimized})
 	}
 }
 
@@ -296,6 +287,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx.Globals = base(i.globals)
 	ctx.RC = rcBase(i.rc)
 	ctx.Natives = n.store.Natives()
+	ctx.Entries = entry(n.entries)
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[bp:])
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp))
@@ -303,7 +295,6 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx.Depth = 0
 
 	n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
-	n.promote(addr, fn, code)
 
 	trap := jit.Enter(code.Entry(), ctx)
 	for {
@@ -329,6 +320,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
+			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
 			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {
@@ -505,6 +497,10 @@ func end(s []types.Boxed) uintptr {
 
 func rcBase(rc []int) uintptr {
 	return uintptr(unsafe.Pointer(unsafe.SliceData(rc)))
+}
+
+func entry(entries []int64) uintptr {
+	return uintptr(unsafe.Pointer(unsafe.SliceData(entries)))
 }
 
 // heapBase is the address of heap's backing array: jit.SizeofValue bytes

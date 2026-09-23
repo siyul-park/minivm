@@ -2,6 +2,7 @@ package arm64_test
 
 import (
 	"math"
+	"runtime"
 	"slices"
 	"testing"
 	"unsafe"
@@ -236,7 +237,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false)
+		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
 		require.NoError(t, err)
 		buffer, err := asm.NewBuffer(len(bytes))
 		require.NoError(t, err)
@@ -732,7 +733,7 @@ func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
 // with m and publishes it.
 func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int, osr bool) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, exits, err := compile.Lower(f, m, fn, objects, address, osr)
+	code, exits, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
@@ -751,6 +752,11 @@ func enter(t *testing.T, stack []types.Boxed) *jit.Context {
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
 	ctx.Limit = uint64(len(ctx.Records))
 	ctx.Budget = 1000
+	// entries backs the prologue's own entry count, indexed by address;
+	// none of these cases uses past 7.
+	entries := make([]int64, 8)
+	ctx.Entries = uintptr(unsafe.Pointer(&entries[0]))
+	t.Cleanup(func() { runtime.KeepAlive(entries) })
 	return ctx
 }
 

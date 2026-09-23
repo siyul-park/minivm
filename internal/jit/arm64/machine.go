@@ -42,9 +42,9 @@ func (m *Machine) Arch() asm.Arch { return target.New() }
 // Reserve returns the scratch and frame-base registers.
 func (m *Machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X17, target.X25} }
 
-// Prologue begins a function: it builds the frame, loads the frame base,
-// pushes the activation record, and clears the locals after params.
-func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int) {
+// Prologue begins a function at address, builds its frame, pushes the
+// activation record, optionally counts the entry, and clears locals after params.
+func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int) {
 	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}}
 	a.Bind(m.entry)
 	a.Emit(
@@ -60,6 +60,14 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int) {
 		target.ADDI(target.X16, target.X16, 1),
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 	)
+	if count {
+		a.Emit(
+			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
+			target.LDR(target.X17, target.X16, int16(8*address)),
+			target.ADDI(target.X17, target.X17, 1),
+			target.STR(target.X17, target.X16, int16(8*address)),
+		)
+	}
 	for i := params; i < len(kinds); i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 	}
@@ -157,13 +165,10 @@ func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	)
 }
 
-// Exit writes the exit id and its trap to the Context and calls the exit
-// stub. A deopt never returns; any other exit returns when the interpreter
-// resumes.
+// Exit writes the exit id and trap, then calls the preserving stub through
+// EXIT. EXIT has BLR encoding with FlowNext, so use intervals stay live across
+// the stub; deopt does not resume and other exits resume in native code.
 func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
-	for _, u := range uses {
-		a.Emit(target.USE(u))
-	}
 	trap := jit.TrapBridge
 	if k == jit.ExitDeopt {
 		trap = jit.TrapDeopt
@@ -174,8 +179,11 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	a.Emit(
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
 		target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
-		target.BLR(target.X16),
+		target.EXIT(target.X16),
 	)
+	for _, u := range uses {
+		a.Emit(target.USE(u))
+	}
 	if k == jit.ExitDeopt {
 		a.Emit(target.BRK(0))
 	}
@@ -305,6 +313,8 @@ func (m *Machine) load(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 	return true
 }
 
+// store overwrites a slot, releasing its old reference when its declared
+// representation is boxed.
 func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if len(op.Args) != 1 {
 		return false
@@ -312,6 +322,11 @@ func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	base, ok := m.base(a, op.Slot)
 	if !ok {
 		return false
+	}
+	if s.Slot(op.Slot) == ssa.TypeRef {
+		old := m.vreg()
+		a.Emit(target.LDR(old, base, int16(op.Slot.Index*8)))
+		m.release(a, old, s)
 	}
 	a.Emit(target.STR(m.box(a, s, op.Args[0]), base, int16(op.Slot.Index*8)))
 	return true

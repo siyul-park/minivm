@@ -23,7 +23,7 @@ type stub struct{}
 
 func (stub) Arch() asm.Arch                                                   { panic("unused") }
 func (stub) Reserve() []asm.PReg                                              { panic("unused") }
-func (stub) Prologue(*asm.Assembler, []types.Kind, int)                       { panic("unused") }
+func (stub) Prologue(*asm.Assembler, []types.Kind, int, bool, int)            { panic("unused") }
 func (stub) Epilogue(*asm.Assembler)                                          { panic("unused") }
 func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool           { panic("unused") }
 func (stub) Branch(*asm.Assembler, ssa.Terminator, compile.Site, []asm.Label) { panic("unused") }
@@ -101,6 +101,8 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed) (*jit.Context, jit.T
 	// a recursive self-call's nested retain/release pairs never reach zero.
 	rc := make([]int, u.Address+1)
 	rc[u.Address] = 1
+	// entries backs the prologue's own entry count at u.Address.
+	entries := make([]int64, u.Address+1)
 
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
@@ -110,9 +112,11 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed) (*jit.Context, jit.T
 	ctx.Budget = 1 << 20
 	ctx.Natives = store.Natives()
 	ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+	ctx.Entries = uintptr(unsafe.Pointer(&entries[0]))
 
 	trap := jit.Enter(c.Entry(), ctx)
 	runtime.KeepAlive(rc)
+	runtime.KeepAlive(entries)
 	return ctx, trap
 }
 
@@ -124,6 +128,27 @@ func native(t *testing.T) {
 }
 
 func TestCompile(t *testing.T) {
+	t.Run("counts only Baseline function entries", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			unit  compile.Unit
+			count bool
+		}{
+			{"baseline", compile.Unit{Function: noop(t), Tier: jit.Baseline}, true},
+			{"optimized", compile.Unit{Function: noop(t), Tier: jit.Optimized}, false},
+			{"osr", compile.Unit{Function: noop(t), Tier: jit.Baseline, OSR: true}, false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				m := new(machine)
+				c, err := compile.Compile(tc.unit, m)
+				require.NoError(t, err)
+				require.NoError(t, c.Free())
+				require.Equal(t, tc.count, m.count)
+			})
+		}
+	})
+
 	t.Run("rejects a function translation cannot express", func(t *testing.T) {
 		u := compile.Unit{Function: &types.Function{}, Tier: jit.Baseline}
 		_, err := compile.Compile(u, stub{})

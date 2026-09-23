@@ -19,9 +19,9 @@ import (
 type Machine interface {
 	Arch() asm.Arch
 	Reserve() []asm.PReg
-	// Prologue begins a function whose slots have kinds, params of them
-	// parameters.
-	Prologue(a *asm.Assembler, kinds []types.Kind, params int)
+	// Prologue begins a function at address whose slots have kinds, params
+	// of them parameters, and count requests its entry hotness counter.
+	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int)
 	Epilogue(a *asm.Assembler)
 	// Lower emits op and reports false when the target cannot lower it.
 	Lower(a *asm.Assembler, op ssa.Operation, s Site) bool
@@ -46,6 +46,7 @@ type Machine interface {
 type Site interface {
 	Reg(v ssa.Value) asm.VReg
 	Type(v ssa.Value) ssa.Type
+	Slot(slot ssa.Slot) ssa.Type
 	// Deopt returns the label of an exit that abandons native code at the
 	// interpreter state of the operation.
 	Deopt() asm.Label
@@ -93,6 +94,7 @@ type lowering struct {
 	// osr reports whether this unit is rooted at a loop header instead of
 	// its function's own entry.
 	osr     bool
+	count   bool
 	objects transform.Objects
 	states  map[ssa.Value]ssa.Operation
 	consts  map[ssa.Value]types.Boxed
@@ -140,11 +142,12 @@ type stub struct {
 var ErrUnsupported = errors.New("unsupported lowering")
 
 // Lower emits code for f and its exit maps. address is the unit's own
-// function address: a call to it is its own recursion. An OSR unit's block
+// function address: a call to it is its own recursion. count requests its
+// function-entry hotness counter. An OSR unit's block
 // 0 may carry parameters, the operand stack the interpreter left at its
 // header (transform.Translate roots there); Lower loads them itself (see
 // params) instead of rejecting them.
-func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr bool) ([]byte, []jit.Exit, error) {
+func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) ([]byte, []jit.Exit, error) {
 	if f.Len() == 0 {
 		return nil, nil, fmt.Errorf("%w: function shape", ErrUnsupported)
 	}
@@ -161,7 +164,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		}
 	}
 	l := &lowering{
-		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, objects: objects,
+		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
 		borrow: borrowed(f),
 	}
@@ -243,7 +246,7 @@ func (l *lowering) function() error {
 		// function was called with: the prologue must clear none of them.
 		params = len(kinds)
 	}
-	l.m.Prologue(l.a, kinds, params)
+	l.m.Prologue(l.a, kinds, params, l.count, l.address)
 	if l.osr {
 		if err := l.preload(); err != nil {
 			return err
@@ -477,6 +480,17 @@ func (l *lowering) Reg(v ssa.Value) asm.VReg {
 // Type is v's static type.
 func (l *lowering) Type(v ssa.Value) ssa.Type {
 	return l.f.Type(v)
+}
+
+func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
+	kinds := l.fn.Slots()
+	if slot.Space == ssa.SpaceLocal && slot.Index >= 0 && slot.Index < len(kinds) {
+		return ssa.TypeOf(kinds[slot.Index])
+	}
+	if slot.Space == ssa.SpaceGlobal {
+		return ssa.TypeRef
+	}
+	return 0
 }
 
 // Deopt places a deopt stub at the current state.

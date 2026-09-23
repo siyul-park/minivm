@@ -36,6 +36,7 @@ func TestContext_Layout(t *testing.T) {
 		{"globals", jit.OffsetGlobals, unsafe.Offsetof(jit.Context{}.Globals)},
 		{"rc", jit.OffsetRC, unsafe.Offsetof(jit.Context{}.RC)},
 		{"natives", jit.OffsetNatives, unsafe.Offsetof(jit.Context{}.Natives)},
+		{"entries", jit.OffsetEntries, unsafe.Offsetof(jit.Context{}.Entries)},
 		{"top", jit.OffsetTop, unsafe.Offsetof(jit.Context{}.Top)},
 		{"fb", jit.OffsetFB, unsafe.Offsetof(jit.Context{}.FB)},
 		{"depth", jit.OffsetDepth, unsafe.Offsetof(jit.Context{}.Depth)},

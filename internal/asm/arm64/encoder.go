@@ -836,7 +836,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(0xD61F0000 | reg(r)<<5), nil
 
-	case OpBLR:
+	case OpBLR, OpEXIT:
 		r, err := e.decodeRegOnly(inst)
 		if err != nil {
 			return nil, err

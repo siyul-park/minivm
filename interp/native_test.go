@@ -286,6 +286,25 @@ func dynamicConcatProgram(t *testing.T, warm int) *program.Program {
 		program.WithConstants(fn, types.String("dyn-"), types.String("call")))
 }
 
+// store loops a module-level header, overwriting an any local with a ref
+// and then an i32 each pass. Native OpStore must release the ref.
+func store(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeAny), program.WithConstants(types.String("leaked")))
+}
+
 // fibOverflowProgram warms fib with shallow calls, deep enough for recursion
 // but shallow enough to fit WithFrame(limit), then calls fib(n) once with n
 // deep enough to exceed limit: native recursion always exceeds ctx.Limit
@@ -615,18 +634,28 @@ func TestWithThreshold(t *testing.T) {
 		prog := fibCallsProgram(t, 20)
 		want := runProgram(t, prog)
 
+		var runErr, popErr error
+		var result types.Value
+		var entries float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			require.Equal(t, want, result)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
 			vm.Flush()
-			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
 		}, 2*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("a loop function reaches a safepoint and refills its budget", func(t *testing.T) {
@@ -634,20 +663,28 @@ func TestWithThreshold(t *testing.T) {
 		prog := sumWarmProgram(t, 1000, 200000)
 		want := runProgram(t, prog)
 
+		var runErr, popErr error
+		var result types.Value
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("releases a dying ref parameter through ExitRelease", func(t *testing.T) {
@@ -667,20 +704,34 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32),
 			program.WithConstants(fn, types.String("native-"), types.String("release")))
 
+		var runErr, popErr, refErr error
+		var survivor types.Boxed
+		var count int
+		var released float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			survivor, err := vm.PopBoxed()
-			require.NoError(t, err)
-			count, err := vm.RefCount(survivor.Ref())
-			require.NoError(t, err)
-			require.Equal(t, 1, count)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			survivor, popErr = vm.PopBoxed()
+			if popErr != nil {
+				return true
+			}
+			count, refErr = vm.RefCount(survivor.Ref())
+			if refErr != nil {
+				return true
+			}
 			vm.Flush()
-			released, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "release"})
+			released, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "release"})
 			return released > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, refErr)
+		require.Equal(t, 1, count)
 	})
 
 	t.Run("a native division by zero is caught by a guest handler, matching threaded", func(t *testing.T) {
@@ -688,20 +739,28 @@ func TestWithThreshold(t *testing.T) {
 		prog := divCaughtProgram(t, 1000)
 		want := runProgram(t, prog)
 
+		var runErr, popErr error
+		var result types.Value
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("an uncaught native division by zero reports the same stack trace as threaded", func(t *testing.T) {
@@ -710,12 +769,15 @@ func TestWithThreshold(t *testing.T) {
 		wantErr := runProgramErr(t, prog)
 		require.Error(t, wantErr)
 
+		var gotErr error
 		require.Eventually(t, func() bool {
 			vm := interp.New(prog, interp.WithThreshold(0))
 			defer vm.Close()
-			err := vm.Run(context.Background())
-			return err != nil && errorsEqual(err, wantErr)
+			gotErr = vm.Run(context.Background())
+			return gotErr != nil
 		}, 5*time.Second, time.Millisecond)
+		require.Error(t, gotErr)
+		require.True(t, errorsEqual(gotErr, wantErr))
 	})
 
 	t.Run("a bridged STRING_CONCAT inside compiled code matches threaded, including RefCount", func(t *testing.T) {
@@ -723,20 +785,54 @@ func TestWithThreshold(t *testing.T) {
 		prog := concatProgram(t, 1000)
 		wantValue, wantCount := runProgramString(t, prog)
 
+		var runErr, popErr error
+		var value string
+		var count int
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			value, count, err := popString(vm)
-			require.NoError(t, err)
-			if value != wantValue || count != wantCount {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+	})
+
+	t.Run("native OpStore releases a ref-typed slot's old value, matching threaded RefCount", func(t *testing.T) {
+		native(t)
+		const n = 200_000
+		prog := store(t, n)
+
+		threaded := interp.New(store(t, n))
+		require.NoError(t, threaded.Run(context.Background()))
+		wantConst, err := threaded.Const(0)
+		require.NoError(t, err)
+		want, err := threaded.RefCount(wantConst.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		vm := interp.New(prog, interp.WithThreshold(0))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		gotConst, err := vm.Const(0)
+		require.NoError(t, err)
+		got, err := vm.RefCount(gotConst.Ref())
+		require.NoError(t, err)
+
+		require.Equal(t, want, got)
 	})
 
 	t.Run("a bridged call entered dynamically (unfused) matches threaded, including RefCount", func(t *testing.T) {
@@ -744,20 +840,30 @@ func TestWithThreshold(t *testing.T) {
 		prog := dynamicConcatProgram(t, 1000)
 		wantValue, wantCount := runProgramString(t, prog)
 
+		var runErr, popErr error
+		var value string
+		var count int
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			value, count, err := popString(vm)
-			require.NoError(t, err)
-			if value != wantValue || count != wantCount {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
 	})
 
 	t.Run("recursion past a small frame limit deoptimizes an ExitCall, matching threaded", func(t *testing.T) {
@@ -766,18 +872,22 @@ func TestWithThreshold(t *testing.T) {
 		wantErr := runProgramErr(t, prog, interp.WithFrame(10))
 		require.Error(t, wantErr)
 
+		var gotErr error
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(10), interp.WithProfiler(profiler))
 			defer vm.Close()
-			err := vm.Run(context.Background())
-			if err == nil || !overflowEqual(err, wantErr) {
+			gotErr = vm.Run(context.Background())
+			if gotErr == nil {
 				return false
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.Error(t, gotErr)
+		require.True(t, overflowEqual(gotErr, wantErr))
 	})
 
 	t.Run("a native call to an uncompiled function deoptimizes an ExitCall, matching threaded", func(t *testing.T) {
@@ -785,20 +895,30 @@ func TestWithThreshold(t *testing.T) {
 		prog := outerInnerProgram(t, 1000)
 		wantValue, wantCount := runProgramString(t, prog)
 
+		var runErr, popErr error
+		var value string
+		var count int
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			value, count, err := popString(vm)
-			require.NoError(t, err)
-			if value != wantValue || count != wantCount {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
 	})
 
 	t.Run("a deopt two native activations deep matches threaded, including the borrowed callee's RefCount", func(t *testing.T) {
@@ -806,30 +926,36 @@ func TestWithThreshold(t *testing.T) {
 		prog := nestedConcatProgram(t, 20000)
 		wantValue, wantCount := runProgramString(t, prog)
 
+		var runErr, popErr, refErr error
+		var value string
+		var count, innerCount int
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			value, count, err := popString(vm)
-			require.NoError(t, err)
-			if value != wantValue || count != wantCount {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
 			}
-			// concatFunction (constant 0, address 1) is retained exactly
-			// once by its caller's own call site and used only there, so it
-			// is borrowed: the deopt that rebuilds both activations, which
-			// then run to a normal RETURN threaded, must not leave it
-			// over- or under-counted.
-			innerCount, rcErr := vm.RefCount(1)
-			require.NoError(t, rcErr)
-			if innerCount != 1 {
-				return false
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
+			}
+			innerCount, refErr = vm.RefCount(1)
+			if refErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, refErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+		require.Equal(t, 1, innerCount)
 	})
 
 	t.Run("a borrowed callee's RefCount survives an ExitCall replay, matching threaded", func(t *testing.T) {
@@ -837,29 +963,36 @@ func TestWithThreshold(t *testing.T) {
 		prog := outerInnerProgram(t, 20000)
 		wantValue, wantCount := runProgramString(t, prog)
 
+		var runErr, popErr, refErr error
+		var value string
+		var count, innerCount int
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			value, count, err := popString(vm)
-			require.NoError(t, err)
-			if value != wantValue || count != wantCount {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
 			}
-			// inner (constant 0, address 1) is never itself warm enough to
-			// compile, so outer's every native call to it replays threaded
-			// through ExitCall; the replayed CALL releases what it adopts,
-			// so the borrowed reference deopt hands it must be real.
-			innerCount, rcErr := vm.RefCount(1)
-			require.NoError(t, rcErr)
-			if innerCount != 1 {
-				return false
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
+			}
+			innerCount, refErr = vm.RefCount(1)
+			if refErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, refErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+		require.Equal(t, 1, innerCount)
 	})
 
 	t.Run("a wide i64 result from native code matches threaded", func(t *testing.T) {
@@ -867,20 +1000,28 @@ func TestWithThreshold(t *testing.T) {
 		prog := wideI64Program(t, 1000)
 		want := runProgram(t, prog)
 
+		var runErr, popErr error
+		var result types.Value
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("a hot function tiers up to Optimized after enough native entries", func(t *testing.T) {
@@ -890,56 +1031,59 @@ func TestWithThreshold(t *testing.T) {
 
 		var got types.Value
 		var compiles float64
+		var runErr, popErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
 			vm.Flush()
-			got = result
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 	})
 
 	t.Run("a function that deoptimizes every call retires once and never re-enters native code", func(t *testing.T) {
 		native(t)
-		// warm is large enough (matching sumWarmProgram/sumTryProgram) that the
-		// async Baseline compile reliably finishes during warmup — long
-		// enough, in fact, that Baseline usually promotes to Optimized before
-		// the fail loop starts. Retirement (native.refute reached) now marks
-		// the retiring code's own tier permanently failed: there is no
-		// feedback yet that would make a recompile of the same unchanged
-		// code at that tier differ. A fresh Baseline compile is not the same
-		// code Optimized retired, so at most one retirement per tier can
-		// occur — Optimized once, and (if it then falls back and warms
-		// Baseline again) Baseline once — bounding the deopt count at
-		// 2*refute (interp/native.go's unexported deopt-retire threshold),
-		// never growing unbounded with fails as the old retire-forget-only
-		// contract allowed.
+		// Warmup is long enough for Baseline and Optimized publication; each
+		// retired tier is permanently blocked, bounding deopts at 2*refute.
 		const fails = 200
 		const refute = 8 // interp/native.go's unexported refute constant.
 		prog := divFailProgram(t, 200_000, fails)
 		want := runProgram(t, prog)
 
 		var deopts float64
+		var runErr, popErr error
+		var result types.Value
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return deopts > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 		require.LessOrEqual(t, deopts, float64(2*refute))
 	})
 
@@ -954,6 +1098,8 @@ func TestWithThreshold(t *testing.T) {
 		// instrumentation (unlike the native loop itself) slows it down.
 		prog := sumTryProgram(t, 200_000, 2_000_000_000)
 
+		var runErr error
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
@@ -963,14 +1109,16 @@ func TestWithThreshold(t *testing.T) {
 				time.Sleep(time.Second)
 				cancel()
 			}()
-			err := vm.Run(ctx)
-			if !errors.Is(err, context.Canceled) {
+			runErr = vm.Run(ctx)
+			if !errors.Is(runErr, context.Canceled) {
 				return false
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
 			return exits > 0
 		}, 20*time.Second, time.Second)
+		require.Error(t, runErr)
+		require.ErrorIs(t, runErr, context.Canceled)
 	})
 
 	t.Run("a function allocated after construction runs interpreted", func(t *testing.T) {
@@ -1057,20 +1205,28 @@ func TestWithThreshold(t *testing.T) {
 		prog := typedArrayCallsProgram(t, 20000)
 		want := runProgram(t, prog)
 
+		var runErr, popErr error
+		var result types.Value
+		var entries float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("reads and writes a ref array element natively, matching threaded RefCount", func(t *testing.T) {
@@ -1082,20 +1238,30 @@ func TestWithThreshold(t *testing.T) {
 		// for a second run (want, then every retry below).
 		wantValue, wantCount := runProgramString(t, refArrayProgram(t, 20000))
 
+		var runErr, popErr error
+		var value string
+		var count int
+		var entries float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(refArrayProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			value, count, err := popString(vm)
-			require.NoError(t, err)
-			if value != wantValue || count != wantCount {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
 	})
 
 	t.Run("walks a struct tree natively through struct.get and ref.is_null, matching threaded", func(t *testing.T) {
@@ -1106,20 +1272,28 @@ func TestWithThreshold(t *testing.T) {
 		// cross-run-reuse hazard above.
 		want := runProgram(t, structTreeProgram(t, 20000))
 
+		var runErr, popErr error
+		var result types.Value
+		var entries float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(structTreeProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("an out-of-bounds array.get deopts and is caught by a guest handler, matching threaded", func(t *testing.T) {
@@ -1127,20 +1301,28 @@ func TestWithThreshold(t *testing.T) {
 		prog := arrayOOBProgram(t, 20000)
 		want := runProgram(t, prog)
 
+		var runErr, popErr error
+		var result types.Value
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("a host array fails its shape guard and deopts, matching threaded", func(t *testing.T) {
@@ -1159,25 +1341,43 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), want)
 
+		var runErr, popErr, marshalErr, allocErr, globalErr error
+		var result types.Value
+		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			hostVal, err := vm.Marshal([]int32{1, 2, 3, 4, 5})
-			require.NoError(t, err)
-			hostAddr, err := vm.Alloc(hostVal)
-			require.NoError(t, err)
-			require.NoError(t, vm.SetGlobal(0, types.BoxRef(hostAddr)))
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
-			if result != want {
-				return false
+			hostVal, marshalErr := vm.Marshal([]int32{1, 2, 3, 4, 5})
+			if marshalErr != nil {
+				return true
+			}
+			hostAddr, allocErr := vm.Alloc(hostVal)
+			if allocErr != nil {
+				return true
+			}
+			globalErr = vm.SetGlobal(0, types.BoxRef(hostAddr))
+			if globalErr != nil {
+				return true
+			}
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
 			}
 			vm.Flush()
-			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, marshalErr)
+		require.NoError(t, allocErr)
+		require.NoError(t, globalErr)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
 	})
 
 	t.Run("stays off by default: no vm_jit metrics are reported", func(t *testing.T) {
@@ -1199,19 +1399,67 @@ func TestWithThreshold(t *testing.T) {
 
 		var got types.Value
 		var entries float64
+		var runErr, popErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
 			vm.Flush()
-			got = result
-			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
 		require.Equal(t, want, got)
+	})
+
+	t.Run("OSR compiles a module loop straight to Optimized, matching threaded", func(t *testing.T) {
+		native(t)
+		const n = 20000
+		want := runProgram(t, concat(t, n))
+		prog := concat(t, n)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		vm.Flush()
+
+		require.Equal(t, want, got)
+		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.Greater(t, compiles, float64(0))
+	})
+
+	t.Run("a callee reached only from native code still tiers up to Optimized", func(t *testing.T) {
+		native(t)
+		const n = 200_000
+		want := runProgram(t, fib(t, n))
+		prog := fib(t, n)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		vm.Flush()
+
+		require.Equal(t, want, got)
+		// One Optimized compile is the header's own OSR unit; a second is
+		// only possible if fib, called solely from that native loop, also
+		// reached the promote threshold.
+		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.GreaterOrEqual(t, compiles, float64(2))
 	})
 
 	t.Run("OSR resolved during earlier calls enters at a function's loop header mid-call", func(t *testing.T) {
@@ -1227,21 +1475,25 @@ func TestWithThreshold(t *testing.T) {
 
 		var got types.Value
 		var entries float64
+		var runErr, popErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
 			vm.Flush()
-			got = result
-			// warmCalls+1 total calls to sum never reach threshold, so
-			// entry-0 CALL-based compilation never even submits; any
-			// native entry observed can only be OSR.
-			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 	})
 
@@ -1258,22 +1510,36 @@ func TestWithThreshold(t *testing.T) {
 		var gotCode types.Boxed
 		var gotValue int
 		var exits float64
+		var runErr, popErr, constErr, refErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			code, err := vm.PopBoxed()
-			require.NoError(t, err)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			gotCode, popErr = vm.PopBoxed()
+			if popErr != nil {
+				return true
+			}
 			str, err := vm.Const(0)
-			require.NoError(t, err)
-			count, err := vm.RefCount(str.Ref())
-			require.NoError(t, err)
+			constErr = err
+			if constErr != nil {
+				return true
+			}
+			gotValue, refErr = vm.RefCount(str.Ref())
+			if refErr != nil {
+				return true
+			}
 			vm.Flush()
-			gotCode, gotValue = code, count
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, constErr)
+		require.NoError(t, refErr)
 		require.Equal(t, wantCode, gotCode)
 		require.Equal(t, wantValue, gotValue)
 	})
@@ -1285,18 +1551,25 @@ func TestWithThreshold(t *testing.T) {
 
 		var got types.Value
 		var unsupported float64
+		var runErr, popErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.NoError(t, vm.Run(context.Background()))
-			result, err := vm.Pop()
-			require.NoError(t, err)
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
 			vm.Flush()
-			got = result
-			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"})
+			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "unsupported"})
 			return unsupported > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 		// A site submits its OSR unit once: the failed compile is never
 		// resubmitted, however many further back edges the loop takes.
@@ -1310,24 +1583,40 @@ func TestWithThreshold(t *testing.T) {
 
 		var gotFirst, gotSecond types.Value
 		var entries float64
+		var runErr, firstPopErr, secondPopErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
 
-			require.NoError(t, vm.Run(context.Background()))
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
 			first, err := vm.Pop()
-			require.NoError(t, err)
+			firstPopErr = err
+			if firstPopErr != nil {
+				return true
+			}
 			vm.Reset()
 
-			require.NoError(t, vm.Run(context.Background()))
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
 			second, err := vm.Pop()
-			require.NoError(t, err)
+			secondPopErr = err
+			if secondPopErr != nil {
+				return true
+			}
 			vm.Flush()
 			gotFirst, gotSecond = first, second
-			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, firstPopErr)
+		require.NoError(t, secondPopErr)
 		require.Equal(t, want, gotFirst)
 		require.Equal(t, want, gotSecond)
 	})
@@ -1339,36 +1628,53 @@ func TestWithThreshold(t *testing.T) {
 
 		var gotFirst, gotSecond types.Value
 		var entries float64
+		var runErr error
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			pool := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer pool.Close()
 
-			// Both Get calls land before either Put, so the pool (size 2,
-			// nothing idle yet) hands out two distinct Interpreters rather
-			// than reusing one.
 			first, err := pool.Get(context.Background())
-			require.NoError(t, err)
+			if err != nil {
+				runErr = err
+				return true
+			}
 			second, err := pool.Get(context.Background())
-			require.NoError(t, err)
+			if err != nil {
+				runErr = err
+				return true
+			}
 
-			require.NoError(t, first.Run(context.Background()))
+			runErr = first.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
 			firstResult, err := first.Pop()
-			require.NoError(t, err)
+			if err != nil {
+				runErr = err
+				return true
+			}
 
-			require.NoError(t, second.Run(context.Background()))
+			runErr = second.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
 			secondResult, err := second.Pop()
-			require.NoError(t, err)
+			if err != nil {
+				runErr = err
+				return true
+			}
 
 			first.Flush()
 			second.Flush()
 			gotFirst, gotSecond = firstResult, secondResult
-			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 
 			pool.Put(first)
 			pool.Put(second)
 			return entries > 0
 		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
 		require.Equal(t, want, gotFirst)
 		require.Equal(t, want, gotSecond)
 	})
@@ -1395,6 +1701,51 @@ func iterativeFibProgram(t *testing.T, n int) *program.Program {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32))
+}
+
+// concat runs an address-0 loop with one unpromoted any local beside four
+// promoted i32 locals. STRING_CONCAT bridges with the locals live in the exit map.
+func concat(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 7).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRING_CONCAT).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
+		program.WithConstants(types.String("seed-"), types.String("tail")))
+}
+
+// fib loops at module level and calls fib(8). Once the header is native,
+// the callee enters native code directly and its prologue counts every entry.
+func fib(t *testing.T, n int) *program.Program {
+	t.Helper()
+	fib := fibFunction()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 8).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib))
 }
 
 // sumHeaderProgram calls sum(warmEach) warmCalls times, then sum(n) once,

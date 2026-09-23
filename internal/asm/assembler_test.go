@@ -425,4 +425,40 @@ func TestAssembler_Build(t *testing.T) {
 		_, err := a.Build()
 		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
 	})
+
+	t.Run("keeps a register value untouched through the exit stub alongside reloaded locals", func(t *testing.T) {
+		// v0, v1 are call-live locals an earlier BLR forces to spill; v2 is
+		// a value defined after that call and used only past EXIT, mirroring
+		// an exit map naming both a register value and spilled ones. EXIT is
+		// FlowNext, so v2's register is never up for reuse across it.
+		a := asm.New(arm64.New())
+		a.Emit(
+			slots(arm64.OpSUBI),
+			arm64.MOVI(vint(0), 1),
+			arm64.MOVI(vint(1), 2),
+			arm64.BLR(arm64.X2),
+			arm64.MOVI(vint(2), 3),
+			arm64.EXIT(arm64.X16),
+			arm64.USE(vint(0)), arm64.USE(vint(1)), arm64.USE(vint(2)),
+			slots(arm64.OpADDI),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.SUBI(arm64.SP, arm64.SP, 16),
+			arm64.MOVI(arm64.X0, 1),
+			arm64.STR(arm64.X0, arm64.SP, 0),
+			arm64.MOVI(arm64.X0, 2),
+			arm64.STR(arm64.X0, arm64.SP, 8),
+			arm64.BLR(arm64.X2),
+			arm64.MOVI(arm64.X0, 3),
+			arm64.EXIT(arm64.X16),
+			arm64.LDR(arm64.X1, arm64.SP, 0),
+			arm64.LDR(arm64.X1, arm64.SP, 8),
+			arm64.ADDI(arm64.SP, arm64.SP, 16),
+			arm64.RET(),
+		), code)
+	})
 }

@@ -159,6 +159,7 @@ const (
 	OpBL
 	OpBR
 	OpBLR
+	OpEXIT
 	OpRET
 
 	// Branch (compare-and-branch)
@@ -573,7 +574,13 @@ func B(offset int32) asm.Instruction  { return newBranch(OpB, int64(offset)) }
 func BL(offset int32) asm.Instruction { return newBranch(OpBL, int64(offset)) }
 func BR(reg asm.Reg) asm.Instruction  { return newReg1(OpBR, reg) }
 func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
-func RET() asm.Instruction            { return newInst(OpRET, nil) }
+
+// EXIT calls the exit stub, which the runtime guarantees preserves every
+// allocatable register; it encodes exactly as BLR but never clobbers or
+// forces a spill.
+func EXIT(reg asm.Reg) asm.Instruction { return newReg1(OpEXIT, reg) }
+
+func RET() asm.Instruction { return newInst(OpRET, nil) }
 
 // Build resolves label branches after every label is bound.
 func BLabel(id asm.Label) asm.Instruction {

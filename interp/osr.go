@@ -37,14 +37,6 @@ func (s *site) refute() bool {
 // never runs on the per-iteration path.
 const interval = 256
 
-// osrTier is the tier every OSR unit compiles at. Optimized is unsafe here:
-// PromotePass corrupts an unpromoted local's value whenever it coexists
-// with a promoted one across a loop (isolated by pass bisection on the
-// StringBuild kernel — Fold+Promote+DCE alone reproduces it, Fold+DCE alone
-// does not — independent of translation rooting). Baseline never runs
-// PromotePass.
-const osrTier = jit.Baseline
-
 // observe wraps every loop header's threaded handler of fn at addr with OSR
 // observation, address 0 (module code) included. A header a fusion
 // absorbed (code[ip] == nil) is left alone: nothing runs there to observe.
@@ -84,7 +76,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				// compile of the same address may hold it, undrained,
 				// since its own last call.
 				n.drain(i)
-				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.module, Tier: osrTier, Entry: s.ip, OSR: true}
+				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.module, Tier: jit.Optimized, Entry: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
 		case s.count%interval == 0:
@@ -95,12 +87,10 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 	}
 }
 
-// enter runs the current frame as s's cached OSR activation. It reports
-// whether native code actually ran: false only means s.code went stale
-// (retired and reclaimed since it was last observed), so the caller must
-// run this call threaded, same as before a site ever resolves.
+// enter runs the current frame as s's cached OSR activation. A cache hit
+// enters directly; queue publication and native-only promotion are drained
+// at OSR submission checks and native safepoints.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
-	n.drain(i)
 	n.store.Enter()
 	c := n.store.CodeAt(s.address, s.ip)
 	if c == nil {
@@ -115,6 +105,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	ctx.Globals = base(i.globals)
 	ctx.RC = rcBase(i.rc)
 	ctx.Natives = n.store.Natives()
+	ctx.Entries = entry(n.entries)
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[i.fr.bp:])
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp+1))
@@ -159,6 +150,7 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap) boo
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
+			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
 			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {

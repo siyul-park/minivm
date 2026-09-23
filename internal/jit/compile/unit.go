@@ -54,7 +54,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	code, exits, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR)
+	code, exits, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR, u.Tier == jit.Baseline && !u.OSR)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +85,9 @@ func passes(tier jit.Tier) []pass.Pass[*ssa.Function] {
 		return []pass.Pass[*ssa.Function]{transform.NewFoldPass(), transform.NewDCEPass()}
 	case jit.Optimized:
 		return []pass.Pass[*ssa.Function]{
-			transform.NewFoldPass(), transform.NewPromotePass(), transform.NewForwardPass(),
-			transform.NewCSEPass(), transform.NewGuardPass(), transform.NewHoistPass(), transform.NewDCEPass(),
+			transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(),
+			transform.NewGuardPass(), transform.NewHoistPass(), transform.NewDCEPass(),
+			transform.NewPromotePass(), transform.NewDCEPass(),
 		}
 	default:
 		return nil

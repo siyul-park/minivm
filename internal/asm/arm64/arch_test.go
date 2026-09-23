@@ -24,6 +24,7 @@ func TestFrame_Flow(t *testing.T) {
 		{"BR", arm64.BR(arm64.X0), asm.FlowEnd},
 		{"BL", arm64.BL(8), asm.FlowCall},
 		{"BLR", arm64.BLR(arm64.X0), asm.FlowCall},
+		{"EXIT", arm64.EXIT(arm64.X0), asm.FlowNext},
 		{"RET", arm64.RET(), asm.FlowEnd},
 		{"BRK", arm64.BRK(0), asm.FlowEnd},
 		{"CBZ", arm64.CBZLabel(arm64.X0, 0), asm.FlowBranch},
@@ -59,6 +60,7 @@ func TestFrame_Writes(t *testing.T) {
 		{"FCMP", arm64.FCMP(arm64.D0, arm64.D1), [4]bool{}},
 		{"CBZ", arm64.CBZLabel(arm64.X0, 0), [4]bool{}},
 		{"BLR", arm64.BLR(arm64.X0), [4]bool{}},
+		{"EXIT", arm64.EXIT(arm64.X0), [4]bool{}},
 		{"FMOV", arm64.FMOV(arm64.D0, arm64.X0), [4]bool{true, false, false, false}},
 		{"USE", arm64.USE(arm64.X0), [4]bool{}},
 	}

@@ -20,6 +20,20 @@ func TestNewPromotePass(t *testing.T) {
 }
 
 func TestPromotePass_Run(t *testing.T) {
+	t.Run("keeps an unpromoted ref local beside a promoted i32 local", func(t *testing.T) {
+		fn, _ := loopFunction(t)
+		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		_, err = transform.NewPromotePass().Run(pass.NewManager(), out)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		formatted := ssa.Format(out)
+		require.Contains(t, formatted, "load local[0]")
+		require.Contains(t, formatted, "load local[1]")
+	})
+
 	t.Run("carries a loop-carried counter on the back edge as a block parameter", func(t *testing.T) {
 		fn := slotFunction()
 		require.NoError(t, ssa.Verify(fn))

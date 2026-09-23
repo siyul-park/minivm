@@ -24,6 +24,8 @@ Each public symbol under test `MUST` have one top-level test function as its tes
 
 The agent `MUST` use one case representation per test function: direct cases or table-driven cases, never both. It `MUST NOT` mix cases with different abstraction levels or depths.
 
+`require.Eventually` callbacks `MUST` contain no assertions. They `MUST` capture results and errors, return only readiness conditions, and assert the captured state after polling.
+
 When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice `MAY` be used. The data and generation code `MUST` remain simple enough to read as specification.
 
 Tests `MUST` use only the public interface of the code under test. Direct reference to a private symbol indicates a design problem and `MUST` be resolved by changing the design so the behavior is testable through its appropriate public boundary.

@@ -32,6 +32,10 @@ type Context struct {
 	Globals uintptr
 	RC      uintptr
 	Natives uintptr
+	// Entries is the base of a per-address int64 table the prologue
+	// increments on every entry, interpreted-CALL or native-to-native, so
+	// tiering sees a callee reached only from native code too.
+	Entries uintptr
 	Top     uintptr
 	FB      uintptr
 
@@ -66,6 +70,7 @@ const (
 	OffsetGlobals = unsafe.Offsetof(Context{}.Globals)
 	OffsetRC      = unsafe.Offsetof(Context{}.RC)
 	OffsetNatives = unsafe.Offsetof(Context{}.Natives)
+	OffsetEntries = unsafe.Offsetof(Context{}.Entries)
 	OffsetTop     = unsafe.Offsetof(Context{}.Top)
 	OffsetFB      = unsafe.Offsetof(Context{}.FB)
 	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)

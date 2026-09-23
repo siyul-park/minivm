@@ -39,7 +39,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack. |
 | `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | `asm.State` first, then `Trap`, exit id, bases (`Stack`, `Heap`, `Globals`, `RC`, `Natives`), `Top`, `Limit`, `FB`, `Depth`, `Records`, `Budget`. The interpreter writes bases before every `Enter`/`Resume`. |
+| `jit.Context` | `asm.State` first, then `Trap`, exit id, bases (`Stack`, `Heap`, `Globals`, `RC`, `Natives`, `Entries`), `Top`, `Limit`, `FB`, `Depth`, `Records`, `Budget`. The interpreter writes bases before every `Enter`/`Resume`. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
 | `jit.Store` | Published code and `Context.Natives`. |
@@ -47,14 +47,14 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so loops poll `Budget`.
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
 - Registers: X25 frame base, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X24, X27, D0–D31.
-- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register.
+- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. The exit stub preserves every allocatable register; `Machine.Exit` places its map's `USE` rows after `EXIT` so mapped values stay live through the stub.
 
 ## Pipeline
 
 | Tier | Passes |
 |---|---|
 | `jit.Baseline` | fold, dce |
-| `jit.Optimized` | fold, promote, forward, cse, guard, hoist, dce |
+| `jit.Optimized` | fold, forward, cse, guard, hoist, dce, promote, dce |
 
 - `Translate` gives every `OpExec`, return, and completion the interpreter state at its instruction. Block 0 never has predecessors.
 - `Lower` assigns one register per SSA value by type, orders blocks in reverse postorder, and resolves block parameters by parallel moves on edges.
@@ -64,7 +64,8 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 ## ARM64 activation
 
-- Prologue: push `Records[Depth]`, store return address in `Record.PC`, clear non-parameter locals (not on OSR).
+- Prologue: push `Records[Depth]`, store return address in `Record.PC`, optionally count the entry at `Context.Entries[address]`, clear non-parameter locals (not on OSR).
+- `OpStore` to a reference-capable slot (`Type` is `ssa.TypeRef`, which also represents a dynamically typed value) releases the slot's old occupant before overwriting it, matching threaded `LOCAL_SET`.
 - `OpReturn` releases reference-capable slots, stores boxed results from slot 0. `OpComplete` stores results past the locals.
 - `CALL` to a constant function: box args at the callee frame, `BLR Context.Natives[addr]`, or `BL` the unit's own entry for a self call. No native code, `Depth == Limit`, or frame past `Top` → `ExitCall`.
 
@@ -88,15 +89,15 @@ A non-resuming exit rebuilds every native activation as an interpreter frame, ou
 
 ## Tiers
 
-- Baseline native entries reach `promote` → Optimized compile.
+- Baseline function prologues count `Context.Entries[address]`, including interpreted and native-to-native entries. When a published Baseline reaches `promote`, `drain` submits Optimized; Optimized and OSR entries do not pay the counter cost.
 - Deopts reach `refute` → retire; that tier never recompiles for the address. An OSR site that reaches `refute` restores its threaded handler.
-- Compiles are async on `compile.Queue`, one unit per address; the interpreter drains and publishes at its next call or header observation.
+- Compiles are async on `compile.Queue`, one unit per address; the interpreter drains and publishes at its next call, header observation, or safepoint.
 - A `Pool` shares `Store`, `Queue`, and module data; each interpreter has its own `jit.Context`.
 
 ## OSR
 
 - Every loop header of every function known at construction, module included, is wrapped by an observer.
-- Past the threshold it submits a unit and polls `Store.CodeAt` every 256 back edges.
+- Past the threshold it submits a unit directly at `jit.Optimized` and polls `Store.CodeAt` every 256 back edges.
 - Entry reuses the current interpreter frame (`FB = bp`, `Depth = 0`). An exit rewrites that frame in place.
 
 ## Metrics
@@ -105,8 +106,6 @@ With `WithProfiler`: `vm_jit_compiles_total{tier,outcome}`, `vm_jit_entries_tota
 
 ## Limits
 
-- OSR compiles at Baseline: `PromotePass` corrupts an unpromoted local that shares a loop with a promoted one.
-- Promotion counts interpreter `CALL`s only, not native-to-native calls.
 - No `i64` OSR block-0 parameter; no `i64` `CALL` result.
 - Container ops lower behind `guard.shape`, which deopts on null or a mismatched representation.
 - Unlowered opcodes bridge; see `instruction-set.md`. `RETURN_CALL`, `YIELD`, `RESUME` have no native form.

@@ -366,7 +366,7 @@ Each `BenchmarkInterpreter_Run` row is the time to execute a whole bytecode prog
 
 ## Interpretation
 
-`jit` rows enter native code two ways: an interpreted `CALL` to a `*types.Function` (Baseline, then Optimized once Baseline is hot enough), or on-stack at a hot loop header (OSR), module-level code included, with no call boundary. A called function that lowers cleanly runs natively; an unsupported operation, `RETURN_CALL`, or a loop header OSR cannot compile returns to threaded execution and still pays native entry bookkeeping. OSR units compile at Baseline only: `PromotePass` is unsafe for a function that promotes one local while leaving another (e.g. a ref-typed one) unpromoted across the same loop, and Baseline never runs `PromotePass`.
+`jit` rows enter native code two ways: an interpreted `CALL` to a `*types.Function` (Baseline, then Optimized once entries — interpreted or native-to-native — reach the promote threshold), or on-stack at a hot loop header (OSR), module-level code included, with no call boundary, compiling directly at Optimized. A called function that lowers cleanly runs natively; an unsupported operation, `RETURN_CALL`, or a loop header OSR cannot compile returns to threaded execution and still pays native entry bookkeeping.
 
 Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
 
