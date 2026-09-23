@@ -30,6 +30,13 @@ type native struct {
 	deopts  []int
 	// failed records permanent compile failure per address and tier.
 	failed []uint8
+	// candidates holds every address with published Baseline code not yet
+	// promoted or permanently blocked: drain's promotion scan visits only
+	// these instead of every address's own entry count.
+	candidates []int
+	// sites indexes every observed OSR site by (address, ip): drain looks a
+	// failed OSR unit's site up here to restore its threaded handler.
+	sites map[key]*site
 
 	// exact caches unfused threaded code for materialized frames.
 	exact map[int][]func(*Interpreter)
@@ -56,9 +63,6 @@ const nativeStack = 1 << 20
 
 // budget is the back-edge count between safepoints.
 const budget = 1 << 16
-
-// promote is the Baseline-to-Optimized entry threshold.
-const promote = 1000
 
 // refute is the deopt threshold that retires native code.
 const refute = 8
@@ -151,6 +155,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		deopts:    make([]int, len(i.code)),
 		failed:    make([]uint8, len(i.code)),
 		exact:     map[int][]func(*Interpreter){},
+		sites:     map[key]*site{},
 		compile:   i.compile,
 	}
 	// OSR observes every loop header of every function i compiled at
@@ -177,11 +182,15 @@ func (n *native) close() error {
 // advance, since native completion must apply them exactly as pushFrame
 // would.
 func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
-	n.drain(i)
 	if addr >= len(n.calls) {
 		// Bound after construction (Alloc, Store): never compiled.
 		return false
 	}
+	if n.hasFailed(addr, jit.Baseline) {
+		// A failed Baseline never republishes: nothing is left to count.
+		return false
+	}
+	n.drain(i)
 	if n.store.Code(addr) == nil {
 		n.count(i, addr, fn)
 		return false
@@ -245,31 +254,46 @@ func tierBit(tier jit.Tier) uint8 {
 }
 
 // drain publishes completed jobs, records permanent compile failures, and
-// tiers every address the prologue's own entry count has since promoted.
+// tiers every Baseline candidate whose prologue count reached jit.Promote.
+// A candidate leaves once it is no longer Baseline or Optimized has failed.
 func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
 		if job.Err != nil {
-			// failed is the entry-0 call site's own tiering; an OSR unit is
-			// a different site, so only a non-OSR failure marks it.
-			if !job.Unit.OSR {
+			// A failed OSR unit restores its site's threaded handler; failed
+			// tracks entry-0 tiering only.
+			if job.Unit.OSR {
+				k := key{job.Unit.Address, job.Unit.Entry}
+				if s, ok := n.sites[k]; ok {
+					i.code[s.address][s.ip] = s.inner
+					delete(n.sites, k)
+				}
+			} else {
 				n.markFailed(job.Unit.Address, job.Unit.Tier)
 			}
 			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome(job.Err)})
 			continue
 		}
 		n.store.Publish(job.Code)
+		if job.Code.Tier == jit.Baseline {
+			n.candidates = append(n.candidates, job.Unit.Address)
+		}
 		n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
 	}
-	for addr, count := range n.entries {
-		if count < promote || n.hasFailed(addr, jit.Optimized) {
-			continue
-		}
-		code := n.store.Code(addr)
-		if code == nil || code.Tier != jit.Baseline {
-			continue
-		}
-		n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.module, Tier: jit.Optimized})
+	if len(n.candidates) == 0 {
+		return
 	}
+	live := n.candidates[:0]
+	for _, addr := range n.candidates {
+		code := n.store.Code(addr)
+		if code == nil || code.Tier != jit.Baseline || n.hasFailed(addr, jit.Optimized) {
+			continue
+		}
+		if n.entries[addr] >= jit.Promote {
+			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.module, Tier: jit.Optimized})
+		}
+		live = append(live, addr)
+	}
+	n.candidates = live
 }
 
 // run executes one native call and reports whether it should retire.

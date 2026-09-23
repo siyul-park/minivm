@@ -1573,10 +1573,14 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var unsupported float64
 		var runErr, popErr error
+		var vm *interp.Interpreter
+		var profiler *prof.Profiler
 		require.Eventually(t, func() bool {
-			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
-			defer vm.Close()
+			if vm != nil {
+				vm.Close()
+			}
+			profiler = prof.New()
+			vm = interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1589,12 +1593,78 @@ func TestWithThreshold(t *testing.T) {
 			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "unsupported"})
 			return unsupported > 0
 		}, 5*time.Second, time.Millisecond)
+		defer vm.Close()
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 		// A site submits its OSR unit once: the failed compile is never
 		// resubmitted, however many further back edges the loop takes.
 		require.Equal(t, float64(1), unsupported)
+
+		// The failed site restores its threaded handler and stops polling:
+		// a second Run on the same interpreter takes the same many back
+		// edges again, and the metric does not move.
+		vm.Reset()
+		require.NoError(t, vm.Run(context.Background()))
+		got2, popErr2 := vm.Pop()
+		require.NoError(t, popErr2)
+		require.Equal(t, want, got2)
+		vm.Flush()
+		again, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "unsupported"})
+		require.Equal(t, float64(1), again)
+	})
+
+	t.Run("a loop header whose body always bridges retires its OSR site and never re-enters native code", func(t *testing.T) {
+		native(t)
+		const refute = 8
+		const n = 600
+		prog := bridge(t, n)
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		ctx := context.Background()
+
+		// One run bridges at most once: a materialized frame finishes threaded.
+		var got types.Value
+		var runErr, popErr error
+		var exits float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(ctx)
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return exits >= float64(refute)
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+		// One submit, one compile; every native entry bridges immediately,
+		// so refute retires the site at exactly the deopt threshold.
+		require.Equal(t, float64(1), compiles)
+		require.Equal(t, float64(refute), exits)
+
+		// The retired site never polls or re-enters again: a further run
+		// takes the same back edges threaded, and both metrics hold.
+		require.NoError(t, vm.Run(ctx))
+		got2, err2 := vm.Pop()
+		require.NoError(t, err2)
+		require.Equal(t, want, got2)
+		vm.Reset()
+		vm.Flush()
+		compilesAgain, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+		exitsAgain, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		require.Equal(t, float64(1), compilesAgain)
+		require.Equal(t, float64(refute), exitsAgain)
 	})
 
 	t.Run("OSR survives Reset: a second run reuses the resolved site", func(t *testing.T) {
@@ -1894,6 +1964,24 @@ func runModuleDivCaught(t *testing.T, prog *program.Program) (int, types.Boxed) 
 	count, err := vm.RefCount(str.Ref())
 	require.NoError(t, err)
 	return count, code
+}
+
+// bridge loops n times at module level over STRING_LEN, which native code
+// does not lower: every native entry of its header bridges.
+func bridge(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	header, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
+	b.Bind(header)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.CONST_GET, 0).Emit(instr.STRING_LEN).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(header)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(types.String("x")))
 }
 
 // emptyHeaderProgram loops n times purely on raw local reads at its own

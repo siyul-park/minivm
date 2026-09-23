@@ -10,6 +10,11 @@ const (
 	Optimized
 )
 
+// Promote is the entry count, written by a Baseline prologue on every
+// interpreted or native entry, at which the interpreter tiers an address to
+// Optimized.
+const Promote = 1024
+
 func (t Tier) String() string {
 	switch t {
 	case Baseline:

@@ -8,6 +8,12 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// key identifies one OSR site by its loop header's (address, ip): how drain
+// looks a site up to restore it once its unit's compile permanently fails.
+type key struct {
+	address, ip int
+}
+
 // site is one loop header's OSR observation state, owned by the wrapper
 // closure that replaces its threaded handler when the JIT is constructed.
 type site struct {
@@ -16,6 +22,9 @@ type site struct {
 	// module reports whether fn completes through OpComplete instead of
 	// returning through OpReturn.
 	module bool
+	// inner is s's own threaded handler, restored in place of the observer
+	// once s is known to never resolve.
+	inner func(*Interpreter)
 
 	count     int64
 	submitted bool
@@ -52,8 +61,9 @@ func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 		}
 		// translate.go completes address 0 through OpComplete regardless of
 		// fn.Typ, which i.module sets to an empty, non-nil FunctionType.
-		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0}
-		code[ip] = n.observer(s, code, code[ip])
+		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip]}
+		n.sites[key{addr, ip}] = s
+		code[ip] = n.observer(s, code, s.inner)
 	}
 }
 
@@ -119,6 +129,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		n.store.RetireAt(s.address, s.ip)
 		code[s.ip] = inner
 		s.code = nil
+		delete(n.sites, key{s.address, s.ip})
 	}
 	n.store.Leave()
 	_ = n.store.Reclaim()

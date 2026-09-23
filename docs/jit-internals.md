@@ -89,8 +89,9 @@ A non-resuming exit rebuilds every native activation as an interpreter frame, ou
 
 ## Tiers
 
-- Baseline function prologues count `Context.Entries[address]`, including interpreted and native-to-native entries. When a published Baseline reaches `promote`, `drain` submits Optimized; Optimized and OSR entries do not pay the counter cost.
-- Deopts reach `refute` → retire; that tier never recompiles for the address. An OSR site that reaches `refute` restores its threaded handler.
+- Baseline function prologues count `Context.Entries[address]`, including interpreted and native-to-native entries. When a published Baseline reaches `jit.Promote`, `drain` submits Optimized; Optimized and OSR entries do not pay the counter cost.
+- Promotion is checked only for addresses whose published code is still Baseline.
+- Deopts reach `refute` → retire; that tier never recompiles for the address. A `CALL` to an address whose Baseline failed costs one check.
 - Compiles are async on `compile.Queue`, one unit per address; the interpreter drains and publishes at its next call, header observation, or safepoint.
 - A `Pool` shares `Store`, `Queue`, and module data; each interpreter has its own `jit.Context`.
 
@@ -98,7 +99,8 @@ A non-resuming exit rebuilds every native activation as an interpreter frame, ou
 
 - Every loop header of every function known at construction, module included, is wrapped by an observer.
 - Past the threshold it submits a unit directly at `jit.Optimized` and polls `Store.CodeAt` every 256 back edges.
-- Entry reuses the current interpreter frame (`FB = bp`, `Depth = 0`). An exit rewrites that frame in place.
+- A site whose unit fails to compile or reaches `refute` restores its threaded handler and is never polled again.
+- Entry reuses the current interpreter frame (`FB = bp`, `Depth = 0`). An exit rewrites that frame in place. A materialized frame finishes its call threaded without observers.
 
 ## Metrics
 
