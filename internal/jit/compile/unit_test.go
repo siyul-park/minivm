@@ -129,25 +129,28 @@ func native(t *testing.T) {
 }
 
 func TestCompile(t *testing.T) {
-	t.Run("counts only Baseline function entries", func(t *testing.T) {
-		cases := []struct {
-			name  string
-			unit  compile.Unit
-			count bool
-		}{
-			{"baseline", compile.Unit{Function: noop(t), Tier: jit.Baseline}, true},
-			{"optimized", compile.Unit{Function: noop(t), Tier: jit.Optimized}, false},
-			{"osr", compile.Unit{Function: noop(t), Tier: jit.Baseline, OSR: true}, false},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				m := new(machine)
-				c, err := compile.Compile(tc.unit, m)
-				require.NoError(t, err)
-				require.NoError(t, c.Free())
-				require.Equal(t, tc.count, m.count)
-			})
-		}
+	t.Run("counts Baseline function entries", func(t *testing.T) {
+		m := new(machine)
+		c, err := compile.Compile(compile.Unit{Function: noop(t), Tier: jit.Baseline}, m)
+		require.NoError(t, err)
+		require.NoError(t, c.Free())
+		require.True(t, m.count)
+	})
+
+	t.Run("does not count Optimized function entries", func(t *testing.T) {
+		m := new(machine)
+		c, err := compile.Compile(compile.Unit{Function: noop(t), Tier: jit.Optimized}, m)
+		require.NoError(t, err)
+		require.NoError(t, c.Free())
+		require.False(t, m.count)
+	})
+
+	t.Run("does not count OSR entries", func(t *testing.T) {
+		m := new(machine)
+		c, err := compile.Compile(compile.Unit{Function: noop(t), Tier: jit.Baseline, OSR: true}, m)
+		require.NoError(t, err)
+		require.NoError(t, c.Free())
+		require.False(t, m.count)
 	})
 
 	t.Run("rejects a function translation cannot express", func(t *testing.T) {

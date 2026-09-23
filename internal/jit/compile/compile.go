@@ -17,11 +17,14 @@ import (
 
 // Machine emits target rows for one function.
 type Machine interface {
+	// Arch returns the target assembler architecture.
 	Arch() asm.Arch
+	// Reserve returns registers reserved from allocation.
 	Reserve() []asm.PReg
 	// Prologue begins a function at address whose slots have kinds, params
 	// of them parameters, and count requests its entry hotness counter.
 	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int)
+	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
 	// Lower emits op and reports false when the target cannot lower it.
 	Lower(a *asm.Assembler, op ssa.Operation, s Site) bool
@@ -41,13 +44,17 @@ type Machine interface {
 	Results(a *asm.Assembler, regs []asm.VReg)
 	// Call emits call site c and reports false when the target cannot.
 	Call(a *asm.Assembler, c Call, s Site) bool
+	// Move copies one virtual register to another.
 	Move(a *asm.Assembler, dst, src asm.VReg)
 }
 
 // Site is what Machine sees of the operation or terminator it lowers.
 type Site interface {
+	// Reg returns the register assigned to v.
 	Reg(v ssa.Value) asm.VReg
+	// Type returns the static type of v.
 	Type(v ssa.Value) ssa.Type
+	// Slot returns the static type of slot.
 	Slot(slot ssa.Slot) ssa.Type
 	// Deopt returns the label of an exit that abandons native code at the
 	// interpreter state of the operation.
@@ -530,6 +537,7 @@ func (l *lowering) Type(v ssa.Value) ssa.Type {
 	return l.f.Type(v)
 }
 
+// Slot returns the static type of slot.
 func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
 	kinds := l.fn.Slots()
 	if slot.Space == ssa.SpaceLocal && slot.Index >= 0 && slot.Index < len(kinds) {

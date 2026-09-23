@@ -20,16 +20,16 @@ func NewCompactPass() *CompactPass {
 }
 
 // Run compacts a program's constant and type pools.
-func (p *CompactPass) Run(_ *pass.Manager, program *program.Program) (bool, error) {
-	codes := [][]byte{program.Code}
-	for _, v := range program.Constants {
+func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
+	codes := [][]byte{prog.Code}
+	for _, v := range prog.Constants {
 		if function, ok := v.(*types.Function); ok {
 			codes = append(codes, function.Code)
 		}
 	}
 
-	constants := program.Constants
-	typs := program.Types
+	constants := prog.Constants
+	typs := prog.Types
 	constantLen, typeLen := len(constants), len(typs)
 
 	constUsed := make([]bool, len(constants))
@@ -95,8 +95,8 @@ func (p *CompactPass) Run(_ *pass.Manager, program *program.Program) (bool, erro
 		}
 	}
 
-	program.Constants = constants
-	program.Types = typs
+	prog.Constants = constants
+	prog.Types = typs
 
 	return constantLen == constSize && typeLen == typesSize, nil
 }

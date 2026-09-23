@@ -16,10 +16,10 @@ func TestNewEncoder(t *testing.T) {
 func TestEncoder_Encode(t *testing.T) {
 	encoder := arm64.NewEncoder()
 
-	goldens := []struct {
+	tests := []struct {
 		name string
 		inst asm.Instruction
-		want uint32
+		want any
 	}{
 		{"ADD X1,X2,X3", arm64.ADD(arm64.X1, arm64.X2, arm64.X3), 0x8B030041},
 		{"ADD W1,W2,W3", arm64.ADD(arm64.W1, arm64.W2, arm64.W3), 0x0B030041},
@@ -137,60 +137,49 @@ func TestEncoder_Encode(t *testing.T) {
 		{"FCVTZU W1,D2", arm64.FCVTZU(arm64.W1, arm64.D2), 0x1E790041},
 		{"FCVTZU X1,S2", arm64.FCVTZU(arm64.X1, arm64.S2), 0x9E390041},
 		{"FCVTZU X1,D2", arm64.FCVTZU(arm64.X1, arm64.D2), 0x9E790041},
+		{name: "register offset load", inst: arm64.LDRR(arm64.X3, arm64.X4, arm64.X5), want: []byte{0x83, 0x78, 0x65, 0xF8}},
+		{name: "register offset store", inst: arm64.STRR(arm64.X3, arm64.X4, arm64.X5), want: []byte{0x83, 0x78, 0x25, 0xF8}},
+		{name: "USE", inst: arm64.USE(arm64.X3), want: []byte(nil)},
+		{
+			name: "unsupported opcode",
+			inst: asm.Instruction{Op: 0xFFFF, Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2), Src2: asm.Physical(arm64.X3)},
+			want: arm64.ErrUnsupportedOpcode,
+		},
+		{name: "mixed widths", inst: arm64.ADD(arm64.X1, arm64.X2, arm64.W3), want: asm.ErrInvalidOperand},
+		{
+			name: "missing immediate",
+			inst: asm.Instruction{Op: uint16(arm64.OpADDI), Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2)},
+			want: arm64.ErrMissingImmediate,
+		},
+		{name: "unencodable logical immediate", inst: arm64.ANDI(arm64.X1, arm64.X2, 0), want: arm64.ErrMissingImmediate},
+		{name: "int destination for SCVTF", inst: arm64.SCVTF(arm64.X1, arm64.X2), want: asm.ErrInvalidOperand},
+		{name: "float source for CLZ", inst: arm64.CLZ(arm64.X1, arm64.D2), want: asm.ErrInvalidOperand},
+		{name: "B offset unaligned", inst: arm64.B(2), want: asm.ErrBranchOutOfRange},
+		{name: "B offset exceeds imm26", inst: arm64.B(1 << 27), want: asm.ErrBranchOutOfRange},
+		{name: "BEQ offset exceeds imm19", inst: arm64.BEQ(1 << 21), want: asm.ErrBranchOutOfRange},
+		{name: "CBZ offset exceeds imm19", inst: arm64.CBZ(arm64.X1, 1<<21), want: asm.ErrBranchOutOfRange},
+		{name: "TBZ offset exceeds imm14", inst: arm64.TBZ(arm64.X1, 3, 1<<17), want: asm.ErrBranchOutOfRange},
 	}
-	for _, tt := range goldens {
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := encoder.Encode(tt.inst)
-			require.NoError(t, err)
-			require.Equal(t, tt.want, binary.LittleEndian.Uint32(got))
-		})
-	}
-
-	t.Run("register offset load store scales slot index", func(t *testing.T) {
-		got, err := encoder.Encode(arm64.LDRR(arm64.X3, arm64.X4, arm64.X5))
-		require.NoError(t, err)
-		require.Equal(t, []byte{0x83, 0x78, 0x65, 0xF8}, got)
-
-		got, err = encoder.Encode(arm64.STRR(arm64.X3, arm64.X4, arm64.X5))
-		require.NoError(t, err)
-		require.Equal(t, []byte{0x83, 0x78, 0x25, 0xF8}, got)
-	})
-
-	t.Run("USE encodes nothing", func(t *testing.T) {
-		got, err := encoder.Encode(arm64.USE(arm64.X3))
-		require.NoError(t, err)
-		require.Empty(t, got)
-	})
-
-	invalid := []struct {
-		name string
-		inst asm.Instruction
-		want error
-	}{
-		{
-			"unsupported opcode",
-			asm.Instruction{Op: 0xFFFF, Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2), Src2: asm.Physical(arm64.X3)},
-			arm64.ErrUnsupportedOpcode,
-		},
-		{"mixed widths", arm64.ADD(arm64.X1, arm64.X2, arm64.W3), asm.ErrInvalidOperand},
-		{
-			"missing immediate",
-			asm.Instruction{Op: uint16(arm64.OpADDI), Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2)},
-			arm64.ErrMissingImmediate,
-		},
-		{"unencodable logical immediate", arm64.ANDI(arm64.X1, arm64.X2, 0), arm64.ErrMissingImmediate},
-		{"int destination for SCVTF", arm64.SCVTF(arm64.X1, arm64.X2), asm.ErrInvalidOperand},
-		{"float source for CLZ", arm64.CLZ(arm64.X1, arm64.D2), asm.ErrInvalidOperand},
-		{"B offset unaligned", arm64.B(2), asm.ErrBranchOutOfRange},
-		{"B offset exceeds imm26", arm64.B(1 << 27), asm.ErrBranchOutOfRange},
-		{"BEQ offset exceeds imm19", arm64.BEQ(1 << 21), asm.ErrBranchOutOfRange},
-		{"CBZ offset exceeds imm19", arm64.CBZ(arm64.X1, 1<<21), asm.ErrBranchOutOfRange},
-		{"TBZ offset exceeds imm14", arm64.TBZ(arm64.X1, 3, 1<<17), asm.ErrBranchOutOfRange},
-	}
-	for _, tt := range invalid {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := encoder.Encode(tt.inst)
-			require.ErrorIs(t, err, tt.want)
+			switch want := tt.want.(type) {
+			case error:
+				require.ErrorIs(t, err, want)
+			case []byte:
+				require.NoError(t, err)
+				if want == nil {
+					require.Empty(t, got)
+					return
+				}
+				require.Equal(t, want, got)
+			case int:
+				require.NoError(t, err)
+				require.Equal(t, uint32(want), binary.LittleEndian.Uint32(got))
+			default:
+				require.Fail(t, "invalid encoder test case")
+			}
 		})
 	}
 }

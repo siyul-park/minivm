@@ -15,6 +15,7 @@ const (
 // Optimized.
 const Promote = 1024
 
+// String returns the tier name.
 func (t Tier) String() string {
 	switch t {
 	case Baseline:

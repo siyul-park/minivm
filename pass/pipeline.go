@@ -6,6 +6,7 @@ type Pipeline[U any] struct {
 	passes []Pass[U]
 }
 
+// NewPipeline returns a pass pipeline.
 func NewPipeline[U any]() *Pipeline[U] {
 	return &Pipeline[U]{}
 }

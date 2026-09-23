@@ -67,26 +67,32 @@ func Mem(base Operand, offset int64) MemOperand {
 	return MemOperand{Base: base, Offset: offset}
 }
 
+// String returns the operand's assembly form.
 func (o VRegOperand) String() string {
 	return o.Reg.String()
 }
 
+// String returns the operand's assembly form.
 func (o PRegOperand) String() string {
 	return o.Reg.String()
 }
 
+// String returns the operand's assembly form.
 func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
+// String returns the operand's assembly form.
 func (o LabelOperand) String() string {
 	return fmt.Sprintf("label%d", o.ID)
 }
 
+// String returns the operand's assembly form.
 func (SlotsOperand) String() string {
 	return "#slots"
 }
 
+// String returns the operand's assembly form.
 func (o MemOperand) String() string {
 	if o.Offset != 0 {
 		return fmt.Sprintf("[%s, #%d]", o.Base, o.Offset)

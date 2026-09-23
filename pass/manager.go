@@ -18,6 +18,7 @@ type cacheKey struct {
 	unit   any
 }
 
+// ErrUnregisteredAnalysis reports a missing analysis registration.
 var ErrUnregisteredAnalysis = errors.New("unregistered analysis")
 
 // Register adds an analysis, keyed by its result type R.
@@ -50,6 +51,7 @@ func GetResult[R any](m *Manager, unit any) (R, error) {
 	return res.(R), nil
 }
 
+// NewManager returns a pass manager.
 func NewManager() *Manager {
 	return &Manager{
 		analyses: make(map[reflect.Type]func(*Manager, any) (any, error)),

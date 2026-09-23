@@ -74,7 +74,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 
 	changed := false
 	for _, h := range headers {
-		p, ok := preheaders[h]
+		preheader, ok := preheaders[h]
 		if !ok {
 			continue
 		}
@@ -104,7 +104,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 					}
 				}
 				if invariant {
-					dest[s] = p
+					dest[s] = preheader
 					changed = true
 				}
 			}

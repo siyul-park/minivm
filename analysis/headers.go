@@ -25,6 +25,11 @@ func Headers(fn *types.Function) ([]int, error) {
 // internal/graph's dense integer node space.
 type cfg []*BasicBlock
 
-func (g cfg) Len() int            { return len(g) }
+// Len returns the number of blocks.
+func (g cfg) Len() int { return len(g) }
+
+// Succ returns a node's successors.
 func (g cfg) Succ(node int) []int { return g[node].Succs }
+
+// Pred returns a node's predecessors.
 func (g cfg) Pred(node int) []int { return g[node].Preds }

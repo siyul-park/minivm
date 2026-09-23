@@ -3,7 +3,6 @@ package interp_test
 import (
 	"context"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,46 +84,38 @@ func TestPool_Get(t *testing.T) {
 
 	t.Run("shares one native JIT runtime across pooled interpreters, compiling once", func(t *testing.T) {
 		native(t)
-		prog := fibCallsProgram(t, 300)
+		prog := fibFlatCallsProgram(t, 1000)
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer p.Close()
 
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		require.NoError(t, first.Run(context.Background()))
+		_, err = first.Pop()
+		require.NoError(t, err)
+		first.Flush()
+
+		var compiles float64
 		require.Eventually(t, func() bool {
-			profiler := prof.New()
-			p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
-			defer p.Close()
-
-			var wg sync.WaitGroup
-			errs := make(chan error, 2)
-			for range 2 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					vm, err := p.Get(context.Background())
-					if err != nil {
-						errs <- err
-						return
-					}
-					if err := vm.Run(context.Background()); err != nil {
-						errs <- err
-						return
-					}
-					if _, err := vm.Pop(); err != nil {
-						errs <- err
-						return
-					}
-					vm.Flush()
-					p.Put(vm)
-					errs <- nil
-				}()
-			}
-			wg.Wait()
-			close(errs)
-			for err := range errs {
-				require.NoError(t, err)
-			}
-
-			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			first.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles == 1
 		}, 5*time.Second, time.Millisecond)
+
+		require.NoError(t, second.Run(context.Background()))
+		_, err = second.Pop()
+		require.NoError(t, err)
+		second.Flush()
+
+		compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.Equal(t, float64(1), compiles)
+
+		p.Put(first)
+		p.Put(second)
 	})
 
 }

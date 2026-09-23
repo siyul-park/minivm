@@ -116,6 +116,7 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 
 // Branch transfers control to labels: OpBranch takes labels[0] on nonzero,
 // OpTable takes labels[i] for index i and the last label out of range.
+// Branch emits a branch for a SSA terminator.
 func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label) {
 	switch t.Op {
 	case ssa.OpJump:
@@ -133,6 +134,7 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 
 // Return boxes results into the interpreter's return slots. OpReturn first
 // releases reference-capable frame slots, matching threaded RETURN.
+// Return emits a native return.
 func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 	base := len(m.kinds)
 	if t.Op == ssa.OpReturn {
@@ -156,6 +158,7 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 
 // Budget counts Context.Budget down and branches to safepoint when it is
 // spent.
+// Budget emits the loop safepoint check.
 func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	a.Emit(
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
@@ -168,6 +171,7 @@ func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 // Exit writes the exit id and trap, then calls the preserving stub through
 // EXIT. EXIT has BLR encoding with FlowNext, so use intervals stay live across
 // the stub; deopt does not resume and other exits resume in native code.
+// Exit emits a native exit.
 func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	trap := jit.TrapBridge
 	if k == jit.ExitDeopt {
@@ -205,6 +209,7 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 // through Context.Natives, or, when Self, branches directly to the unit's
 // own entry. Missing code, depth, or space takes ExitCall; an owned Callee
 // is released once the callee returns, a borrowed one left alone.
+// Call emits a native call.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > 4095 {
 		return false

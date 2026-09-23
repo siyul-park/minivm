@@ -137,6 +137,7 @@ func (c *Context) Read(record int, v Value) uint64 {
 	return c.Word(c.Records[record].SP + uintptr(8*v.Loc.Slot))
 }
 
+// String returns the trap name.
 func (t Trap) String() string {
 	switch t {
 	case TrapReturn:

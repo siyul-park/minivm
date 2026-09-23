@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Interpreter executes a program.
 type Interpreter struct {
 	// ctx is non-nil only while Run is executing and is cleared before Run returns.
 	ctx context.Context
@@ -78,6 +79,7 @@ type Interpreter struct {
 // Option configures an Interpreter or Pool at construction. Only the With
 // constructors produce one, so callers can name and collect options without
 // reaching the unexported state they configure.
+// Option configures an Interpreter.
 type Option func(*option)
 
 type option struct {
@@ -119,6 +121,7 @@ const (
 	negZeroF64 = uint64(1) << 63
 )
 
+// WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
 }
@@ -136,26 +139,32 @@ func WithProfiler(p *prof.Profiler) Option {
 	return func(o *option) { o.profiler = p }
 }
 
+// WithFrame sets initial frame capacity.
 func WithFrame(val int) Option {
 	return func(o *option) { o.frame = val }
 }
 
+// WithStack sets initial stack capacity.
 func WithStack(val int) Option {
 	return func(o *option) { o.stack = val }
 }
 
+// WithHeap sets initial heap capacity.
 func WithHeap(val int) Option {
 	return func(o *option) { o.heap = val }
 }
 
+// WithHeapLimit sets the heap limit.
 func WithHeapLimit(val int) Option {
 	return func(o *option) { o.maxHeap = val }
 }
 
+// WithTick sets the execution tick interval.
 func WithTick(val int) Option {
 	return func(o *option) { o.tick = val }
 }
 
+// WithFuel sets the execution fuel.
 func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
 }
@@ -163,6 +172,7 @@ func WithFuel(val uint64) Option {
 // WithThreshold enables the JIT: n calls to a *types.Function before it is
 // compiled to native code. n < 0 disables it; this is the default. The JIT
 // also requires runtime.GOARCH == "arm64" and neither WithHook nor WithFuel.
+// WithThreshold sets the JIT compilation threshold.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
@@ -335,6 +345,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	return i
 }
 
+// Run executes the program until it returns or exits.
 func (i *Interpreter) Run(ctx context.Context) (err error) {
 	i.ctx = ctx
 	i.done = nil
@@ -354,23 +365,28 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	}
 }
 
+// Marshal converts a host value to a VM value.
 func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
 	defer i.guard(&err)
 	return i.codec.Marshal(i, v)
 }
 
+// Unmarshal converts a VM value to a host value.
 func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
 	return i.codec.Unmarshal(i, v, dst)
 }
 
+// Context returns the current execution context.
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
+// FP returns the current frame pointer.
 func (i *Interpreter) FP() int {
 	return i.fp
 }
 
+// Opcode returns the current opcode.
 func (i *Interpreter) Opcode() (instr.Opcode, error) {
 	fn, ip := i.Func(), i.IP()
 	if fn < 0 || fn >= len(i.instrs) || ip < 0 || ip >= len(i.instrs[fn]) {
@@ -379,14 +395,17 @@ func (i *Interpreter) Opcode() (instr.Opcode, error) {
 	return instr.Opcode(i.instrs[fn][ip]), nil
 }
 
+// Func returns the current function address.
 func (i *Interpreter) Func() int {
 	return i.fr.addr
 }
 
+// IP returns the current instruction pointer.
 func (i *Interpreter) IP() int {
 	return i.fr.ip
 }
 
+// Frame returns an active frame by depth.
 func (i *Interpreter) Frame(n int) (fn, ip, bp int, err error) {
 	if n < 0 || n >= i.fp {
 		return 0, 0, 0, ErrFrameUnderflow
@@ -395,6 +414,7 @@ func (i *Interpreter) Frame(n int) (fn, ip, bp int, err error) {
 	return f.addr, f.ip, f.bp, nil
 }
 
+// Const returns a constant by index.
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {
 		return 0, ErrSegmentationFault
@@ -402,6 +422,7 @@ func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	return i.constants[idx], nil
 }
 
+// Global returns a global by index.
 func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.globals) {
 		return 0, ErrSegmentationFault
@@ -439,6 +460,7 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	return nil
 }
 
+// Local returns a local by index.
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 	f := i.fr
 	addr := f.bp + idx
@@ -473,6 +495,7 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	return nil
 }
 
+// Load returns and owns a heap value.
 func (i *Interpreter) Load(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
@@ -529,6 +552,7 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	return nil
 }
 
+// Alloc allocates or retains a heap value.
 func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	defer i.guard(&err)
 	switch v := val.(type) {
@@ -561,6 +585,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	return addr, nil
 }
 
+// Retain adds one heap reference.
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
@@ -571,6 +596,7 @@ func (i *Interpreter) Retain(addr int) (types.Value, error) {
 	return val, nil
 }
 
+// Release drops one heap reference.
 func (i *Interpreter) Release(addr int) error {
 	if !i.alive(addr) {
 		return ErrSegmentationFault
@@ -600,6 +626,7 @@ func (i *Interpreter) HeapLen() int {
 	return len(i.heap)
 }
 
+// Push adds a value to the operand stack.
 func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {
@@ -617,6 +644,7 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	return nil
 }
 
+// Pop removes and returns the top stack value.
 func (i *Interpreter) Pop() (types.Value, error) {
 	if i.sp == 0 {
 		return nil, ErrStackUnderflow
@@ -654,6 +682,7 @@ func (i *Interpreter) Peek(n int) (types.Boxed, error) {
 	return i.stack[i.sp-1-n], nil
 }
 
+// Len returns the operand stack length.
 func (i *Interpreter) Len() int {
 	return i.sp
 }
@@ -681,6 +710,7 @@ func (i *Interpreter) Close() error {
 	return i.native.close()
 }
 
+// Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
 	// Keep the recent peak, but let a smaller heap shrink an old high-water mark.
 	dynamic := len(i.heap) - i.base

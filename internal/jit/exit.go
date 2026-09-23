@@ -83,6 +83,7 @@ const (
 	ExitCall
 )
 
+// String returns the exit kind name.
 func (k Kind) String() string {
 	switch k {
 	case ExitDeopt:

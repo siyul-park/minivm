@@ -18,18 +18,19 @@ func TestNewCompactPass(t *testing.T) {
 }
 
 func TestCompactPass_Run(t *testing.T) {
-	t.Run("reports preserved when the pools are already compact", func(t *testing.T) {
-		p := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
-		preserved, err := transform.NewCompactPass().Run(pass.NewManager(), p)
-		require.NoError(t, err)
-		require.True(t, preserved)
-	})
-
 	tests := []struct {
-		name     string
-		program  *program.Program
-		expected *program.Program
+		name      string
+		program   *program.Program
+		expected  *program.Program
+		preserved bool
+		run       bool
+		want      types.Value
 	}{
+		{
+			name:      "already compact",
+			program:   program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}),
+			preserved: true,
+		},
 		{
 			name: "comparable constants",
 			program: program.New(
@@ -71,7 +72,9 @@ func TestCompactPass_Run(t *testing.T) {
 					instr.New(instr.REF_TEST, 0),
 					instr.New(instr.REF_CAST, 1),
 					instr.New(instr.MAP_NEW_DEFAULT, 2)},
-				program.WithTypes(types.TypeString, types.TypeError, types.NewMapType(types.TypeI32, types.TypeI32)))},
+				program.WithTypes(types.TypeString, types.TypeError, types.NewMapType(types.TypeI32, types.TypeI32))),
+			preserved: true,
+		},
 		{
 			name: "uncomparable constants",
 			program: program.New(
@@ -87,7 +90,9 @@ func TestCompactPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 1)},
 				program.WithConstants(
 					types.TypedArray[float64]{1},
-					types.TypedArray[float64]{1}))},
+					types.TypedArray[float64]{1})),
+			preserved: true,
+		},
 		{
 			name: "nil constants",
 			program: program.New(
@@ -99,39 +104,49 @@ func TestCompactPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CONST_GET, 0)},
-				program.WithConstants([]types.Value{nil}...))}}
-
-	for _, tt := range tests {
-		m := pass.NewManager()
-
-		t.Run(tt.name, func(t *testing.T) {
-			actual := tt.program
-			_, err := transform.NewCompactPass().Run(m, actual)
-			require.NoError(t, err)
-			require.Equal(t, tt.expected, actual)
-		})
+				program.WithConstants([]types.Value{nil}...))},
+		{
+			name: "preserves execution",
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.I32_ADD)},
+				program.WithConstants(types.I32(21), types.I32(21))),
+			preserved: false,
+			run:       true,
+		},
 	}
 
-	t.Run("preserves execution", func(t *testing.T) {
-		prog := program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.I32_ADD)},
-			program.WithConstants(types.I32(21), types.I32(21)))
-		before := interp.New(prog, interp.WithTick(1))
-		defer before.Close()
-		require.NoError(t, before.Run(context.Background()))
-		want, err := before.Pop()
-		require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := tt.program
+			var want types.Value
+			if tt.run {
+				before := interp.New(actual, interp.WithTick(1))
+				defer before.Close()
+				require.NoError(t, before.Run(context.Background()))
+				var err error
+				want, err = before.Pop()
+				require.NoError(t, err)
+			}
 
-		_, err = transform.NewCompactPass().Run(pass.NewManager(), prog)
-		require.NoError(t, err)
-		after := interp.New(prog, interp.WithTick(1))
-		defer after.Close()
-		require.NoError(t, after.Run(context.Background()))
-		got, err := after.Pop()
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	})
+			preserved, err := transform.NewCompactPass().Run(pass.NewManager(), actual)
+			require.NoError(t, err)
+			require.Equal(t, tt.preserved, preserved)
+			if tt.expected != nil {
+				require.Equal(t, tt.expected, actual)
+			}
+			if !tt.run {
+				return
+			}
+
+			after := interp.New(actual, interp.WithTick(1))
+			defer after.Close()
+			require.NoError(t, after.Run(context.Background()))
+			got, err := after.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
 }
