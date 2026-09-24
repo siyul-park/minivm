@@ -18,31 +18,35 @@ import (
 
 // machine records every call Lower makes, in order.
 type machine struct {
-	calls   []string
-	kinds   []types.Kind
-	count   bool
-	results []types.Kind
-	regs    map[ssa.Value]asm.VReg
-	moves   [][2]asm.VReg
-	uses    [][]asm.VReg
-	spills  []int
-	sites   []compile.Call
+	calls     []string
+	kinds     []types.Kind
+	count     bool
+	arguments []types.Kind
+	results   []types.Kind
+	regs      map[ssa.Value]asm.VReg
+	moves     [][2]asm.VReg
+	uses      [][]asm.VReg
+	spills    []int
+	sites     []compile.Call
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
 func (m *machine) Reserve() []asm.PReg { return nil }
 
-func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bool, _ int, results []types.Kind) {
+func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bool, _ int, arguments, results []types.Kind) []asm.VReg {
 	m.calls = append(m.calls, "prologue")
 	m.kinds = kinds
 	m.count = count
+	m.arguments = arguments
 	m.results = results
+	return nil
 }
 
 func (m *machine) Epilogue(*asm.Assembler) { m.calls = append(m.calls, "epilogue") }
 
-func (m *machine) Enter(a *asm.Assembler, results []types.Kind) asm.Label {
+func (m *machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
 	m.calls = append(m.calls, "enter")
+	m.arguments = arguments
 	m.results = results
 	label := a.Label()
 	a.Bind(label)
@@ -373,6 +377,7 @@ func TestLower(t *testing.T) {
 			Address: 2, Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
 			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(1)}, Owned: false,
 			Registers: []types.Kind{types.KindI32},
+			Arguments: []types.Kind{types.KindI32},
 		}, site)
 		require.Equal(t, []jit.Exit{{
 			Kind:   jit.ExitCall,
@@ -383,6 +388,24 @@ func TestLower(t *testing.T) {
 			}}},
 			Results: []types.Kind{types.KindI32},
 		}}, exits)
+	})
+
+	t.Run("does not register-pass an i64 argument", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI64(7))
+		callee := constant(b, entry, types.BoxRef(2))
+		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		caller := function(0, 0, instr.New(instr.CALL))
+		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}}}
+		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
+		require.NoError(t, err)
+		require.Empty(t, m.sites[0].Arguments)
 	})
 
 	t.Run("keeps the retain and release for a callee retained more than once", func(t *testing.T) {

@@ -23,15 +23,19 @@ type Machine interface {
 	Reserve() []asm.PReg
 	// Prologue begins a function at address whose slots have kinds, params
 	// of them parameters, and count requests its entry hotness counter.
-	// results is the function's register-convention results (see Enter),
-	// empty when none apply: Prologue keeps it for OpReturn to consult.
-	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, results []types.Kind)
+	// arguments is the function's register-convention parameters (see
+	// arguments), results its register-convention results (see Enter),
+	// both empty when none apply. Prologue returns one register per
+	// argument holding its incoming value, and keeps results for OpReturn
+	// to consult.
+	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind) []asm.VReg
 	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
 	// Enter emits the Go entry stub after Epilogue and returns its label:
-	// what Lower resolves to the native code's entry offset. results is the
-	// function's register-convention results, empty when none apply.
-	Enter(a *asm.Assembler, results []types.Kind) asm.Label
+	// what Lower resolves to the native code's entry offset. arguments and
+	// results are the function's register-convention parameters and
+	// results, empty when none apply.
+	Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label
 	// Lower emits op and reports false when the target cannot lower it.
 	Lower(a *asm.Assembler, op ssa.Operation, s Site) bool
 	// Branch transfers control to labels, one per edge of t.
@@ -104,6 +108,9 @@ type Call struct {
 	// fact of the callee's own types.Function, so caller and callee always
 	// agree on it regardless of which unit or tier either compiles as.
 	Registers []types.Kind
+	// Arguments is the callee's register-convention parameters (see
+	// arguments): each also moves into X0/X1, on top of its slot store.
+	Arguments []types.Kind
 }
 
 type lowering struct {
@@ -135,6 +142,11 @@ type lowering struct {
 	// enter is the Go entry stub Enter binds, resolved to a byte offset
 	// after Build.
 	enter asm.Label
+	// args holds each register-passed parameter's incoming value while it
+	// still equals its slot: only during block 0, which runs once per
+	// activation (see rotate), and until an OpStore to that slot. Cleared
+	// entries and every later block read the slot instead.
+	args []asm.VReg
 
 	// op is the operation or terminator being lowered.
 	op ssa.Operation
@@ -301,8 +313,12 @@ func (l *lowering) function() error {
 		// function was called with: the prologue must clear none of them.
 		params = len(kinds)
 	}
+	var args []types.Kind
+	if !l.osr {
+		args = arguments(l.fn)
+	}
 	results := registers(l.fn)
-	l.m.Prologue(l.a, kinds, params, l.count, l.address, results)
+	l.args = l.m.Prologue(l.a, kinds, params, l.count, l.address, args, results)
 	if l.osr {
 		if err := l.preload(); err != nil {
 			return err
@@ -335,6 +351,7 @@ func (l *lowering) function() error {
 		if err := l.terminator(b.Terminator, labels); err != nil {
 			return err
 		}
+		l.args = nil
 	}
 	for _, e := range l.edges {
 		l.a.Bind(e.label)
@@ -349,7 +366,7 @@ func (l *lowering) function() error {
 		}
 	}
 	l.m.Epilogue(l.a)
-	l.enter = l.m.Enter(l.a, results)
+	l.enter = l.m.Enter(l.a, args, results)
 	return l.err
 }
 
@@ -368,6 +385,27 @@ func registers(fn *types.Function) []types.Kind {
 		return nil
 	}
 	kinds := types.Kinds(returns)
+	for _, k := range kinds {
+		if k == types.KindI64 {
+			return nil
+		}
+	}
+	return kinds
+}
+
+// arguments reports fn's register-convention parameters: at most two, none
+// i64, in X0/X1 like registers' results. Every other function passes its
+// arguments through slots alone. Caller and callee agree on this static fact
+// of fn at every unit and tier.
+func arguments(fn *types.Function) []types.Kind {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	params := fn.Typ.Params
+	if len(params) == 0 || len(params) > 2 {
+		return nil
+	}
+	kinds := types.Kinds(params)
 	for _, k := range kinds {
 		if k == types.KindI64 {
 			return nil
@@ -410,6 +448,10 @@ func (l *lowering) operation(op ssa.Operation) error {
 	case ssa.OpConst:
 		l.consts[op.Results[0]] = op.Const
 	case ssa.OpLoad:
+		if i, ok := l.argument(op.Slot); ok {
+			l.m.Move(l.a, l.Reg(op.Results[0]), l.args[i])
+			return nil
+		}
 		if l.f.Type(op.Results[0]) == ssa.TypeI64 {
 			l.raw[op.Results[0]] = true
 		}
@@ -439,7 +481,11 @@ func (l *lowering) operation(op ssa.Operation) error {
 		l.emit(id)
 		l.m.Results(l.a, results)
 		return l.err
-	case ssa.OpStore, ssa.OpRelease, ssa.OpGuardShape:
+	case ssa.OpStore:
+		if i, ok := l.argument(op.Slot); ok {
+			l.args[i] = asm.VReg{}
+		}
+	case ssa.OpRelease, ssa.OpGuardShape:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
@@ -448,6 +494,15 @@ func (l *lowering) operation(op ssa.Operation) error {
 	}
 	l.deopt()
 	return l.err
+}
+
+// argument reports the index of the register-passed parameter slot names
+// while its incoming register value is still current (see args).
+func (l *lowering) argument(slot ssa.Slot) (int, bool) {
+	if slot.Space != ssa.SpaceLocal || slot.Base != 0 || slot.Index < 0 || slot.Index >= len(l.args) {
+		return 0, false
+	}
+	return slot.Index, l.args[slot.Index] != asm.VReg{}
 }
 
 func (l *lowering) deopt() {
@@ -661,6 +716,7 @@ func (l *lowering) call(op ssa.Operation) error {
 		Owned:     owned,
 		Self:      !l.osr && c.Ref() == l.address,
 		Registers: registers(target),
+		Arguments: arguments(target),
 	}
 	if !l.m.Call(l.a, site, l) {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())

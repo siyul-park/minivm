@@ -1229,6 +1229,73 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantRC, gotRC)
 	})
 
+	t.Run("a deopt inside a callee with register-passed ref and i32 parameters matches threaded, including the ref's RefCount", func(t *testing.T) {
+		native(t)
+		// rec(s, n) = n < 1 ? n : rec(s, n-1) + 1. The module warms rec(s, 2),
+		// then calls rec(s, 30) under a handler: WithFrame(10) deopts it
+		// several native activations deep.
+		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+		small := fb.Label()
+		fb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_LT_S)).BrIf(small)
+		fb.Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		)
+		fb.Bind(small).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN))
+		rec := fb.MustBuild()
+
+		mb := instr.NewBuilder()
+		loop, done, start, end, catch := mb.Label(), mb.Label(), mb.Label(), mb.Label(), mb.Label()
+		mb.Bind(loop)
+		mb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.I32_GE_S).BrIf(done)
+		mb.Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		mb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		mb.Br(loop)
+		mb.Bind(done)
+		mb.Bind(start).Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 30).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		mb.Bind(end)
+		mb.Bind(catch).Emit(instr.ERROR_CODE)
+		mb.Try(start, end, catch, 1)
+		code, err := mb.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(rec, types.String("s")), program.WithHandlers(mb.Handlers()...))
+
+		wantVM := interp.New(prog, interp.WithFrame(10))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		want, err := wantVM.Pop()
+		require.NoError(t, err)
+		wantConst, err := wantVM.Const(1)
+		require.NoError(t, err)
+		wantRC, err := wantVM.RefCount(wantConst.Ref())
+		require.NoError(t, err)
+
+		var runErr, popErr, rcErr error
+		var got types.Value
+		var gotRC int
+		var exits float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(10), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			c, _ := vm.Const(1)
+			gotRC, rcErr = vm.RefCount(c.Ref())
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, rcErr)
+		require.Equal(t, want, got)
+		require.Equal(t, wantRC, gotRC)
+	})
+
 	t.Run("a native call to an uncompiled function deoptimizes an ExitCall, matching threaded", func(t *testing.T) {
 		native(t)
 		prog := outerInnerProgram(t, 1000)

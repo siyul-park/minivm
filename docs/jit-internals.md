@@ -74,6 +74,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 - X25 (frame base) and X27 (`Context.Depth`) are pinned and caller-maintained: a call adds `8·Base` to X25 around `BL`/`BLR`; prologue and epilogue step X27; only exits store it to `Context.Depth`, which is exact at every trap.
 - `Code.Native()` is the body at offset 0, installed in `Natives`. `Code.Entry()` is a Go entry stub after the epilogue: it loads X25/X27 from `Context.FB`/`Context.Depth`, calls the body, and boxes register results into the frame.
 - A function with one or two non-`i64` results (`compile.registers`) returns them in X0/X1; its callers read them after a `DEF` row. `OpComplete` never uses registers.
+- A function with one or two non-`i64` parameters (`compile.arguments`) also receives them in X0/X1; every argument still has its boxed slot. A block-0 load of such a parameter reads the register until a store to its slot; every other load reads the slot. OSR units read slots.
 
 ## Exits
 

@@ -46,6 +46,8 @@ The agent `MUST NOT` delegate a vague objective. Parallel work `MUST` have disjo
 
 Exploration `MUST` use Haiku.
 
+Before delegating, the agent `MUST` weigh the delegate's cost — context ramp-up, edit, verification, plus the handoff and the review of its report — against doing the work itself with its own context and more expensive tokens, and `MUST` take the cheaper path. It `SHOULD` do small, already-understood edits itself (comment or doc trims, golden fixes, merging duplicate tests, running gates or benchmarks). It `SHOULD` resume a delegate that already holds the context rather than spawn a new one. A delegate `MUST NOT` end its turn waiting on background work.
+
 When a task exceeds the agent's own capability to resolve reliably, the agent `MUST` delegate it to an adviser of higher capability (Sonnet above Haiku; Opus above Sonnet) instead of guessing, working around, or declaring it out of scope. The handoff `MUST` carry the evidence gathered so far and the smallest unresolved decision.
 
 ## Workflow

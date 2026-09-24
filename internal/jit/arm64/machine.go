@@ -54,7 +54,11 @@ func (m *Machine) Reserve() []asm.PReg {
 // from Context before the outermost call. results is the function's
 // register-convention results (see compile's registers): Return keeps it to
 // decide whether OpReturn moves results to X0/X1 or boxes them to the frame.
-func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, results []types.Kind) {
+// arguments is the function's register-convention parameters: Prologue
+// moves each out of X0/X1 into a fresh vreg, returned in order. It captures
+// them after SP is lowered (a spilled capture stores SP-relative) and emits
+// every DEF before any move (no capture may take a register not yet read).
+func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind) []asm.VReg {
 	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: results}
 	a.Bind(m.entry)
 	a.Emit(
@@ -78,6 +82,29 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, cou
 	for i := params; i < len(kinds); i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 	}
+	for i := range arguments {
+		a.Emit(target.DEF(register(i)))
+	}
+	regs := make([]asm.VReg, len(arguments))
+	for i, k := range arguments {
+		src := register(i)
+		m.temp--
+		switch k.Repr() {
+		case types.KindF32:
+			regs[i] = asm.NewVReg(m.temp, asm.RegTypeFloat, asm.Width32)
+			a.Emit(target.FMOV(regs[i], src))
+		case types.KindF64:
+			regs[i] = asm.NewVReg(m.temp, asm.RegTypeFloat, asm.Width64)
+			a.Emit(target.FMOV(regs[i], src))
+		case types.KindRef:
+			regs[i] = asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
+			a.Emit(target.MOV(regs[i], src))
+		default:
+			regs[i] = asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width32)
+			a.Emit(target.MOVW(regs[i], src))
+		}
+	}
+	return regs
 }
 
 // Epilogue ends a function: every return branches here to pop the record
@@ -96,16 +123,29 @@ func (m *Machine) Epilogue(a *asm.Assembler) {
 // Enter emits the Go entry stub after the epilogue, at code offset > 0 so
 // the function body stays at offset 0 for native-to-native calls. It loads
 // X25 and X27 from Context (the interpreter writes both before every Enter
-// and Resume), calls the function's own entry, boxes each register-
-// convention result from X0/X1 into the VM frame by its declared kind
-// (i64 excluded: registers(fn) never admits one), and returns to Go. Enter
-// returns the stub's label so Lower can resolve its byte offset after Build.
-func (m *Machine) Enter(a *asm.Assembler, results []types.Kind) asm.Label {
+// and Resume), loads each register-convention parameter from its slot into
+// X0/X1 (low 32 bits for a narrow or f32 payload, the whole word for f64
+// and ref), calls the function's own entry, boxes each register-convention
+// result from X0/X1 into the VM frame by its declared kind (i64 excluded:
+// registers(fn) never admits one), and returns to Go. Enter returns the
+// stub's label so Lower can resolve its byte offset after Build.
+func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
 	label := a.Label()
 	a.Bind(label)
 	a.Emit(
 		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 		target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+	)
+	for i, k := range arguments {
+		dst := register(i)
+		switch k.Repr() {
+		case types.KindRef, types.KindF64:
+			a.Emit(target.LDR(dst, target.X25, int16(8*i)))
+		default:
+			a.Emit(target.LDR(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), target.X25, int16(8*i)))
+		}
+	}
+	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		target.BLLabel(m.entry),
@@ -316,6 +356,26 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.STR(target.X17, target.X16, record(jit.RecordExit)),
 		target.ADDI(target.X25, target.X25, uint16(8*c.Base)),
 	)
+	// A register-passed argument also moves into X0/X1 raw, on top of its
+	// boxed slot store (exits read only the slot). The moves sit right
+	// before the branch so no other value is allocated X0/X1 in between.
+	for i := range c.Arguments {
+		src, dst := s.Reg(c.Args[i]), register(i)
+		switch {
+		case src.Type() == asm.RegTypeFloat:
+			a.Emit(target.FMOV(dst, src))
+		case src.Width() == asm.Width32:
+			a.Emit(target.MOV(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), src))
+		default:
+			a.Emit(target.MOV(dst, src))
+		}
+	}
+	if len(c.Arguments) > 0 {
+		a.Emit(target.USE(target.X0))
+		if len(c.Arguments) > 1 {
+			a.Emit(target.USE(target.X1))
+		}
+	}
 	if c.Self {
 		a.Emit(target.BLLabel(m.entry))
 	} else {
