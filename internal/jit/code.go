@@ -1,6 +1,10 @@
 package jit
 
-import "github.com/siyul-park/minivm/internal/asm"
+import (
+	"fmt"
+
+	"github.com/siyul-park/minivm/internal/asm"
+)
 
 // Tier is how far a function's native code is optimized; the zero Tier is none.
 type Tier uint8
@@ -43,6 +47,11 @@ type Code struct {
 	Results int
 	Exits   []Exit
 
+	// native is the body's own address: offset 0, what natives[Address]
+	// holds for a native-to-native call. entry is the Go entry stub's
+	// address, native plus stub's byte offset: what Go crosses into native
+	// code through (jit.Enter/interp's fresh calls and OSR entries).
+	native uintptr
 	entry  uintptr
 	size   int
 	buffer *asm.Buffer
@@ -50,21 +59,35 @@ type Code struct {
 
 // NewCode links code into a new Buffer sized len(code) and returns the
 // native code of address rooted at ip (an OSR unit when osr) at tier, whose
-// exits it takes are exits and TrapReturn value count is results.
-func NewCode(address, ip int, osr bool, tier Tier, results int, code []byte, exits []Exit) (*Code, error) {
+// exits it takes are exits, TrapReturn value count is results, and whose Go
+// entry stub (see Entry) sits at byte offset stub from the body.
+func NewCode(address, ip int, osr bool, tier Tier, results int, code []byte, exits []Exit, stub int) (*Code, error) {
+	if stub < 0 || stub > len(code) {
+		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, stub)
+	}
 	buffer, err := asm.NewBuffer(len(code))
 	if err != nil {
 		return nil, err
 	}
-	entry, err := asm.Link(buffer, code)
+	native, err := asm.Link(buffer, code)
 	if err != nil {
 		_ = buffer.Free()
 		return nil, err
 	}
-	return &Code{Address: address, IP: ip, OSR: osr, Tier: tier, Results: results, Exits: exits, entry: entry, size: len(code), buffer: buffer}, nil
+	return &Code{
+		Address: address, IP: ip, OSR: osr, Tier: tier, Results: results, Exits: exits,
+		native: native, entry: native + uintptr(stub), size: len(code), buffer: buffer,
+	}, nil
 }
 
-// Entry returns c's native entry address.
+// Native returns c's body address, offset 0: the address a native-to-native
+// call dispatches to.
+func (c *Code) Native() uintptr {
+	return c.native
+}
+
+// Entry returns c's Go entry stub address: where a fresh call from Go, or an
+// OSR entry, crosses into native code.
 func (c *Code) Entry() uintptr {
 	return c.entry
 }

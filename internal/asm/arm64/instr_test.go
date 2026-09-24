@@ -926,6 +926,12 @@ func TestUSE(t *testing.T) {
 	require.NotEmpty(t, inst.String())
 }
 
+func TestDEF(t *testing.T) {
+	inst := arm64.DEF(arm64.X0)
+	require.Equal(t, uint16(arm64.OpDEF), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
 func TestBRK(t *testing.T) {
 	inst := arm64.BRK(1)
 	require.Equal(t, uint16(arm64.OpBRK), inst.Op)

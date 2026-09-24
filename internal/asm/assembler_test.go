@@ -462,3 +462,29 @@ func TestAssembler_Build(t *testing.T) {
 		), code)
 	})
 }
+
+func TestAssembler_Offset(t *testing.T) {
+	t.Run("reports a bound label's byte offset after Build", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		label := assembler.Label()
+		assembler.Emit(arm64.NOP(), arm64.NOP())
+		assembler.Bind(label)
+		assembler.Emit(arm64.RET())
+
+		_, err := assembler.Build()
+		require.NoError(t, err)
+
+		offset, ok := assembler.Offset(label)
+		require.True(t, ok)
+		require.Equal(t, 8, offset)
+	})
+	t.Run("reports nothing before Build", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		label := assembler.Label()
+		assembler.Bind(label)
+		assembler.Emit(arm64.RET())
+
+		_, ok := assembler.Offset(label)
+		require.False(t, ok)
+	})
+}

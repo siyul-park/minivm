@@ -944,7 +944,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	case OpNOP:
 		return enc(0xD503201F), nil
 
-	case OpUSE:
+	case OpUSE, OpDEF:
 		return nil, nil
 
 	case OpHLT:

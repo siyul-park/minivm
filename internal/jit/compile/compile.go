@@ -23,9 +23,15 @@ type Machine interface {
 	Reserve() []asm.PReg
 	// Prologue begins a function at address whose slots have kinds, params
 	// of them parameters, and count requests its entry hotness counter.
-	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int)
+	// results is the function's register-convention results (see Enter),
+	// empty when none apply: Prologue keeps it for OpReturn to consult.
+	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, results []types.Kind)
 	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
+	// Enter emits the Go entry stub after Epilogue and returns its label:
+	// what Lower resolves to the native code's entry offset. results is the
+	// function's register-convention results, empty when none apply.
+	Enter(a *asm.Assembler, results []types.Kind) asm.Label
 	// Lower emits op and reports false when the target cannot lower it.
 	Lower(a *asm.Assembler, op ssa.Operation, s Site) bool
 	// Branch transfers control to labels, one per edge of t.
@@ -93,6 +99,11 @@ type Call struct {
 	// and the unit is not OSR (its entry is a loop header): the call branches
 	// to its own entry instead of Context.Natives.
 	Self bool
+	// Registers is the callee's register-convention results (see registers),
+	// empty when the callee returns through the VM frame. It is a static
+	// fact of the callee's own types.Function, so caller and callee always
+	// agree on it regardless of which unit or tier either compiles as.
+	Registers []types.Kind
 }
 
 type lowering struct {
@@ -121,6 +132,9 @@ type lowering struct {
 	edges  []edge
 	stubs  []stub
 	err    error
+	// enter is the Go entry stub Enter binds, resolved to a byte offset
+	// after Build.
+	enter asm.Label
 
 	// op is the operation or terminator being lowered.
 	op ssa.Operation
@@ -165,12 +179,12 @@ var ErrUnsupported = errors.New("unsupported lowering")
 // 0 may carry parameters, the operand stack the interpreter left at its
 // header (transform.Translate roots there); Lower loads them itself (see
 // params) instead of rejecting them.
-func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) ([]byte, []jit.Exit, error) {
+func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) ([]byte, []jit.Exit, int, error) {
 	if f.Len() == 0 {
-		return nil, nil, fmt.Errorf("%w: function shape", ErrUnsupported)
+		return nil, nil, 0, fmt.Errorf("%w: function shape", ErrUnsupported)
 	}
 	if !osr && len(f.Block(0).Params) > 0 {
-		return nil, nil, fmt.Errorf("%w: entry parameters", ErrUnsupported)
+		return nil, nil, 0, fmt.Errorf("%w: entry parameters", ErrUnsupported)
 	}
 	for _, p := range f.Block(0).Params {
 		// A not-yet-loaded i64 param would need every later block-0 param's
@@ -178,7 +192,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		// position, which this backend does not implement; refuse rather
 		// than risk misboxing one on a guard failure.
 		if f.Type(p) == ssa.TypeI64 {
-			return nil, nil, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
+			return nil, nil, 0, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
 		}
 	}
 	homes := map[int]int{}
@@ -189,7 +203,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 			}
 			for _, frame := range op.Frames {
 				if frame.Base != 0 && len(frame.Locals) > 0 {
-					return nil, nil, fmt.Errorf("%w: outer-frame deopt", ErrUnsupported)
+					return nil, nil, 0, fmt.Errorf("%w: outer-frame deopt", ErrUnsupported)
 				}
 				for _, local := range frame.Locals {
 					if _, ok := homes[local.Index]; !ok {
@@ -207,24 +221,28 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	l.a.Reserve(m.Reserve()...)
 	l.a.ReserveSlots(len(homes))
 	if err := l.function(); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	code, err := l.a.Build()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
+	}
+	entry, ok := l.a.Offset(l.enter)
+	if !ok {
+		return nil, nil, 0, fmt.Errorf("%w: unresolved entry stub", ErrUnsupported)
 	}
 	exits := make([]jit.Exit, len(l.exits))
 	for id, e := range l.exits {
 		for _, p := range l.places[id] {
 			loc, ok := l.a.Loc(p.reg)
 			if !ok {
-				return nil, nil, fmt.Errorf("%w: exit %d names v%d with no location", ErrUnsupported, id, p.reg.ID())
+				return nil, nil, 0, fmt.Errorf("%w: exit %d names v%d with no location", ErrUnsupported, id, p.reg.ID())
 			}
 			p.to.Loc = loc
 		}
 		exits[id] = *e
 	}
-	return code, exits, nil
+	return code, exits, entry, nil
 }
 
 // borrowed reports every OpConst ref value used only as CALL callees and
@@ -283,7 +301,8 @@ func (l *lowering) function() error {
 		// function was called with: the prologue must clear none of them.
 		params = len(kinds)
 	}
-	l.m.Prologue(l.a, kinds, params, l.count, l.address)
+	results := registers(l.fn)
+	l.m.Prologue(l.a, kinds, params, l.count, l.address, results)
 	if l.osr {
 		if err := l.preload(); err != nil {
 			return err
@@ -330,7 +349,31 @@ func (l *lowering) function() error {
 		}
 	}
 	l.m.Epilogue(l.a)
+	l.enter = l.m.Enter(l.a, results)
 	return l.err
+}
+
+// registers reports fn's register-convention results: at most two, none
+// i64 (an i64 result needs range checking compile.call already refuses).
+// A function outside that shape returns nil, so Return keeps boxing results
+// to slots and Enter's stub boxes nothing beyond the slot layout. The same
+// static fact governs every unit and tier of fn, so a caller compiled
+// separately from its callee always agrees with it.
+func registers(fn *types.Function) []types.Kind {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	returns := fn.Typ.Returns
+	if len(returns) == 0 || len(returns) > 2 {
+		return nil
+	}
+	kinds := types.Kinds(returns)
+	for _, k := range kinds {
+		if k == types.KindI64 {
+			return nil
+		}
+	}
+	return kinds
 }
 
 // preload loads block 0's parameters from the operand-stack slots the
@@ -605,18 +648,19 @@ func (l *lowering) call(op ssa.Operation) error {
 	l.exits[id].Owned = owned
 	bridge, resume := l.stub(id)
 	site := Call{
-		Address: c.Ref(),
-		Callee:  callee,
-		Args:    op.Args[:len(op.Args)-1],
-		Results: op.Results,
-		Base:    len(l.fn.Slots()) + below,
-		Size:    max(len(target.Slots()), len(target.Typ.Returns)),
-		Exit:    id,
-		Live:    l.live(id),
-		Bridge:  bridge,
-		Resume:  resume,
-		Owned:   owned,
-		Self:    !l.osr && c.Ref() == l.address,
+		Address:   c.Ref(),
+		Callee:    callee,
+		Args:      op.Args[:len(op.Args)-1],
+		Results:   op.Results,
+		Base:      len(l.fn.Slots()) + below,
+		Size:      max(len(target.Slots()), len(target.Typ.Returns)),
+		Exit:      id,
+		Live:      l.live(id),
+		Bridge:    bridge,
+		Resume:    resume,
+		Owned:     owned,
+		Self:      !l.osr && c.Ref() == l.address,
+		Registers: registers(target),
 	}
 	if !l.m.Call(l.a, site, l) {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())

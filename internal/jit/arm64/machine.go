@@ -29,6 +29,9 @@ type Machine struct {
 	// carries no such query, and the fact is Machine-local across the whole
 	// function, like kinds and temp).
 	guards map[ssa.Value]ssa.Shape
+	// results is this function's register-convention results (see compile's
+	// registers), empty when OpReturn boxes to the VM frame instead.
+	results []types.Kind
 }
 
 // New returns an ARM64 machine.
@@ -39,26 +42,31 @@ func New() *Machine {
 // Arch returns the ARM64 assembler target.
 func (m *Machine) Arch() asm.Arch { return target.New() }
 
-// Reserve returns the scratch and frame-base registers.
-func (m *Machine) Reserve() []asm.PReg { return []asm.PReg{target.X16, target.X17, target.X25} }
+// Reserve returns the scratch, frame-base, and depth registers.
+func (m *Machine) Reserve() []asm.PReg {
+	return []asm.PReg{target.X16, target.X17, target.X25, target.X27}
+}
 
 // Prologue begins a function at address, builds its frame, pushes the
-// activation record, optionally counts the entry, and clears locals after params.
-func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int) {
-	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}}
+// activation record, optionally counts the entry, and clears locals after
+// params. X25 (frame base) and X27 (activation depth) already hold this
+// activation's values: a self call leaves them set, and Enter loads them
+// from Context before the outermost call. results is the function's
+// register-convention results (see compile's registers): Return keeps it to
+// decide whether OpReturn moves results to X0/X1 or boxes them to the frame.
+func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, results []types.Kind) {
+	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: results}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		asm.Instruction{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
-		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
-		target.LSLI(target.X17, target.X16, 5),
+		target.LSLI(target.X17, target.X27, 5),
 		target.ADD(target.X17, target.Ctx, target.X17),
 		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
 		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
-		target.ADDI(target.X16, target.X16, 1),
-		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		target.ADDI(target.X27, target.X27, 1),
+		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 	)
 	if count {
 		a.Emit(
@@ -74,18 +82,54 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, cou
 }
 
 // Epilogue ends a function: every return branches here to pop the record
-// and the frame.
+// and the frame. It stores X27 to Context.Depth before popping so Depth is
+// exact at every exit; it never reloads it.
 func (m *Machine) Epilogue(a *asm.Assembler) {
 	a.Bind(m.end)
 	a.Emit(
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
-		target.SUBI(target.X16, target.X16, 1),
-		target.STR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
+		target.SUBI(target.X27, target.X27, 1),
+		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 		asm.Instruction{Op: uint16(target.OpADDI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.LR, target.SP, 8),
 		target.ADDI(target.SP, target.SP, 16),
 		target.RET(),
 	)
+}
+
+// Enter emits the Go entry stub after the epilogue, at code offset > 0 so
+// the function body stays at offset 0 for native-to-native calls. It loads
+// X25 and X27 from Context (the interpreter writes both before every Enter
+// and Resume), calls the function's own entry, boxes each register-
+// convention result from X0/X1 into the VM frame by its declared kind
+// (i64 excluded: registers(fn) never admits one), and returns to Go. Enter
+// returns the stub's label so Lower can resolve its byte offset after Build.
+func (m *Machine) Enter(a *asm.Assembler, results []types.Kind) asm.Label {
+	label := a.Label()
+	a.Bind(label)
+	a.Emit(
+		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
+		target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+		target.SUBI(target.SP, target.SP, 16),
+		target.STR(target.LR, target.SP, 8),
+		target.BLLabel(m.entry),
+	)
+	for i, k := range results {
+		src := register(i)
+		switch k.Repr() {
+		case types.KindRef, types.KindF64:
+			a.Emit(target.STR(src, target.X25, int16(8*i)))
+		default:
+			a.Emit(target.UXTW(target.X16, src))
+			a.Emit(target.LDI(target.X17, types.Tag(k))...)
+			a.Emit(target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, int16(8*i)))
+		}
+	}
+	a.Emit(
+		target.LDR(target.LR, target.SP, 8),
+		target.ADDI(target.SP, target.SP, 16),
+		target.RET(),
+	)
+	return label
 }
 
 // Lower emits op and reports false when it has no ARM64 lowering.
@@ -150,10 +194,40 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 			a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 		}
 	}
+	if t.Op == ssa.OpReturn && len(m.results) > 0 {
+		// USE(X0)/USE(X1) after every move extends their fixed intervals
+		// through the whole sequence, so the allocator never assigns a
+		// later Arg's own value to a register a prior move already wrote.
+		for i, v := range t.Args {
+			src, dst := s.Reg(v), register(i)
+			switch {
+			case src.Type() == asm.RegTypeFloat:
+				a.Emit(target.FMOV(dst, src))
+			case src.Width() == asm.Width32:
+				a.Emit(target.MOV(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), src))
+			default:
+				a.Emit(target.MOV(dst, src))
+			}
+		}
+		a.Emit(target.USE(target.X0))
+		if len(t.Args) > 1 {
+			a.Emit(target.USE(target.X1))
+		}
+		a.Emit(target.BLabel(m.end))
+		return
+	}
 	for i, v := range t.Args {
 		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((base+i)*8)))
 	}
 	a.Emit(target.BLabel(m.end))
+}
+
+// register is the register-convention result register at index i (0 or 1).
+func register(i int) asm.PReg {
+	if i == 1 {
+		return target.X1
+	}
+	return target.X0
 }
 
 // Budget counts Context.Budget down and branches to safepoint when it is
@@ -230,11 +304,10 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 		target.CMP(target.X16, target.X17),
 		target.BCondLabel(target.OpBHI, c.Bridge),
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
-		target.CMP(target.X16, target.X17),
+		target.CMP(target.X27, target.X17),
 		target.BCondLabel(target.OpBCS, c.Bridge),
-		target.LSLI(target.X16, target.X16, 5),
+		target.LSLI(target.X16, target.X27, 5),
 		target.ADD(target.X16, target.Ctx, target.X16),
 		target.ADDI(target.X17, target.SP, 0),
 		target.STR(target.X17, target.X16, record(jit.RecordSP)),
@@ -242,27 +315,41 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	a.Emit(target.LDI(target.X17, uint64(c.Exit))...)
 	a.Emit(
 		target.STR(target.X17, target.X16, record(jit.RecordExit)),
-		target.ADDI(target.X16, target.X25, uint16(8*c.Base)),
-		target.STR(target.X16, target.Ctx, int16(jit.OffsetFB)),
+		target.ADDI(target.X25, target.X25, uint16(8*c.Base)),
 	)
 	if c.Self {
 		a.Emit(target.BLLabel(m.entry))
 	} else {
 		a.Emit(target.BLR(code))
 	}
+	// DEF marks X0 (and X1) written by the call: BL/BLR's Flow is FlowCall,
+	// so the default Writes rule (Dst set, Flow FlowNext) never sees it.
+	for i := range c.Registers {
+		a.Emit(target.DEF(register(i)))
+	}
 	for _, u := range c.Live {
 		a.Emit(target.USE(u))
 	}
-	a.Emit(
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetDepth)),
-		target.LSLI(target.X16, target.X16, 5),
-		target.ADD(target.X16, target.Ctx, target.X16),
-		target.LDR(target.X25, target.X16, record(jit.RecordFB)),
-	)
+	a.Emit(target.SUBI(target.X25, target.X25, uint16(8*c.Base)))
 	if c.Owned {
 		m.release(a, s.Reg(c.Callee), s)
 	}
 	a.Bind(c.Resume)
+	if len(c.Registers) > 0 {
+		for j, v := range c.Results {
+			dst := s.Reg(v)
+			src := register(j)
+			switch {
+			case dst.Type() == asm.RegTypeFloat:
+				a.Emit(target.FMOV(dst, src))
+			case dst.Width() == asm.Width32:
+				a.Emit(target.MOV(dst, asm.NewPReg(src.ID(), asm.RegTypeInt, asm.Width32)))
+			default:
+				a.Emit(target.MOV(dst, src))
+			}
+		}
+		return true
+	}
 	for j, v := range c.Results {
 		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))
 	}

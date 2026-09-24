@@ -85,7 +85,7 @@ func (s *Store) Find(pc uintptr) *Code {
 
 // Publish takes ownership of c. An OSR code (c.OSR) is never a call target:
 // it installs into the (address, IP) map, once, instead of natives[c.Address].
-// Otherwise it installs c — natives[c.Address] = c.Entry() — when c.Address
+// Otherwise it installs c — natives[c.Address] = c.Native() — when c.Address
 // is in range and c.Tier is above the published code's tier (none published
 // counts as zero), retiring the code it replaces. Either way it reports
 // whether c installed; a stale c is freed instead.
@@ -118,7 +118,7 @@ func (s *Store) Publish(c *Code) bool {
 		installed = c.Tier > published
 	}
 	if installed {
-		atomic.StoreUintptr(&s.natives[c.Address], c.entry)
+		atomic.StoreUintptr(&s.natives[c.Address], c.native)
 		s.codes[c.Address].Store(c)
 		if old != nil {
 			s.retired = append(s.retired, old)
@@ -230,5 +230,5 @@ func (s *Store) Close() error {
 }
 
 func holds(c *Code, pc uintptr) bool {
-	return pc >= c.entry && pc < c.entry+uintptr(c.size)
+	return pc >= c.native && pc < c.native+uintptr(c.size)
 }

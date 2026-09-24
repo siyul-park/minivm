@@ -54,11 +54,11 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	code, exits, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR, u.Tier == jit.Baseline && !u.OSR)
+	code, exits, entry, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR, u.Tier == jit.Baseline && !u.OSR)
 	if err != nil {
 		return nil, err
 	}
-	c, err := jit.NewCode(u.Address, u.Entry, u.OSR, u.Tier, completion(f), code, exits)
+	c, err := jit.NewCode(u.Address, u.Entry, u.OSR, u.Tier, completion(f), code, exits, entry)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}

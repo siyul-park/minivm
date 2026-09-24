@@ -237,7 +237,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		bytes, exits, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
+		bytes, exits, stub, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
 		require.NoError(t, err)
 		buffer, err := asm.NewBuffer(len(bytes))
 		require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestNew(t *testing.T) {
 		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
 		ctx.Limit = 2
 
-		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		require.Equal(t, jit.TrapBridge, jit.Enter(code+uintptr(stub), ctx))
 		require.Equal(t, jit.ExitCall, exits[ctx.Exit()].Kind)
 		require.Equal(t, uint64(2), ctx.Depth)
 		require.GreaterOrEqual(t, ctx.Records[1].PC, code)
@@ -262,6 +262,8 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("bridges a call to a function without native code", func(t *testing.T) {
+		// An ExitCall never resumes (interp deoptimizes it), so this stops
+		// at the bridge: the exit map and the slot-boxed argument.
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
@@ -283,18 +285,8 @@ func TestNew(t *testing.T) {
 		require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frames[0].IP-1]))
 		require.Empty(t, exit.Frames[0].Stack)
 		require.Equal(t, types.BoxI32(9), stack[1])
-
-		stack[1] = types.BoxI32(34)
-		require.Equal(t, jit.TrapBridge, jit.Resume(ctx))
-		require.Equal(t, []uint64{34}, operands(ctx, exits[ctx.Exit()].Frames[0]))
-		require.Equal(t, types.BoxI32(8), stack[2])
-
-		stack[2] = types.BoxI32(21)
-		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
-		require.Equal(t, types.BoxI32(55), stack[0])
-		// fib's own call site retains it exactly once and it feeds only that
-		// call, so it is borrowed: rc never moves off the pool's own count,
-		// even across three suspended bridges.
+		// The borrowed callee's retain is never emitted, so bridging costs
+		// no RC movement.
 		require.Equal(t, []int{0, 0, 1}, rc)
 	})
 
@@ -340,6 +332,103 @@ func TestNew(t *testing.T) {
 		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil, 0, false)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, consts, stack)
+	})
+
+	t.Run("returns each register-convention kind through the Go entry stub", func(t *testing.T) {
+		// At most two results, none i64 (registers in compile owns the
+		// eligibility rule): every kind here moves through X0 in Return and
+		// is boxed by Enter's stub, not stored by OpReturn itself.
+		for _, c := range []types.Boxed{
+			types.BoxI1(true), types.BoxI8(-1), types.BoxI32(-7), types.BoxF32(-2), types.BoxF64(1.5), types.BoxRef(4),
+		} {
+			t.Run(c.Kind().String(), func(t *testing.T) {
+				b := ssa.New("f")
+				entry := b.Block()
+				v := b.Value(ssa.TypeOf(c.Kind()))
+				b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c, Results: []ssa.Value{v}})
+				at := state(b, entry)
+				b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
+
+				fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{kindType(t, c.Kind())}}}
+				stack := make([]types.Boxed, 1)
+				code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
+				require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
+				require.Equal(t, c, stack[0])
+			})
+		}
+	})
+
+	t.Run("returns two register-convention results through X0 and X1", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x := b.Value(ssa.TypeF64)
+		y := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxF64(2.5), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(4), Results: []ssa.Value{y}})
+		at := state(b, entry)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x, y}, State: at})
+
+		fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeF64, types.TypeString}}}
+		stack := make([]types.Boxed, 2)
+		code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
+		require.Equal(t, []types.Boxed{types.BoxF64(2.5), types.BoxRef(4)}, stack)
+	})
+
+	t.Run("a native call reads a register-convention result and forwards it through its own return", func(t *testing.T) {
+		// The callee address (7) differs from the caller's lowering address
+		// (0), so Call reaches it through the natives table, exercising
+		// Call's DEF/MOV read after a real BLR, not the self-call branch.
+		callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		b := ssa.New("callee")
+		entry := b.Block()
+		v := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(42), Results: []ssa.Value{v}})
+		at := state(b, entry)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
+		// natives[address] holds the body, not the Go entry stub.
+		calleeCode, _, _, err := compile.Lower(b.Build(), arm64.New(), callee, nil, 7, false, true)
+		require.NoError(t, err)
+		calleeBuffer, err := asm.NewBuffer(len(calleeCode))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, calleeBuffer.Free()) })
+		calleeBody, err := asm.Link(calleeBuffer, calleeCode)
+		require.NoError(t, err)
+
+		// exit() reads the caller's own bytecode to find the CALL's width
+		// for the exit map's IP, even though the CALL op below is built
+		// directly as SSA: Code must hold a real CALL at IP 0.
+		caller := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)}),
+		}
+		cb := ssa.New("caller")
+		centry := cb.Block()
+		callee32 := cb.Value(ssa.TypeRef)
+		got := cb.Value(ssa.TypeI32)
+		cb.Add(centry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(7), Results: []ssa.Value{callee32}})
+		// Retained once and used only as this call's callee: borrowed, so
+		// Call neither retains nor releases it (no Context.RC needed here).
+		cb.Add(centry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee32}})
+		cat := cb.Value(ssa.TypeState)
+		cb.Add(centry, ssa.Operation{
+			Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1, Stack: []ssa.Operand{{Value: callee32}}}},
+			Results: []ssa.Value{cat},
+		})
+		cb.Add(centry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee32}, State: cat, Results: []ssa.Value{got}})
+		rat := state(cb, centry)
+		cb.Term(centry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}, State: rat})
+
+		objects := transform.Objects{7: {Function: callee}}
+		code, _ := lower(t, arm64.New(), cb.Build(), caller, objects, 0, false)
+
+		natives := []uintptr{0, 0, 0, 0, 0, 0, 0, calleeBody}
+		stack := make([]types.Boxed, 1)
+		ctx := enter(t, stack)
+		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI32(42), stack[0])
 	})
 
 	t.Run("lowers each function afresh on one machine", func(t *testing.T) {
@@ -698,6 +787,29 @@ func fibonacci(t *testing.T) (*types.Function, transform.Module) {
 	return fib, transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: fib}}}
 }
 
+// kindType is a representative types.Type for k, for a Returns declaration
+// a test builds directly (types.Kinds goes the other way).
+func kindType(t *testing.T, k types.Kind) types.Type {
+	t.Helper()
+	switch k {
+	case types.KindI1:
+		return types.TypeI1
+	case types.KindI8:
+		return types.TypeI8
+	case types.KindI32:
+		return types.TypeI32
+	case types.KindF32:
+		return types.TypeF32
+	case types.KindF64:
+		return types.TypeF64
+	case types.KindRef:
+		return types.TypeString
+	default:
+		t.Fatalf("kindType: unsupported kind %v", k)
+		return nil
+	}
+}
+
 // frame is a function without code whose slots are params then locals.
 func frame(params, locals []types.Type) *types.Function {
 	return &types.Function{Typ: &types.FunctionType{Params: params}, Locals: locals}
@@ -730,17 +842,20 @@ func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
 }
 
 // lower builds f, the translation of fn at address (an OSR unit when osr),
-// with m and publishes it.
+// with m and publishes it. It returns the Go entry stub's address: what a
+// fresh jit.Enter crosses into native code through, not the body's own
+// address at offset 0 (what natives[address] holds for a native-to-native
+// call: see the "records a nested native call" case, which links directly).
 func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int, osr bool) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, exits, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
+	code, exits, stub, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	entry, err := asm.Link(buffer, code)
+	body, err := asm.Link(buffer, code)
 	require.NoError(t, err)
-	return entry, exits
+	return body + uintptr(stub), exits
 }
 
 // enter is a context whose next activation has its frame at stack[0].

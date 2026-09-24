@@ -27,6 +27,7 @@ type Assembler struct {
 	nextLbl  Label
 	locs     map[VReg]Loc
 	slots    int
+	offsets  map[Label]int
 }
 
 var (
@@ -117,6 +118,13 @@ func (a *Assembler) Loc(v VReg) (Loc, bool) {
 	return loc, ok
 }
 
+// Offset reports id's byte offset in the code Build returned, valid only
+// after a successful Build.
+func (a *Assembler) Offset(id Label) (int, bool) {
+	off, ok := a.offsets[id]
+	return off, ok
+}
+
 // virtual reports whether any row names a virtual register.
 func virtual(insts []Instruction) bool {
 	for _, inst := range insts {
@@ -163,6 +171,10 @@ func (a *Assembler) encode(insts []Instruction, labels map[Label]int) ([]byte, e
 				insts, labels = splice(insts, labels, at, repl)
 				continue
 			}
+		}
+		a.offsets = make(map[Label]int, len(labels))
+		for id, pos := range labels {
+			a.offsets[id] = offsets[pos]
 		}
 		return a.resolve(insts, draft, offsets, labels)
 	}

@@ -46,7 +46,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so loops poll `Budget`.
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
-- Registers: X25 frame base, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X24, X27, D0–D31.
+- Registers: X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X24, D0–D31.
 - Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: a call keeps them live across itself; any other exit saves a non-live one on its cold path into a fixed spill home.
 
 ## Pipeline
@@ -66,8 +66,14 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 - Prologue: push `Records[Depth]`, store return address in `Record.PC`, optionally count the entry at `Context.Entries[address]`, clear non-parameter locals (not on OSR).
 - `OpStore` to a reference-capable slot (`Type` is `ssa.TypeRef`, which also represents a dynamically typed value) releases the slot's old occupant before overwriting it, matching threaded `LOCAL_SET`.
-- `OpReturn` releases reference-capable slots, stores boxed results from slot 0. `OpComplete` stores results past the locals.
+- `OpReturn` releases reference-capable slots, then moves results to X0/X1 (see Call convention) or stores them boxed from slot 0. `OpComplete` stores results past the locals.
 - `CALL` to a constant function: box args at the callee frame, `BLR Context.Natives[addr]`, or `BL` the unit's own entry for a self call. No native code, `Depth == Limit`, or frame past `Top` → `ExitCall`.
+
+### Call convention
+
+- X25 (frame base) and X27 (`Context.Depth`) are pinned and caller-maintained: a call adds `8·Base` to X25 around `BL`/`BLR`; prologue and epilogue step X27 and store it to `Context.Depth`, never reading it back.
+- `Code.Native()` is the body at offset 0, installed in `Natives`. `Code.Entry()` is a Go entry stub after the epilogue: it loads X25/X27 from `Context.FB`/`Context.Depth`, calls the body, and boxes register results into the frame.
+- A function with one or two non-`i64` results (`compile.registers`) returns them in X0/X1; its callers read them after a `DEF` row. `OpComplete` never uses registers.
 
 ## Exits
 
@@ -85,7 +91,7 @@ A non-resuming exit rebuilds every native activation as an interpreter frame, ou
 
 ## Store
 
-- `Publish`: a non-OSR code installs into `Natives[addr]` if its tier is higher, retiring the old one; an OSR code installs into an `(address, ip)` map once.
+- `Publish`: a non-OSR code installs `Code.Native()` into `Natives[addr]` if its tier is higher, retiring the old one; an OSR code installs into an `(address, ip)` map once.
 - `Retire` / `RetireAt` unpublish; `Find(pc)` and `CodeAt` still see retired code.
 - `Reclaim` frees retired code once no interpreter is inside native code.
 

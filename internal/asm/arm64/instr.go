@@ -190,6 +190,7 @@ const (
 	// System
 	OpNOP
 	OpUSE
+	OpDEF
 	OpBRK
 	OpSVC
 	OpHLT
@@ -866,6 +867,11 @@ func HLT() asm.Instruction { return newInst(OpHLT, nil) }
 
 // USE reads src and encodes nothing: it keeps a value live up to its row.
 func USE(src asm.Reg) asm.Instruction { return newReg1(OpUSE, src) }
+
+// DEF marks reg written here and encodes nothing: the dual of USE, for a
+// physical result register (X0/X1) a call convention defines rather than an
+// instruction operand, such as BL/BLR's register-convention result.
+func DEF(reg asm.Reg) asm.Instruction { return newInst(OpDEF, regOperand(reg)) }
 
 // BRK #imm — software breakpoint
 func BRK(imm16 uint16) asm.Instruction { return newInst(OpBRK, nil, nil, imm(int64(imm16))) }

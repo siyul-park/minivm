@@ -21,19 +21,20 @@ import (
 // is refused before Compile reaches the backend.
 type stub struct{}
 
-func (stub) Arch() asm.Arch                                                   { panic("unused") }
-func (stub) Reserve() []asm.PReg                                              { panic("unused") }
-func (stub) Prologue(*asm.Assembler, []types.Kind, int, bool, int)            { panic("unused") }
-func (stub) Epilogue(*asm.Assembler)                                          { panic("unused") }
-func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool           { panic("unused") }
-func (stub) Branch(*asm.Assembler, ssa.Terminator, compile.Site, []asm.Label) { panic("unused") }
-func (stub) Return(*asm.Assembler, ssa.Terminator, compile.Site)              { panic("unused") }
-func (stub) Budget(*asm.Assembler, asm.Label)                                 { panic("unused") }
-func (stub) Exit(*asm.Assembler, int, jit.Kind, []asm.VReg)                   { panic("unused") }
-func (stub) Spill(*asm.Assembler, asm.VReg, int)                              { panic("unused") }
-func (stub) Results(*asm.Assembler, []asm.VReg)                               { panic("unused") }
-func (stub) Call(*asm.Assembler, compile.Call, compile.Site) bool             { panic("unused") }
-func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg)                          { panic("unused") }
+func (stub) Arch() asm.Arch                                                      { panic("unused") }
+func (stub) Reserve() []asm.PReg                                                 { panic("unused") }
+func (stub) Prologue(*asm.Assembler, []types.Kind, int, bool, int, []types.Kind) { panic("unused") }
+func (stub) Epilogue(*asm.Assembler)                                             { panic("unused") }
+func (stub) Enter(*asm.Assembler, []types.Kind) asm.Label                        { panic("unused") }
+func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool              { panic("unused") }
+func (stub) Branch(*asm.Assembler, ssa.Terminator, compile.Site, []asm.Label)    { panic("unused") }
+func (stub) Return(*asm.Assembler, ssa.Terminator, compile.Site)                 { panic("unused") }
+func (stub) Budget(*asm.Assembler, asm.Label)                                    { panic("unused") }
+func (stub) Exit(*asm.Assembler, int, jit.Kind, []asm.VReg)                      { panic("unused") }
+func (stub) Spill(*asm.Assembler, asm.VReg, int)                                 { panic("unused") }
+func (stub) Results(*asm.Assembler, []asm.VReg)                                  { panic("unused") }
+func (stub) Call(*asm.Assembler, compile.Call, compile.Site) bool                { panic("unused") }
+func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg)                             { panic("unused") }
 
 // noop is a function of one RETURN and no parameters: valid enough for
 // translation and verification to succeed.

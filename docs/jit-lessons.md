@@ -144,6 +144,14 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Consequence for the rebuild**: `make benchmark-pr` numbers are recorded, not gated, during the rebuild. Any perf claim compares interleaved A/B runs, never two runs taken minutes apart with the tree changing in between.
 
+### L18 — Memory-carried runtime counters serialize native recursion
+
+**Observed**: `Context.Depth` and `Context.FB`, loaded and stored in every prologue, epilogue, and call site, put every activation of a recursion on one store→load dependency chain; fib(20) was latency-bound, not issue-bound.
+
+**Evidence**: `S2-P15b`; fib(20)/jit 56.0µs → 42.7µs with Depth in X27 and FB in X25 (store-only mirrors), → 36.1µs with results in X0/X1; interleaved A/B, `-benchtime=300ms -count=3`.
+
+**Consequence for the rebuild**: pin per-activation state in registers the call convention preserves, and store it to memory only for out-of-band readers (exits, materializer). Keep the body at offset 0 and load the pinned registers in a separate Go entry stub.
+
 ## Related
 
 - `jit-internals.md` — current JIT contract and status
