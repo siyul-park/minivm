@@ -1334,6 +1334,79 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, 1, innerCount)
 	})
 
+	t.Run("a deep recursion resuming safepoints then deopting at its frame limit matches threaded", func(t *testing.T) {
+		native(t)
+
+		// rec(n): a 20000-iteration loop (a resumed safepoint in every
+		// activation), then rec(n-1). Param 0 is n; local 1 the counter.
+		fb := instr.NewBuilder()
+		loop, done, small := fb.Label(), fb.Label(), fb.Label()
+		fb.Bind(loop)
+		fb.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 20000).Emit(instr.I32_GE_S).BrIf(done)
+		fb.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		fb.Br(loop)
+		fb.Bind(done)
+		fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_LT_S).BrIf(small)
+		fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+		fb.Bind(small).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+		fnCode, err := fb.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+			Code:   instr.Marshal(fnCode),
+		}
+
+		// The module warms rec(2), then calls rec(15) under a handler:
+		// WithFrame(8) makes the native chain take ExitCall several
+		// activations deep, and the handler catches the overflow.
+		mb := instr.NewBuilder()
+		wloop, wdone, start, end, catch := mb.Label(), mb.Label(), mb.Label(), mb.Label(), mb.Label()
+		mb.Bind(wloop)
+		mb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5).Emit(instr.I32_GE_S).BrIf(wdone)
+		mb.Emit(instr.I32_CONST, 2).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		mb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		mb.Br(wloop)
+		mb.Bind(wdone)
+		mb.Bind(start).Emit(instr.I32_CONST, 15).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		mb.Bind(end)
+		mb.Bind(catch).Emit(instr.ERROR_CODE)
+		mb.Try(start, end, catch, 1)
+		code, err := mb.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fn), program.WithHandlers(mb.Handlers()...))
+
+		wantVM := interp.New(prog, interp.WithFrame(8))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		want, err := wantVM.Pop()
+		require.NoError(t, err)
+
+		var runErr, popErr error
+		var got types.Value
+		var safepoints, calls float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			safepoints, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
+			calls, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return safepoints > 0 && calls > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+	})
+
 	t.Run("a wide i64 result from native code matches threaded", func(t *testing.T) {
 		native(t)
 		prog := wideI64Program(t, 1000)
