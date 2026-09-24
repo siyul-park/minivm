@@ -1334,11 +1334,13 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, 1, innerCount)
 	})
 
-	t.Run("a deep recursion resuming safepoints then deopting at its frame limit matches threaded", func(t *testing.T) {
+	t.Run("a deep recursion resuming safepoints and releases then deopting at its frame limit matches threaded", func(t *testing.T) {
 		native(t)
 
 		// rec(n): a 20000-iteration loop (a resumed safepoint in every
-		// activation), then rec(n-1). Param 0 is n; local 1 the counter.
+		// activation), a dropped fresh struct (a resumed release), then
+		// rec(n-1). Param 0 is n; local 1 the counter.
+		record := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("n")))
 		fb := instr.NewBuilder()
 		loop, done, small := fb.Label(), fb.Label(), fb.Label()
 		fb.Bind(loop)
@@ -1346,6 +1348,7 @@ func TestWithThreshold(t *testing.T) {
 		fb.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
 		fb.Br(loop)
 		fb.Bind(done)
+		fb.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.DROP)
 		fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_LT_S).BrIf(small)
 		fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
 		fb.Bind(small).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
@@ -1374,7 +1377,7 @@ func TestWithThreshold(t *testing.T) {
 		mb.Try(start, end, catch, 1)
 		code, err := mb.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fn), program.WithHandlers(mb.Handlers()...))
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithTypes(record), program.WithConstants(fn), program.WithHandlers(mb.Handlers()...))
 
 		wantVM := interp.New(prog, interp.WithFrame(8))
 		defer wantVM.Close()
@@ -1384,7 +1387,7 @@ func TestWithThreshold(t *testing.T) {
 
 		var runErr, popErr error
 		var got types.Value
-		var safepoints, calls float64
+		var safepoints, releases, calls float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
@@ -1399,8 +1402,9 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Flush()
 			safepoints, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
+			releases, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "release"})
 			calls, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
-			return safepoints > 0 && calls > 0
+			return safepoints > 0 && releases > 0 && calls > 0
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)

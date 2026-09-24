@@ -66,7 +66,6 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, cou
 		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
 		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
 		target.ADDI(target.X27, target.X27, 1),
-		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 	)
 	if count {
 		a.Emit(
@@ -82,13 +81,11 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, cou
 }
 
 // Epilogue ends a function: every return branches here to pop the record
-// and the frame. It stores X27 to Context.Depth before popping so Depth is
-// exact at every exit; it never reloads it.
+// and the frame.
 func (m *Machine) Epilogue(a *asm.Assembler) {
 	a.Bind(m.end)
 	a.Emit(
 		target.SUBI(target.X27, target.X27, 1),
-		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 		asm.Instruction{Op: uint16(target.OpADDI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.LR, target.SP, 8),
 		target.ADDI(target.SP, target.SP, 16),
@@ -242,15 +239,17 @@ func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	)
 }
 
-// Exit writes the exit id and trap, then calls the preserving stub through
-// EXIT. EXIT has BLR encoding with FlowNext, so use intervals stay live across
-// the stub; deopt does not resume and other exits resume in native code.
-// Exit emits a native exit.
+// Exit stores X27 to Context.Depth (its only writer, so Depth is exact at
+// every trap), writes the exit id and trap, then calls the preserving stub
+// through EXIT. EXIT has BLR encoding with FlowNext, so use intervals stay
+// live across the stub; deopt does not resume and other exits resume in
+// native code.
 func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	trap := jit.TrapBridge
 	if k == jit.ExitDeopt {
 		trap = jit.TrapDeopt
 	}
+	a.Emit(target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)))
 	a.Emit(target.LDI(target.X16, uint64(id))...)
 	a.Emit(target.STR(target.X16, target.Ctx, int16(jit.OffsetExit)))
 	a.Emit(target.LDI(target.X16, uint64(trap))...)

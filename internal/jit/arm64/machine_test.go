@@ -69,7 +69,6 @@ func TestMachine_Prologue(t *testing.T) {
 		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
 		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
 		target.ADDI(target.X27, target.X27, 1),
-		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
 		target.LDR(target.X17, target.X16, 24),
 		target.ADDI(target.X17, target.X17, 1),
@@ -81,7 +80,7 @@ func TestMachine_Prologue(t *testing.T) {
 	t.Run("skips entry count", func(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Prologue(a, []types.Kind{types.KindI32, types.KindI64, types.KindRef}, 1, false, 3, nil)
-		require.Len(t, a.Rows(), 11)
+		require.Len(t, a.Rows(), 10)
 		require.NotContains(t, a.Rows(), target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
 	})
 }
@@ -89,7 +88,6 @@ func TestMachine_Prologue(t *testing.T) {
 func TestMachine_Epilogue(t *testing.T) {
 	pop := []asm.Instruction{
 		target.SUBI(target.X27, target.X27, 1),
-		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 		{Op: uint16(target.OpADDI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.LR, target.SP, 8),
 		target.ADDI(target.SP, target.SP, 16),
@@ -930,6 +928,7 @@ func TestMachine_Exit(t *testing.T) {
 	uses := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
 	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
 		return slices.Concat(
+			[]asm.Instruction{target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth))},
 			target.LDI(target.X16, id),
 			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
 			target.LDI(target.X16, uint64(trap)),

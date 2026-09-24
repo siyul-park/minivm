@@ -50,7 +50,6 @@ func TestNew(t *testing.T) {
 		}
 		require.Equal(t, types.BoxI32(45), stack[0])
 		require.Equal(t, 3, safepoints)
-		require.Zero(t, ctx.Depth)
 	})
 
 	t.Run("deopts a division by zero with the operands of its instruction", func(t *testing.T) {
