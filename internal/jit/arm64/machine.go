@@ -42,9 +42,9 @@ func New() *Machine {
 // Arch returns the ARM64 assembler target.
 func (m *Machine) Arch() asm.Arch { return target.New() }
 
-// Reserve returns the scratch, frame-base, and depth registers.
+// Reserve returns the scratch, budget, frame-base, and depth registers.
 func (m *Machine) Reserve() []asm.PReg {
-	return []asm.PReg{target.X16, target.X17, target.X25, target.X27}
+	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}
 }
 
 // Prologue begins a function at address, builds its frame, pushes the
@@ -135,6 +135,7 @@ func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.L
 	a.Emit(
 		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 		target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+		target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 	)
 	for i, k := range arguments {
 		dst := register(i)
@@ -267,21 +268,19 @@ func register(i int) asm.PReg {
 	return target.X0
 }
 
-// Budget counts Context.Budget down and branches to safepoint when it is
-// spent.
-// Budget emits the loop safepoint check.
+// Budget counts X24, the pinned budget, down and branches to safepoint when
+// it is spent.
 func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	a.Emit(
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
-		target.SUBSI(target.X16, target.X16, 1),
-		target.STR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
+		target.SUBSI(target.X24, target.X24, 1),
 		target.BCondLabel(target.OpBLE, safepoint),
 	)
 }
 
-// Exit stores X27 to Context.Depth (its only writer, so Depth is exact at
-// every trap), writes the exit id and trap, then calls the preserving stub
-// through EXIT. EXIT has BLR encoding with FlowNext, so use intervals stay
+// Exit stores X27 to Context.Depth and X24 to Context.Budget (their only
+// writer, so both are exact at every trap), writes the exit id and trap,
+// then calls the preserving stub through EXIT; a resumed exit reloads X24,
+// which Go may have refilled. EXIT has BLR encoding with FlowNext, so use intervals stay
 // live across the stub; deopt does not resume and other exits resume in
 // native code.
 func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
@@ -289,7 +288,10 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	if k == jit.ExitDeopt {
 		trap = jit.TrapDeopt
 	}
-	a.Emit(target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)))
+	a.Emit(
+		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+		target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+	)
 	a.Emit(target.LDI(target.X16, uint64(id))...)
 	a.Emit(target.STR(target.X16, target.Ctx, int16(jit.OffsetExit)))
 	a.Emit(target.LDI(target.X16, uint64(trap))...)
@@ -303,7 +305,9 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	}
 	if k == jit.ExitDeopt {
 		a.Emit(target.BRK(0))
+		return
 	}
+	a.Emit(target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)))
 }
 
 // Spill saves a value in a fixed spill slot.

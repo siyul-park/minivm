@@ -54,7 +54,7 @@ func (r regs) Reg(v ssa.Value) asm.VReg {
 }
 
 func TestMachine_Reserve(t *testing.T) {
-	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X25, target.X27}, arm64.New().Reserve())
+	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}, arm64.New().Reserve())
 }
 
 func TestMachine_Prologue(t *testing.T) {
@@ -141,6 +141,7 @@ func TestMachine_Enter(t *testing.T) {
 		require.Equal(t, []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(entry),
@@ -167,6 +168,7 @@ func TestMachine_Enter(t *testing.T) {
 		want := []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
@@ -191,7 +193,7 @@ func TestMachine_Enter(t *testing.T) {
 		start := len(a.Rows())
 		m.Enter(a, nil, []types.Kind{types.KindF64})
 
-		require.Equal(t, target.STR(target.X0, target.X25, 0), a.Rows()[start+5])
+		require.Equal(t, target.STR(target.X0, target.X25, 0), a.Rows()[start+6])
 	})
 
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
@@ -204,6 +206,7 @@ func TestMachine_Enter(t *testing.T) {
 		require.Equal(t, []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(asm.NewPReg(target.X0.ID(), asm.RegTypeInt, asm.Width32), target.X25, 0),
 			target.LDR(target.X1, target.X25, 8),
 			target.SUBI(target.SP, target.SP, 16),
@@ -225,6 +228,7 @@ func TestMachine_Enter(t *testing.T) {
 		require.Equal(t, []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(asm.NewPReg(target.X0.ID(), asm.RegTypeInt, asm.Width32), target.X25, 0),
 			target.LDR(target.X1, target.X25, 8),
 			target.SUBI(target.SP, target.SP, 16),
@@ -1032,9 +1036,7 @@ func TestMachine_Budget(t *testing.T) {
 	start := len(a.Rows())
 	m.Budget(a, exit)
 	require.Equal(t, []asm.Instruction{
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
-		target.SUBSI(target.X16, target.X16, 1),
-		target.STR(target.X16, target.Ctx, int16(jit.OffsetBudget)),
+		target.SUBSI(target.X24, target.X24, 1),
 		target.BCondLabel(target.OpBLE, exit),
 	}, a.Rows()[start:])
 }
@@ -1043,7 +1045,10 @@ func TestMachine_Exit(t *testing.T) {
 	uses := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
 	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
 		return slices.Concat(
-			[]asm.Instruction{target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth))},
+			[]asm.Instruction{
+				target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+				target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			},
 			target.LDI(target.X16, id),
 			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
 			target.LDI(target.X16, uint64(trap)),
@@ -1060,7 +1065,7 @@ func TestMachine_Exit(t *testing.T) {
 	t.Run("suspends a resumable exit", func(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Exit(a, 3, jit.ExitBridge, uses)
-		require.Equal(t, rows(3, jit.TrapBridge), a.Rows())
+		require.Equal(t, append(rows(3, jit.TrapBridge), target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))), a.Rows())
 	})
 
 	t.Run("never returns from a deopt", func(t *testing.T) {

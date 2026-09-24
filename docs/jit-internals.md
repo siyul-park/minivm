@@ -46,7 +46,8 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so loops poll `Budget`.
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
-- Registers: X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X24, D0–D31.
+- Registers: X24 loop budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
+- X24 mirrors `Context.Budget`: exits store it, resumed exits and the Go entry stub load it.
 - Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: a call keeps them live across itself; any other exit saves a non-live one on its cold path into a fixed spill home.
 - In a function with a call, a scalar or ref constant no loop block uses is loaded at each use and at each exit stub instead of spilled; an `ExitCall` map keeps its constants live across the call, since a deeper trap reads them from spill slots. Other constants keep one register.
 
