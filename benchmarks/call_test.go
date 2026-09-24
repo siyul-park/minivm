@@ -17,7 +17,7 @@ func BenchmarkCall_RecursiveFib(b *testing.B) {
 			prog := recursiveFib(n)
 			require.NoError(b, program.Verify(prog))
 
-			benchmarkVM(b, prog, types.BoxI32(want))
+			benchmarkVM(b, prog, types.I32(want))
 			fibScript := fmt.Sprintf(`def fib(n):
     if n < 2: return n
     return fib(n-1) + fib(n-2)
@@ -49,7 +49,7 @@ func BenchmarkCall_IndirectRecursiveFib(b *testing.B) {
 	prog := indirectRecursiveFib(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			type fib func(int32, fib) int32
@@ -88,7 +88,7 @@ func BenchmarkCall_TailSum(b *testing.B) {
 	prog := tailSum(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 }
 
 func BenchmarkCall_TailPingPong(b *testing.B) {
@@ -97,7 +97,7 @@ func BenchmarkCall_TailPingPong(b *testing.B) {
 	prog := tailPingPong(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 }
 
 func BenchmarkCall_ClosureCounter(b *testing.B) {
@@ -106,7 +106,7 @@ func BenchmarkCall_ClosureCounter(b *testing.B) {
 	prog := closureCounter(count)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			var value int32
@@ -139,7 +139,7 @@ func BenchmarkCall_NQueens(b *testing.B) {
 	prog := nqueens(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def solve(row, n, cols, diag1, diag2):
     if row == n:
         return 1
@@ -178,7 +178,7 @@ func BenchmarkCall_Fannkuch(b *testing.B) {
 	prog := fannkuch(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def count_flips(perm):
     a = perm[:]
     flips = 0
@@ -813,11 +813,66 @@ func fannkuch(n int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(fannkuchListing, n))
 }
 
+func BenchmarkCall_I64WideFib(b *testing.B) {
+	const n int64 = 25
+	want := i64WideFibReference(n)
+	prog := i64WideFib(n)
+	require.NoError(b, program.Verify(prog))
+
+	benchmarkVM(b, prog, types.I64(want))
+}
+
 func recursiveFibReference(n int32) int32 {
 	if n < 2 {
 		return n
 	}
 	return recursiveFibReference(n-1) + recursiveFibReference(n-2)
+}
+
+// i64WideFibListing is recursiveFib's i64 counterpart: the base case adds
+// 1<<50, computed by a runtime i64.shl rather than a literal, so it stays a
+// wide (>32-bit) i64 result without depending on a wide i64.const.
+const i64WideFibListing = `
+.constants
+func(i64) i64
+	local.get 0
+	i64.const 2
+	i64.lt_s
+	br_if base
+	local.get 0
+	i64.const 1
+	i64.sub
+	const.get 0
+	call
+	local.get 0
+	i64.const 2
+	i64.sub
+	const.get 0
+	call
+	i64.add
+	return
+	base:
+	local.get 0
+	i64.const 1
+	i64.const 50
+	i64.shl
+	i64.add
+	return
+.code
+	i64.const %d
+	const.get 0
+	call
+`
+
+func i64WideFib(n int64) *program.Program {
+	return mustParseProgram(fmt.Sprintf(i64WideFibListing, n))
+}
+
+func i64WideFibReference(n int64) int64 {
+	if n < 2 {
+		return n + (1 << 50)
+	}
+	return i64WideFibReference(n-1) + i64WideFibReference(n-2)
 }
 
 // nqueensReference transcribes nqueens' solve recursion operation-for-

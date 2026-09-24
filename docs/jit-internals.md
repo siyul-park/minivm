@@ -75,7 +75,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 - X25 (frame base) and X27 (`Context.Depth`) are pinned and caller-maintained: a call adds `8·Base` to X25 around `BL`/`BLR`; prologue and epilogue step X27; only exits store it to `Context.Depth`, which is exact at every trap.
 - `Code.Native()` is the body at offset 0, installed in `Natives`. `Code.Entry()` is a Go entry stub after the epilogue: it loads X25/X27 from `Context.FB`/`Context.Depth`, calls the body, and boxes register results into the frame.
-- A function with one or two non-`i64` results (`compile.registers`) returns them in X0/X1; its callers read them after a `DEF` row. `OpComplete` never uses registers.
+- A function with one or two results, i64 included (`compile.registers`), returns them in X0/X1; its callers read them after a `DEF` row. Native-to-native, an i64 result is the raw word; only the Go entry stub boxes it, narrow inline or heap, matching threaded `RETURN`. `OpComplete` never uses registers.
 - A function with one or two non-`i64` parameters (`compile.arguments`) also receives them in X0/X1; every argument still has its boxed slot. A block-0 load of such a parameter reads the register until a store to its slot; every other load reads the slot. OSR units read slots.
 
 ## Exits
@@ -120,7 +120,7 @@ With `WithProfiler`: `vm_jit_compiles_total{tier,outcome}`, `vm_jit_entries_tota
 
 ## Limits
 
-- No `i64` OSR block-0 parameter; no `i64` `CALL` result.
+- No `i64` OSR block-0 parameter; no `i64` `CALL` argument in registers (`compile.arguments` excludes it). A `CALL` result is register-passed when its callee has one or two results (i64 included); a callee with three or more still refuses an i64 one. A wide (> 49-bit) i64 at a non-register store, slot return, call argument, or `OpComplete` still deopts.
 - Container ops lower behind `guard.shape`, which deopts on null or a mismatched representation.
 - Unlowered opcodes bridge; see `instruction-set.md`. Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` resume (see Exits); every other bridge still deopts, `ExitCall` still deopts (no nested `jit.Enter`; the callee runs interpreted and the caller resumes threaded). `RETURN_CALL`, `YIELD`, `RESUME` have no native form.
 - A resumed bridge round-trips through Go, so a site whose bridges recur with fewer than `amortize` back edges between them (no intervening loop work to pay for the trip) retires after `resume` such bridges in a row, same as a refuted deopt (see Tiers/OSR).

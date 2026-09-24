@@ -62,6 +62,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}
+	c.Registers = registers(u.Function)
 	return c, nil
 }
 

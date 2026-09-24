@@ -614,7 +614,7 @@ func TestLower(t *testing.T) {
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
-	t.Run("rejects a call returning an i64", func(t *testing.T) {
+	t.Run("register-passes a call returning an i64", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := constant(b, entry, types.BoxRef(2))
@@ -624,6 +624,23 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}}}
+		m := new(machine)
+		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, m.sites, 1)
+		require.Equal(t, []types.Kind{types.KindI64}, m.sites[0].Registers)
+	})
+
+	t.Run("rejects a call returning an i64 the callee cannot register-pass", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		callee := constant(b, entry, types.BoxRef(2))
+		at := state(b, entry, 0, ssa.Operand{Value: callee, Owned: true})
+		got := [3]ssa.Value{b.Value(ssa.TypeI64), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)}
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: got[:]})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64, types.TypeI32, types.TypeI32}}}
 		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})

@@ -357,6 +357,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	trap := jit.Enter(code.Entry(), ctx)
 	for {
 		if trap == jit.TrapReturn {
+			boxRegisters(i, code, bp)
 			if release {
 				i.release(addr)
 			}
@@ -410,6 +411,16 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 		default:
 			n.deopt(i, exit, release, advance)
 			return n.refute(addr)
+		}
+	}
+}
+
+// boxRegisters boxes each i64 register-convention result at bp, which the
+// Go entry stub left as a raw word, as threaded RETURN would: inline or heap.
+func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
+	for index, k := range code.Registers {
+		if k == types.KindI64 {
+			i.stack[bp+index] = i.boxI64(int64(i.stack[bp+index]))
 		}
 	}
 }

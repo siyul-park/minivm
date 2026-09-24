@@ -121,9 +121,11 @@ func TestNew(t *testing.T) {
 		fn.Typ.Returns = []types.Type{types.TypeI64}
 		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 
+		// A register-convention i64 result reaches the slot raw.
 		inline := []types.Boxed{types.BoxI64(-42)}
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, inline)))
-		require.Equal(t, types.BoxI64(-41), inline[0])
+		raw := int64(-41)
+		require.Equal(t, types.Boxed(uint64(raw)), inline[0])
 
 		promoted := []types.Boxed{types.BoxRef(3)}
 		ctx := enter(t, promoted)

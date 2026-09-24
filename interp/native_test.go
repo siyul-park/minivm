@@ -482,8 +482,7 @@ func caught(t *testing.T, warm, n int) *program.Program {
 // wideI64Function returns n << 50. A literal outside the inline-boxable
 // range is not itself translatable (transform.Translate rejects it), so the
 // width has to arise from computation: for n=1 the shift's result exceeds
-// the inline range, and a wide i64 result deopts at its own RETURN, which
-// this proves alongside the value.
+// the inline range.
 func wideI64Function(t *testing.T) *types.Function {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -512,6 +511,79 @@ func wideI64Program(t *testing.T, warm int) *program.Program {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fn))
+}
+
+// wideI64FibFunction is recursiveFib's i64 counterpart: its base case adds
+// 1<<50, a runtime i64.shl rather than a literal, so every leaf call's
+// result is wide, and its own RETURN and every recursive CALL of it are
+// register-eligible (a single i64 result).
+func wideI64FibFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}})
+	small := b.Label()
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_LT_S)).BrIf(small)
+	b.Emit(
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		instr.New(instr.I64_ADD), instr.New(instr.RETURN),
+	)
+	b.Bind(small).Emit(
+		instr.New(instr.LOCAL_GET, 0),
+		instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 50), instr.New(instr.I64_SHL), instr.New(instr.I64_ADD),
+		instr.New(instr.RETURN),
+	)
+	return b.MustBuild()
+}
+
+// wideI64Fib calls wideI64FibFunction(n) once, leaving its wide result on
+// the stack.
+func wideI64Fib(t *testing.T, n int64) *program.Program {
+	t.Helper()
+	fn := wideI64FibFunction()
+	b := instr.NewBuilder()
+	b.Emit(instr.I64_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(fn))
+}
+
+// wideI64SumFunction sums 0..n-1 in an i32 local through a loop (OSR's own
+// entry, not a CALL; the accumulator stays i32 so no i64 local is ever
+// loop-carried), converts to i64 and adds 1<<50 only at RETURN, so the OSR
+// unit's own result is wide and register-eligible. Params: 0=n. Locals:
+// 1=i, 2=sum.
+func wideI64SumFunction(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_TO_I64_S)
+	b.Emit(instr.I64_CONST, 1).Emit(instr.I64_CONST, 50).Emit(instr.I64_SHL).Emit(instr.I64_ADD)
+	b.Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}},
+		Locals: []types.Type{types.TypeI32, types.TypeI32},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// wideI64SumProgram calls wideI64SumFunction(n) once, leaving its wide
+// result on the stack; n's back edges are what drive its loop header past
+// OSR's own threshold.
+func wideI64SumProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	fn := wideI64SumFunction(t)
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(fn))
 }
 
 // divFailProgram warms divFunction with a nonzero divisor warm times, then
@@ -1483,9 +1555,27 @@ func TestWithThreshold(t *testing.T) {
 		prog := wideI64Program(t, 1000)
 		want := runProgram(t, prog)
 
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		result, err := vm.Pop()
+		require.NoError(t, err)
+		vm.Flush()
+
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		require.Zero(t, deopts)
+		require.Equal(t, want, result)
+	})
+
+	t.Run("a wide i64 recursion result from native code matches threaded", func(t *testing.T) {
+		native(t)
+		prog := wideI64Fib(t, 20)
+		want := runProgram(t, prog)
+
+		var got types.Value
 		var runErr, popErr error
-		var result types.Value
-		var exits float64
+		var deopts, entries float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
@@ -1494,17 +1584,52 @@ func TestWithThreshold(t *testing.T) {
 			if runErr != nil {
 				return true
 			}
-			result, popErr = vm.Pop()
+			got, popErr = vm.Pop()
 			if popErr != nil {
 				return true
 			}
 			vm.Flush()
-			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-			return exits > 0
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			baseline, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			entries = baseline + optimized
+			return entries > 0
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
-		require.Equal(t, want, result)
+		require.Zero(t, deopts)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("an OSR unit returns a wide i64 result matching threaded", func(t *testing.T) {
+		native(t)
+		prog := wideI64SumProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var runErr, popErr error
+		var deopts, compiles float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Zero(t, deopts)
+		require.Equal(t, want, got)
 	})
 
 	t.Run("a hot function tiers up to Optimized after enough native entries", func(t *testing.T) {

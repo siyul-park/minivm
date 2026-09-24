@@ -435,12 +435,12 @@ func (l *lowering) function() error {
 	return l.err
 }
 
-// registers reports fn's register-convention results: at most two, none
-// i64 (an i64 result needs range checking compile.call already refuses).
-// A function outside that shape returns nil, so Return keeps boxing results
-// to slots and Enter's stub boxes nothing beyond the slot layout. The same
-// static fact governs every unit and tier of fn, so a caller compiled
-// separately from its callee always agrees with it.
+// registers reports fn's register-convention results: at most two, of any
+// kind (an i64 one stays raw; Go boxes it). A function outside that shape
+// returns nil, so Return keeps boxing results to slots and Enter's stub
+// boxes nothing beyond the slot layout. The same static fact governs every unit
+// and tier of fn, so a caller compiled separately from its callee always
+// agrees with it.
 func registers(fn *types.Function) []types.Kind {
 	if fn == nil || fn.Typ == nil {
 		return nil
@@ -449,13 +449,7 @@ func registers(fn *types.Function) []types.Kind {
 	if len(returns) == 0 || len(returns) > 2 {
 		return nil
 	}
-	kinds := types.Kinds(returns)
-	for _, k := range kinds {
-		if k == types.KindI64 {
-			return nil
-		}
-	}
-	return kinds
+	return types.Kinds(returns)
 }
 
 // arguments reports fn's register-convention parameters: at most two, none
@@ -781,9 +775,11 @@ func (l *lowering) call(op ssa.Operation) error {
 	if target == nil || target.Typ == nil {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
 	}
-	for _, v := range op.Results {
-		if l.f.Type(v) == ssa.TypeI64 {
-			return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
+	if registers(target) == nil {
+		for _, v := range op.Results {
+			if l.f.Type(v) == ssa.TypeI64 {
+				return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
+			}
 		}
 	}
 	state, ok := l.states[op.State]

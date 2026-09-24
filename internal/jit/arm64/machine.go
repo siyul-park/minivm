@@ -126,9 +126,9 @@ func (m *Machine) Epilogue(a *asm.Assembler) {
 // and Resume), loads each register-convention parameter from its slot into
 // X0/X1 (low 32 bits for a narrow or f32 payload, the whole word for f64
 // and ref), calls the function's own entry, boxes each register-convention
-// result from X0/X1 into the VM frame by its declared kind (i64 excluded:
-// registers(fn) never admits one), and returns to Go. Enter returns the
-// stub's label so Lower can resolve its byte offset after Build.
+// result from X0/X1 into the VM frame by its declared kind (ref, f64 and
+// i64 stored raw; the caller boxes an i64), and returns to Go. Enter returns
+// the stub's label so Lower can resolve its byte offset after Build.
 func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
 	label := a.Label()
 	a.Bind(label)
@@ -154,7 +154,7 @@ func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.L
 	for i, k := range results {
 		src := register(i)
 		switch k.Repr() {
-		case types.KindRef, types.KindF64:
+		case types.KindRef, types.KindF64, types.KindI64:
 			a.Emit(target.STR(src, target.X25, int16(8*i)))
 		default:
 			a.Emit(target.UXTW(target.X16, src))

@@ -83,6 +83,17 @@ func identity(t *testing.T) *types.Function {
 	}
 }
 
+// wideResult is a function of no parameters returning one i64 constant:
+// register-eligible per compile's registers.
+func wideResult(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	b.Emit(instr.I64_CONST, 5).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}}, Code: instr.Marshal(code)}
+}
+
 // fibonacci is fib(n) = n < 2 ? n : fib(n-1) + fib(n-2), at address 2,
 // calling itself through constant 0.
 func fibonacci(t *testing.T) (*types.Function, transform.Module) {
@@ -179,6 +190,22 @@ func TestCompile(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, c.Free())
 		require.False(t, m.count)
+	})
+
+	t.Run("sets Registers from the function's register-convention results", func(t *testing.T) {
+		m := new(machine)
+		c, err := compile.Compile(compile.Unit{Function: wideResult(t), Tier: jit.Baseline}, m)
+		require.NoError(t, err)
+		require.NoError(t, c.Free())
+		require.Equal(t, []types.Kind{types.KindI64}, c.Registers)
+	})
+
+	t.Run("leaves Registers nil for a function outside the register shape", func(t *testing.T) {
+		m := new(machine)
+		c, err := compile.Compile(compile.Unit{Function: noop(t), Tier: jit.Baseline}, m)
+		require.NoError(t, err)
+		require.NoError(t, c.Free())
+		require.Nil(t, c.Registers)
 	})
 
 	t.Run("rejects a function translation cannot express", func(t *testing.T) {

@@ -17,7 +17,7 @@ func BenchmarkNumeric_BranchTree(b *testing.B) {
 	prog, want := branchTree(input, nodes)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			var total int32
@@ -56,7 +56,7 @@ func BenchmarkNumeric_NBody(b *testing.B) {
 	prog := nbody(steps)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`import math
 
 
@@ -158,7 +158,7 @@ func BenchmarkNumeric_SpectralNorm(b *testing.B) {
 	prog := spectralnorm(n, rounds)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`import math
 
 
@@ -230,7 +230,7 @@ func BenchmarkNumeric_Mandelbrot(b *testing.B) {
 	prog := mandelbrot(width, height, maxIter)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def escape_count(cr, ci, max_iter):
     zr = 0.0
     zi = 0.0
@@ -275,13 +275,22 @@ def run():
 	}, want)
 }
 
+func BenchmarkNumeric_FNV1a64(b *testing.B) {
+	const n int32 = 1024
+	want := fnv1a64Reference(n)
+	prog := fnv1a64(n)
+	require.NoError(b, program.Verify(prog))
+
+	benchmarkVM(b, prog, types.I64(want))
+}
+
 func BenchmarkNumeric_MatMul(b *testing.B) {
 	const n int32 = 16
 	want := matmulReference(n)
 	prog := matmul(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def matmul(n, a, b, out):
     i = 0
     while i < n:
@@ -1599,6 +1608,69 @@ sumDone:
 func matmul(n int32) *program.Program {
 	nn := uint64(uint32(n * n))
 	return mustParseProgram(fmt.Sprintf(matmulListing, nn, n))
+}
+
+// fnv1a64Listing computes FNV-1a 64 over n single-byte inputs (index & 0xff).
+// The offset basis 0xcbf29ce484222325 exceeds the translator's inline
+// i64.const range, so it is built at runtime from its 32-bit halves.
+// Locals: 0=n (param), 1=h, 2=i.
+const fnv1a64Listing = `
+.constants
+func(i32) i64
+	i64
+	i32
+	i64.const 3421674724
+	i64.const 32
+	i64.shl
+	i64.const 2216829733
+	i64.or
+	local.set 1
+	i32.const 0
+	local.set 2
+	loop:
+	local.get 2
+	local.get 0
+	i32.ge_s
+	br_if done
+	local.get 1
+	local.get 2
+	i32.const 255
+	i32.and
+	i32.to_i64_s
+	i64.xor
+	i64.const 1099511628211
+	i64.mul
+	local.set 1
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br loop
+	done:
+	local.get 1
+	return
+.code
+	i32.const %d
+	const.get 0
+	call
+`
+
+func fnv1a64(n int32) *program.Program {
+	return mustParseProgram(fmt.Sprintf(fnv1a64Listing, n))
+}
+
+// fnv1a64Reference transcribes fnv1a64's basis construction and hash loop
+// operation-for-operation so its result is bit-identical to the bytecode
+// kernel.
+func fnv1a64Reference(n int32) int64 {
+	hi, lo := int64(0xcbf29ce4), int64(0x84222325)
+	h := hi<<32 | lo
+	const prime int64 = 1099511628211
+	for i := int32(0); i < n; i++ {
+		h ^= int64(i & 0xff)
+		h *= prime
+	}
+	return h
 }
 
 // nbodyReference transcribes nbody's advance/energy loops operation-for-

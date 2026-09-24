@@ -208,12 +208,12 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap, mar
 }
 
 // finish ends s's OSR activation on TrapReturn. An ordinary RETURN's
-// results are already boxed at the frame base — native code released every
-// reference-capable slot and wrote them there itself — so only the frame's
-// own teardown remains, shared with threaded RETURN through leave. Module
-// completion instead leaves its results on the operand stack past the
-// locals, with ip past the end of code so dispatch returns, exactly as
-// threaded execution ends it.
+// results are already at the frame base — native code released every
+// reference-capable slot and wrote them there itself; boxRegisters boxes
+// the raw i64 ones — so only the frame's own teardown remains, shared with
+// threaded RETURN through leave. Module completion instead leaves its
+// results on the operand stack past the locals, with ip past the end of
+// code so dispatch returns, exactly as threaded execution ends it.
 func (n *native) finish(i *Interpreter, s *site, c *jit.Code) {
 	f := i.fr
 	if s.module {
@@ -221,6 +221,7 @@ func (n *native) finish(i *Interpreter, s *site, c *jit.Code) {
 		i.sp = f.bp + len(s.fn.Slots()) + c.Results
 		return
 	}
+	boxRegisters(i, c, f.bp)
 	i.leave(f, f.bp+len(s.fn.Typ.Returns))
 }
 

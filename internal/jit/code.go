@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/types"
 )
 
 // Tier is how far a function's native code is optimized; the zero Tier is none.
@@ -45,7 +46,11 @@ type Code struct {
 	// OpComplete carries it on the operand stack past the locals, since it
 	// has no Typ.Returns to read it from otherwise.
 	Results int
-	Exits   []Exit
+	// Registers is the function's register-convention result kinds, nil
+	// when Return boxes to the frame. An i64 one reaches its frame slot as
+	// a raw word the caller must box.
+	Registers []types.Kind
+	Exits     []Exit
 
 	// native is the body's own address: offset 0, what natives[Address]
 	// holds for a native-to-native call. entry is the Go entry stub's

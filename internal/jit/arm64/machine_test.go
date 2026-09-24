@@ -196,6 +196,16 @@ func TestMachine_Enter(t *testing.T) {
 		require.Equal(t, target.STR(target.X0, target.X25, 0), a.Rows()[start+6])
 	})
 
+	t.Run("stores an i64 result raw", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, nil, 0, true, 0, nil, nil)
+		m.Epilogue(a)
+		start := len(a.Rows())
+		m.Enter(a, nil, []types.Kind{types.KindI64})
+
+		require.Equal(t, target.STR(target.X0, target.X25, 0), a.Rows()[start+6])
+	})
+
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, nil, 0, true, 0, nil, nil)
