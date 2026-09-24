@@ -114,7 +114,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, []uint64{1 << 50}, operands(ctx, exits[ctx.Exit()].Frames[0]))
 	})
 
-	t.Run("unboxes an inline i64 slot and deopts on a promoted one", func(t *testing.T) {
+	t.Run("unboxes an inline i64 slot and a heap-promoted one, deopts on a ref to a non-I64", func(t *testing.T) {
 		fn := function(t, []types.Type{types.TypeI64}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
 		})
@@ -127,10 +127,29 @@ func TestNew(t *testing.T) {
 		raw := int64(-41)
 		require.Equal(t, types.Boxed(uint64(raw)), inline[0])
 
+		// A heap-promoted i64 (a wide value, from a threaded caller) unboxes
+		// by borrow: no refcount change from the read itself. RETURN still
+		// releases the slot's own occupant, so rc starts above one.
 		promoted := []types.Boxed{types.BoxRef(3)}
+		heap := []types.Value{nil, nil, nil, types.I64(1 << 50)}
+		rc := []int{0, 0, 0, 2}
 		ctx := enter(t, promoted)
-		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
-		require.Zero(t, exits[ctx.Exit()].Frames[0].IP)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		raw = int64(1<<50) + 1
+		require.Equal(t, types.Boxed(uint64(raw)), promoted[0])
+		require.Equal(t, 1, rc[3])
+		runtime.KeepAlive(heap)
+		runtime.KeepAlive(rc)
+
+		mismatched := []types.Boxed{types.BoxRef(3)}
+		badHeap := []types.Value{nil, nil, nil, types.I32(5)}
+		badCtx := enter(t, mismatched)
+		badCtx.Heap = uintptr(unsafe.Pointer(&badHeap[0]))
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, badCtx))
+		require.Zero(t, exits[badCtx.Exit()].Frames[0].IP)
+		runtime.KeepAlive(badHeap)
 	})
 
 	t.Run("bridges an operation it does not lower", func(t *testing.T) {

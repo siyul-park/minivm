@@ -18,6 +18,18 @@ func TestItab(t *testing.T) {
 		require.Equal(t, word, jit.Itab(v))
 	})
 
+	t.Run("boxes I64 with a data word that is itself a pointer to the value", func(t *testing.T) {
+		var v types.Value = types.I64(1 << 50)
+		type face struct {
+			tab  uintptr
+			data unsafe.Pointer
+		}
+		f := (*face)(unsafe.Pointer(&v))
+
+		require.Equal(t, f.tab, jit.Itab(v))
+		require.Equal(t, int64(1<<50), *(*int64)(f.data))
+	})
+
 	t.Run("distinguishes concrete types sharing the same interface", func(t *testing.T) {
 		array := jit.Itab(types.TypedArray[int32](nil))
 		other := jit.Itab(types.TypedArray[int64](nil))

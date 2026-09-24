@@ -937,17 +937,29 @@ func (m *Machine) choose(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	return true
 }
 
-// guard checks that the slot word of an i64 holds an inline integer, not a
-// reference to a promoted one, and unboxes it.
+// guard unboxes an i64 operand as threaded borrowI64 does: a word tagged
+// Ref reads the heap-promoted I64 through its itab (any other object
+// deopts) and data word, a borrow; every other word sign-extends its 49-bit
+// payload. I64 and Ref tags differ only in bit 49, so the inline path tests
+// that bit and branches past the ref path.
 func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	word, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	a.Emit(target.LSRI(target.X16, word, 49))
-	a.Emit(target.LDI(target.X17, types.Tag(types.KindI64)>>49)...)
-	a.Emit(
-		target.CMP(target.X16, target.X17),
-		target.BCondLabel(target.OpBNE, s.Deopt()),
-		target.SBFX(dst, word, 0, 49),
-	)
+	inline, done := a.Label(), a.Label()
+	a.Emit(target.LSRI(target.X16, word, 49), target.TSTI(target.X16, 1), target.BCondLabel(target.OpBEQ, inline))
+	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>49)...)
+	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, inline))
+	heap := m.vreg()
+	a.Emit(target.SBFX(heap, word, 0, 32), target.LSLI(heap, heap, 4))
+	a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)))
+	a.Emit(target.ADD(heap, target.X16, heap))
+	a.Emit(target.LDR(target.X16, heap, 0))
+	a.Emit(target.LDI(target.X17, uint64(jit.Itab(types.I64(0))))...)
+	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+	a.Emit(target.LDR(dst, heap, int16(jit.OffsetData)), target.LDR(dst, dst, 0), target.BLabel(done))
+
+	a.Bind(inline)
+	a.Emit(target.SBFX(dst, word, 0, 49))
+	a.Bind(done)
 	return true
 }
 

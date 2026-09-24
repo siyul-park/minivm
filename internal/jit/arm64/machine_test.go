@@ -273,6 +273,7 @@ func TestMachine_Lower(t *testing.T) {
 	local := func(i int) ssa.Slot { return ssa.Slot{Space: ssa.SpaceLocal, Index: i} }
 	globals := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
 	old := asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)
+	heap := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
 	counter := []asm.Instruction{
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
 		target.LSLI(target.X17, target.X17, 3),
@@ -493,15 +494,32 @@ func TestMachine_Lower(t *testing.T) {
 			rows: []asm.Instruction{target.LDR(x(1), target.X25, 16)}, lower: true,
 		},
 		{
-			name: "guard.kind deopts on a word that is no inline i64 and unboxes",
+			name: "guard.kind unboxes an inline i64 or a heap-promoted one, deopts on a ref to another object",
 			regs: regs{1: i64, 2: i64},
 			op:   ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
 			rows: slices.Concat(
-				[]asm.Instruction{target.LSRI(target.X16, x(1), 49)},
-				target.LDI(target.X17, types.Tag(types.KindI64)>>49),
+				[]asm.Instruction{
+					target.LSRI(target.X16, x(1), 49),
+					target.TSTI(target.X16, 1),
+					target.BCondLabel(target.OpBEQ, 2),
+				},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, 2),
+					target.SBFX(heap, x(1), 0, 32),
+					target.LSLI(heap, heap, 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(heap, target.X16, heap),
+					target.LDR(target.X16, heap, 0),
+				},
+				target.LDI(target.X17, uint64(jit.Itab(types.I64(0)))),
 				[]asm.Instruction{
 					target.CMP(target.X16, target.X17),
 					target.BCondLabel(target.OpBNE, exit),
+					target.LDR(x(2), heap, int16(jit.OffsetData)),
+					target.LDR(x(2), x(2), 0),
+					target.BLabel(3),
 					target.SBFX(x(2), x(1), 0, 49),
 				},
 			), lower: true,

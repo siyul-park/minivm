@@ -586,6 +586,36 @@ func wideI64SumProgram(t *testing.T, n int) *program.Program {
 	return program.New(code, program.WithConstants(fn))
 }
 
+// wideArgFunction returns its i64 parameter plus one.
+func wideArgFunction() *types.Function {
+	b := instr.NewBuilder()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	if err != nil {
+		panic(err)
+	}
+	return &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+		Code: instr.Marshal(code),
+	}
+}
+
+// wideArgProgram calls wideArgFunction(1) warm times, unrolled so the
+// module stays threaded, then once with the wide argument 1<<50, leaving
+// that result on the stack.
+func wideArgProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	fn := wideArgFunction()
+	b := instr.NewBuilder()
+	for range warm {
+		b.Emit(instr.I64_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	}
+	b.Emit(instr.I64_CONST, 1).Emit(instr.I64_CONST, 50).Emit(instr.I64_SHL).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(fn))
+}
+
 // divFailProgram warms divFunction with a nonzero divisor warm times, then
 // calls it with a zero divisor fails times in a loop whose body is one Try
 // region: every one of those native entries deoptimizes, so the address
@@ -1571,6 +1601,39 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("a wide i64 recursion result from native code matches threaded", func(t *testing.T) {
 		native(t)
 		prog := wideI64Fib(t, 20)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var runErr, popErr error
+		var deopts, entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			baseline, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			entries = baseline + optimized
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Zero(t, deopts)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a wide i64 argument from threaded code into a native function matches threaded", func(t *testing.T) {
+		native(t)
+		prog := wideArgProgram(t, 2000)
 		want := runProgram(t, prog)
 
 		var got types.Value
