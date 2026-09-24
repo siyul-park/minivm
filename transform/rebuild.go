@@ -9,8 +9,10 @@ type rebuilder struct {
 }
 
 func newRebuilder(function *ssa.Function) *rebuilder {
+	builder := ssa.New(function.Name())
+	builder.Entry(function.Entry())
 	return &rebuilder{
-		builder: ssa.New(function.Name()),
+		builder: builder,
 		blocks:  map[int]int{},
 		values:  map[ssa.Value]ssa.Value{},
 	}

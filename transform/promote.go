@@ -78,12 +78,16 @@ func promotable(function *ssa.Function) map[int]ssa.Type {
 
 func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function, bool) {
 	indexes := slices.Sorted(maps.Keys(localTypes))
+	wide := slices.ContainsFunc(indexes, func(index int) bool { return localTypes[index] == ssa.TypeI64 })
 
 	dominance := graph.NewDominance(function)
 	params := placements(function, dominance, localTypes, indexes)
 	children := dominance.Children()
 
 	rebuilder := newRebuilder(function)
+	// raw holds the reaching values of promoted i64 locals: already raw
+	// ints, so a guard.kind on one aliases away.
+	raw := map[ssa.Value]bool{}
 	var walk func(block int, reaching map[int]ssa.Value)
 	walk = func(block int, reaching map[int]ssa.Value) {
 		id := rebuilder.block(block)
@@ -92,9 +96,17 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
 		}
 		for _, index := range params[block] {
-			reaching[index] = rebuilder.builder.Param(id, localTypes[index])
+			v := rebuilder.builder.Param(id, localTypes[index])
+			reaching[index] = v
+			if localTypes[index] == ssa.TypeI64 {
+				raw[v] = true
+			}
 		}
 		if block == 0 {
+			state := ssa.NoValue
+			if wide {
+				state = enter(rebuilder, function, id)
+			}
 			for _, index := range indexes {
 				held := rebuilder.builder.Value(localTypes[index])
 				rebuilder.builder.Add(id, ssa.Operation{
@@ -102,7 +114,16 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 					Slot:    ssa.Slot{Space: ssa.SpaceLocal, Index: index},
 					Results: []ssa.Value{held},
 				})
-				reaching[index] = held
+				v := held
+				if localTypes[index] == ssa.TypeI64 {
+					guarded := rebuilder.builder.Value(ssa.TypeI64)
+					rebuilder.builder.Add(id, ssa.Operation{
+						Op: ssa.OpGuardKind, Args: []ssa.Value{held}, State: state, Results: []ssa.Value{guarded},
+					})
+					v = guarded
+					raw[v] = true
+				}
+				reaching[index] = v
 			}
 		}
 
@@ -114,6 +135,12 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 				continue
 			case operation.Op == ssa.OpStore && promoted(localTypes, operation.Slot):
 				reaching[operation.Slot.Index] = operation.Args[0]
+				if localTypes[operation.Slot.Index] == ssa.TypeI64 {
+					raw[operation.Args[0]] = true
+				}
+				continue
+			case operation.Op == ssa.OpGuardKind && raw[operation.Args[0]]:
+				rebuilder.alias(operation.Results[0], operation.Args[0])
 				continue
 			case operation.Op == ssa.OpState:
 				at := entry(operation)
@@ -139,6 +166,25 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 	walk(0, map[int]ssa.Value{})
 
 	return rebuilder.builder.Build(), true
+}
+
+// enter emits the unit's entry state in block id: function's Entry frame
+// with block 0's params as its stack, refs owned, and no locals, since
+// every promoted slot still holds its entry value there.
+func enter(rebuilder *rebuilder, function *ssa.Function, id int) ssa.Value {
+	block := function.Block(0)
+	var stack []ssa.Operand
+	if len(block.Params) > 0 {
+		stack = make([]ssa.Operand, len(block.Params))
+		for i, param := range block.Params {
+			stack[i] = ssa.Operand{Value: rebuilder.value(param), Owned: function.Type(param) == ssa.TypeRef}
+		}
+	}
+	frame := function.Entry()
+	frame.Stack = stack
+	state := rebuilder.builder.Value(ssa.TypeState)
+	rebuilder.builder.Add(id, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{frame}, Results: []ssa.Value{state}})
+	return state
 }
 
 func placements(function *ssa.Function, dominance *graph.Dominance, localTypes map[int]ssa.Type, indexes []int) [][]int {

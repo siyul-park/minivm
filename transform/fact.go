@@ -201,6 +201,7 @@ func (f facts) build(entry activation, spans []span, states [][]fact, root int) 
 		ids[i] = -1
 	}
 	b := ssa.New(fmt.Sprintf("%d:%d", entry.address, spans[root].start))
+	b.Entry(ssa.Frame{Address: entry.address, IP: spans[root].start, Returns: entry.returns()})
 	for _, id := range order {
 		ids[id] = b.Block()
 	}

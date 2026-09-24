@@ -267,6 +267,42 @@ func TestCompile(t *testing.T) {
 		}
 	})
 
+	t.Run("compiles and runs an OSR unit whose loop carries an i64 local", func(t *testing.T) {
+		native(t)
+		// i (slot 1, i32) counts 0..n; acc (slot 2, i64) xors i in each
+		// iteration, promoted and entry-guarded once instead of refusing
+		// (gap 5, closed by P).
+		b := instr.NewBuilder()
+		header, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I64_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(header)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_TO_I64_S).Emit(instr.I64_XOR).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(header)
+		b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}},
+			Locals: []types.Type{types.TypeI32, types.TypeI64},
+			Code:   instr.Marshal(code),
+		}
+		entry := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 1).Width() +
+			instr.New(instr.I64_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 2).Width()
+
+		stack := []types.Boxed{types.BoxI32(5), types.BoxI32(0), types.BoxI64(0)}
+		u := compile.Unit{Address: 1, Function: fn, Tier: jit.Optimized, Entry: entry, OSR: true}
+		ctx, trap := run(t, u, stack)
+		require.Equal(t, jit.TrapReturn, trap)
+		// 0^0^1^2^3^4 = 4, raw: a register-eligible i64 result reaches its
+		// slot as Enter's raw word (R), which only the Go entry boxes.
+		want := int64(0 ^ 0 ^ 1 ^ 2 ^ 3 ^ 4)
+		require.Equal(t, types.Boxed(uint64(want)), stack[0])
+		require.Zero(t, ctx.Depth)
+	})
+
 	t.Run("keeps module code's own completion value count", func(t *testing.T) {
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2)

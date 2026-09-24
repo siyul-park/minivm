@@ -98,6 +98,26 @@ func TestBuilder_Term(t *testing.T) {
 	})
 }
 
+func TestBuilder_Entry(t *testing.T) {
+	t.Run("carries the frame Build copies onto the function", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Entry(ssa.Frame{Address: 3, IP: 7, Returns: 2})
+
+		require.Equal(t, ssa.Frame{Address: 3, IP: 7, Returns: 2}, b.Build().Entry())
+	})
+
+	t.Run("resets after Build, like every other builder field", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Entry(ssa.Frame{Address: 3, IP: 7, Returns: 2})
+		b.Build()
+
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		require.Zero(t, b.Build().Entry())
+	})
+}
+
 func TestBuilder_Build(t *testing.T) {
 	t.Run("resolves successors and predecessors", func(t *testing.T) {
 		b := ssa.New("f")

@@ -519,9 +519,10 @@ func (l *lowering) operation(op ssa.Operation) error {
 			l.raw[op.Results[0]] = true
 		}
 	case ssa.OpGuardKind:
+		// Only a slot word reaches a guard (promote aliases the rest away);
+		// unboxing a raw int would corrupt it.
 		if !l.raw[op.Args[0]] {
-			l.m.Move(l.a, l.Reg(op.Results[0]), l.Reg(op.Args[0]))
-			return nil
+			return fmt.Errorf("%w: guard.kind of raw int", ErrUnsupported)
 		}
 	case ssa.OpRetain:
 		if l.borrow[op.Args[0]] {

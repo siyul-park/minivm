@@ -5,6 +5,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -166,6 +167,15 @@ blk3: (v6:ref) <-- (blk1)
 	store local[1], v9 state v11
 	jump blk1(v6)
 `, ssa.Format(entry))
+
+		// The root's entry frame (address, header IP, return count) is what
+		// a promoted i64 local's block-0 guard resumes into; it must survive
+		// both rotate (the blk0 it prepends above) and a later pass's own
+		// rebuild.
+		require.Equal(t, ssa.Frame{Address: 1, IP: header, Returns: 1}, root.Entry())
+		_, err = transform.NewFoldPass().Run(pass.NewManager(), root)
+		require.NoError(t, err)
+		require.Equal(t, ssa.Frame{Address: 1, IP: header, Returns: 1}, root.Entry())
 	})
 
 	t.Run("translates from a header reached with an empty operand stack", func(t *testing.T) {

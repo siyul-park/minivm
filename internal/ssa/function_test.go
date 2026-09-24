@@ -131,3 +131,20 @@ func TestFunction_Values(t *testing.T) {
 		require.Equal(t, int(ssa.NoValue)+1, ssa.New("f").Build().Values())
 	})
 }
+
+func TestFunction_Entry(t *testing.T) {
+	t.Run("returns the frame Builder.Entry set", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Entry(ssa.Frame{Address: 4, IP: 9, Returns: 1})
+
+		require.Equal(t, ssa.Frame{Address: 4, IP: 9, Returns: 1}, b.Build().Entry())
+	})
+
+	t.Run("is zero when Builder.Entry was never called", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+
+		require.Zero(t, b.Build().Entry())
+	})
+}

@@ -6,6 +6,7 @@ type Builder struct {
 	name   string
 	types  []Type
 	blocks []Block
+	entry  Frame
 }
 
 // New returns a builder for a named function.
@@ -50,6 +51,12 @@ func (b *Builder) Term(block int, term Terminator) {
 	b.blocks[block].Terminator = term
 }
 
+// Entry records the frame the function enters at: Address, IP and
+// Returns; its Stack is block 0's params. Build copies it.
+func (b *Builder) Entry(frame Frame) {
+	b.entry = frame
+}
+
 // Build returns the function and resets the builder.
 func (b *Builder) Build() *Function {
 	f := &Function{
@@ -58,8 +65,9 @@ func (b *Builder) Build() *Function {
 		blocks: b.blocks,
 		succs:  make([][]int, len(b.blocks)),
 		preds:  make([][]int, len(b.blocks)),
+		entry:  b.entry,
 	}
-	b.types, b.blocks = make([]Type, 1), nil
+	b.types, b.blocks, b.entry = make([]Type, 1), nil, Frame{}
 	for id, block := range f.blocks {
 		for _, edge := range block.Terminator.Edges {
 			if edge.Block < 0 || edge.Block >= len(f.blocks) {

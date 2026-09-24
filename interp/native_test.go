@@ -616,6 +616,52 @@ func wideArgProgram(t *testing.T, warm int) *program.Program {
 	return program.New(code, program.WithConstants(fn))
 }
 
+// narrowArgProgram calls wideArgFunction(5) n times in a module loop,
+// XOR-accumulating each (narrow) result into module local 0, an i64
+// promoted local whose own loop header is OSR-eligible: closing gap 5 (P)
+// is what lets this loop, not just its callee, compile natively.
+func narrowArgProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	fn := wideArgFunction()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I64_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I64_CONST, 5).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_XOR).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI64, types.TypeI32), program.WithConstants(fn))
+}
+
+// fnvModuleProgram runs FNV-1a 64 entirely in a module loop (no CALL): h, an
+// i64 promoted local, xors each narrow byte index and multiplies by the FNV
+// prime every iteration.
+func fnvModuleProgram(t *testing.T, n int, seed int64) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I64_CONST, uint64(seed)).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_TO_I64_U).Emit(instr.I64_XOR)
+	b.Emit(instr.I64_CONST, 1099511628211).Emit(instr.I64_MUL)
+	b.Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI64, types.TypeI32))
+}
+
 // divFailProgram warms divFunction with a nonzero divisor warm times, then
 // calls it with a zero divisor fails times in a loop whose body is one Try
 // region: every one of those native entries deoptimizes, so the address
@@ -1692,6 +1738,69 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("an OSR module loop promotes a narrow i64 accumulator matching threaded (narrowarg)", func(t *testing.T) {
+		native(t)
+		prog := narrowArgProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var runErr, popErr error
+		var deopts, compiles float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Zero(t, deopts)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("an OSR module FNV loop promotes its i64 accumulator matching threaded (fnv-module-narrowseed)", func(t *testing.T) {
+		native(t)
+		prog := fnvModuleProgram(t, 100_000, 0x1234567)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var runErr, popErr error
+		var deopts, compiles float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		// The wide hash deopts once, boxing at OpComplete; the loop never does.
+		require.LessOrEqual(t, deopts, float64(1))
 		require.Equal(t, want, got)
 	})
 

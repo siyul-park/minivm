@@ -7,6 +7,7 @@ type Function struct {
 	blocks []Block
 	succs  [][]int
 	preds  [][]int
+	entry  Frame
 }
 
 // Block is a straight-line sequence ending in a terminator.
@@ -55,4 +56,9 @@ func (f *Function) Type(v Value) Type {
 		return 0
 	}
 	return f.types[v]
+}
+
+// Entry returns the frame f enters at (see Builder.Entry).
+func (f *Function) Entry() Frame {
+	return f.entry
 }

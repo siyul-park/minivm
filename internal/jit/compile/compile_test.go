@@ -573,7 +573,14 @@ func TestLower(t *testing.T) {
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
 	})
 
-	t.Run("unboxes an i64 slot word only through its guard", func(t *testing.T) {
+	t.Run("rejects a guard.kind of an already-raw i64", func(t *testing.T) {
+		// Promote aliases away every guard.kind whose arg is already a raw
+		// i64 (its own reaching value), so a genuine one always arrives
+		// with a fresh, unguarded slot word as its arg. A second guard on
+		// an already-guarded value is exactly the case promote must never
+		// produce: refusing it here, instead of silently moving the value
+		// through, catches that bug at compile time rather than
+		// reinterpreting a raw int's bits as a boxed tag downstream.
 		b := ssa.New("f")
 		entry := b.Block()
 		word := b.Value(ssa.TypeI64)
@@ -585,10 +592,8 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{value}, State: at, Results: []ssa.Value{again}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{again}})
 
-		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(1, 0), nil, 0, false, true)
-		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "load", "guard.kind", "move", "return", "epilogue", "enter"}, m.calls)
+		_, _, _, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
+		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
 	t.Run("rejects an unguarded i64 slot word", func(t *testing.T) {
