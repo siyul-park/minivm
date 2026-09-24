@@ -385,15 +385,15 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
-			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {
+			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
 				i.release(ref)
 			}
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
-		case jit.ExitBridge:
-			// Checked before bridging: a deopt after a bridge would run the op twice.
-			if n.bridged[addr] < resume && bridgeable(exit.Code) && n.bridge(i, exit) {
+		case jit.ExitBridge, jit.ExitBox:
+			// Checked before serving: a deopt after a bridge would run the op twice.
+			if n.bridged[addr] < resume && n.serve(i, exit) {
 				n.bridged[addr] = n.amortized(mark, ctx.Budget, n.bridged[addr])
 				mark = ctx.Budget
 				ctx.Heap = heapBase(i.heap)
@@ -413,6 +413,29 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			return n.refute(addr)
 		}
 	}
+}
+
+// serve runs a resumable ExitBridge or ExitBox in Go; false declines, and
+// the exit deopts.
+func (n *native) serve(i *Interpreter, exit jit.Exit) bool {
+	if exit.Kind == jit.ExitBox {
+		return n.widen(i, exit)
+	}
+	return bridgeable(exit.Code) && n.bridge(i, exit)
+}
+
+// widen heap-boxes exit.Word, a wide i64, into Context.Results[0] as
+// threaded boxI64 does; a panic (heap exhaustion) declines.
+func (n *native) widen(i *Interpreter, exit jit.Exit) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	k := int(n.ctx.Depth) - 1
+	v := int64(n.ctx.Read(k, exit.Word))
+	n.ctx.Results[0] = uint64(i.boxI64(v))
+	return true
 }
 
 // boxRegisters boxes each i64 register-convention result at bp, which the

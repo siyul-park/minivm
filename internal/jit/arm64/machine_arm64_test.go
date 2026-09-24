@@ -67,7 +67,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frames[0]))
 	})
 
-	t.Run("deopts storing an i64 outside the inline range", func(t *testing.T) {
+	t.Run("boxes and stores a wide i64 through a resumable exit", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		one := b.Value(ssa.TypeI64)
@@ -81,19 +81,30 @@ func TestNew(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{wide}, State: store})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
+		// The local slot is TypeI64, which Return also releases before it
+		// zeroes the slot: rc=1 on the box means that release is the last
+		// reference, so it takes its own resumable ExitRelease.
+		rc := []int{0, 0, 0, 1}
 		stack := []types.Boxed{0}
 		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil, 0, false)
 		ctx := enter(t, stack)
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
 
-		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
-		require.Equal(t, jit.ExitDeopt, exit.Kind)
-		require.Equal(t, types.KindI64, exit.Frames[0].Stack[0].Kind)
-		require.Equal(t, []uint64{1 << 50}, operands(ctx, exit.Frames[0]))
+		require.Equal(t, jit.ExitBox, exit.Kind)
+		require.Equal(t, uint64(1<<50), read(ctx, exit.Word))
+		ctx.Results[0] = uint64(types.BoxRef(3))
+
+		require.Equal(t, jit.TrapBridge, jit.Resume(ctx))
+		exit = exits[ctx.Exit()]
+		require.Equal(t, jit.ExitRelease, exit.Kind)
+		require.Equal(t, uint64(types.BoxRef(3)), read(ctx, exit.Word))
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
 		require.Zero(t, stack[0])
 	})
 
-	t.Run("deopts returning an i64 outside the inline range", func(t *testing.T) {
+	t.Run("boxes and returns a wide i64 through a resumable exit", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		one := b.Value(ssa.TypeI64)
@@ -110,8 +121,37 @@ func TestNew(t *testing.T) {
 		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0, false)
 		ctx := enter(t, stack)
 
-		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
-		require.Equal(t, []uint64{1 << 50}, operands(ctx, exits[ctx.Exit()].Frames[0]))
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitBox, exit.Kind)
+		require.Equal(t, uint64(1<<50), read(ctx, exit.Word))
+		ctx.Results[0] = uint64(types.BoxRef(3))
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
+		require.Equal(t, types.BoxRef(3), stack[0])
+	})
+
+	t.Run("releases an i64 slot's old occupant on store, as threaded LOCAL_SET does", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeI64}, nil, func(b *instr.Builder) {
+			b.Emit(instr.I64_CONST, 5).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
+		})
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+
+		rc := []int{0, 0, 0, 1}
+		stack := []types.Boxed{types.BoxRef(3)}
+		ctx := enter(t, stack)
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		// rc=1 on the old occupant: store's release is the last reference,
+		// so it takes its own resumable exit; native code never decrements
+		// past 1 itself, so this simulates the interpreter's own release.
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitRelease, exit.Kind)
+		require.Equal(t, uint64(types.BoxRef(3)), read(ctx, exit.Word))
+		rc[3] = 0
+		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
+		require.Zero(t, rc[3])
 	})
 
 	t.Run("unboxes an inline i64 slot and a heap-promoted one, deopts on a ref to a non-I64", func(t *testing.T) {
@@ -203,7 +243,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitRelease, exit.Kind)
-		require.Equal(t, uint64(types.BoxRef(2)), read(ctx, exit.Release))
+		require.Equal(t, uint64(types.BoxRef(2)), read(ctx, exit.Word))
 		require.Equal(t, []int{0, 0, 1}, rc)
 
 		rc[2] = 2
@@ -227,7 +267,7 @@ func TestNew(t *testing.T) {
 
 		stack[0] = types.BoxRef(3)
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
-		require.Equal(t, uint64(types.BoxRef(3)), read(ctx, exits[ctx.Exit()].Release))
+		require.Equal(t, uint64(types.BoxRef(3)), read(ctx, exits[ctx.Exit()].Word))
 		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
 		require.Equal(t, types.BoxI32(1), stack[0])
 	})

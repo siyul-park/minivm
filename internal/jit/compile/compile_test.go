@@ -68,6 +68,10 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		exit, resume := s.Release(s.Reg(op.Args[0]))
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[0]), exit))
 		a.Bind(resume)
+	case op.Op == ssa.OpStore && s.Type(op.Args[0]) == ssa.TypeI64:
+		exit, resume := s.Box(s.Reg(op.Args[0]))
+		a.Emit(arm64.CBNZLabel(s.Reg(op.Args[0]), exit))
+		a.Bind(resume)
 	}
 	for _, v := range op.Results {
 		m.regs[v] = s.Reg(v)
@@ -355,9 +359,25 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "const", "release", "return", "exit 0 3", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, []jit.Exit{{
-			Kind:    jit.ExitRelease,
-			Release: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}},
+			Kind: jit.ExitRelease,
+			Word: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}},
 		}}, exits)
+	})
+
+	t.Run("maps a box exit with the word and a full state", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		wide := constant(b, entry, types.BoxI64(1))
+		at := state(b, entry, 9, ssa.Operand{Value: wide})
+		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{wide}, State: at})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		_, exits, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, exits, 1)
+		require.Equal(t, jit.ExitBox, exits[0].Kind)
+		require.Equal(t, types.KindI64, exits[0].Word.Kind)
+		require.Equal(t, 9, exits[0].Frames[0].IP)
 	})
 
 	t.Run("calls a resolved function at the frame base above its operands, borrowing its once-retained callee", func(t *testing.T) {

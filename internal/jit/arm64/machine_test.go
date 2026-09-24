@@ -40,6 +40,8 @@ func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
+func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
+
 func (r regs) Reg(v ssa.Value) asm.VReg {
 	switch r[v] {
 	case ssa.TypeI64, ssa.TypeRef:
@@ -587,7 +589,10 @@ func TestMachine_Lower(t *testing.T) {
 			rows: append(boxed(types.KindI8, target.UXTW(target.X16, w(1))), target.STR(target.X16, target.X25, 16)), lower: true,
 		},
 		{
-			name: "store i64 fails outside the inline range",
+			// The inline (in-range) path is row-identical to a narrow
+			// store: the CBNZ target is the only difference from before
+			// resumable boxing (a Box exit instead of a deopt).
+			name: "store i64 boxes outside the inline range",
 			regs: regs{1: i64},
 			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{1}},
 			rows: append(boxed(types.KindI64, append(target.LDI(target.X16, 1<<48),

@@ -28,8 +28,9 @@ type Exit struct {
 	// Results are the kinds of the values an ExitBridge reads back from
 	// Context.Results, or an ExitCall from the callee's frame base, in order.
 	Results []types.Kind
-	// Release is the reference an ExitRelease hands to the interpreter.
-	Release Value
+	// Word is the value an ExitRelease or ExitBox hands to the interpreter:
+	// the reference to release, or the raw i64 word to box.
+	Word Value
 }
 
 // Kind is why native code exits.
@@ -81,6 +82,9 @@ const (
 	// resumes once the callee returns. Frames are the caller's state after
 	// the call, which is also its state while a native callee runs.
 	ExitCall
+	// ExitBox suspends native code for the interpreter to heap-box Word, a
+	// wide i64 outside the inline range, into Context.Results[0].
+	ExitBox
 )
 
 // String returns the exit kind name.
@@ -96,6 +100,8 @@ func (k Kind) String() string {
 		return "release"
 	case ExitCall:
 		return "call"
+	case ExitBox:
+		return "box"
 	default:
 		return "invalid"
 	}

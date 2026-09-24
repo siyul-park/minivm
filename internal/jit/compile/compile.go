@@ -77,6 +77,10 @@ type Site interface {
 	// whose last reference native code drops, and the label the machine
 	// binds where native code resumes.
 	Release(ref asm.VReg) (exit, resume asm.Label)
+	// Box returns the label of an exit that hands the interpreter word, a
+	// wide i64 to heap-box, and the label the machine binds where native
+	// code resumes with the boxed ref in the same register as word.
+	Box(word asm.VReg) (exit, resume asm.Label)
 }
 
 // Call describes a statically resolved CALL.
@@ -749,8 +753,17 @@ func (l *lowering) Deopt() asm.Label {
 func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
 	id := l.exit(jit.ExitRelease)
 	e := l.exits[id]
-	e.Release.Kind = types.KindRef
-	l.places[id] = append(l.places[id], place{to: &e.Release, reg: ref})
+	e.Word.Kind = types.KindRef
+	l.places[id] = append(l.places[id], place{to: &e.Word, reg: ref})
+	return l.stub(id)
+}
+
+// Box places a box stub for word, a wide i64.
+func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(jit.ExitBox)
+	e := l.exits[id]
+	e.Word.Kind = types.KindI64
+	l.places[id] = append(l.places[id], place{to: &e.Word, reg: word})
 	return l.stub(id)
 }
 

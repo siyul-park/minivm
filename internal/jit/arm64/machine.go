@@ -308,6 +308,9 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 		return
 	}
 	a.Emit(target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)))
+	if k == jit.ExitBox {
+		a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetResults)))
+	}
 }
 
 // Spill saves a value in a fixed spill slot.
@@ -493,7 +496,8 @@ func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	if !ok {
 		return false
 	}
-	if s.Slot(op.Slot) == ssa.TypeRef {
+	// An i64 slot may hold a heap-promoted ref; release skips inline words.
+	if k := s.Slot(op.Slot); k == ssa.TypeRef || k == ssa.TypeI64 {
 		old := m.vreg()
 		a.Emit(target.LDR(old, base, int16(op.Slot.Index*8)))
 		m.release(a, old, s)
@@ -1016,7 +1020,7 @@ func (m *Machine) vreg() asm.VReg {
 }
 
 // box returns the register holding v as a boxed word. An i64 outside the
-// inline range deopts.
+// inline range exits through Box and resumes with its heap ref in X16.
 func (m *Machine) box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	src, k := s.Reg(v), s.Type(v).Kind()
 	switch k {
@@ -1024,12 +1028,16 @@ func (m *Machine) box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 		return src
 	case types.KindI64:
 		a.Emit(target.LDI(target.X16, 1<<48)...)
+		a.Emit(target.ADD(target.X17, src, target.X16), target.LSRI(target.X17, target.X17, 49))
+		exit, resume := s.Box(src)
 		a.Emit(
-			target.ADD(target.X17, src, target.X16),
-			target.LSRI(target.X17, target.X17, 49),
-			target.CBNZLabel(target.X17, s.Deopt()),
+			target.CBNZLabel(target.X17, exit),
 			target.ANDI(target.X16, src, types.VMask),
 		)
+		a.Emit(target.LDI(target.X17, types.Tag(k))...)
+		a.Emit(target.ORR(target.X16, target.X16, target.X17))
+		a.Bind(resume)
+		return target.X16
 	case types.KindF32:
 		a.Emit(target.FMOV(target.W16, src))
 	default:

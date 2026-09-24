@@ -176,16 +176,16 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap, mar
 			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
-			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Release)).Ref(); ref != 0 {
+			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
 				i.release(ref)
 			}
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
-		case jit.ExitBridge:
-			// The limit is checked before attempting the bridge: running it
-			// and then materializing anyway would run Code twice.
-			if s.bridged < resume && bridgeable(exit.Code) && n.bridge(i, exit) {
+		case jit.ExitBridge, jit.ExitBox:
+			// The limit is checked before serving: running a bridge and then
+			// materializing anyway would run Code twice.
+			if s.bridged < resume && n.serve(i, exit) {
 				s.bridged = n.amortized(mark, ctx.Budget, s.bridged)
 				mark = ctx.Budget
 				ctx.Heap = heapBase(i.heap)
