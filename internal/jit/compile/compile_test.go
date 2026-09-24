@@ -136,6 +136,12 @@ func (m *machine) Move(a *asm.Assembler, dst, src asm.VReg) {
 	a.Emit(arm64.MOV(dst, src))
 }
 
+func (m *machine) Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool {
+	m.calls = append(m.calls, "const")
+	a.Emit(arm64.LDI(dst, 0)...)
+	return true
+}
+
 func i32(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
 func i64(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width64) }
 
@@ -207,7 +213,9 @@ func TestLower(t *testing.T) {
 		_, exits, _, err := compile.Lower(b.Build(), m, function(1, 1, instr.New(instr.CALL)), transform.Objects{9: {Function: function(1, 1)}}, 0, false, true)
 		require.NoError(t, err)
 		require.Empty(t, m.spills)
-		require.Contains(t, m.sites[0].Live, m.regs[v])
+		// v, a constant, is loaded once for the call's map and kept live
+		// across the call; the local and the stack entry share it.
+		require.Len(t, m.sites[0].Live, 1)
 		frame := exits[0].Frames[0]
 		require.Equal(t, []jit.Local{{Index: 0, Value: frame.Stack[0].Value}}, frame.Locals)
 	})
@@ -370,12 +378,12 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		// No "retain" row: the callee's single retain, consumed only by
 		// this call, is redundant — the constant pool already holds it.
-		require.Equal(t, []string{"prologue", "const", "const", "const", "call", "return", "exit 0 4", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "jump", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		site.Bridge, site.Resume = 0, 0
 		require.Equal(t, compile.Call{
 			Address: 2, Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
-			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(1)}, Owned: false,
+			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(10)}, Owned: false,
 			Registers: []types.Kind{types.KindI32},
 			Arguments: []types.Kind{types.KindI32},
 		}, site)
@@ -427,7 +435,7 @@ func TestLower(t *testing.T) {
 		caller := function(1, 1, instr.New(instr.CALL))
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "const", "retain", "retain", "call", "return", "exit 0 4", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "retain", "retain", "call", "return", "exit 0 4", "jump", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		require.True(t, site.Owned)
 		require.True(t, exits[0].Owned)
@@ -455,7 +463,7 @@ func TestLower(t *testing.T) {
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		// No "retain" row before either call.
-		require.Equal(t, []string{"prologue", "const", "const", "call", "call", "return", "exit 0 4", "jump", "exit 1 4", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "call", "call", "return", "exit 0 4", "jump", "exit 1 4", "jump", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 2)
 		require.False(t, exits[0].Owned)
 		require.False(t, exits[1].Owned)
@@ -527,6 +535,29 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, jit.ExitSafepoint, exits[0].Kind)
 		require.Equal(t, 9, exits[0].Frames[0].IP)
+	})
+
+	t.Run("keeps a loop's constant in one register even when the function calls", func(t *testing.T) {
+		b := ssa.New("f")
+		header, exit := b.Block(), b.Block()
+		value := constant(b, header, types.BoxI32(1))
+		at := state(b, header, 9, ssa.Operand{Value: value})
+		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		arg := constant(b, exit, types.BoxI32(7))
+		callee := constant(b, exit, types.BoxRef(2))
+		b.Add(exit, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		call := state(b, exit, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		got := b.Value(ssa.TypeI32)
+		b.Add(exit, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: call, Results: []ssa.Value{got}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		_, _, _, err := compile.Lower(b.Build(), m, function(0, 1, instr.New(instr.CALL)), transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		require.NoError(t, err)
+		// value is lowered once at its definition, not at the store and the
+		// branch; arg, outside the loop, is loaded at the call only.
+		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "call"}, m.calls[:6])
 	})
 
 	t.Run("deopts at an exit terminator", func(t *testing.T) {

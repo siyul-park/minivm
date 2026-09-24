@@ -424,30 +424,40 @@ func (m *Machine) Move(a *asm.Assembler, dst, src asm.VReg) {
 	a.Emit(target.MOV(dst, src))
 }
 
+// constant lowers OpConst; compile routes only floats here.
 func (m *Machine) constant(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if len(op.Results) != 1 {
 		return false
 	}
 	dst := s.Reg(op.Results[0])
 	switch op.Const.Kind() {
-	case types.KindI1:
-		value := uint64(0)
-		if op.Const.Bool() {
-			value = 1
-		}
-		a.Emit(target.LDI(dst, value)...)
-	case types.KindI8, types.KindI32:
-		a.Emit(target.LDI(dst, uint64(uint32(op.Const.I32())))...)
-	case types.KindI64:
-		a.Emit(target.LDI(dst, uint64(op.Const.I64()))...)
 	case types.KindF32:
 		a.Emit(target.LDI(target.X16, uint64(math.Float32bits(op.Const.F32())))...)
 		a.Emit(target.FMOV(dst, target.W16))
 	case types.KindF64:
 		a.Emit(target.LDI(target.X16, uint64(op.Const))...)
 		a.Emit(target.FMOV(dst, target.X16))
+	default:
+		return m.Const(a, dst, op.Const)
+	}
+	return true
+}
+
+// Const loads scalar or ref constant c into dst.
+func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool {
+	switch c.Kind() {
+	case types.KindI1:
+		value := uint64(0)
+		if c.Bool() {
+			value = 1
+		}
+		a.Emit(target.LDI(dst, value)...)
+	case types.KindI8, types.KindI32:
+		a.Emit(target.LDI(dst, uint64(uint32(c.I32())))...)
+	case types.KindI64:
+		a.Emit(target.LDI(dst, uint64(c.I64()))...)
 	case types.KindRef:
-		a.Emit(target.LDI(dst, uint64(op.Const))...)
+		a.Emit(target.LDI(dst, uint64(c))...)
 	default:
 		return false
 	}

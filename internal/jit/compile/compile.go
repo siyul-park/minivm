@@ -4,6 +4,7 @@ package compile
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/siyul-park/minivm/instr"
@@ -56,6 +57,9 @@ type Machine interface {
 	Call(a *asm.Assembler, c Call, s Site) bool
 	// Move copies one virtual register to another.
 	Move(a *asm.Assembler, dst, src asm.VReg)
+	// Const loads scalar or ref constant c into dst and reports false when
+	// the target cannot; Reg calls it at each use of a remat constant.
+	Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool
 }
 
 // Site is what Machine sees of the operation or terminator it lowers.
@@ -135,6 +139,10 @@ type lowering struct {
 	exits  []*jit.Exit
 	places [][]place
 	saves  [][]save
+	// stalls holds each exit's remat constants, materialized at its stub.
+	stalls [][]stall
+	// memo is each ExitCall map's one register per remat constant.
+	memo   map[int]map[ssa.Value]asm.VReg
 	deopts []stub
 	edges  []edge
 	stubs  []stub
@@ -142,6 +150,11 @@ type lowering struct {
 	// enter is the Go entry stub Enter binds, resolved to a byte offset
 	// after Build.
 	enter asm.Label
+	// remats holds each constant loaded at each use (see remat).
+	remats map[ssa.Value]bool
+	// tmp is the next one-use register id, past the SSA values and the four
+	// ids scratch reserves.
+	tmp int32
 	// args holds each register-passed parameter's incoming value while it
 	// still equals its slot: only during block 0, which runs once per
 	// activation (see rotate), and until an OpStore to that slot. Cleared
@@ -180,6 +193,19 @@ type stub struct {
 type save struct {
 	reg  asm.VReg
 	slot int
+}
+
+// stall is an exit map entry for remat constant v, resolved at the stub.
+type stall struct {
+	to *jit.Value
+	v  ssa.Value
+}
+
+// remat reports v's constant and whether it is loaded at each use instead of
+// held in one register a call would force to spill.
+func (l *lowering) remat(v ssa.Value) (types.Boxed, bool) {
+	c, ok := l.consts[v]
+	return c, ok && l.remats[v]
 }
 
 // ErrUnsupported reports SSA the backend does not lower.
@@ -228,7 +254,46 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	l := &lowering{
 		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
-		borrow: borrowed(f), homes: homes,
+		borrow: borrowed(f), homes: homes, tmp: int32(f.Values()) + 4,
+		memo: map[int]map[ssa.Value]asm.VReg{}, remats: map[ssa.Value]bool{},
+	}
+	// A scalar or ref constant is rematerialized when f has a call and no
+	// loop block uses it: a loop keeps its constants in registers.
+	loops := map[int]bool{}
+	dom := graph.NewDominance(f)
+	for _, h := range graph.Headers(f, dom) {
+		maps.Copy(loops, graph.Body(f, dom, h))
+	}
+	caller := false
+	looped := map[ssa.Value]bool{}
+	for id := 0; id < f.Len(); id++ {
+		b := f.Block(id)
+		mark := func(args []ssa.Value) {
+			if loops[id] {
+				for _, v := range args {
+					looped[v] = true
+				}
+			}
+		}
+		for _, op := range b.Operations {
+			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
+			mark(op.Args)
+		}
+		mark(b.Terminator.Args)
+		for _, e := range b.Terminator.Edges {
+			mark(e.Args)
+		}
+	}
+	for id := 0; id < f.Len() && caller; id++ {
+		for _, op := range f.Block(id).Operations {
+			if op.Op == ssa.OpConst && !looped[op.Results[0]] {
+				switch op.Const.Kind() {
+				case types.KindF32, types.KindF64:
+				default:
+					l.remats[op.Results[0]] = true
+				}
+			}
+		}
 	}
 	l.a.Reserve(m.Reserve()...)
 	l.a.ReserveSlots(len(homes))
@@ -447,6 +512,10 @@ func (l *lowering) operation(op ssa.Operation) error {
 		return nil
 	case ssa.OpConst:
 		l.consts[op.Results[0]] = op.Const
+		if _, ok := l.remat(op.Results[0]); ok {
+			// Reg loads it at each use.
+			return nil
+		}
 	case ssa.OpLoad:
 		if i, ok := l.argument(op.Slot); ok {
 			l.m.Move(l.a, l.Reg(op.Results[0]), l.args[i])
@@ -614,8 +683,17 @@ func (l *lowering) validate(args []ssa.Value) error {
 	return nil
 }
 
-// Reg is v's virtual register, typed by its static representation.
+// Reg is v's virtual register, typed by its static representation; for a
+// remat constant, a fresh register loaded here.
 func (l *lowering) Reg(v ssa.Value) asm.VReg {
+	if c, ok := l.remat(v); ok {
+		return l.materialize(v, c)
+	}
+	return l.reg(v)
+}
+
+// reg is v's virtual register, typed by its static representation.
+func (l *lowering) reg(v ssa.Value) asm.VReg {
 	switch l.f.Type(v) {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
 		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width32)
@@ -628,6 +706,23 @@ func (l *lowering) Reg(v ssa.Value) asm.VReg {
 	default:
 		return asm.VReg{}
 	}
+}
+
+// fresh returns an unshared register of v's bank and width.
+func (l *lowering) fresh(v ssa.Value) asm.VReg {
+	like := l.reg(v)
+	id := l.tmp
+	l.tmp++
+	return asm.NewVReg(id, like.Type(), like.Width())
+}
+
+// materialize loads constant c for v into a fresh register.
+func (l *lowering) materialize(v ssa.Value, c types.Boxed) asm.VReg {
+	reg := l.fresh(v)
+	if !l.m.Const(l.a, reg, c) {
+		l.fail(fmt.Errorf("%w: constant v%d", ErrUnsupported, v))
+	}
+	return reg
 }
 
 // Type is v's static type.
@@ -739,8 +834,13 @@ func (l *lowering) leave(t ssa.Terminator) error {
 	return nil
 }
 
-// emit saves deferred deopt values and leaves native code through exit id.
+// emit resolves deferred remat constants, saves deferred deopt values, and
+// leaves native code through exit id.
 func (l *lowering) emit(id int) {
+	for _, s := range l.stalls[id] {
+		reg := l.materialize(s.v, l.consts[s.v])
+		l.places[id] = append(l.places[id], place{to: s.to, reg: reg})
+	}
 	for _, save := range l.saves[id] {
 		l.m.Spill(l.a, save.reg, save.slot)
 	}
@@ -754,6 +854,7 @@ func (l *lowering) exit(k jit.Kind) int {
 	l.exits = append(l.exits, e)
 	l.places = append(l.places, nil)
 	l.saves = append(l.saves, nil)
+	l.stalls = append(l.stalls, nil)
 
 	if k == jit.ExitRelease {
 		return id
@@ -824,6 +925,28 @@ func (l *lowering) place(id int, to *jit.Value, v ssa.Value) {
 		l.fail(fmt.Errorf("%w: exit %d names unguarded i64 slot word v%d", ErrUnsupported, id, v))
 	}
 	to.Kind = l.f.Type(v).Kind()
+	if _, ok := l.remat(v); ok {
+		// An ExitCall map is also an outer activation's map, read from its
+		// spill slot by a deeper trap: the register must live across the
+		// call, one per value.
+		if l.exits[id].Kind == jit.ExitCall {
+			m := l.memo[id]
+			if m == nil {
+				m = map[ssa.Value]asm.VReg{}
+				l.memo[id] = m
+			}
+			reg, ok := m[v]
+			if !ok {
+				reg = l.Reg(v)
+				m[v] = reg
+			}
+			l.places[id] = append(l.places[id], place{to: to, reg: reg})
+			return
+		}
+		// Any other map is read only at its own stub.
+		l.stalls[id] = append(l.stalls[id], stall{to: to, v: v})
+		return
+	}
 	l.places[id] = append(l.places[id], place{to: to, reg: l.Reg(v)})
 }
 

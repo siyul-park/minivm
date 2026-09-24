@@ -1090,3 +1090,31 @@ func TestMachine_Move(t *testing.T) {
 	m.Move(a, d1, d2)
 	require.Equal(t, []asm.Instruction{target.MOV(w1, w2), target.FMOV(d1, d2)}, a.Rows())
 }
+
+func TestMachine_Const(t *testing.T) {
+	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
+	x := asm.NewVReg(2, asm.RegTypeInt, asm.Width64)
+	for _, c := range []struct {
+		name string
+		dst  asm.VReg
+		c    types.Boxed
+		rows []asm.Instruction
+	}{
+		{"i1", w, types.BoxI1(true), target.LDI(w, 1)},
+		{"i8", w, types.BoxI8(-2), target.LDI(w, uint64(uint32(0xFFFFFFFE)))},
+		{"i32", w, types.BoxI32(-7), target.LDI(w, uint64(uint32(0xFFFFFFF9)))},
+		{"i64", x, types.BoxI64(1 << 40), target.LDI(x, 1<<40)},
+		{"ref", x, types.BoxRef(3), target.LDI(x, uint64(types.BoxRef(3)))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := asm.New(target.New())
+			require.True(t, arm64.New().Const(a, c.dst, c.c))
+			require.Equal(t, c.rows, a.Rows())
+		})
+	}
+	t.Run("declines a float", func(t *testing.T) {
+		a := asm.New(target.New())
+		require.False(t, arm64.New().Const(a, x, types.BoxF64(1.5)))
+		require.Empty(t, a.Rows())
+	})
+}
