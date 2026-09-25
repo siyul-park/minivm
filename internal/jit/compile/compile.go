@@ -407,17 +407,21 @@ func borrowed(f *ssa.Function) map[ssa.Value]bool {
 	for id := 0; id < f.Len(); id++ {
 		b := f.Block(id)
 		for _, op := range b.Operations {
-			switch op.Op {
-			case ssa.OpRetain:
+			if op.Op == ssa.OpRetain {
 				retains[op.Args[0]]++
-			case ssa.OpRelease:
-			case ssa.OpGuardValue:
+				continue
+			}
+			if op.Op == ssa.OpRelease {
+				continue
+			}
+			if op.Op == ssa.OpGuardValue {
 				uses[op.Args[0]]++
-			default:
-				use(op.Args)
-				if op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 {
-					callees[op.Args[len(op.Args)-1]]++
-				}
+				continue
+			}
+
+			use(op.Args)
+			if op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 {
+				callees[op.Args[len(op.Args)-1]]++
 			}
 		}
 		use(b.Terminator.Args)

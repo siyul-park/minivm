@@ -39,25 +39,22 @@ func TestParseFunction(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		// Drop trailing empty strings from split
-		lines := tt.lines
-		for len(lines) > 0 && lines[len(lines)-1] == "" {
-			lines = lines[:len(lines)-1]
-		}
-		t.Run(lines[0], func(t *testing.T) {
+	t.Run("round-trips formatted functions", func(t *testing.T) {
+		for _, tt := range tests {
+			lines := tt.lines
+			for len(lines) > 0 && lines[len(lines)-1] == "" {
+				lines = lines[:len(lines)-1]
+			}
 			fn, err := types.ParseFunction(lines)
-			require.NoError(t, err)
-			require.NotNil(t, fn)
-			// Round-trip: String() must match input
+			require.NoError(t, err, lines[0])
+			require.NotNil(t, fn, lines[0])
 			got := strings.Split(fn.String(), "\n")
 			for len(got) > 0 && got[len(got)-1] == "" {
 				got = got[:len(got)-1]
 			}
-			require.Equal(t, lines, got)
-		})
-	}
-
+			require.Equal(t, lines, got, lines[0])
+		}
+	})
 	t.Run("no offset prefix", func(t *testing.T) {
 		// Instructions written without offset prefix must parse successfully.
 		lines := []string{
@@ -140,18 +137,17 @@ func TestParse(t *testing.T) {
 		{"bad", nil, true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
+	t.Run("type strings", func(t *testing.T) {
+		for _, tt := range tests {
 			got, err := types.Parse(tt.input)
 			if tt.wantErr {
-				require.Error(t, err)
-				return
+				require.Error(t, err, tt.input)
+				continue
 			}
-			require.NoError(t, err)
-			require.True(t, tt.want.Equals(got))
-		})
-	}
-
+			require.NoError(t, err, tt.input)
+			require.True(t, tt.want.Equals(got), tt.input)
+		}
+	})
 	t.Run("nested struct fields", func(t *testing.T) {
 		// A nested struct carries its own ";" separators, so the field split has
 		// to track brace depth rather than cutting on every semicolon.

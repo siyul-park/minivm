@@ -1978,14 +1978,14 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	seed := int64(-3750763034362895579)
-	for _, c := range []struct {
-		name string
-		prog *program.Program
-	}{
-		{"a function FNV loop seeded with a wide i64.const compiles and matches threaded", fnvProgram(t, 100_000, instr.I64_CONST, uint64(seed))},
-		{"a function FNV loop seeded by a wide i64 pool cell compiles and matches threaded", fnvProgram(t, 100_000, instr.CONST_GET, 1, types.I64(seed))},
-	} {
-		t.Run(c.name, func(t *testing.T) {
+	t.Run("wide FNV seeds", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			prog *program.Program
+		}{
+			{"a function FNV loop seeded with a wide i64.const compiles and matches threaded", fnvProgram(t, 100_000, instr.I64_CONST, uint64(seed))},
+			{"a function FNV loop seeded by a wide i64 pool cell compiles and matches threaded", fnvProgram(t, 100_000, instr.CONST_GET, 1, types.I64(seed))},
+		} {
 			native(t)
 			prog := c.prog
 			want := runProgram(t, prog)
@@ -2010,12 +2010,12 @@ func TestWithThreshold(t *testing.T) {
 				compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 				return compiles > 0
 			}, 5*time.Second, time.Millisecond)
-			require.NoError(t, runErr)
-			require.NoError(t, popErr)
-			require.Zero(t, deopts)
-			require.Equal(t, want, got)
-		})
-	}
+			require.NoError(t, runErr, c.name)
+			require.NoError(t, popErr, c.name)
+			require.Zero(t, deopts, c.name)
+			require.Equal(t, want, got, c.name)
+		}
+	})
 
 	t.Run("a wide i64 constant kept across a shape-guard deopt keeps threaded's RefCount", func(t *testing.T) {
 		native(t)

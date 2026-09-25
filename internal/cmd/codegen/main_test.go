@@ -10,24 +10,6 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	root := filepath.Clean(filepath.Join("..", "..", ".."))
-	binary := filepath.Join(t.TempDir(), "codegen")
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./internal/cmd/codegen")
-	build.Dir = root
-	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
-
-	t.Run("generates threaded output by default", func(t *testing.T) {
-		temp := t.TempDir()
-		command := exec.CommandContext(t.Context(), binary)
-		command.Dir = temp
-		output, err := command.CombinedOutput()
-		require.NoError(t, err)
-		require.Equal(t, "interp/threaded.go\n", string(output))
-		_, err = os.ReadFile(filepath.Join(temp, "interp", "threaded.go"))
-		require.NoError(t, err)
-	})
-
 	cases := []struct {
 		name      string
 		content   []byte
@@ -36,6 +18,11 @@ func TestRun(t *testing.T) {
 		contains  string
 		unchanged bool
 	}{
+		{
+			name:     "generates threaded output by default",
+			generate: true,
+		},
+
 		{
 			name:     "up to date output passes silently",
 			generate: true,
@@ -53,8 +40,15 @@ func TestRun(t *testing.T) {
 			contains: "read interp/threaded.go",
 		},
 	}
+	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "codegen")
+			build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./internal/cmd/codegen")
+			build.Dir = root
+			output, err := build.CombinedOutput()
+			require.NoError(t, err, string(output))
+
 			dir := t.TempDir()
 			out := filepath.Join(dir, "interp", "threaded.go")
 			require.NoError(t, os.MkdirAll(filepath.Dir(out), 0o755))
@@ -71,10 +65,9 @@ func TestRun(t *testing.T) {
 			if content != nil {
 				require.NoError(t, os.WriteFile(out, content, 0o644))
 			}
-
 			command := exec.CommandContext(t.Context(), binary, "-check")
 			command.Dir = dir
-			output, err := command.CombinedOutput()
+			output, err = command.CombinedOutput()
 			if tc.wantErr {
 				require.Error(t, err)
 				require.Contains(t, string(output), tc.contains)
