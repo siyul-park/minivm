@@ -70,6 +70,121 @@ func fibFlatCallsProgram(t *testing.T, calls int) *program.Program {
 	return program.New(code, program.WithConstants(fib))
 }
 
+// indirectFibFunction is fib(n, self) = n < 2 ? n : fib(n-1, self)(n-1, self)
+// + fib(n-2, self)(n-2, self), calling itself through param 1 (the callee
+// arrives on the stack, not by CONST_GET) instead of constant 0.
+func indirectFibFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
+	small := b.Label()
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
+	b.Emit(
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	)
+	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// indirectFibCallsProgram calls indirectFibFunction(n, self) calls times,
+// module locals [0] the counter and [1] the running sum, and leaves the sum
+// on the stack.
+func indirectFibCallsProgram(t *testing.T, n, calls int) *program.Program {
+	t.Helper()
+	fib := indirectFibFunction()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(calls)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithConstants(fib))
+}
+
+// incFunction returns its one parameter plus one.
+func incFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// decFunction returns its one parameter minus one.
+func decFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// applyFunction calls fn(x) through param 1, a dynamic CALL.
+func applyFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// applyProgram calls apply(i, inc) warm times, then apply(i, dec) warm times,
+// through the same dynamic CALL site: a polymorphic callee at one ip.
+// Constants are [apply, inc, dec]. Module locals [0] the counter and [1] the
+// running sum, left on the stack.
+func applyProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	for _, callee := range []uint64{1, 2} {
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, callee).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+	}
+	b.Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32),
+		program.WithConstants(applyFunction(), incFunction(), decFunction()))
+}
+
+// wrapFunction calls a closure through param 1, a dynamic CALL: native never
+// records a closure callee (call's own hook only reaches a *types.Function
+// target), so this site never speculates.
+func wrapFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// closureCallsProgram calls wrap(i, closure) calls times, closure a
+// zero-capture closure over incFunction created once and kept alive in
+// module local [1]. Constants are [inc, wrap]. Module locals [0] the counter
+// and [1] the closure, left holding the counter on the stack.
+func closureCallsProgram(t *testing.T, calls int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(calls)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeAny),
+		program.WithConstants(incFunction(), wrapFunction()))
+}
+
 // sumFunction is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
 func sumFunction(t *testing.T) *types.Function {
 	t.Helper()
@@ -2847,6 +2962,171 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.Equal(t, want, gotFirst)
 		require.Equal(t, want, gotSecond)
+	})
+
+	t.Run("an indirect self call through a parameter runs native and matches threaded, including RefCount", func(t *testing.T) {
+		native(t)
+		prog := indirectFibCallsProgram(t, 20, 50)
+
+		wantVM := interp.New(indirectFibCallsProgram(t, 20, 50))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		want, err := wantVM.Pop()
+		require.NoError(t, err)
+		wantConst, err := wantVM.Const(0)
+		require.NoError(t, err)
+		wantRC, err := wantVM.RefCount(wantConst.Ref())
+		require.NoError(t, err)
+
+		var runErr, popErr, rcErr error
+		var got types.Value
+		var gotRC int
+		var compiles, entries, deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			gotConst, err := vm.Const(0)
+			if err != nil {
+				popErr = err
+				return true
+			}
+			gotRC, rcErr = vm.RefCount(gotConst.Ref())
+			if rcErr != nil {
+				return true
+			}
+			vm.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return compiles > 0 && entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, rcErr)
+		require.Equal(t, want, got)
+		require.Equal(t, wantRC, gotRC)
+		require.Zero(t, deopts)
+	})
+
+	t.Run("a unit that declined before its dynamic sites ran recompiles once they are recorded", func(t *testing.T) {
+		native(t)
+		prog := indirectFibCallsProgram(t, 20, 50)
+
+		var runErr, popErr error
+		var unsupported, ok float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			_, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"})
+			ok, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			return unsupported >= 1 && ok >= 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.GreaterOrEqual(t, unsupported, float64(1))
+		require.GreaterOrEqual(t, ok, float64(1))
+	})
+
+	t.Run("a speculated callee refuted by a second function deopts, retires, and matches threaded, including RefCount", func(t *testing.T) {
+		native(t)
+		const refute = 8 // interp/native.go's unexported refute constant.
+		prog := applyProgram(t, 3000)
+
+		wantVM := interp.New(applyProgram(t, 3000))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		want, err := wantVM.Pop()
+		require.NoError(t, err)
+		wantInc, err := wantVM.Const(1)
+		require.NoError(t, err)
+		wantIncRC, err := wantVM.RefCount(wantInc.Ref())
+		require.NoError(t, err)
+		wantDec, err := wantVM.Const(2)
+		require.NoError(t, err)
+		wantDecRC, err := wantVM.RefCount(wantDec.Ref())
+		require.NoError(t, err)
+
+		var runErr, popErr, rcErr error
+		var got types.Value
+		var gotIncRC, gotDecRC int
+		var deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			gotInc, err := vm.Const(1)
+			if err != nil {
+				popErr = err
+				return true
+			}
+			gotIncRC, rcErr = vm.RefCount(gotInc.Ref())
+			if rcErr != nil {
+				return true
+			}
+			gotDec, err := vm.Const(2)
+			if err != nil {
+				popErr = err
+				return true
+			}
+			gotDecRC, rcErr = vm.RefCount(gotDec.Ref())
+			if rcErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return deopts >= 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, rcErr)
+		require.Equal(t, want, got)
+		require.Equal(t, wantIncRC, gotIncRC)
+		require.Equal(t, wantDecRC, gotDecRC)
+		require.GreaterOrEqual(t, deopts, float64(1))
+		// Bounds the same way native_test.go's own retirement case does: a
+		// site that kept re-entering and re-deopting after retirement would
+		// blow well past this, since applyProgram runs 6000 calls total.
+		require.LessOrEqual(t, deopts, float64(2*refute))
+	})
+
+	t.Run("a closure callee leaves its site unrecorded and the caller stays threaded", func(t *testing.T) {
+		native(t)
+		prog := closureCallsProgram(t, 50)
+		want := runProgram(t, prog)
+
+		vm := interp.New(prog, interp.WithThreshold(0))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 	})
 }
 

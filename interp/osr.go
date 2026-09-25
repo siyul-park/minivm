@@ -91,7 +91,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				// compile of the same address may hold it, undrained,
 				// since its own last call.
 				n.drain(i)
-				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.module, Tier: jit.Optimized, Entry: s.ip, OSR: true}
+				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, Entry: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
 		case s.count%interval == 0:

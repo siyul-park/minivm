@@ -91,7 +91,7 @@ One opcode per row, in opcode-value order.
 | Control | `BR_IF` | `br_if` | ✅ | 🔲 | lowered on ARM64 |
 | Control | `BR_TABLE` | `br_table` | ✅ | 🔲 | lowered on ARM64 |
 | Stack | `SELECT` | `select` | ✅ | 🔲 | lowered on ARM64 |
-| Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target when the return is not i64; other calls bridge |
+| Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target, or to the one function recorded at a dynamic site behind `guard.value`, when the return is not i64; other calls bridge |
 | Control | `RETURN` | `return` | ✅ | 🔲 | lowered on ARM64 |
 | Control | `RETURN_CALL` | `return_call` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Coroutines | `YIELD` | `yield` | ⬜ | 🔲 | bridges to threaded on ARM64 |

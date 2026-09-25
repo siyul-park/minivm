@@ -2,6 +2,7 @@ package interp
 
 import (
 	"errors"
+	"maps"
 	"math"
 	"runtime"
 	"sync/atomic"
@@ -42,6 +43,12 @@ type native struct {
 	// sites indexes every observed OSR site by (address, ip): drain looks a
 	// failed OSR unit's site up here to restore its threaded handler.
 	sites map[key]*site
+	// callees records each dynamic CALL's one observed callee, by caller
+	// address then ip: 0 (unset) means unseen, mixed means more than one seen,
+	// any other value is the one callee address seen there so far. A caller's
+	// own ip slice is allocated lazily, sized to its own code. feedback reads
+	// this to snapshot a unit's own single-callee sites at submit time.
+	callees [][]int
 
 	// exact caches unfused threaded code for materialized frames, by address.
 	exact [][]func(*Interpreter)
@@ -91,6 +98,10 @@ const resume = refute
 // none at all (no loop between two levels). 2 separates the first from the
 // other two on both measured kernels.
 const amortize = 2
+
+// mixed marks a dynamic CALL site (native.callees) that has seen more than
+// one callee: it never speculates.
+const mixed = -1
 
 const (
 	metricCompiles = "vm_jit_compiles_total"
@@ -188,6 +199,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		failed:    make([][2]bool, len(i.code)),
 		exact:     make([][]func(*Interpreter), len(i.code)),
 		sites:     map[key]*site{},
+		callees:   make([][]int, len(i.code)),
 		compile:   i.compile,
 	}
 	// OSR observes every loop header of every function i compiled at
@@ -225,6 +237,9 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 // attempt is call's slow path; call stays small enough to inline into the
 // threaded CALL handlers.
 func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
+	if release {
+		n.see(i, addr)
+	}
 	n.drain(i)
 	if n.store.Code(addr) == nil {
 		n.count(i, addr, fn)
@@ -270,7 +285,50 @@ func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	if n.calls[addr] < n.threshold || n.hasFailed(addr, jit.Baseline) {
 		return
 	}
-	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Tier: jit.Baseline})
+	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.feedback(addr), Tier: jit.Baseline})
+}
+
+// see records the one callee seen at the current dynamic CALL: i.fr's own
+// address and ip (the CALL's own, per call's doc). A caller past construction
+// (bound dynamically) is skipped; its own ip slice is allocated lazily, sized
+// to its own code, on first use. The transition is 0 (unset) -> callee ->
+// mixed once a second, different callee is seen; it never moves back.
+func (n *native) see(i *Interpreter, callee int) {
+	addr, ip := i.fr.addr, i.fr.ip
+	if addr >= len(n.callees) {
+		return
+	}
+	if n.callees[addr] == nil {
+		n.callees[addr] = make([]int, len(i.code[addr]))
+	}
+	sites := n.callees[addr]
+	switch sites[ip] {
+	case 0:
+		sites[ip] = callee
+	case callee, mixed:
+	default:
+		sites[ip] = mixed
+	}
+}
+
+// feedback is addr's compile-time snapshot of n.module: its own single-callee
+// dynamic CALL sites (see), an unseen or mixed one absent. The snapshot is
+// never mutated after Submit: a fresh map every call.
+func (n *native) feedback(addr int) transform.Module {
+	m := n.module
+	if addr >= len(n.callees) || n.callees[addr] == nil {
+		return m
+	}
+	callees := map[int]int{}
+	for ip, callee := range n.callees[addr] {
+		if callee > 0 {
+			callees[ip] = callee
+		}
+	}
+	if len(callees) > 0 {
+		m.Callees = callees
+	}
+	return m
 }
 
 // refute counts deopts; refute retires the code at its current tier.
@@ -311,7 +369,9 @@ func (n *native) drain(i *Interpreter) {
 					i.code[s.address][s.ip] = s.inner
 					delete(n.sites, k)
 				}
-			} else {
+			} else if maps.Equal(job.Unit.Module.Callees, n.feedback(job.Unit.Address).Callees) {
+				// Feedback that moved since this unit's own snapshot gets
+				// another try instead of a permanent failure.
 				n.markFailed(job.Unit.Address, job.Unit.Tier)
 			}
 			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome(job.Err)})
@@ -333,7 +393,7 @@ func (n *native) drain(i *Interpreter) {
 			continue
 		}
 		if n.entries[addr] >= jit.Promote {
-			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.module, Tier: jit.Optimized})
+			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.feedback(addr), Tier: jit.Optimized})
 		}
 		live = append(live, addr)
 	}

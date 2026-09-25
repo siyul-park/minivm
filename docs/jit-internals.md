@@ -62,7 +62,8 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 - `Lower` assigns one register per SSA value by type, orders blocks in reverse postorder, and resolves block parameters by parallel moves on edges.
 - A loop header needs a state-bearing operation before its budget check, or lowering fails.
 - An OSR unit loads block-0 parameters (the operand stack at the header) in its prologue and clears no locals.
-- A constant callee is borrowed, no retain/release around any of its calls, when its retains and uses equal its call-site count: this also covers one CSE'd callee shared by several call sites, each with its own retain-before-call pair.
+- A constant callee is borrowed, no retain/release around any of its calls, when its retains and uses equal its call-site count: this also covers one CSE'd callee shared by several call sites, each with its own retain-before-call pair. A `guard.value`'s admitted constant is not itself a use, so a speculated callee stays borrowed too.
+- A dynamic `CALL` whose unit feedback (`transform.Module.Callees`) names one function is guarded by `guard.value` against that constant and lowered as a constant call; a borrowed (non-owned) callee operand only.
 
 ## ARM64 activation
 
@@ -109,6 +110,8 @@ A non-resuming exit rebuilds every native activation as an interpreter frame, ou
 - `resume` consecutive bridges unamortized by real native work (fewer than `amortize` back edges since the last amortized one) also retire, exactly like a refuted deopt: the round trip a resumed bridge pays for is only worth staying native when other native work offsets it.
 - Compiles are async on `compile.Queue`, one unit per address; the interpreter drains and publishes at its next call, header observation, or safepoint.
 - A `Pool` shares `Store`, `Queue`, and module data; each interpreter has its own `jit.Context`.
+- The dynamic CALL path records one callee per site (`native.callees`), only on JIT-enabled interpreters and only for `*types.Function` targets.
+- A failed entry compile is permanent only when its address's feedback has not moved since the unit's own snapshot; feedback that moved gets another try instead.
 
 ## OSR
 
@@ -127,6 +130,7 @@ With `WithProfiler`: `vm_jit_compiles_total{tier,outcome}`, `vm_jit_entries_tota
 - Container ops lower behind `guard.shape`, which deopts on null or a mismatched representation.
 - Unlowered opcodes bridge; see `instruction-set.md`. Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` resume (see Exits); every other bridge still deopts, `ExitCall` still deopts (no nested `jit.Enter`; the callee runs interpreted and the caller resumes threaded). `RETURN_CALL`, `YIELD`, `RESUME` have no native form.
 - A resumed bridge round-trips through Go, so a site whose bridges recur with fewer than `amortize` back edges between them (no intervening loop work to pay for the trip) retires after `resume` such bridges in a row, same as a refuted deopt (see Tiers/OSR).
+- Closures and host functions leave a dynamic CALL site unrecorded. An owned callee operand is not speculated. An unrecorded site declines the whole unit until it runs.
 
 ## Related
 
