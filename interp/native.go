@@ -34,7 +34,7 @@ type native struct {
 	// resume retires the address.
 	bridged []int
 	// failed records permanent compile failure per address and tier.
-	failed []uint8
+	failed [][2]bool
 	// candidates holds every address with published Baseline code not yet
 	// promoted or permanently blocked: drain's promotion scan visits only
 	// these instead of every address's own entry count.
@@ -185,7 +185,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		entries:   make([]int64, len(i.code)),
 		deopts:    make([]int, len(i.code)),
 		bridged:   make([]int, len(i.code)),
-		failed:    make([]uint8, len(i.code)),
+		failed:    make([][2]bool, len(i.code)),
 		exact:     make([][]func(*Interpreter), len(i.code)),
 		sites:     map[key]*site{},
 		compile:   i.compile,
@@ -214,14 +214,17 @@ func (n *native) close() error {
 // advance, since native completion must apply them exactly as pushFrame
 // would.
 func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
-	if addr >= len(n.calls) {
-		// Bound after construction (Alloc, Store): never compiled.
+	// Bound after construction (Alloc, Store): never compiled. A failed
+	// Baseline never republishes: nothing is left to count.
+	if addr >= len(n.failed) || n.failed[addr][jit.Baseline-1] {
 		return false
 	}
-	if n.hasFailed(addr, jit.Baseline) {
-		// A failed Baseline never republishes: nothing is left to count.
-		return false
-	}
+	return n.attempt(i, addr, fn, release, advance)
+}
+
+// attempt is call's slow path; call stays small enough to inline into the
+// threaded CALL handlers.
+func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
 	n.drain(i)
 	if n.store.Code(addr) == nil {
 		n.count(i, addr, fn)
@@ -286,17 +289,12 @@ func (n *native) forget(addr int) {
 
 // hasFailed reports whether addr's compile at tier permanently failed.
 func (n *native) hasFailed(addr int, tier jit.Tier) bool {
-	return n.failed[addr]&tierBit(tier) != 0
+	return n.failed[addr][tier-1]
 }
 
 // markFailed permanently marks addr's compile at tier as failed.
 func (n *native) markFailed(addr int, tier jit.Tier) {
-	n.failed[addr] |= tierBit(tier)
-}
-
-// tierBit is tier's bit in a failed[addr] mark.
-func tierBit(tier jit.Tier) uint8 {
-	return 1 << (tier - 1)
+	n.failed[addr][tier-1] = true
 }
 
 // drain publishes completed jobs, records permanent compile failures, and
