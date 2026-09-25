@@ -179,7 +179,10 @@ func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.L
 func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	switch op.Op {
 	case ssa.OpConst:
-		return m.constant(a, op, s)
+		if len(op.Results) != 1 {
+			return false
+		}
+		return m.Const(a, s.Reg(op.Results[0]), op.Const)
 	case ssa.OpLoad:
 		return m.load(a, op, s)
 	case ssa.OpStore:
@@ -263,14 +266,6 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((base+i)*8)))
 	}
 	a.Emit(target.BLabel(m.end))
-}
-
-// register is the register-convention result register at index i (0 or 1).
-func register(i int) asm.PReg {
-	if i == 1 {
-		return target.X1
-	}
-	return target.X0
 }
 
 // Budget counts X24, the pinned budget, down and branches to safepoint when
@@ -436,26 +431,7 @@ func (m *Machine) Move(a *asm.Assembler, dst, src asm.VReg) {
 	a.Emit(target.MOV(dst, src))
 }
 
-// constant lowers OpConst; compile routes only floats here.
-func (m *Machine) constant(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Results) != 1 {
-		return false
-	}
-	dst := s.Reg(op.Results[0])
-	switch op.Const.Kind() {
-	case types.KindF32:
-		a.Emit(target.LDI(target.X16, uint64(math.Float32bits(op.Const.F32())))...)
-		a.Emit(target.FMOV(dst, target.W16))
-	case types.KindF64:
-		a.Emit(target.LDI(target.X16, uint64(op.Const))...)
-		a.Emit(target.FMOV(dst, target.X16))
-	default:
-		return m.Const(a, dst, op.Const)
-	}
-	return true
-}
-
-// Const loads scalar or ref constant c into dst.
+// Const loads c into dst.
 func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool {
 	switch c.Kind() {
 	case types.KindI1:
@@ -468,12 +444,26 @@ func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool {
 		a.Emit(target.LDI(dst, uint64(uint32(c.I32())))...)
 	case types.KindI64:
 		a.Emit(target.LDI(dst, uint64(c.I64()))...)
+	case types.KindF32:
+		a.Emit(target.LDI(target.X16, uint64(math.Float32bits(c.F32())))...)
+		a.Emit(target.FMOV(dst, target.W16))
+	case types.KindF64:
+		a.Emit(target.LDI(target.X16, uint64(c))...)
+		a.Emit(target.FMOV(dst, target.X16))
 	case types.KindRef:
 		a.Emit(target.LDI(dst, uint64(c))...)
 	default:
 		return false
 	}
 	return true
+}
+
+// register is the register-convention result register at index i (0 or 1).
+func register(i int) asm.PReg {
+	if i == 1 {
+		return target.X1
+	}
+	return target.X0
 }
 
 // load unboxes a slot: a narrow or f32 payload is the slot's low 32 bits,

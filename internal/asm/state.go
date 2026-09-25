@@ -46,6 +46,11 @@ func (s *State) PC() uintptr {
 	return s.pc
 }
 
+// Exited reports whether native code left the state suspended.
+func (s *State) Exited() bool {
+	return s.exited != 0
+}
+
 // Abandon discards a suspended native stack, so the next Enter runs a fresh
 // activation from the stack's top rather than nesting below the abandoned
 // one.
@@ -84,14 +89,14 @@ func (s *State) Word(addr uintptr) uint64 {
 }
 
 func (s *State) slot(r PReg) *uint64 {
-	if r.id >= uint8(len(s.regs)) {
+	if r.ID() >= uint8(len(s.regs)) {
 		panic("asm: invalid register")
 	}
-	switch r.typ {
+	switch r.Type() {
 	case RegTypeInt:
-		return &s.regs[r.id]
+		return &s.regs[r.ID()]
 	case RegTypeFloat:
-		return &s.fregs[r.id]
+		return &s.fregs[r.ID()]
 	default:
 		panic("asm: invalid register type")
 	}

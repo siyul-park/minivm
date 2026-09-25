@@ -273,6 +273,31 @@ func TestSSAPass_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("does not invalidate program analyses while a temporary SSA pass runs", func(t *testing.T) {
+		calls := 0
+		manager := pass.NewManager()
+		pass.Register[*program.Program, int](manager, run[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
+			calls++
+			return len(prog.Code), nil
+		}))
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
+		_, err := pass.GetResult[int](manager, prog)
+		require.NoError(t, err)
+
+		inner := pass.NewPipeline[*ssa.Function]()
+		inner.Add(run[*ssa.Function, bool](func(*pass.Manager, *ssa.Function) (bool, error) {
+			return false, nil
+		}))
+		outer := pass.NewPipeline[*program.Program]()
+		outer.Add(transform.NewSSAPass(inner))
+		_, err = outer.Run(manager, prog)
+		require.NoError(t, err)
+
+		_, err = pass.GetResult[int](manager, prog)
+		require.NoError(t, err)
+		require.Equal(t, 1, calls)
+	})
+
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
 		for _, input := range declinedCases(t) {
 			require.NoError(t, program.Verify(input))
@@ -284,6 +309,12 @@ func TestSSAPass_Run(t *testing.T) {
 			require.Equal(t, before, input.String())
 		}
 	})
+}
+
+type run[U, R any] func(*pass.Manager, U) (R, error)
+
+func (r run[U, R]) Run(m *pass.Manager, unit U) (R, error) {
+	return r(m, unit)
 }
 
 func pipeline() *pass.Pipeline[*ssa.Function] {

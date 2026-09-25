@@ -86,3 +86,12 @@ func TestResume(t *testing.T) {
 		require.Equal(t, uint64(2), ctx.Exit())
 	})
 }
+
+func TestContext_Trap(t *testing.T) {
+	ctx, err := jit.NewContext(4096)
+	require.NoError(t, err)
+	require.Equal(t, jit.TrapReturn, ctx.Trap())
+
+	require.Equal(t, jit.TrapBridge, jit.Enter(link(t, exit(1, jit.TrapBridge)...), ctx))
+	require.Equal(t, jit.TrapBridge, ctx.Trap())
+}

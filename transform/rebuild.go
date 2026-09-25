@@ -2,6 +2,11 @@ package transform
 
 import "github.com/siyul-park/minivm/internal/ssa"
 
+type site struct {
+	block int
+	index int
+}
+
 type rebuilder struct {
 	builder *ssa.Builder
 	blocks  map[int]int

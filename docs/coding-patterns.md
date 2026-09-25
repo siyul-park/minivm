@@ -36,13 +36,13 @@ Files and declaration order `MUST` make ownership, responsibility, and relations
 
 ### Structural Rules
 
-1. **Abstract semantic duplication.*- When multiple sites implement the same behavior or rule, it `MUST` move into one owner. Similar syntax alone `MUST NOT` trigger abstraction.
+1. **Abstract semantic duplication.** When multiple sites implement the same behavior or rule, it `MUST` move into one owner. Similar syntax alone `MUST NOT` trigger abstraction.
 
-2. **Merge overlapping symbols.*- When symbols have substantially the same responsibility at the same abstraction level, they `MUST` be consolidated. One general symbol `SHOULD` be preferred over parallel variants, wrappers, aliases, or coordinators.
+2. **Merge overlapping symbols.** When symbols have substantially the same responsibility at the same abstraction level, they `MUST` be consolidated. One general symbol `SHOULD` be preferred over parallel variants, wrappers, aliases, or coordinators.
 
-3. **Split real boundaries.*- Symbols `MUST` be separated only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. They `MUST NOT` be split to shorten code or create symmetry.
+3. **Split real boundaries.** Symbols `MUST` be separated only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. They `MUST NOT` be split to shorten code or create symmetry.
 
-4. **Reuse before extension.*- Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
+4. **Reuse before extension.** Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
 
 ## Functions
 
@@ -87,6 +87,7 @@ Every exported symbol is a maintenance commitment.
 - Interfaces `MUST` be accepted only when callers supply behavior; they `MUST` be defined where behavior is consumed.
 - Constructors `MUST` return concrete types.
 - Exported structs `SHOULD` stay small; writable state `MUST` stay behind its owner.
+- Data-only values and native ABI bridge structs `MAY` expose contract fields; long-lived mutable runtime state `MUST` remain behind its owner.
 - Immutable values and defensive copies at ownership boundaries `SHOULD` be preferred.
 - Parameter-group structs named `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` `MUST NOT` be added without a contract.
 - Speculative options, algorithms, extension points, or policy knobs `MUST NOT` be exposed.
@@ -103,6 +104,8 @@ Types `MUST` own invariants and transitions. Compile, publish, install, reset, r
 ## Ownership and Concurrency
 
 Ownership `MUST` be explicit.
+
+An unexported member of an exported type `MUST` be owned by that type. Only methods of that type `MAY` read or mutate it directly; constructors `MAY` initialize it. Other types and functions `MUST` use the owner's public contract. Layout-only declarations such as `unsafe.Offsetof` `MAY` name private members but `MUST NOT` read or mutate runtime state. Same-package visibility `MUST NOT` be treated as permission to bypass ownership. This is a design boundary, not a reason to split the package.
 
 Mutable storage `MUST` stay within its owner; borrowed values `MUST NOT` cross ownership boundaries.
 

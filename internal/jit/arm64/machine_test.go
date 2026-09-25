@@ -60,24 +60,26 @@ func TestMachine_Reserve(t *testing.T) {
 }
 
 func TestMachine_Prologue(t *testing.T) {
-	a := asm.New(target.New())
-	arm64.New().Prologue(a, []types.Kind{types.KindI32, types.KindI64, types.KindRef}, 1, true, 3, nil, nil)
-	require.Equal(t, []asm.Instruction{
-		target.SUBI(target.SP, target.SP, 16),
-		target.STR(target.LR, target.SP, 8),
-		{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
-		target.LSLI(target.X17, target.X27, 5),
-		target.ADD(target.X17, target.Ctx, target.X17),
-		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
-		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
-		target.ADDI(target.X27, target.X27, 1),
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
-		target.LDR(target.X17, target.X16, 24),
-		target.ADDI(target.X17, target.X17, 1),
-		target.STR(target.X17, target.X16, 24),
-		target.STR(target.XZR, target.X25, 8),
-		target.STR(target.XZR, target.X25, 16),
-	}, a.Rows())
+	t.Run("counts entry and clears locals", func(t *testing.T) {
+		a := asm.New(target.New())
+		arm64.New().Prologue(a, []types.Kind{types.KindI32, types.KindI64, types.KindRef}, 1, true, 3, nil, nil)
+		require.Equal(t, []asm.Instruction{
+			target.SUBI(target.SP, target.SP, 16),
+			target.STR(target.LR, target.SP, 8),
+			{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
+			target.LSLI(target.X17, target.X27, 5),
+			target.ADD(target.X17, target.Ctx, target.X17),
+			target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
+			target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
+			target.ADDI(target.X27, target.X27, 1),
+			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
+			target.LDR(target.X17, target.X16, 24),
+			target.ADDI(target.X17, target.X17, 1),
+			target.STR(target.X17, target.X16, 24),
+			target.STR(target.XZR, target.X25, 8),
+			target.STR(target.XZR, target.X25, 16),
+		}, a.Rows())
+	})
 
 	t.Run("skips entry count", func(t *testing.T) {
 		a := asm.New(target.New())
@@ -1218,6 +1220,8 @@ func TestMachine_Move(t *testing.T) {
 func TestMachine_Const(t *testing.T) {
 	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
 	x := asm.NewVReg(2, asm.RegTypeInt, asm.Width64)
+	f := asm.NewVReg(3, asm.RegTypeFloat, asm.Width32)
+	d := asm.NewVReg(4, asm.RegTypeFloat, asm.Width64)
 	for _, c := range []struct {
 		name string
 		dst  asm.VReg
@@ -1228,6 +1232,8 @@ func TestMachine_Const(t *testing.T) {
 		{"i8", w, types.BoxI8(-2), target.LDI(w, uint64(uint32(0xFFFFFFFE)))},
 		{"i32", w, types.BoxI32(-7), target.LDI(w, uint64(uint32(0xFFFFFFF9)))},
 		{"i64", x, types.BoxI64(1 << 40), target.LDI(x, 1<<40)},
+		{"f32", f, types.BoxF32(1.5), append(target.LDI(target.X16, uint64(math.Float32bits(1.5))), target.FMOV(f, target.W16))},
+		{"f64", d, types.BoxF64(1.5), append(target.LDI(target.X16, uint64(types.BoxF64(1.5))), target.FMOV(d, target.X16))},
 		{"ref", x, types.BoxRef(3), target.LDI(x, uint64(types.BoxRef(3)))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1236,9 +1242,4 @@ func TestMachine_Const(t *testing.T) {
 			require.Equal(t, c.rows, a.Rows())
 		})
 	}
-	t.Run("declines a float", func(t *testing.T) {
-		a := asm.New(target.New())
-		require.False(t, arm64.New().Const(a, x, types.BoxF64(1.5)))
-		require.Empty(t, a.Rows())
-	})
 }

@@ -91,39 +91,53 @@ func TestAssembler_ReserveSlots(t *testing.T) {
 }
 
 func TestAssembler_Loc(t *testing.T) {
-	a := asm.New(arm64.New())
-	a.Emit(
-		slots(arm64.OpSUBI),
-		arm64.MOVI(vint(0), 1),
-		arm64.MOVI(vint(1), 2),
-		arm64.BLR(arm64.X1),
-		arm64.ADD(vint(2), vint(0), vint(1)),
-		arm64.STR(vint(2), arm64.Ctx, 0),
-		slots(arm64.OpADDI),
-		arm64.RET(),
-	)
-	_, ok := a.Loc(vint(0))
-	require.False(t, ok)
-
-	_, err := a.Build()
-	require.NoError(t, err)
-
-	tests := []struct {
-		name string
-		reg  asm.VReg
-		want asm.Loc
-		ok   bool
-	}{
-		{"spilled", vint(0), asm.Loc{Slot: 0, Spilled: true}, true},
-		{"spilled next slot", vint(1), asm.Loc{Slot: 1, Spilled: true}, true},
-		{"assigned", vint(2), asm.Loc{Reg: arm64.X2}, true},
-		{"unknown", vint(3), asm.Loc{}, false},
+	emit := func() *asm.Assembler {
+		a := asm.New(arm64.New())
+		a.Emit(
+			slots(arm64.OpSUBI),
+			arm64.MOVI(vint(0), 1),
+			arm64.MOVI(vint(1), 2),
+			arm64.BLR(arm64.X1),
+			arm64.ADD(vint(2), vint(0), vint(1)),
+			arm64.STR(vint(2), arm64.Ctx, 0),
+			slots(arm64.OpADDI),
+			arm64.RET(),
+		)
+		return a
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			loc, ok := a.Loc(tt.reg)
-			require.Equal(t, tt.ok, ok)
-			require.Equal(t, tt.want, loc)
-		})
+	built := func(t *testing.T) *asm.Assembler {
+		a := emit()
+		_, err := a.Build()
+		require.NoError(t, err)
+		return a
 	}
+
+	t.Run("reports no location before build", func(t *testing.T) {
+		_, ok := emit().Loc(vint(0))
+		require.False(t, ok)
+	})
+
+	t.Run("reports a spilled first value", func(t *testing.T) {
+		loc, ok := built(t).Loc(vint(0))
+		require.True(t, ok)
+		require.Equal(t, asm.Loc{Slot: 0, Spilled: true}, loc)
+	})
+
+	t.Run("reports a spilled next value", func(t *testing.T) {
+		loc, ok := built(t).Loc(vint(1))
+		require.True(t, ok)
+		require.Equal(t, asm.Loc{Slot: 1, Spilled: true}, loc)
+	})
+
+	t.Run("reports an assigned value", func(t *testing.T) {
+		loc, ok := built(t).Loc(vint(2))
+		require.True(t, ok)
+		require.Equal(t, asm.Loc{Reg: arm64.X2}, loc)
+	})
+
+	t.Run("reports no location for an unknown value", func(t *testing.T) {
+		loc, ok := built(t).Loc(vint(3))
+		require.False(t, ok)
+		require.Equal(t, asm.Loc{}, loc)
+	})
 }

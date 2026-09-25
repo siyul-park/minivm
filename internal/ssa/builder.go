@@ -59,25 +59,7 @@ func (b *Builder) Entry(frame Frame) {
 
 // Build returns the function and resets the builder.
 func (b *Builder) Build() *Function {
-	f := &Function{
-		name:   b.name,
-		types:  b.types,
-		blocks: b.blocks,
-		succs:  make([][]int, len(b.blocks)),
-		preds:  make([][]int, len(b.blocks)),
-		entry:  b.entry,
-	}
+	f := newFunction(b.name, b.types, b.blocks, b.entry)
 	b.types, b.blocks, b.entry = make([]Type, 1), nil, Frame{}
-	for id, block := range f.blocks {
-		for _, edge := range block.Terminator.Edges {
-			if edge.Block < 0 || edge.Block >= len(f.blocks) {
-				continue
-			}
-			f.succs[id] = append(f.succs[id], edge.Block)
-			if preds := f.preds[edge.Block]; len(preds) == 0 || preds[len(preds)-1] != id {
-				f.preds[edge.Block] = append(preds, id)
-			}
-		}
-	}
 	return f
 }

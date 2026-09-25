@@ -58,12 +58,13 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := jit.NewCode(u.Address, u.Entry, u.OSR, u.Tier, completion(f), code, exits, entry)
+	c, err := jit.NewCode(
+		u.Address, u.Entry, u.OSR, u.Tier, completion(f),
+		registers(u.Function), arguments(u.Function), code, exits, entry,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}
-	c.Registers = registers(u.Function)
-	c.Arguments = arguments(u.Function)
 	return c, nil
 }
 

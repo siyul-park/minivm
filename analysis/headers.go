@@ -5,6 +5,10 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// cfg adapts Blocks' block-indexed successors and predecessors to
+// internal/graph's dense integer node space.
+type cfg []*BasicBlock
+
 // Headers returns the bytecode offset of every loop header in fn: a block
 // some back edge targets, in the sense internal/graph.Headers defines it.
 func Headers(fn *types.Function) ([]int, error) {
@@ -20,10 +24,6 @@ func Headers(fn *types.Function) ([]int, error) {
 	}
 	return out, nil
 }
-
-// cfg adapts Blocks' block-indexed successors and predecessors to
-// internal/graph's dense integer node space.
-type cfg []*BasicBlock
 
 // Len returns the number of blocks.
 func (g cfg) Len() int { return len(g) }

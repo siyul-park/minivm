@@ -66,17 +66,17 @@ func (s *Store) Find(pc uintptr) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.codes {
-		if c := s.codes[i].Load(); c != nil && holds(c, pc) {
+		if c := s.codes[i].Load(); c != nil && c.Holds(pc) {
 			return c
 		}
 	}
 	for _, c := range s.osr {
-		if holds(c, pc) {
+		if c.Holds(pc) {
 			return c
 		}
 	}
 	for _, c := range s.retired {
-		if holds(c, pc) {
+		if c.Holds(pc) {
 			return c
 		}
 	}
@@ -118,7 +118,7 @@ func (s *Store) Publish(c *Code) bool {
 		installed = c.Tier > published
 	}
 	if installed {
-		atomic.StoreUintptr(&s.natives[c.Address], c.native)
+		atomic.StoreUintptr(&s.natives[c.Address], c.Native())
 		s.codes[c.Address].Store(c)
 		if old != nil {
 			s.retired = append(s.retired, old)
@@ -227,8 +227,4 @@ func (s *Store) Close() error {
 		err = errors.Join(err, c.Free())
 	}
 	return err
-}
-
-func holds(c *Code, pc uintptr) bool {
-	return pc >= c.native && pc < c.native+uintptr(c.size)
 }

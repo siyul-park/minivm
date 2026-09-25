@@ -105,7 +105,7 @@ func Enter(code uintptr, ctx *Context) Trap {
 	if !asm.Enter(code, &ctx.State) {
 		return TrapReturn
 	}
-	return ctx.trap
+	return ctx.Trap()
 }
 
 // Resume continues the suspended activation and reports how it left next.
@@ -113,13 +113,18 @@ func Resume(ctx *Context) Trap {
 	if !asm.Resume(&ctx.State) {
 		return TrapReturn
 	}
-	return ctx.trap
+	return ctx.Trap()
 }
 
 // Exit reports the exit identifier native code last wrote before leaving;
 // what it names is the code publisher's to say.
 func (c *Context) Exit() uint64 {
 	return c.exit
+}
+
+// Trap returns how native code last left.
+func (c *Context) Trap() Trap {
+	return c.trap
 }
 
 // Read returns the raw value named by v. Outer activations use their saved

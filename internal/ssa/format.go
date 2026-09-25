@@ -11,10 +11,11 @@ import (
 // Format renders a readable SSA dump.
 func Format(function *Function) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "func %s\n", function.name)
-	for id, block := range function.blocks {
+	fmt.Fprintf(&sb, "func %s\n", function.Name())
+	for id := range function.Len() {
+		block := function.Block(id)
 		fmt.Fprintf(&sb, "blk%d: (%s)", id, definitions(function, block.Params))
-		if preds := function.preds[id]; len(preds) > 0 {
+		if preds := function.Pred(id); len(preds) > 0 {
 			names := make([]string, len(preds))
 			for i, pred := range preds {
 				names[i] = fmt.Sprintf("blk%d", pred)

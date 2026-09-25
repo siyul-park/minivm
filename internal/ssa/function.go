@@ -62,3 +62,21 @@ func (f *Function) Type(v Value) Type {
 func (f *Function) Entry() Frame {
 	return f.entry
 }
+
+func newFunction(name string, types []Type, blocks []Block, entry Frame) *Function {
+	f := &Function{name: name, types: types, blocks: blocks, entry: entry}
+	f.succs = make([][]int, len(blocks))
+	f.preds = make([][]int, len(blocks))
+	for id, block := range blocks {
+		for _, edge := range block.Terminator.Edges {
+			if edge.Block < 0 || edge.Block >= len(blocks) {
+				continue
+			}
+			f.succs[id] = append(f.succs[id], edge.Block)
+			if preds := f.preds[edge.Block]; len(preds) == 0 || preds[len(preds)-1] != id {
+				f.preds[edge.Block] = append(preds, id)
+			}
+		}
+	}
+	return f
+}

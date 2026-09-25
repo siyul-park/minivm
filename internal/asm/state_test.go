@@ -155,3 +155,19 @@ func TestState_Abandon(t *testing.T) {
 
 	require.Equal(t, first, second)
 }
+
+func TestState_Exited(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("requires arm64")
+	}
+	s, err := asm.NewState(4096)
+	require.NoError(t, err)
+	require.False(t, s.Exited())
+
+	address, _ := linkExit(t)
+	require.True(t, asm.Enter(address, &s))
+	require.True(t, s.Exited())
+
+	require.False(t, asm.Resume(&s))
+	require.False(t, s.Exited())
+}

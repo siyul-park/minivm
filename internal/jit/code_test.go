@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/types"
 )
 
 // ret is a 4-byte ARM64 RET instruction: valid to link on darwin or linux
@@ -15,9 +16,11 @@ func ret() []byte {
 }
 
 func TestNewCode(t *testing.T) {
-	t.Run("links code and keeps its identity", func(t *testing.T) {
+	t.Run("links code and keeps its metadata", func(t *testing.T) {
+		registers := []types.Kind{types.KindI32}
+		arguments := []types.Kind{types.KindRef}
 		exits := []jit.Exit{{Kind: jit.ExitDeopt}}
-		c, err := jit.NewCode(3, 0, false, jit.Baseline, 1, ret(), exits, 0)
+		c, err := jit.NewCode(3, 0, false, jit.Baseline, 1, registers, arguments, ret(), exits, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -28,12 +31,21 @@ func TestNewCode(t *testing.T) {
 		require.False(t, c.OSR)
 		require.Equal(t, jit.Baseline, c.Tier)
 		require.Equal(t, 1, c.Results)
+		require.Equal(t, registers, c.Registers)
+		require.Equal(t, arguments, c.Arguments)
 		require.Equal(t, exits, c.Exits)
+
+		registers[0] = types.KindF64
+		arguments[0] = types.KindI64
+		exits[0].Kind = jit.ExitBridge
+		require.Equal(t, []types.Kind{types.KindI32}, c.Registers)
+		require.Equal(t, []types.Kind{types.KindRef}, c.Arguments)
+		require.Equal(t, []jit.Exit{{Kind: jit.ExitDeopt}}, c.Exits)
 	})
 
 	t.Run("places the entry stub at a byte offset from the body", func(t *testing.T) {
 		code := append(ret(), ret()...)
-		c, err := jit.NewCode(3, 0, false, jit.Baseline, 0, code, nil, 4)
+		c, err := jit.NewCode(3, 0, false, jit.Baseline, 0, nil, nil, code, nil, 4)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -41,7 +53,7 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("keeps an OSR unit's entry IP", func(t *testing.T) {
-		c, err := jit.NewCode(3, 12, true, jit.Optimized, 0, ret(), nil, 0)
+		c, err := jit.NewCode(3, 12, true, jit.Optimized, 0, nil, nil, ret(), nil, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -50,7 +62,7 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("keeps OSR true at IP 0: OSR is its own field, never inferred from IP", func(t *testing.T) {
-		c, err := jit.NewCode(3, 0, true, jit.Baseline, 0, ret(), nil, 0)
+		c, err := jit.NewCode(3, 0, true, jit.Baseline, 0, nil, nil, ret(), nil, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -59,18 +71,29 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("rejects empty code", func(t *testing.T) {
-		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, 0)
+		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, nil, nil, 0)
 		require.Error(t, err)
 	})
 
 	t.Run("rejects an entry stub offset outside the code", func(t *testing.T) {
-		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, ret(), nil, len(ret())+1)
+		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, len(ret())+1)
 		require.Error(t, err)
 	})
 }
 
+func TestCode_Holds(t *testing.T) {
+	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Free()) })
+
+	require.False(t, c.Holds(c.Native()-1))
+	require.True(t, c.Holds(c.Native()))
+	require.True(t, c.Holds(c.Native()+uintptr(len(ret())-1)))
+	require.False(t, c.Holds(c.Native()+uintptr(len(ret()))))
+}
+
 func TestCode_Free(t *testing.T) {
-	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, ret(), nil, 0)
+	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, 0)
 	require.NoError(t, err)
 
 	require.NoError(t, c.Free())

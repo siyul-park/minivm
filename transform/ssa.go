@@ -24,14 +24,15 @@ type pool struct {
 
 var _ pass.Pass[*program.Program] = (*SSAPass)(nil)
 
-// NewSSAPass returns an SSA round-trip pass using pipeline.
+// NewSSAPass returns an SSA round-trip pass.
 func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 	return &SSAPass{pipeline: pipeline}
 }
 
-// Run applies the SSA round trip and leaves unsupported or failed functions unchanged.
-func (p *SSAPass) Run(manager *pass.Manager, program *program.Program) (bool, error) {
+// Run applies the SSA round trip.
+func (p *SSAPass) Run(_ *pass.Manager, program *program.Program) (bool, error) {
 	constants := newPool(program)
+	manager := pass.NewManager()
 
 	root := &types.Function{Typ: &types.FunctionType{}, Locals: program.Locals, Code: program.Code, Handlers: program.Handlers}
 	changed, err := p.roundtrip(manager, constants, 0, root)

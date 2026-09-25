@@ -39,20 +39,6 @@ type Frame interface {
 // Flow is how control leaves a row.
 type Flow uint8
 
-const (
-	// FlowNext falls through to the next row.
-	FlowNext Flow = iota
-	// FlowJump goes unconditionally to the Src2 label.
-	FlowJump
-	// FlowBranch goes to the Src2 label or falls through.
-	FlowBranch
-	// FlowCall falls through after clobbering every allocatable register.
-	FlowCall
-	// FlowEnd leaves the rows the allocator can see: a return, an indirect
-	// jump, a trap.
-	FlowEnd
-)
-
 // Relaxer is an optional Arch capability implemented by architectures that
 // can rewrite a branch instruction with an out-of-range immediate
 // displacement into an equivalent multi-instruction sequence that fits.
@@ -67,6 +53,21 @@ type Relaxer interface {
 	Relax(inst Instruction, disp int64) ([]Instruction, bool)
 }
 
+const (
+	// FlowNext falls through to the next row.
+	FlowNext Flow = iota
+	// FlowJump goes unconditionally to the Src2 label.
+	FlowJump
+	// FlowBranch goes to the Src2 label or falls through.
+	FlowBranch
+	// FlowCall falls through after clobbering every allocatable register.
+	FlowCall
+	// FlowEnd leaves the rows the allocator can see: a return, an indirect
+	// jump, a trap.
+	FlowEnd
+)
+
+// Stable assembler errors.
 var (
 	ErrInvalidOperand   = errors.New("invalid operand")
 	ErrInvalidArgs      = errors.New("invalid arguments")

@@ -15,17 +15,17 @@ type Encoder struct{}
 // Sentinel errors
 // ---------------------------------------------------------------------------
 
+// Stable ARM64 encoder errors.
 var (
-	ErrUnsupportedOpcode         = errors.New("unsupported opcode")
-	ErrMissingDestinationReg     = errors.New("missing destination register")
-	ErrMissingSourceReg          = errors.New("missing source register")
-	ErrMissingSourceRegs         = errors.New("missing source registers")
-	ErrMissingImmediate          = errors.New("missing immediate")
-	ErrMissingShiftImmediate     = errors.New("missing shift immediate")
-	ErrMissingMemoryOperand      = errors.New("missing memory operand")
-	ErrMissingRegisterOperand    = errors.New("missing register operand")
-	ErrMissingBranchOffset       = errors.New("missing branch offset")
-	ErrUnexpectedRegisterOperand = errors.New("unexpected register operand")
+	ErrUnsupportedOpcode      = errors.New("unsupported opcode")
+	ErrMissingDestinationReg  = errors.New("missing destination register")
+	ErrMissingSourceReg       = errors.New("missing source register")
+	ErrMissingSourceRegs      = errors.New("missing source registers")
+	ErrMissingImmediate       = errors.New("missing immediate")
+	ErrMissingShiftImmediate  = errors.New("missing shift immediate")
+	ErrMissingMemoryOperand   = errors.New("missing memory operand")
+	ErrMissingRegisterOperand = errors.New("missing register operand")
+	ErrMissingBranchOffset    = errors.New("missing branch offset")
 )
 
 var _ asm.Encoder = (*Encoder)(nil)

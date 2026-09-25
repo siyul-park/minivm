@@ -44,17 +44,17 @@ func TestContext_Layout(t *testing.T) {
 		{"budget", jit.OffsetBudget, unsafe.Offsetof(jit.Context{}.Budget)},
 		{"results", jit.OffsetResults, unsafe.Offsetof(jit.Context{}.Results)},
 		{"records", jit.OffsetRecords, unsafe.Offsetof(jit.Context{}.Records)},
+		{"record size", unsafe.Sizeof(jit.Record{}), 32},
+		{"record fb", jit.RecordFB, 0},
+		{"record sp", jit.RecordSP, 8},
+		{"record pc", jit.RecordPC, 16},
+		{"record exit", jit.RecordExit, 24},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, tt.off)
 		})
 	}
-	require.Equal(t, uintptr(32), unsafe.Sizeof(jit.Record{}))
-	require.Equal(t, uintptr(0), jit.RecordFB)
-	require.Equal(t, uintptr(8), jit.RecordSP)
-	require.Equal(t, uintptr(16), jit.RecordPC)
-	require.Equal(t, uintptr(24), jit.RecordExit)
 }
 
 func TestContext_Read(t *testing.T) {

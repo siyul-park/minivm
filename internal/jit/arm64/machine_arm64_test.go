@@ -398,29 +398,28 @@ func TestNew(t *testing.T) {
 		require.Equal(t, consts, stack)
 	})
 
-	t.Run("returns each register-convention kind through the Go entry stub", func(t *testing.T) {
-		// At most two results, none i64 (registers in compile owns the
-		// eligibility rule): every kind here moves through X0 in Return and
-		// is boxed by Enter's stub, not stored by OpReturn itself.
-		for _, c := range []types.Boxed{
-			types.BoxI1(true), types.BoxI8(-1), types.BoxI32(-7), types.BoxF32(-2), types.BoxF64(1.5), types.BoxRef(4),
-		} {
-			t.Run(c.Kind().String(), func(t *testing.T) {
-				b := ssa.New("f")
-				entry := b.Block()
-				v := b.Value(ssa.TypeOf(c.Kind()))
-				b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c, Results: []ssa.Value{v}})
-				at := state(b, entry)
-				b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
+	// returns runs a function returning c through Return's X0 and the Go
+	// entry stub's boxing.
+	returns := func(t *testing.T, c types.Boxed) {
+		b := ssa.New("f")
+		entry := b.Block()
+		v := b.Value(ssa.TypeOf(c.Kind()))
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c, Results: []ssa.Value{v}})
+		at := state(b, entry)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
 
-				fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{kindType(t, c.Kind())}}}
-				stack := make([]types.Boxed, 1)
-				code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
-				require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
-				require.Equal(t, c, stack[0])
-			})
-		}
-	})
+		fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{kindType(t, c.Kind())}}}
+		stack := make([]types.Boxed, 1)
+		code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
+		require.Equal(t, c, stack[0])
+	}
+	t.Run("returns i1 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxI1(true)) })
+	t.Run("returns i8 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxI8(-1)) })
+	t.Run("returns i32 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxI32(-7)) })
+	t.Run("returns f32 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxF32(-2)) })
+	t.Run("returns f64 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxF64(1.5)) })
+	t.Run("returns ref through the Go entry stub", func(t *testing.T) { returns(t, types.BoxRef(4)) })
 
 	t.Run("returns two register-convention results through X0 and X1", func(t *testing.T) {
 		b := ssa.New("f")

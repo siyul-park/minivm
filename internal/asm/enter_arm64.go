@@ -5,7 +5,7 @@ package asm
 // suspended at an exit, for Resume, rather than returned.
 func Enter(code uintptr, s *State) bool {
 	enter(code, s)
-	return s.exited != 0
+	return s.Exited()
 }
 
 // Resume continues the last suspended activation from its saved native PC
@@ -13,7 +13,7 @@ func Enter(code uintptr, s *State) bool {
 // reports the same as Enter.
 func Resume(s *State) bool {
 	resume(s)
-	return s.exited != 0
+	return s.Exited()
 }
 
 func enter(code uintptr, s *State)

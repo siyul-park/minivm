@@ -12,7 +12,7 @@ import (
 // code returns a fresh, unpublished, non-OSR Code at address of tier.
 func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
 	t.Helper()
-	c, err := jit.NewCode(address, 0, false, tier, 0, ret(), nil, 0)
+	c, err := jit.NewCode(address, 0, false, tier, 0, nil, nil, ret(), nil, 0)
 	require.NoError(t, err)
 	return c
 }
@@ -20,7 +20,7 @@ func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
 // osrCode returns a fresh, unpublished OSR Code at address rooted at ip.
 func osrCode(t *testing.T, address, ip int, tier jit.Tier) *jit.Code {
 	t.Helper()
-	c, err := jit.NewCode(address, ip, true, tier, 0, ret(), nil, 0)
+	c, err := jit.NewCode(address, ip, true, tier, 0, nil, nil, ret(), nil, 0)
 	require.NoError(t, err)
 	return c
 }

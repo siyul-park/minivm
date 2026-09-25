@@ -41,7 +41,6 @@ var ErrEntry = errors.New("entry starts no block")
 
 // Translate converts one bytecode function from entry to SSA.
 // It returns ErrEntry for a non-block entry and nil when translation is unsupported.
-// Translate converts one bytecode function from entry to SSA.
 func Translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
 	if function == nil {
 		return nil, nil
@@ -58,9 +57,6 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 	return f, nil
 }
 
-// Adopts is how many of the pops operands code takes ownership of: every one
-// when it enters a frame, the stored value when it overwrites heap contents.
-// The owned operands it does not adopt stay the translated code's to release.
 // Adopts returns the number of popped operands transferred to the destination.
 func Adopts(code instr.Opcode, pops int) int {
 	switch {

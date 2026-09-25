@@ -28,11 +28,11 @@ var (
 
 // Verify rejects malformed, undefined, non-dominated, or mistyped SSA.
 func Verify(function *Function) error {
-	if function == nil || len(function.blocks) == 0 {
+	if function == nil || function.Len() == 0 {
 		return fmt.Errorf("%w: no entry block", ErrForm)
 	}
 	dominance := graph.NewDominance(function)
-	for id := range function.blocks {
+	for id := range function.Len() {
 		if !dominance.Dominates(0, id) {
 			return fmt.Errorf("%w: blk%d is unreachable from the entry", ErrForm, id)
 		}
@@ -41,7 +41,8 @@ func Verify(function *Function) error {
 	if err != nil {
 		return err
 	}
-	for id, block := range function.blocks {
+	for id := range function.Len() {
+		block := function.Block(id)
 		if err := params(function, id); err != nil {
 			return fmt.Errorf("blk%d: %w", id, err)
 		}
@@ -64,7 +65,7 @@ func Verify(function *Function) error {
 }
 
 func define(function *Function) ([]position, error) {
-	sites := make([]position, len(function.types))
+	sites := make([]position, function.Values())
 	for i := range sites {
 		sites[i] = position{-1, -1}
 	}
@@ -78,7 +79,8 @@ func define(function *Function) ([]position, error) {
 		sites[v] = s
 		return nil
 	}
-	for id, block := range function.blocks {
+	for id := range function.Len() {
+		block := function.Block(id)
 		for _, v := range block.Params {
 			if err := claim(v, position{id, -1}); err != nil {
 				return nil, err
@@ -101,9 +103,9 @@ func define(function *Function) ([]position, error) {
 }
 
 func params(function *Function, block int) error {
-	want := function.blocks[block].Params
-	for _, pred := range function.preds[block] {
-		for _, edge := range function.blocks[pred].Terminator.Edges {
+	want := function.Block(block).Params
+	for _, pred := range function.Pred(block) {
+		for _, edge := range function.Block(pred).Terminator.Edges {
 			if edge.Block != block {
 				continue
 			}
@@ -291,7 +293,7 @@ func terminator(function *Function, sites []position, t Terminator) error {
 		return fmt.Errorf("%w: %s is not a terminator", ErrForm, t.Op)
 	}
 	for _, edge := range t.Edges {
-		if edge.Block < 0 || edge.Block >= len(function.blocks) {
+		if edge.Block < 0 || edge.Block >= function.Len() {
 			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Op, edge.Block)
 		}
 	}
@@ -316,10 +318,10 @@ func resume(function *Function, sites []position, v Value, name string, deopts b
 		return Operation{}, fmt.Errorf("%w: %s resumes into v%d", ErrState, name, v)
 	}
 	def := sites[v]
-	if def.index < 0 || function.blocks[def.block].Operations[def.index].Op != OpState {
+	if def.index < 0 || function.Block(def.block).Operations[def.index].Op != OpState {
 		return Operation{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
 	}
-	return function.blocks[def.block].Operations[def.index], nil
+	return function.Block(def.block).Operations[def.index], nil
 }
 
 func constant(function *Function, sites []position, v Value) bool {
@@ -327,7 +329,7 @@ func constant(function *Function, sites []position, v Value) bool {
 		return false
 	}
 	def := sites[v]
-	return def.index >= 0 && function.blocks[def.block].Operations[def.index].Op == OpConst
+	return def.index >= 0 && function.Block(def.block).Operations[def.index].Op == OpConst
 }
 
 func uses(function *Function, sites []position, dominance *graph.Dominance, at position, values []Value) error {

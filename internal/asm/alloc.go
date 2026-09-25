@@ -65,7 +65,7 @@ func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserv
 	for _, inst := range insts {
 		for _, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
 			if v, ok := register(op).(VReg); ok {
-				a.next = max(a.next, v.id+1)
+				a.next = max(a.next, v.ID()+1)
 			}
 		}
 	}
@@ -263,7 +263,7 @@ func (a *allocator) operands(row int) (reads, writes []value) {
 func (a *allocator) value(r Reg) (value, bool) {
 	switch r := r.(type) {
 	case VReg:
-		return value{virtual: true, id: r.id, typ: r.typ, width: r.width}, true
+		return value{virtual: true, id: r.ID(), typ: r.Type(), width: r.Width()}, true
 	case PReg:
 		v := physical(r)
 		return v, a.usable[v]
@@ -324,12 +324,12 @@ func (a *allocator) free(iv interval, active []interval, assigned map[value]PReg
 	held := map[uint8]bool{}
 	for _, o := range active {
 		if r, ok := assigned[o.value]; ok && o.value.typ == iv.value.typ {
-			held[r.id] = true
+			held[r.ID()] = true
 		}
 	}
 next:
 	for _, r := range a.registers[iv.value.typ] {
-		if held[r.id] {
+		if held[r.ID()] {
 			continue
 		}
 		for _, f := range fixed[physical(r)] {
@@ -426,7 +426,7 @@ func (a *allocator) fresh(v value) VReg {
 func (a *allocator) assign(assigned map[value]PReg) {
 	for v, r := range assigned {
 		if !a.tiny[vreg(v)] {
-			a.locs[vreg(v)] = Loc{Reg: NewPReg(r.id, v.typ, v.width)}
+			a.locs[vreg(v)] = Loc{Reg: NewPReg(r.ID(), v.typ, v.width)}
 		}
 	}
 	for row, inst := range a.insts {
@@ -436,8 +436,8 @@ func (a *allocator) assign(assigned map[value]PReg) {
 			if !ok {
 				continue
 			}
-			r := assigned[value{virtual: true, id: v.id, typ: v.typ, width: v.width}]
-			*op = replace(*op, NewPReg(r.id, v.typ, v.width))
+			r := assigned[value{virtual: true, id: v.ID(), typ: v.Type(), width: v.Width()}]
+			*op = replace(*op, NewPReg(r.ID(), v.Type(), v.Width()))
 		}
 		a.insts[row] = inst
 	}
@@ -492,7 +492,7 @@ func (v value) compare(o value) int {
 }
 
 func physical(r PReg) value {
-	return value{id: int32(r.id), typ: r.typ}
+	return value{id: int32(r.ID()), typ: r.Type()}
 }
 
 func vreg(v value) VReg {

@@ -57,8 +57,8 @@ type Machine interface {
 	Call(a *asm.Assembler, c Call, s Site) bool
 	// Move copies one virtual register to another.
 	Move(a *asm.Assembler, dst, src asm.VReg)
-	// Const loads scalar or ref constant c into dst and reports false when
-	// the target cannot; Reg calls it at each use of a remat constant.
+	// Const loads constant c into dst and reports false when the target cannot.
+	// Reg calls it at each use of a remat constant.
 	Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool
 }
 
@@ -209,13 +209,6 @@ type stall struct {
 	v  ssa.Value
 }
 
-// remat reports v's constant and whether it is loaded at each use instead of
-// held in one register a call would force to spill.
-func (l *lowering) remat(v ssa.Value) (types.Boxed, bool) {
-	c, ok := l.consts[v]
-	return c, ok && l.remats[v]
-}
-
 // ErrUnsupported reports SSA the backend does not lower.
 var ErrUnsupported = errors.New("unsupported lowering")
 
@@ -329,6 +322,75 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		exits[id] = *e
 	}
 	return code, exits, entry, nil
+}
+
+// Reg is v's virtual register, typed by its static representation; for a
+// remat constant, a fresh register loaded here.
+func (l *lowering) Reg(v ssa.Value) asm.VReg {
+	if c, ok := l.remat(v); ok {
+		return l.materialize(v, c)
+	}
+	return l.reg(v)
+}
+
+// Type is v's static type.
+func (l *lowering) Type(v ssa.Value) ssa.Type {
+	return l.f.Type(v)
+}
+
+// Slot returns the static type of slot.
+func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
+	kinds := l.fn.Slots()
+	if slot.Space == ssa.SpaceLocal && slot.Index >= 0 && slot.Index < len(kinds) {
+		return ssa.TypeOf(kinds[slot.Index])
+	}
+	if slot.Space == ssa.SpaceGlobal {
+		return ssa.TypeRef
+	}
+	return 0
+}
+
+// Deopt places a deopt stub at the current state.
+func (l *lowering) Deopt() asm.Label {
+	id := l.exit(jit.ExitDeopt)
+	label := l.a.Label()
+	l.deopts = append(l.deopts, stub{label: label, id: id})
+	return label
+}
+
+// Release places a release stub for ref.
+func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(jit.ExitRelease)
+	e := l.exits[id]
+	e.Word.Kind = types.KindRef
+	l.places[id] = append(l.places[id], place{to: &e.Word, reg: ref})
+	return l.stub(id)
+}
+
+// Box places a box stub for word, a wide i64.
+func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(jit.ExitBox)
+	e := l.exits[id]
+	e.Word.Kind = types.KindI64
+	l.places[id] = append(l.places[id], place{to: &e.Word, reg: word})
+	return l.stub(id)
+}
+
+// remat reports v's constant and whether it is loaded at each use instead of
+// held in one register a call would force to spill.
+func (l *lowering) remat(v ssa.Value) (types.Boxed, bool) {
+	c, ok := l.consts[v]
+	return c, ok && l.remats[v]
+}
+
+// validate rejects an unguarded promoted i64 slot word.
+func (l *lowering) validate(args []ssa.Value) error {
+	for _, v := range args {
+		if l.raw[v] {
+			return fmt.Errorf("%w: unguarded i64 slot word v%d", ErrUnsupported, v)
+		}
+	}
+	return nil
 }
 
 // borrowed reports every OpConst ref value used only as CALL callees and
@@ -681,25 +743,6 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	return nil
 }
 
-// validate rejects an unguarded promoted i64 slot word.
-func (l *lowering) validate(args []ssa.Value) error {
-	for _, v := range args {
-		if l.raw[v] {
-			return fmt.Errorf("%w: unguarded i64 slot word v%d", ErrUnsupported, v)
-		}
-	}
-	return nil
-}
-
-// Reg is v's virtual register, typed by its static representation; for a
-// remat constant, a fresh register loaded here.
-func (l *lowering) Reg(v ssa.Value) asm.VReg {
-	if c, ok := l.remat(v); ok {
-		return l.materialize(v, c)
-	}
-	return l.reg(v)
-}
-
 // reg is v's virtual register, typed by its static representation.
 func (l *lowering) reg(v ssa.Value) asm.VReg {
 	switch l.f.Type(v) {
@@ -731,49 +774,6 @@ func (l *lowering) materialize(v ssa.Value, c types.Boxed) asm.VReg {
 		l.fail(fmt.Errorf("%w: constant v%d", ErrUnsupported, v))
 	}
 	return reg
-}
-
-// Type is v's static type.
-func (l *lowering) Type(v ssa.Value) ssa.Type {
-	return l.f.Type(v)
-}
-
-// Slot returns the static type of slot.
-func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
-	kinds := l.fn.Slots()
-	if slot.Space == ssa.SpaceLocal && slot.Index >= 0 && slot.Index < len(kinds) {
-		return ssa.TypeOf(kinds[slot.Index])
-	}
-	if slot.Space == ssa.SpaceGlobal {
-		return ssa.TypeRef
-	}
-	return 0
-}
-
-// Deopt places a deopt stub at the current state.
-func (l *lowering) Deopt() asm.Label {
-	id := l.exit(jit.ExitDeopt)
-	label := l.a.Label()
-	l.deopts = append(l.deopts, stub{label: label, id: id})
-	return label
-}
-
-// Release places a release stub for ref.
-func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
-	id := l.exit(jit.ExitRelease)
-	e := l.exits[id]
-	e.Word.Kind = types.KindRef
-	l.places[id] = append(l.places[id], place{to: &e.Word, reg: ref})
-	return l.stub(id)
-}
-
-// Box places a box stub for word, a wide i64.
-func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
-	id := l.exit(jit.ExitBox)
-	e := l.exits[id]
-	e.Word.Kind = types.KindI64
-	l.places[id] = append(l.places[id], place{to: &e.Word, reg: word})
-	return l.stub(id)
 }
 
 // stub places the stub of exit id; a resumable one continues at resume,

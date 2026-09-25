@@ -2,6 +2,7 @@ package arm64
 
 import "github.com/siyul-park/minivm/internal/asm"
 
+// ARM64 integer and floating-point register names.
 var (
 	X0  = asm.NewPReg(0, asm.RegTypeInt, asm.Width64)
 	X1  = asm.NewPReg(1, asm.RegTypeInt, asm.Width64)
@@ -146,6 +147,4 @@ var (
 	S29 = asm.NewPReg(29, asm.RegTypeFloat, asm.Width32)
 	S30 = asm.NewPReg(30, asm.RegTypeFloat, asm.Width32)
 	S31 = asm.NewPReg(31, asm.RegTypeFloat, asm.Width32)
-
-	IntRets = []asm.PReg{X0, X1}
 )

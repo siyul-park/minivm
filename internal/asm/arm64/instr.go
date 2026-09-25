@@ -5,6 +5,7 @@ import "github.com/siyul-park/minivm/internal/asm"
 // Op identifies an ARM64 instruction opcode.
 type Op uint16
 
+// ARM64 instruction opcodes.
 const (
 	// Arithmetic
 	OpADD Op = iota
@@ -202,6 +203,7 @@ const (
 	OpDMB
 )
 
+// ARM64 condition codes.
 const (
 	// Cond* are ARM64 condition codes.
 	CondEQ uint8 = 0x0
@@ -755,7 +757,6 @@ func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
 // EXIT calls the exit stub, which the runtime guarantees preserves every
 // allocatable register; it encodes exactly as BLR but never clobbers or
 // forces a spill.
-// EXIT returns an ARM64 instruction.
 func EXIT(reg asm.Reg) asm.Instruction { return newReg1(OpEXIT, reg) }
 
 // RET returns an ARM64 instruction.

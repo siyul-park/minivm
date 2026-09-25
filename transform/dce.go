@@ -9,11 +9,6 @@ import (
 // DCEPass removes unreachable blocks and dead pure operations.
 type DCEPass struct{}
 
-type site struct {
-	block int
-	index int
-}
-
 var _ pass.Pass[*ssa.Function] = (*DCEPass)(nil)
 
 // NewDCEPass returns the pass.

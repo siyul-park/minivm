@@ -21,10 +21,10 @@ func (p *Pipeline[U]) Run(m *Manager, unit U) (U, error) {
 	for _, pass := range p.passes {
 		preserved, err := pass.Run(m, unit)
 		if err != nil {
-			m.invalidate(false)
+			m.Invalidate(false)
 			return unit, err
 		}
-		m.invalidate(preserved)
+		m.Invalidate(preserved)
 	}
 	return unit, nil
 }

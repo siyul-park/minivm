@@ -39,17 +39,17 @@ type site struct {
 	bridged int
 }
 
-// refute counts one deopt against s and reports when it should retire.
-func (s *site) refute() bool {
-	s.deopts++
-	return s.deopts >= refute
-}
-
 // interval is how many back edges pass — once a site has crossed the submit
 // threshold — between its store lookups (and, while unsubmitted, its
 // Queue.Submit retries): rare enough that the lock CodeAt and Submit take
 // never runs on the per-iteration path.
 const interval = 256
+
+// refute counts one deopt against s and reports when it should retire.
+func (s *site) refute() bool {
+	s.deopts++
+	return s.deopts >= refute
+}
 
 // observe wraps every loop header's threaded handler of fn at addr with OSR
 // observation, address 0 (module code) included. A header a fusion
