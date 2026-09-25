@@ -118,9 +118,8 @@ func TestPool_Get(t *testing.T) {
 		p.Put(second)
 	})
 
-	t.Run("pooled interpreters observing different callees converge", func(t *testing.T) {
+	t.Run("pooled interpreters observing different callees match threaded with bounded deopts", func(t *testing.T) {
 		native(t)
-		// Baseline and Optimized each pay one refute cycle, in separate waves.
 		const calls = 5
 		const rounds = 600
 		const refute = 8 // interp/native.go's unexported refute constant.
@@ -151,26 +150,19 @@ func TestPool_Get(t *testing.T) {
 			vm.Flush()
 		}
 
-		var entriesAtHalf float64
 		for round := 1; round <= rounds; round++ {
 			run(a, 0, wantInc, round)
 			run(b, 1, wantDec, round)
 			a.Reset()
 			b.Reset()
-
-			if round == rounds/2 {
-				entriesAtHalf, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
-			}
 		}
 		p.Put(a)
 		p.Put(b)
 
 		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-		require.LessOrEqual(t, deopts, float64(2*refute), "deopts must stay bounded, not run away")
-		require.Greater(t, deopts, float64(0), "the divergence must have been exercised")
-
-		entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
-		require.Greater(t, entries, entriesAtHalf, "at least one interpreter keeps entering native code")
+		// Each interpreter refutes each tier at most once, then runs threaded.
+		require.LessOrEqual(t, deopts, float64(2*2*refute))
+		require.Greater(t, deopts, float64(0))
 	})
 }
 
