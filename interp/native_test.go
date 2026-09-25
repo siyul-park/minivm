@@ -387,26 +387,9 @@ func node() *types.StructType {
 	)
 }
 
-// structs loops n times at module level. Each pass builds a fresh struct.new
-// whose held field is a shared string constant, storing the struct over the
-// previous one: LOCAL_SET releases the prior struct, cascading a release of
-// its own held field. arm64 lowers no struct.new, so every native entry
-// bridges; struct.new's own Adopts is 0, so a resumed bridge must retain a
-// fresh reference for held regardless of its Owned bit, matching
-// structNew()'s own no-release field transfer. An inner 4-iteration loop
-// after each struct.new gives native.go's amortize check real back edges,
-// so the site stays native for the whole run instead of retiring after
-// resume unamortized bridges in a row (see arrays below for the same
-// pattern; a held field built by STRING_CONCAT instead, tried first, is not
-// bridgeable — see bridgeable — and its own decline dominates every pass
-// before struct.new is ever reached). The loop-carried local is declared as
-// record itself, not TypeAny: a TypeAny-declared local seeded by REF_NULL
-// joins two structurally different facts at the loop header (unrefined null
-// vs. a record-typed struct), which transform.Translate declines to merge,
-// unrelated to bridging. Seeding with struct.new_default instead keeps both
-// the preheader and back-edge facts record-typed, so the header's join and
-// translation succeed. The final value is the surviving struct's held
-// field, retained by struct.get.
+// Bridges struct.new while preserving ownership: each iteration replaces a record
+// and releases the previous one. The loop-carried local stays concretely typed so
+// SSA can join the back edge; an inner loop provides enough native work to amortize bridges.
 func structs(t *testing.T, n int) *program.Program {
 	t.Helper()
 	record := node()
@@ -463,19 +446,9 @@ func arrays(t *testing.T, n int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithTypes(elem))
 }
 
-// trap loops warm+1 times at module level over the same native loop header
-// array.new_default resumes through, calling array.new_default(1) every
-// iteration but the last, whose length is negative (0-1): straight-line
-// code outside any loop or call never enters native code at all, so the
-// trapping call must share the warmup's own header to ever reach native.
-// An inner 4-iteration loop after each bridge gives native.go's amortize
-// check real back edges to see, so the site never retires before the
-// trapping call reaches it (resume would otherwise retire this
-// bridge-per-iteration site well before warm iterations, same as arrays
-// below, and the trap would then run threaded — not through a native
-// decline at all). arm64's bridge attempt runs arrayNewDefault()'s own
-// ErrSegmentationFault check Go-side and must decline rather than resume
-// there, matching threaded.
+// Warm native execution at the loop header, then trigger the invalid array.new_default.
+// The inner work keeps the site from retiring on unamortized bridges; the bridge declines
+// the same ErrSegmentationFault that threaded execution reports.
 func trap(t *testing.T, warm int) *program.Program {
 	t.Helper()
 	elem := types.NewArrayType(types.TypeI32)
@@ -502,14 +475,8 @@ func trap(t *testing.T, warm int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithTypes(elem))
 }
 
-// dynamicConcatProgram exercises native.call's dynamic-CALL entry (release
-// true): the callee reference is seeded into local 1 once, then loaded with
-// LOCAL_GET (which retains) at each call site instead of an immediately
-// preceding CONST_GET, so the threader's CONST_GET;CALL fusion never applies
-// and every entry into concatFunction's native code goes through the
-// non-fused path the fused-only concatProgram never exercises. Warms with
-// two throwaway strings warm times, then calls once more and leaves the
-// result on the stack.
+// dynamicConcatProgram forces the dynamic-CALL entry path by loading the callee
+// from a local rather than CONST_GET;CALL fusion. It warms twice, then leaves one result.
 func dynamicConcatProgram(t *testing.T, warm int) *program.Program {
 	t.Helper()
 	fn := concatFunction(t)
@@ -910,14 +877,8 @@ func wideStoreLoopProgram(t *testing.T, n int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32), program.WithGlobals(types.TypeI64))
 }
 
-// divFailProgram warms divFunction with a nonzero divisor warm times, then
-// calls it with a zero divisor fails times in a loop whose body is one Try
-// region: every one of those native entries deoptimizes, so the address
-// retires once its deopt count reaches native.go's refute threshold, and
-// its Baseline tier is then marked permanently failed — it never
-// recompiles and every later call in the loop runs threaded.
-// Locals are [0]=warm counter, [1]=fail counter, so the Try region's entry
-// depth (params + locals + live operands, per instr.Handler) is 2.
+// divFailProgram warms native division, then repeatedly takes the zero-divisor
+// deopt path inside one Try region. Reaching refute retires the address permanently.
 func divFailProgram(t *testing.T, warm, fails int) *program.Program {
 	t.Helper()
 	fn := divFunction(t)
@@ -963,14 +924,8 @@ func nestedConcatOuterFunction(t *testing.T) *types.Function {
 	}
 }
 
-// nestedConcatProgram warms only its caller (constant 1) directly, so every
-// call to concatFunction (constant 0) goes through it: the early ones, while
-// concatFunction is still uncompiled, deoptimize outer alone through
-// ExitCall and replay threaded (which still counts toward concatFunction's
-// own threshold); once concatFunction compiles, outer's later native calls
-// enter it directly (a borrowed constant callee) before its own
-// STRING_CONCAT deopts both activations. The final call leaves its result
-// on the stack.
+// nestedConcatProgram compiles the caller first so later native-to-native calls
+// reach concatFunction directly; concat still deopts at STRING_CONCAT and returns its result.
 func nestedConcatProgram(t *testing.T, warm int) *program.Program {
 	t.Helper()
 	inner := concatFunction(t)

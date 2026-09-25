@@ -6,17 +6,9 @@ type Dominance struct {
 	idom []int
 }
 
-// Frontier returns the dominance frontier of every node: frontier[a] holds
-// each node b that a dominates a predecessor of without strictly dominating b
-// itself, which is exactly where a definition in a stops being the only one
-// reaching. It is the Cooper, Harvey, and Kennedy formulation - from every
-// predecessor of a join, walk the dominator tree up to that join's immediate
-// dominator, adding the join on the way - so it costs one walk per edge into a
-// join and nothing at all for the rest of the graph.
-//
-// Only a predecessor the entry reaches contributes: a node the entry does not
-// reach has no immediate dominator to walk toward and no definition that ever
-// reaches the join, exactly as Dominates leaves it out.
+// Frontier returns each node's dominance frontier using the
+// Cooper-Harvey-Kennedy join-predecessor walk. Unreachable predecessors contribute
+// nothing because they have no dominator chain.
 func Frontier(g Graph, d *Dominance) [][]int {
 	frontier := make([][]int, g.Len())
 	for b := range g.Len() {

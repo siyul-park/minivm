@@ -10,7 +10,7 @@ transform IR → mutation
 pipeline   ordered transforms + invalidation
 ```
 
-`pass.Manager` owns analysis registration and the analysis cache. `pass.Pipeline` owns transform order and invalidation timing. Analyses `MUST NOT` mutate IR. Transforms `MUST` return `true` when all cached analyses survive and `false` when they must be invalidated. Pipeline errors `MUST` invalidate cached analyses because an in-place transform cannot be assumed unchanged on error.
+`pass.Manager` owns analysis registration/cache; `pass.Pipeline` owns transform order/invalidation. Analyses `MUST NOT` mutate IR. A transform returns `true` only when all cached analyses remain valid; errors `MUST` invalidate them because an in-place transform may have partially mutated IR.
 
 ## Layers
 
@@ -23,7 +23,7 @@ pipeline   ordered transforms + invalidation
 
 ## SSA
 
-Each pass owns one policy. Current passes include constant folding, algebraic simplification, local promotion, load forwarding, CSE, guard elimination, LICM, and DCE.
+Each pass owns one policy. Current passes include folding, simplification, promotion, forwarding, CSE, guard elimination, LICM, and DCE.
 
 SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`.
 

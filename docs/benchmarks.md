@@ -40,9 +40,7 @@ fastest runtime **within its own tier**.
 
 ## Reading Results
 
-The agent `MUST` compare within the same tier.
-
-For external runtimes, `B/op` and `allocs/op` describe the Go harness; the agent `MUST` use `ns/op` for CPython. Performance changes `MUST` reproduce the same row and protocol.
+Comparison `MUST` stay within the same tier. For external runtimes, `B/op` and `allocs/op` describe the Go harness; CPython comparisons use `ns/op` only. A performance change `MUST` reproduce the same row and protocol.
 
 ## Canonical VM Operations
 
@@ -400,13 +398,13 @@ Results `MUST` be read by row and tier; unlike tiers `MUST NOT` be aggregated.
 
 ## Methodology
 
-The agent `MUST`:
+Canonical measurements `MUST`:
 
-- keep inputs and correctness checks deterministic;
-- keep setup, verification, warmup, reset, cleanup, and result calculation outside the timed operation;
-- use `-benchtime=300ms -count=3` and report the median for canonical comparison tables;
-- use interleaved A/B runs with `benchstat` when comparing variants;
-- compare CPython on `ns/op` only; `B/op` and `allocs/op` measure the Go harness.
+- use deterministic inputs and correctness checks;
+- exclude setup, verification, warmup, reset, cleanup, and result calculation from timing;
+- use `-benchtime=300ms -count=3` and report the median;
+- use interleaved A/B runs with `benchstat` for variants;
+- compare CPython on `ns/op` only; `B/op` and `allocs/op` belong to the Go harness.
 
 ## Reproduction
 

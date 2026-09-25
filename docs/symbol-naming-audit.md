@@ -6,11 +6,11 @@ Applied naming/vocabulary reference.
 
 ## Current Vocabulary
 
-Current implementation vocabulary is owned by package docs. The rows below are historical/rebuild terms and MUST NOT be used to describe current symbols.
+Package and topic docs own current names. This document records only cross-package vocabulary; historical/rebuild terms `MUST NOT` be used for current symbols.
 
 ## Native Vocabulary
 
-Current native terminology is defined by the owner docs and packages below. New compiler or target terminology MUST be introduced in the owning package or topic doc before use.
+New compiler or target terms `MUST` be introduced by the owning package or topic doc before use.
 
 | Package | Naming domain |
 |---|---|
@@ -31,7 +31,7 @@ Current native terminology is defined by the owner docs and packages below. New 
 
 Naming rules, symbol-removal review, ownership checks, and simplification checks are owned by `coding-patterns.md` and `refactoring.md`.
 
-The agent `MUST NOT` record rename history here. Historical decisions belong in dated plans/audits.
+Rename history does not belong here; dated plans and audits own historical decisions.
 
 ## Related
 

@@ -35,18 +35,18 @@ The agent MUST update `compatibility.md` with GOOS/GOARCH, CGO, executable-memor
 
 ## Coverage
 
-The agent MUST start with low-risk paths in this order:
+Add proof in dependency order:
 
-1. register and instruction encoding;
-2. constants and simple data movement;
-3. arithmetic and comparison encodings;
-4. numeric conversions;
+1. registers/encoding;
+2. constants/data movement;
+3. arithmetic/comparisons;
+4. conversions;
 5. memory operands;
-6. branches and relaxation;
+6. branches/relaxation;
 7. executable-memory publication;
-8. architecture-specific runtime entry once its `compile.Machine` lowering exists.
+8. native entry.
 
-The agent MUST add native lowering, host interaction, calls, heap access, loops, and suspension only after the core runtime contract is stable.
+Calls, host interaction, heap access, loops, and suspension require the core runtime contract first.
 
 ## Validation
 

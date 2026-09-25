@@ -9,11 +9,11 @@
 
 ## A compact, embeddable bytecode VM for Go
 
-Run dynamic logic inside your Go application without giving up control over performance, resources, or host integration.
+Run dynamic logic inside Go with explicit resource limits, typed host calls, and a threaded semantic baseline.
 
-- **Bounded execution** — limit stack, heap, call depth, fuel, hooks, and context.
-- **Direct host integration** — call Go through typed, reflection-free host functions.
-- **Explicit execution** — use the threaded interpreter with bounded resources and controlled host integration.
+- **Bounded execution** — stack, heap, frame depth, fuel, hooks, context.
+- **Direct host calls** — typed, reflection-free `HostFunction` path.
+- **Native tier** — opt-in ARM64 execution with threaded fallback.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -51,8 +51,8 @@ minivm keeps the execution model explicit: bytecode in, controlled runtime, type
 | Embeddable runtime | First-class functions, locals, globals, closures, refs, strings, arrays, structs, maps, coroutines, and structured errors |
 | Host integration | Typed `HostFunction` calls plus `Marshal` and `Unmarshal` for ordinary Go values |
 | Resource control | Stack, heap, frame, fuel, context, hook, and debugger controls |
-| Fast baseline | Closure-threaded dispatch with low steady-state allocation on core workloads |
-| Execution baseline | Threaded interpreter with explicit resource controls |
+| Fast baseline | Closure-threaded dispatch with low steady-state allocation |
+| Semantic baseline | Threaded interpreter with explicit resource controls |
 | Safe admission | Static bytecode verification before execution |
 
 ### Built for
@@ -124,10 +124,10 @@ Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instructio
 ## Architecture
 
 ```text
-Program -> verifier / optimizer -> threaded interpreter
+Program → Verify → optimize? → threaded ⇄ native (ARM64, opt-in)
 ```
 
-The threaded interpreter is the complete execution engine and the semantic baseline. Native compilation is opt-in via `interp.WithThreshold` and arm64-only: it compiles a hot `*types.Function` to native code and deoptimizes back to threaded execution wherever it cannot run natively.
+The threaded interpreter is the semantic baseline and complete execution engine. `WithThreshold` adds ARM64 native execution for hot functions; unsupported paths return to threaded execution.
 
 The instruction set is WebAssembly-inspired but intentionally custom. It uses one-byte opcodes with fixed-width or length-prefixed operands.
 

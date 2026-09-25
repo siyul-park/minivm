@@ -658,13 +658,9 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return val, nil
 }
 
-// PopBoxed consumes the top-of-stack value and returns its raw NaN-boxed word
-// without constructing a types.Value, so scalar results incur no allocation
-// (read them with Boxed.F64/I32/...). It is the zero-alloc counterpart to Pop.
-// For a KindRef result the stack's reference is transferred to the caller
-// unchanged: resolve it with Load and balance it with Release, or Retain to keep
-// an extra reference. Pop instead detaches the heap value and releases the
-// stack's reference, so the two stay symmetric on the consumed slot.
+// PopBoxed returns the raw stack word without allocating. For KindRef it transfers
+// stack ownership to the caller; Pop instead releases that ownership while returning
+// the detached value.
 func (i *Interpreter) PopBoxed() (types.Boxed, error) {
 	if i.sp == 0 {
 		return 0, ErrStackUnderflow
@@ -1221,18 +1217,9 @@ func (i *Interpreter) zero(kind types.Kind) types.Boxed {
 	}
 }
 
-// mapKey indexes one entry of a generic map. It is the single owner of the
-// rule every map opcode and the codec must agree on, because a key written
-// under one spelling and looked up under another is unreachable.
-//
-// A scalar keys by value, i1 and i8 through their i32 representation. A string
-// keys by content, so equal strings index one entry however each was
-// published, as strings compare by content everywhere else. Every other
-// reference keys by heap address.
-//
-// The second result is the key a new entry stores: zero when the MapKey alone
-// reconstructs it, and otherwise a reference the entry takes ownership of. A
-// caller that only looks up releases it instead.
+// mapKey defines the canonical map key: i1/i8 normalize to i32, strings key
+// by content, and other refs by heap address. The optional second result is
+// the owned stored key when normalization alone cannot reconstruct it.
 func (i *Interpreter) mapKey(key types.Boxed) (types.MapKey, types.Boxed) {
 	switch key.Kind() {
 	case types.KindI1, types.KindI8, types.KindI32:
@@ -1341,17 +1328,9 @@ func (i *Interpreter) decoder(r *Registry) *Decoder {
 	return d
 }
 
-// arrayGet reads the element at index at off the array bound to heap
-// address addr, covering every TypedArray[_] representation and the generic
-// *types.Array alike. It is the generic counterpart to the specialized reads
-// array.get fusion emits when a slot's declared element kind matches the
-// runtime representation: a fused handler falls back to arrayGet exactly
-// when that specialization misses, and the unfused ARRAY_GET handler calls
-// it unconditionally. A *types.Array element is always an owned ref and is
-// retained here; a TypedArray[_] element is a scalar copy and needs none.
-// arrayGet does not release addr itself — callers that only borrowed the
-// container ref (a fused read) must leave it alone, and callers that popped
-// an owned ref (the unfused handler) must release it themselves.
+// arrayGet is the generic ARRAY_GET path for all container representations.
+// Generic refs are retained on read; the container address itself is owned
+// and released by the caller.
 func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 	switch array := i.heap[addr].(type) {
 	case types.TypedArray[bool]:
@@ -1454,14 +1433,8 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 	}
 }
 
-// structField reads the field at index at off the struct bound to heap address
-// addr, covering a *types.Struct and a *HostStruct alike. It is the
-// generic counterpart to the specialized reads struct.get
-// fusion emits for a declared *types.StructType slot: the unfused STRUCT_GET
-// handler calls it unconditionally, and a fused handler falls back to it when
-// the runtime value does not match the slot it specialized for. A KindRef
-// field is retained. structField does not release addr itself, for the same
-// reason arrayGet does not.
+// structField is the generic STRUCT_GET path for VM and host structs. Ref fields
+// are retained; the caller owns and releases the container address.
 func (i *Interpreter) structField(addr, at int) types.Boxed {
 	switch value := i.heap[addr].(type) {
 	case *types.Struct:

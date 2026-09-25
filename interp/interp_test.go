@@ -1170,14 +1170,8 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
-		// array.new_default's type index names a ref-element array type, so
-		// it allocates the generic *types.Array boxed-element representation
-		// (never TypedArray[int32]), while the local it is stored into is
-		// declared types.TypeI32Array. array.get's fused LOCAL_GET path
-		// proves only the local's declared element kind at threading time,
-		// so it must fall back from its specialized TypedArray[int32]
-		// assertion to the *types.Array representation actually on the heap
-		// instead of trapping.
+		// array.new_default stores a generic *types.Array in an i32-declared slot; fused array.get
+		// must miss TypedArray[int32] specialization and read the actual representation.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1189,14 +1183,8 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// LOCAL_SET does not recheck the declared type of the slot it writes
-		// into, so a local declared as a concrete i32-element array can still
-		// hold a different concrete element kind (here f32) at runtime.
-		// array.get's fused LOCAL_GET path proves only the local's declared
-		// element kind at threading time, so a miss on its specialized
-		// TypedArray[int32] assertion must fall back through every other
-		// concrete TypedArray[_] representation, not just *types.Array,
-		// instead of trapping a case the unfused handler accepts.
+		// LOCAL_SET permits a f32 array in an i32-declared slot. Fused array.get must miss the
+		// TypedArray[int32] specialization and preserve generic behavior.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1372,15 +1360,8 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// The generated GLOBAL_SET handler does not recheck the declared type
-		// of the slot it writes into, so a global declared as a concrete
-		// i32-element array can still hold a different concrete element kind
-		// (here f32) at runtime. array.get's fused GLOBAL_GET path proves
-		// only the global's declared element kind at threading time, so a
-		// miss on its specialized TypedArray[int32] assertion must fall back
-		// through every other concrete TypedArray[_] representation, not
-		// just *types.Array, instead of trapping a case the unfused handler
-		// accepts.
+		// GLOBAL_SET permits a f32 array in an i32-declared global. Fusion must miss
+		// TypedArray[int32] and fall back to the generic array reader.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1453,15 +1434,8 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// CLOSURE_NEW does not recheck a captured value's type against the
-		// callee's declared Captures, so an upvalue declared as a concrete
-		// i32-element array can still hold a different concrete element kind
-		// (here f32) at runtime. array.get's fused UPVAL_GET path proves only
-		// the upvalue's declared element kind at threading time, so a miss on
-		// its specialized TypedArray[int32] assertion must fall back through
-		// every other concrete TypedArray[_] representation, not just
-		// *types.Array, instead of trapping a case the unfused handler
-		// accepts.
+		// CLOSURE_NEW permits a f32 array in an i32-declared capture. Fusion must miss
+		// TypedArray[int32] and fall back to the generic array reader.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CONST_GET, 1),
@@ -1868,15 +1842,8 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		// Mirrors the LOCAL_GET parity case for array.get: array.new_default's
-		// type index names a ref-element array type, so it allocates the
-		// generic *types.Array boxed-element representation (never
-		// TypedArray[int32]), while the local it is stored into is declared
-		// types.TypeI32Array. array.set's fused LOCAL_GET path proves only
-		// the local's declared element kind at threading time, so a miss on
-		// its specialized TypedArray[int32] assertion must fall back to
-		// (*Interpreter).arraySet, which stores the boxed value as-is,
-		// instead of trapping.
+		// array.new_default produces generic *types.Array even when the slot declares i32
+		// elements. Fused array.set must miss specialization and preserve the generic store.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1889,19 +1856,8 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// Mirrors the LOCAL_GET parity case for array.get: LOCAL_SET does
-		// not recheck the declared type of the slot it writes into, so a
-		// local declared as a concrete i32-element array can still hold a
-		// different concrete element kind (here f32) at runtime. array.set's
-		// fused LOCAL_GET path proves only the local's declared element kind
-		// at threading time, so a miss on its specialized TypedArray[int32]
-		// assertion must fall back through every other concrete
-		// TypedArray[_] representation, not just *types.Array, instead of
-		// trapping a case the unfused handler accepts. The fallback stores
-		// through val.F32(), which reinterprets the fused I32_CONST
-		// payload's raw bits rather than numerically converting it, so
-		// I32_CONST 0 lands as float32(0) -- distinct from the constant's
-		// original 1.5, proving the write actually happened.
+		// LOCAL_SET permits a f32 array in an i32-declared slot. Fusion must miss
+		// TypedArray[int32] and preserve the generic store, including raw-bit conversion.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_SET),
@@ -4981,14 +4937,8 @@ func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
 	}
 }
 
-// BenchmarkInterpreter_ArrayGetContainerFusion measures ARRAY_GET fused onto
-// a GLOBAL_GET and an UPVAL_GET container -- the two sources this change adds
-// to the LOCAL_GET container fusion BenchmarkInterpreter_StructGetLocalFusion
-// already covers. No canonical kernel in benchmarks/ holds an array or struct
-// in a global or an upvalue (#176), so this is the only coverage of either
-// path's runtime win; both sources share one benchmark function, run as
-// subtests, because they exercise the identical sum-loop shape and differ
-// only in where the container lives.
+// BenchmarkInterpreter_ArrayGetContainerFusion covers GLOBAL_GET and UPVAL_GET
+// container fusion; both paths share the same sum-loop shape.
 func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
 	const size, repeats = 64, 4000
 	for _, tt := range []struct {
@@ -5020,13 +4970,8 @@ func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
 	}
 }
 
-// BenchmarkInterpreter_ArraySetContainerFusion measures ARRAY_SET fused onto
-// a LOCAL_GET, GLOBAL_GET, and UPVAL_GET container -- the three sources
-// arrayStore()'s isContainerSource branch (internal/codegen/array.go)
-// specializes. Each subtest writes arr[j] = j through the fused container in
-// a nested loop instead of summing, so the timed body is dominated by
-// array.set rather than array.get; a final single pass sums the written
-// array so the benchmark can still verify correctness.
+// BenchmarkInterpreter_ArraySetContainerFusion measures fused LOCAL_GET, GLOBAL_GET,
+// and UPVAL_GET stores; a final sum verifies the writes outside the timed body.
 func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
 	const size, repeats = 64, 4000
 	for _, tt := range []struct {
@@ -5059,14 +5004,8 @@ func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
 	}
 }
 
-// BenchmarkInterpreter_StructGetHost measures STRUCT_GET against the value the
-// reflection codec picks for a Go struct that carries a method and an
-// unexported field. Field 0 is a plain i32, so the loop isolates per-access
-// dispatch cost from any boxing or heap traffic. The marshal and reset work
-// outside the inner loop is amortized over repeats field reads per run, the
-// same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
-// The two rows separate the threaded read from the lowered one, which is the
-// pair a change to hostGet has to report.
+// BenchmarkInterpreter_StructGetHost isolates STRUCT_GET on a host struct with an
+// unexported field; field 0 is i32, so the loop measures dispatch apart from boxing.
 func BenchmarkInterpreter_StructGetHost(b *testing.B) {
 	const repeats = 10000
 	prog := structGetHostLoop(repeats)

@@ -150,15 +150,9 @@ func validate(op Operand) error {
 	}
 }
 
-// encode turns phys-allocated instructions into the final byte stream.
-//
-// Each pass drafts the instruction list — encoding every instruction with a
-// placeholder for its label operand — to measure byte offsets, then asks the
-// architecture's Relaxer to rewrite label branches whose displacement no
-// longer fits. Relax returns a replacement that is already in range, so a
-// branch relaxes at most once and the loop terminates; batching every splice
-// within a pass keeps drafting proportional to the number of relaxation
-// rounds rather than to the number of branches.
+// encode drafts instructions with label placeholders, then asks the target
+// Relaxer to rewrite out-of-range branches. Each branch relaxes at most once,
+// and all splices for a pass are batched.
 func (a *Assembler) encode(insts []Instruction, labels map[Label]int) ([]byte, error) {
 	relaxer, relaxes := a.arch.(Relaxer)
 	for {

@@ -70,9 +70,9 @@ The agent `MUST` add runtime behavior to the existing opcode corpus when one row
 
 ## Documentation
 
-The agent `MUST` update only owner docs:
+Update only the owner of changed facts:
 
-| Change | Owner |
+| Fact | Owner |
 |---|---|
 | semantics/status | `instruction-set.md` |
 | verification | `verification.md` |

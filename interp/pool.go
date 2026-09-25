@@ -140,13 +140,9 @@ func (p *Pool) grow() *Interpreter {
 	}
 }
 
-// share gives i's native JIT runtime to the pool: the first Interpreter's is
-// adopted, with a reference of the pool's own that Close drops, as the pool's
-// shared runtime, and a later one swaps onto it once
-// its own freshly loaded constants match — which every Interpreter built
-// from the same Program always does, so a mismatch leaves i on its own
-// runtime instead of risking a shared one that does not actually agree with
-// it. A no-op when i was built without WithThreshold.
+// share adopts a matching interpreter JIT runtime into the pool. The pool owns
+// its reference; a mismatched runtime stays private. Interpreters without JIT
+// have no shared runtime.
 func (p *Pool) share(i *Interpreter) {
 	if i.native == nil {
 		return

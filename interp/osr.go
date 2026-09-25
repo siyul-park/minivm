@@ -144,13 +144,8 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	return true
 }
 
-// settle runs s's OSR activation from trap to a stopping point, TrapReturn
-// or a permanent refute, materializing every exit but a safepoint or
-// release into i's own current frame — record 0 is this activation,
-// entered without a call — deeper suspended activations, if any, as new
-// frames above it, exactly as native.deopt does for a CALL-entered one. mark
-// is Context.Budget as of entry, the amortized baseline for s's first
-// bridge. It reports whether the site should retire.
+// settle materializes OSR exits into the current interpreter frame and any
+// suspended outer activations, stopping at TrapReturn or permanent refute.
 func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap, mark int64) bool {
 	ctx := n.ctx
 	for {
@@ -207,13 +202,9 @@ func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap, mar
 	}
 }
 
-// finish ends s's OSR activation on TrapReturn. An ordinary RETURN's
-// results are already at the frame base — native code released every
-// reference-capable slot and wrote them there itself; boxRegisters boxes
-// the raw i64 ones — so only the frame's own teardown remains, shared with
-// threaded RETURN through leave. Module completion instead leaves its
-// results on the operand stack past the locals, with ip past the end of
-// code so dispatch returns, exactly as threaded execution ends it.
+// finish closes an OSR activation after TrapReturn. Ordinary RETURN results are
+// already at the frame base; module completion leaves results past locals and
+// advances IP past code so threaded dispatch completes.
 func (n *native) finish(i *Interpreter, s *site, c *jit.Code) {
 	f := i.fr
 	if s.module {

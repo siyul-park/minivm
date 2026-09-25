@@ -1,18 +1,8 @@
 package instr
 
-// Type is the static metadata of an opcode: its mnemonic, operand encoding
-// widths, and the stack effect (operand kinds it pops and pushes). Pop is
-// listed top-of-stack first; Push lists results bottom first so the last entry
-// ends on top. A KindAny entry matches or yields any kind. When both Pop and
-// Push are nil the opcode has no statically fixed effect (its effect depends on
-// operands, constants, declared types, or the runtime stack) and a verifier
-// must resolve it from context. Reads and Writes state what the opcode touches
-// beyond that stack, and every opcode declares both.
-//
-// Boolean-producing opcodes (comparisons, *.eqz, ref.test/is_null/eq/ne, and
-// the string comparisons) push KindI1 so the verifier tracks the boolean type;
-// i1 shares the i32 representation, so the result is still usable wherever an
-// i32 operand is expected.
+// Type is opcode metadata: mnemonic, operand widths, stack effect, and machine
+// effects. Pop is top-first; Push is bottom-first. Nil Pop/Push means the
+// verifier derives the effect from context. Boolean-producing opcodes push I1.
 type Type struct {
 	Mnemonic string
 	Widths   []int

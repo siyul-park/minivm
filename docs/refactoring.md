@@ -25,7 +25,7 @@ Smaller code is not automatically simpler. The agent `MUST` optimize conceptual 
 
 ### Scope
 
-The agent `MUST` start from the requirement, not the diff. It `MUST` identify affected files, entry points, owners, constraints, and the responsibility changed by the work, and `MUST` state that responsibility in one sentence.
+Start from the requirement, not the diff: identify affected files, entry points, owners, constraints, and the changed responsibility; state that responsibility in one sentence.
 
 The agent `MUST` review successively within a file, across files in a package, and across packages in a module. At each level, it `MUST` inspect cohesion, ownership, dependency direction, and the necessity of each boundary. For repository-wide work, it `MUST` process lower-dependency packages before their consumers. A local fixed point does not establish a package or module fixed point.
 
@@ -45,7 +45,7 @@ The agent `MUST` ask: Is each responsibility in its narrowest correct owner? Is 
 
 The agent `MUST` review every changed symbol and every nearby symbol whose ownership, visibility, call relationship, or contract changed. For each retained symbol it `MUST` ask: **Why does this symbol exist now?**
 
-The agent `MUST` remove, inline, merge, narrow, privatize, rename, or replace a symbol when an existing symbol or simpler structure provides the same contract. It `MUST` check for dead fields, stale parameters, wrappers, aliases, shims, one-call indirections, duplicate state, and duplicate ownership.
+Remove, inline, merge, narrow, privatize, rename, or replace a symbol when a simpler existing structure provides the same contract. Check dead fields, stale parameters, wrappers, aliases, shims, one-call indirections, duplicate state, and duplicate ownership.
 
 ### Simplify
 
@@ -71,7 +71,7 @@ Top Down → Bottom Up → Simplify
           └── no change → Validate
 ```
 
-The agent `MUST` stop only when a complete pass finds no further **safe structural improvement within scope**. This is the simplification fixed point. For repository-wide work, this requires file, package, and module review; the agent `MUST` record the contract or evidence blocking each meaningful remaining candidate.
+Stop only at the simplification fixed point: a complete pass finds no further **safe structural improvement within scope**. Repository-wide work requires file, package, and module review; record the contract or evidence blocking each meaningful candidate.
 
 ### Validate
 

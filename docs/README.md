@@ -4,7 +4,7 @@ Each topic has one canonical owner. This document owns the topic-to-document map
 
 ## Terminology
 
-Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`) for agent requirements and `MUST NOT` use bare imperatives (`keep`, `do not`, `prefer`, `skip`) where a keyword applies. Sentences without a keyword are informative and `MUST NOT` be treated as requirements.
+Requirements use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`). Bare imperatives are not requirements; move normative wording into the owner document.
 
 | Topic | Document |
 |---|---|
@@ -30,13 +30,11 @@ Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `S
 
 ## Guides
 
-Guides define procedures over topic contracts:
+- `guides/add-opcode.md` — opcode change procedure
+- `guides/add-architecture.md` — target-backend procedure
+- `guides/repl.md` — REPL usage
 
-- `guides/add-opcode.md`
-- `guides/add-architecture.md`
-- `guides/repl.md`
-
-A guide `MUST` describe change order and validation only. The contract it operates on `MUST` stay in its owner topic doc; a guide `MUST NOT` duplicate that contract and `MUST` link to the owner instead.
+Guides `MUST` own procedure, not topic contracts; contract text stays with its canonical owner.
 
 ## Style
 
@@ -51,10 +49,11 @@ Every topic and guide document `MUST`:
 
 ## Document Roles
 
-- A canonical topic doc `MUST` describe supported/current behavior. It `MUST NOT` describe removed behavior as current and `MUST NOT` duplicate a contract owned elsewhere.
-- `roadmap.md` `MUST` own priorities only; it `MUST NOT` override topic contracts.
-- `plans/` and `superpowers/` contain dated plans, audits, and design records. They `MAY` preserve history and future work, but they `MUST NOT` own current behavior.
-- `AGENTS.md` owns repository workflow. Topic docs own current behavior and contracts; roadmap owns priorities.
+- Topic docs: current behavior and contracts; no removed behavior or duplicate ownership.
+- Guides: procedures over topic contracts.
+- `roadmap.md`: priorities only.
+- `plans/` and `superpowers/`: dated plans, audits, design records; never current authority.
+- `AGENTS.md`: repository workflow.
 
 ## Related
 

@@ -46,17 +46,9 @@ func (m *Machine) Reserve() []asm.PReg {
 	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}
 }
 
-// Prologue begins a function at address, builds its frame, pushes the
-// activation record, optionally counts the entry, and clears locals after
-// params. X25 (frame base) and X27 (activation depth) already hold this
-// activation's values: a self call leaves them set, and Enter loads them
-// from Context before the outermost call. results is the function's
-// register-convention results (see compile's registers): Return keeps it to
-// decide whether OpReturn moves results to X0/X1 or boxes them to the frame.
-// arguments is the function's register-convention parameters: Prologue
-// moves each out of X0/X1 into a fresh vreg, returned in order. It captures
-// them after SP is lowered (a spilled capture stores SP-relative) and emits
-// every DEF before any move (no capture may take a register not yet read).
+// Prologue builds the frame, records the activation, counts the entry when enabled,
+// and clears non-parameter locals. Register-convention arguments are captured
+// from X0/X1 before those registers are repurposed.
 func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind) []asm.VReg {
 	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: results}
 	a.Bind(m.entry)
@@ -119,17 +111,9 @@ func (m *Machine) Epilogue(a *asm.Assembler) {
 	)
 }
 
-// Enter emits the Go entry stub after the epilogue, at code offset > 0 so
-// the function body stays at offset 0 for native-to-native calls. It loads
-// X25 and X27 from Context (the interpreter writes both before every Enter
-// and Resume), loads each register-convention parameter from its slot into
-// X0/X1 (low 32 bits for a narrow or f32 payload, the whole word for f64 and
-// ref, an i64's SBFX-extracted 49-bit payload: the caller declines Enter
-// when the slot holds a heap ref instead), calls the function's own entry,
-// boxes each register-convention result from X0/X1 into the VM frame by its
-// declared kind (ref, f64 and i64 stored raw; the caller boxes an i64), and
-// returns to Go. Enter returns the stub's label so Lower can resolve its
-// byte offset after Build.
+// Enter emits the Go entry stub after the epilogue so native-to-native calls
+// still enter at offset 0. The stub loads pinned state and register arguments,
+// calls the body, then boxes register results into the VM frame.
 func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
 	label := a.Label()
 	a.Bind(label)

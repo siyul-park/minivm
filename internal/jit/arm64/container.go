@@ -9,15 +9,8 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// shape lowers guard.shape: ref's heap object's own interface word must
-// equal the itab of the representation Shape admits — array elements of
-// Kind in TypedArray[T] (KindRef in *types.Array), or, when Struct, a
-// *types.Struct — whose own Typ additionally must equal Shape.Type when
-// Type names a specific one; a generic struct.set container (Type unset)
-// admits any *types.Struct. Anything else — a null ref, a host object, a
-// mismatched struct type — deopts. Result is the same word as ref;
-// downstream container ops key off Args[0]'s guarded value to assert their
-// own container is admitted.
+// shape lowers guard.shape. It admits only the representation and optional
+// concrete type encoded by Shape; null, host, or mismatched containers deopt.
 func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
@@ -154,14 +147,8 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 		a.Emit(target.ADD(addr, ptr, idx))
 		a.Emit(target.STRB(val, addr, 0))
 	case 4:
-		// A 4-byte array element is packed at a 4-byte stride, unlike a
-		// struct.Data slot's fixed 8-byte width. target.STR always encodes
-		// a 64-bit store for an integer source (internal/asm/arm64's
-		// encodeStore is width-aware for a float source but not an
-		// integer one), which would also overwrite the following element;
-		// an int32 element needs the narrow STRW form. A float32 element's
-		// STR already narrows to a 32-bit store from val's own Width32,
-		// so it is unaffected.
+		// int32 elements use STRW: array stride is 4 bytes, while generic
+		// integer STR writes 8 bytes. Float32 STR is already width-correct.
 		off := m.offset(a, ptr, idx, 2)
 		if shape.Kind == types.KindI32 {
 			a.Emit(target.STRW(val, off, 0))
@@ -221,14 +208,9 @@ func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	return true
 }
 
-// structSet writes val to the field at a bounds-checked index into a
-// guarded struct: the guard only admits *types.Struct generically (the
-// frontend never resolves a concrete field for a dynamic index), so bounds
-// are checked at Typ.Fields' own runtime length. val's storage width and
-// sign handling follow its own static kind — the same one the field it
-// targets must declare, by construction of valid bytecode — matching
-// threaded STRUCT_SET without a runtime field-kind switch. A ref field
-// releases the old value and adopts val.
+// structSet writes a statically typed value to a dynamically indexed guarded
+// struct. Bounds use the runtime field count; ref fields release the old
+// value and adopt the new one.
 func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if len(op.Args) != 3 || len(op.Results) != 0 {
 		return false

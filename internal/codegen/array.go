@@ -68,21 +68,9 @@ func containerGet(state *state, current step) (value, error) {
 				jen.Return(),
 			}
 		}
-		// arrayGuard only proves the container's declared element kind, never
-		// the runtime value's concrete representation: LOCAL_SET, GLOBAL_SET,
-		// and a closure's captured upvalue all assign into a declared slot
-		// without re-checking the assigned value's concrete representation
-		// against it (e.g. ARRAY_NEW_DEFAULT's ref-element path stores
-		// through a differently-declared alias, or a store from a source
-		// whose static type verification could not pin down leaves a
-		// concrete TypedArray[U] with U != T in the slot), so a miss on the
-		// specialized TypedArray[T] assertion falls back to
-		// (*Interpreter).arrayGet, the same generic reader the unfused
-		// handler calls unconditionally — every other TypedArray[_]
-		// representation and the generic *types.Array alike — instead of
-		// trapping a case the unfused handler accepts. This arm still
-		// returns on its own success path, so no variable is live across it
-		// and the fallback below.
+		// arrayGuard proves only the declared element kind. A runtime
+		// representation miss falls back to Interpreter.arrayGet, preserving
+		// the unfused handler's accepted representations.
 		body = append(body, jen.If(
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.Id("ok"),
@@ -203,17 +191,8 @@ func arrayStore(state *state, current step) (value, error) {
 			jen.If(jen.Add(container.boxed).Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.Id("at").Op(":=").Int().Call(index.raw),
 		)
-		// A miss on the specialized TypedArray[T] assertion falls back to
-		// (*Interpreter).arraySet, the same generic writer arraySet() calls
-		// unconditionally: the declared type proves only what to specialize
-		// for, not the runtime representation.
-		//
-		// The container is borrowed, never retained or released here,
-		// unlike the standalone arraySet() handler, which pops an owned ref
-		// and releases it after the write.
-		//
-		// A fused sequence pushes none of its three operands, so its net
-		// stack effect is zero: i.sp is left unchanged in both arms.
+		// A specialized TypedArray[T] miss falls back to arraySet. The container
+		// is borrowed and a fused store leaves sp unchanged.
 		body = append(body, jen.If(
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.Id("ok"),

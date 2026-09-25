@@ -28,7 +28,7 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Native status is per opcode. Threaded execution is the semantic baseline for every opcode; `internal/jit/arm64` additionally lowers a subset directly to native code when `interp.WithThreshold` compiles a function (see `jit-internals.md`). The compiler records an unsupported operation as `ExitBridge`; the interpreter runs `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` once through their own threaded handler and resumes native code (`interp.bridgeable`), and materializes every other `ExitBridge` and deoptimizes back to threaded execution. Terminators with no native form (`RETURN_CALL`, `YIELD`, `RESUME`) deoptimize directly.
+Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Unsupported operations become `ExitBridge`: only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` resume native execution; other bridges materialize and deoptimize. `RETURN_CALL`, `YIELD`, and `RESUME` deoptimize directly.
 
 | Status | Meaning |
 |---|---|
@@ -74,7 +74,7 @@ Query them with `op.Reads(effect)` and `op.Writes(effect)`. Rules:
 - only `call` and `return_call` write `Frame`; resuming a coroutine pushes no frame;
 - `op.IsPure()` is derived, not declared: an opcode that reads nothing, writes nothing, and pushes at least one value computes from its operands alone, so a consumer `MAY` number, fold, or reorder it.
 
-A new opcode `MUST` declare its effects in the same table entry as its stack effect. Consumers `MUST` ask `instr`; they `MUST NOT` re-derive an effect from an opcode list.
+New opcodes `MUST` declare effects beside stack effects in `instr/type.go`; consumers `MUST` query `instr` rather than re-derive effects.
 
 ## Opcode Reference
 
@@ -307,7 +307,7 @@ Branch offsets are relative to instruction end. Function bodies `MUST` terminate
 
 ### Arrays
 
-`ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET`/`ARRAY_SLICE` `MUST` retain copied refs. `ARRAY_SLICE` consumes the source ref; the agent `MUST` use `DUP` to preserve it.
+`ARRAY_APPEND` moves values into the array. `ARRAY_DELETE` moves the removed element to the stack. `ARRAY_GET`/`ARRAY_SLICE` `MUST` retain copied refs. `ARRAY_SLICE` consumes the source ref; callers `MUST` use `DUP` to preserve it.
 
 ### Strings
 
@@ -329,16 +329,12 @@ Handler tables own exception routing. `types.Error` is the structured payload. C
 
 Threaded fusion rules are owned by `fusion.md`.
 
-## Maintenance Notes
+## Maintenance
 
-When changing the instruction set, the agent `MUST`:
-
-- append opcodes only;
-- keep names short and standard;
-- prefer composition over narrow variants;
-- update metadata, verifier, threaded lowering, backend status, tests, and owner docs together;
-- keep stack effects and ownership explicit;
-- preserve threaded semantic parity; extend `internal/jit/arm64` lowering, and this opcode's ARM64 status above, together when native parity for the opcode is added.
+- Opcode numbers are append-only in `instr/opcode.go`.
+- Widths, stack effects, and machine effects live in `instr/type.go`.
+- Threaded handlers are generated; native status stays in the table above.
+- Change procedure belongs to `guides/add-opcode.md`.
 
 ## Related
 

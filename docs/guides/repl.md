@@ -40,9 +40,7 @@ The REPL `MUST` accept one instruction per line; the accumulated program runs an
 | `.help` | help |
 | `.quit` / `.exit` | exit |
 
-`.load` `MUST` replace rather than merge state because merge would require renumbering embedded constant/type indexes.
-
-`.save` `MUST` reject host-value constants such as `*interp.HostFunction` and live views such as `*interp.HostStruct` because they have no textual representation.
+`.load` `MUST` replace state; merging would renumber embedded constant/type indexes. `.save` `MUST` reject host-value constants and live views without textual representations.
 
 ## Debugging
 
@@ -92,7 +90,7 @@ debug> continue
 | `clear <id>` | | remove breakpoint |
 | `quit` / `q` | | exit debug session |
 
-Stops occur before the displayed instruction. The displayed IP is the next byte offset. `frames` marks the innermost frame with `>`.
+Stops occur before the displayed instruction; the displayed IP is the next byte offset. `frames` marks the innermost frame with `>`.
 
 ## Precision
 
@@ -109,7 +107,7 @@ br @0x0010
 
 `.show` prints absolute offsets; the REPL `MUST` normalize `@` targets to relative encoding.
 
-Whole-program text (`.load`, `run`, `.code`) also accepts labels:
+Whole-program text (`.load`, `run`, `.code`) accepts labels:
 
 ```text
 loop:
@@ -120,7 +118,7 @@ done:
 return
 ```
 
-`br_table` labels follow `count, cases, default`. Numeric and symbolic targets `MAY` be mixed.
+`br_table` uses `count, cases, default`; numeric and symbolic targets `MAY` be mixed.
 
 `.show`/`.save` `MUST` emit `L%04d:` labels for instruction-boundary targets. The result `MUST` round-trip through `.load`. Interactive `>` input `MUST NOT` accept labels because forward references require the complete input.
 

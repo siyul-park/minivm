@@ -16,15 +16,8 @@ type HostFunction struct {
 	Fn  func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)
 }
 
-// HostStruct is a live view of a Go struct. The codec produces one for a struct
-// a copy cannot reproduce - one carrying unexported state, or one a pointer
-// receiver mutates - so a field the guest writes and a method the host calls
-// address the same memory.
-//
-// The pointer is what the GC traces, so the Go struct stays alive for as long as
-// the VM holds the view, and the Go type is what identifies it on the way back
-// out. Both are fixed at construction: there is no layout to re-validate on the
-// way into a field.
+// HostStruct is a live Go-struct view. The traced pointer keeps the source alive,
+// and the Go type fixes the view's field layout for its lifetime.
 type HostStruct struct {
 	typ      *types.StructType
 	fields   []field

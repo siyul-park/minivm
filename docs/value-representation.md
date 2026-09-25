@@ -42,7 +42,7 @@ minivm uses NaN boxing.
 
 ## Computational Types
 
-`i1`, `i8`, and `i32` share one 32-bit computational representation while retaining distinct runtime kinds.
+`i1`, `i8`, and `i32` share one 32-bit computational lane while retaining distinct runtime kinds.
 
 ```text
 i8 & i8 → i8
@@ -51,7 +51,7 @@ i8 + i8 → i32
 comparison / eqz → i1
 ```
 
-Constant folding `MUST` preserve result kinds.
+Constant folding `MUST` preserve the declared result kind.
 
 ## I64
 
@@ -77,7 +77,7 @@ Larger signed values `MUST` use heap-backed `types.I64` objects and `KindRef`.
 | `BoxF64` | `KindF64` |
 | `BoxRef` | `KindRef` |
 
-Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MUST` check `Kind()` unless the contract proves the kind.
+Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Callers `MUST` check `Kind()` unless the contract proves the kind.
 
 ## Native Representation
 

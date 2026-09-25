@@ -28,7 +28,7 @@ When extracting shared functionality, code `MUST NOT` merely be moved into a low
 
 Logical cohesion `MUST` be reflected in physical layout.
 
-Symbols owned by the same owner and forming one cohesive responsibility `MUST` reside in the same file. Symbols sharing an ownership boundary `MUST NOT` be scattered across files without a real responsibility or abstraction boundary.
+Symbols with one owner and cohesive responsibility `MUST` share a file. Sharing an ownership boundary `MUST NOT` cause file splits without a real responsibility or abstraction boundary.
 
 Strongly related symbols `MUST` be placed physically close together. Symbols that directly compose one behavior or have a direct caller-callee relationship `SHOULD` be adjacent.
 
@@ -101,23 +101,21 @@ Required dependencies and shape `MUST` be validated at construction, and complet
 
 Types `MUST` own invariants and transitions. Compile, publish, install, reset, retain, release, and close `MUST` be implemented as behavior, not as external field assignments.
 
-## Ownership and Concurrency
+## Ownership
 
-Ownership `MUST` be explicit.
+One symbol owns each mutable state and its transitions.
 
-An unexported member of an exported type `MUST` be owned by that type. Only methods of that type `MAY` read or mutate it directly; constructors `MAY` initialize it. Other types and functions `MUST` use the owner's public contract. Layout-only declarations such as `unsafe.Offsetof` `MAY` name private members but `MUST NOT` read or mutate runtime state. Same-package visibility `MUST NOT` be treated as permission to bypass ownership. This is a design boundary, not a reason to split the package.
+Private state belongs to its owner. An unexported implementation component `MAY` access its exported owner's private state when it is part of that owner's responsibility; unrelated same-package code `MUST` use the owner's contract.
 
-Mutable storage `MUST` stay within its owner; borrowed values `MUST NOT` cross ownership boundaries.
+Borrowed values `MUST NOT` cross or outlive their ownership boundary. Retain/release and resource transitions `MUST` have one owner, and each resource `MUST` be released exactly once.
 
-Retain/release transitions `MUST` belong to the owner of the transition.
+Constructors `MAY` initialize private state. Layout-only declarations such as `unsafe.Offsetof` `MAY` name private members but `MUST NOT` access runtime state.
 
-Contexts `MUST` be first parameters for blocking, I/O, or process-boundary operations; request contexts `MUST NOT` be stored in long-lived objects.
+## Concurrency
 
-Shared mutable state `MUST` have one owner and one synchronization strategy.
+Shared mutable state `MUST` have one owner and one synchronization strategy. Long-lived goroutines `MUST` have explicit shutdown.
 
-Long-lived goroutines `MUST` have explicit shutdown.
-
-Resources `MUST` be released exactly once.
+Blocking, I/O, and process-boundary operations `MUST` take context first; request contexts `MUST NOT` be stored in long-lived objects.
 
 ## Errors
 
@@ -164,9 +162,9 @@ Comments `MAY` be added only when they are clearly necessary to preserve:
 - rejected alternatives with evidence;
 - external contracts or specifications.
 
-Necessary comments `MUST` be dense and concise. Every word `MUST` justify its presence.
+Necessary comments `MUST` state the smallest sufficient fact, constraint, invariant, or consequence. Every sentence `MUST` earn its place.
 
-Comments `MUST NOT` be used to narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Names, types, or structure `MUST` be improved instead.
+Comments `MUST NOT` narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Prefer a better name, type, or structure.
 
 Exported symbols `MUST` have normal Go doc comments.
 

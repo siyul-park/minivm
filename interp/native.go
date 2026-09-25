@@ -79,24 +79,12 @@ const budget = 1 << 16
 // refute is the deopt threshold that retires native code.
 const refute = 8
 
-// resume is how many unamortized bridges in a row (see amortized) retire a
-// site: a resumed bridge round-trips through Go on every occurrence, so a
-// site whose native work between bridges never pays for that cost (measured:
-// AllocationGraph and BinaryTrees, whose bridges recur with no intervening
-// loop work, cost more staying native than deopting once and running
-// threaded) must stop resuming rather than pay the round trip forever.
-// Matches refute: both give a site the same number of chances before giving
-// up on its current tier.
+// resume is the consecutive unamortized-bridge limit before a site retires.
+// It uses the same retry count as refute: native work must pay for the Go round trip.
 const resume = refute
 
-// amortize is the fewest back edges between two bridges (Context.Budget's
-// own fall since the prior mark) that counts the second one as amortized by
-// real native work rather than against resume. PermutationFlips recurses
-// natively per call with ~47 back edges (two array fill/swap loops) between
-// each array.new_default; AllocationGraph's own loop header takes exactly
-// one back edge per bridge; BinaryTrees' struct.new_default recurses with
-// none at all (no loop between two levels). 2 separates the first from the
-// other two on both measured kernels.
+// amortize is the minimum back-edge work between bridges that makes the
+// next bridge count as paid-for native work rather than against resume.
 const amortize = 2
 
 // mixed marks a dynamic CALL site (native.callees) that has seen more than
@@ -517,16 +505,9 @@ func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
 	}
 }
 
-// bridgeable reports whether code's threaded handler may run once, in place,
-// to resume native code: it never releases a heap reference or overwrites
-// its own argument stack slots before its only possible panic (allocation
-// failure), so a decline neither double-mutates nor loses what bridge
-// retained for cleanup. STRING_CONCAT is excluded: its handler releases
-// both operands before allocating the joined result, so a decline there
-// would re-release on threaded retry. array.new is excluded: its true pop
-// count can exceed the SSA Args this backend records for it (a variadic
-// length), unlike the three allowlisted here whose Args always equal their
-// real pop count.
+// bridgeable selects handlers that can execute once in place and safely decline.
+// The allowlist excludes handlers that consume ownership before their only possible
+// panic or whose runtime pop count exceeds the recorded SSA arguments.
 func bridgeable(code instr.Opcode) bool {
 	switch code {
 	case instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT, instr.ARRAY_NEW_DEFAULT:
@@ -536,24 +517,10 @@ func bridgeable(code instr.Opcode) bool {
 	}
 }
 
-// bridge runs exit's opcode once through its own threaded handler against a
-// scratch operand stack, and reports whether native code may resume.
-// Promoted locals and other live values stay in native registers and spill
-// slots, entirely untouched: asm.Resume already restores every allocatable
-// register regardless of what bridge does. Operands cross through boxed
-// interpreter values; a borrowed one (Owned false), or one native will
-// independently release downstream (outside the top Adopts operands, per
-// transform.Adopts), is retained fresh so the handler's own consumption
-// never touches native's copy. A ref result is left owned by the handler's
-// own push, matching native code's own expectation of an owned value.
-//
-// A trap declines instead of unwinding: on a Go call chain from n.run/
-// osr.settle through native.call/native.enter, only a normal return runs
-// n.store.Leave(); re-raising the panic here would skip it and corrupt the
-// store's in-native accounting. Declining releases bridge's own extra
-// retains and lets the caller's existing deopt path (unchanged) rebuild the
-// interpreter frame from the same exit map and let real threaded execution
-// hit the same trap once, under dispatch's own recover.
+// bridge runs the threaded handler once against boxed exit operands.
+// It leaves native registers untouched; asm.Resume restores them. A trap
+// declines through the existing deopt path so accounting and single execution
+// remain unchanged.
 func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	if i.fp >= len(i.frames) {
 		return false

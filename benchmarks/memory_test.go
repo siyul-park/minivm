@@ -685,17 +685,8 @@ func structTreeWalk(depth int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(structTreeWalkListing, depth))
 }
 
-// binaryTreesListing builds the benchmarks-game binary-trees kernel over a
-// named struct type (type 0=Node{item, left, right}; constant 0=
-// bottom_up_tree, 1=item_check; each is self-recursive, calling back through
-// its own const.get index). bottom_up_tree params: 0=item,1=depth; its
-// result and local 2=n are Node. item_check param 0=t is Node, and may be
-// the null ref at a leaf. STRUCT_NEW_DEFAULT zero-initializes ref fields to
-// the null heap ref, so the depth<=0 base case can leave left/right unset
-// instead of writing a null ref. Main locals: 0=stretchTree (Node),
-// 1=checksum,2=longLivedTree (Node),3=depth,4=iterations,5=shift,
-// 6=acc,7=i,8=t1 (Node),9=t2 (Node). %[1]d substitutes min_depth, %[2]d max_depth, %[3]d
-// max_depth+1.
+// binaryTreesListing uses the Node struct with self-recursive bottom_up_tree/item_check.
+// STRUCT_NEW_DEFAULT supplies null ref fields, so the base case need not write them.
 const binaryTreesListing = `
 .locals
 struct {item: i32; left: any; right: any}
@@ -888,17 +879,8 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(binaryTreesListing, minDepth, maxDepth, maxDepth+1))
 }
 
-// sortStressListing builds the sortstress kernel. minivm has no sort opcode,
-// so the sort is written directly in bytecode as an insertion sort over the
-// i32 array: it is a simple, obviously-correct in-place algorithm and the
-// least code among the options, keeping the kernel a measure of VM
-// dispatch rather than of an algorithm choice. The LCG state overflows i32
-// (s*1103515245 can reach ~2.4e18), so make_list (constant 0; params: 0=n,
-// 1=seed; result and local 2=xs are []i32; locals 3=s(i64),4=i) keeps s in
-// i64; the sorted values (s % 1000000) fit i32, so the array itself stays
-// i32. insertion_sort (constant 1; params: 0=arr ([]i32),1=n; locals:
-// 2=i,3=key,4=j) sorts in place. Main locals: 0=xs ([]i32),1=checksum,2=r,
-// 3=i. %[1]d substitutes n, %[2]d rounds.
+// sortStressListing measures VM dispatch with an in-place i32 insertion sort.
+// LCG state stays i64 because its multiply overflows i32.
 const sortStressListing = `
 .locals
 []i32
@@ -1066,14 +1048,8 @@ func sortStress(n, rounds int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(sortStressListing, n, rounds))
 }
 
-// stringBuildListing builds the strbuild kernel: digits(n) token generation
-// (constant 0; params: 0=n; locals: 1=count,2=v,3=arr ([]i32),4=idx,5=d), a
-// per-character checksum read back through string.encode_utf32, and
-// "big = big + tok + ' '" through string.concat (the allocating operation
-// this kernel exists to measure). Type 0 is the []i32 code-point array used
-// to build each token. Constant 1 is the " " separator, constant 2 the ""
-// used to seed big. Main locals: 0=big,1=tokenChecksum,2=i,3=tok,
-// 4=codePoints ([]i32),5=tokLen,6=j. %d substitutes n.
+// stringBuildListing measures token generation, UTF-32 reads, and repeated string.concat.
+// Type 0 is the []i32 code-point array; %d substitutes n.
 const stringBuildListing = `
 .locals
 any

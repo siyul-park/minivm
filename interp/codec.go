@@ -42,18 +42,9 @@ type registry struct {
 	entries map[reflect.Type]*conversion
 }
 
-// conversion is what one Go type compiles to. Every function it holds takes an
-// unsafe.Pointer to a live Go value of that type, valid only for the duration
-// of the call.
-//
-// value and box differ by position: value produces a standalone VM value, the
-// form Marshal returns and an interface slot stores, while box produces a slot
-// of vm, allocating a heap ref when the slot needs one. set is the reverse of
-// both, because a slot resolves to a value before it is written back.
-//
-// view produces a live view of the Go value instead of a copy, and a struct,
-// array, slice, or map has one. host reports that value is that view, so the
-// conversion never copies however it is reached.
+// conversion is the compiled adapter for one Go type. It receives a live pointer
+// for the call duration; value/box/set convert values and slots, while view
+// preserves shared Go storage for pointer-backed values.
 type conversion struct {
 	typ  reflect.Type
 	kind reflect.Kind

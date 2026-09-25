@@ -12,7 +12,7 @@ Generated producer-consumer fusion for threaded execution.
 | generation | `internal/codegen/generate.go`, `threader.go` |
 | validation | `internal/codegen/validate.go` |
 | runtime handlers | `interp/threaded.go` |
-| ARM64 fusion | `interp/` |
+| native execution | `interp/` |
 
 ## Model
 
@@ -55,17 +55,13 @@ Exact mode disables fusion. Runtime guards retain bounds, segmentation, type, an
 
 Threaded fusion remains in the interpreter. Native code consumes the resulting bytecode semantics and does not own fusion.
 
-## Ownership
-
-A fused source `MAY` borrow a ref only while the sequence fully consumes it.
-
-Borrowed refs `MUST NOT` cross stack, frame, global/upvalue, call, yield, or control-flow boundaries. `REF_NULL` `MAY` omit balanced ownership work. `DUP` `MAY` avoid temporary ownership when locally consumed.
-
 ## Generation
 
-`make generate` updates `interp/threaded.go`; `make check-generated` detects stale output. Generated code contains no timestamps or absolute paths.
+`make generate` updates `interp/threaded.go`; `make check-generated` detects stale output. Generated output `MUST` contain no timestamps or absolute paths.
 
-The agent `MUST` change an opcode through one `lowerers` entry. Patterns `MAY` select sequences and compile-time guards but `MUST NOT` add runtime pattern objects, callbacks, synthetic opcodes, code strings, or target-specific logic.
+An opcode change `MUST` use one `lowerers` entry. Patterns `MAY` select sequences and compile-time guards but `MUST NOT` add runtime pattern objects, callbacks, synthetic opcodes, code strings, or target logic.
+
+A fused source `MAY` borrow a ref only while the sequence fully consumes it. Borrowed refs `MUST NOT` cross stack, frame, global/upvalue, call, yield, or control-flow boundaries. `REF_NULL` `MAY` omit balanced ownership work; `DUP` `MAY` omit temporary ownership when locally consumed.
 
 ## Related
 

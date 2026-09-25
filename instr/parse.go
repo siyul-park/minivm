@@ -112,14 +112,8 @@ func ParseU32(code []byte, offset int) int {
 		uint32(code[offset+3])<<24)
 }
 
-// ParseAll reads from r line by line and parses each non-empty line as an
-// assembly instruction, a label definition ("name:"), or a branch mnemonic
-// carrying symbolic label operands (e.g. "br loop", "br_table 0x02 case0
-// case1 done"). Labels may be referenced before they are defined; ParseAll
-// resolves every reference once the whole input has been read, using
-// instr.Builder to back-patch each branch into the signed 16-bit relative
-// offset the interpreter expects. It returns the first error encountered
-// with the line number for context.
+// ParseAll parses instructions and labels, then resolves symbolic branches with
+// Builder. Forward references are allowed; the first error includes its line.
 func ParseAll(r io.Reader) ([]Instruction, error) {
 	b := NewBuilder()
 	lt := &labelTable{

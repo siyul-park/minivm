@@ -4,13 +4,13 @@ Package ownership, dependencies, execution flow, and the current threaded runtim
 
 ## Instruction Levels
 
-| Level | Owner |
-|---|---|
-| Bytecode | `instr` — `Instruction`, `Opcode` |
-| SSA | `internal/ssa` — `Operation`, `Function` |
-| Machine | `internal/asm/<arch>` — machine instructions |
+| Level | Owner | Meaning |
+|---|---|---|
+| Bytecode | `instr` | VM semantics and encoding |
+| SSA | `internal/ssa` | compiler state and control flow |
+| Machine | `internal/asm/<arch>` | target instructions |
 
-Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machine IR is target-specific.
+Semantics originate in bytecode; SSA and machine forms refine representation, not meaning.
 
 ## Package Ownership
 
@@ -55,17 +55,17 @@ Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUS
 program → Verify → optimize? → interp → threaded ⇄ native
 ```
 
-Threaded execution is the semantic baseline. A hot `*types.Function`, entered at ip 0 from an interpreted `CALL`, `MAY` run compiled native code instead (`interp.WithThreshold`, arm64 only); every other call stays threaded.
+Threaded execution is the semantic baseline. On ARM64, `WithThreshold` may compile hot functions; native execution returns to threaded execution at unsupported or non-native boundaries.
 
 ## Runtime
 
-`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. An interpreter built with `WithThreshold` owns its native execution context and tiering counts; its published code and compile queue are its own, or its `Pool`'s when pooled (see `jit-internals.md` Tiers).
+`interp.Interpreter` owns stack, frames, globals, heap/RC, threaded dispatch, tracing, and native installation. Threshold-enabled interpreters own a `jit.Context`; pooled interpreters share published code and compile state through `Pool`.
 
 Execution is single-goroutine-owned. Background compilation consumes immutable input and `MUST NOT` mutate live interpreter state.
 
 ## Invariants
 
-The following invariants `MUST` hold, and the agent `MUST` preserve them:
+The following invariants `MUST` hold:
 
 - Heap index `0` is permanent null.
 - Only `KindRef` participates in reference counting.

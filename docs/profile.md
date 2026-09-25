@@ -6,15 +6,13 @@ Runtime sampling and execution metrics.
 
 ## Signals
 
-- `WithTick` samples execution and performs runtime coordination.
+`WithTick` is the sampling and runtime-coordination interval.
 
 ## Sampling
 
-`interp.Run` samples after every `WithTick` instructions; the default is `128`.
+`Run` samples after every `WithTick` instructions (`128` by default). Each sample records function, bytecode IP, and opcode; the tick also polls context, fuel, hooks, and pool state.
 
-Samples record function, bytecode IP, and opcode. The tick path also polls context, fuel, hooks, and pool state; idle paths skip the extra work.
-
-Lower ticks increase sampling density and cost. Debugger and REPL `.profile` use exact instruction sampling.
+Lower ticks increase both density and cost. Debugger and REPL `.profile` use exact instruction sampling.
 
 ## API
 
@@ -38,9 +36,9 @@ An interpreter built with `interp.WithThreshold` and `WithProfiler` also reports
 
 `.profile` re-executes with exact sampling and reports hot functions, IPs, and opcodes.
 
-## Maintenance
+## Separation
 
-The agent `MUST` keep sampling, pool state, and exact-debug sampling independent.
+Sampling, pool state, and exact-debug sampling are independent concerns.
 
 ## Related
 

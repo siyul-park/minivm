@@ -144,20 +144,9 @@ var moveOpcodes = map[Op]struct{ op32, op64 uint32 }{
 	OpMOVN: {0x12800000, 0x92800000},
 }
 
-// loadOpcodes maps each unsigned-offset load opcode to its 32- and 64-bit
-// base words, picked by the destination's declared width, and the access
-// size (in bytes) that scales the byte offset at each width.
-//
-// LDR genuinely differs by width: a Width32 destination reads a 4-byte word
-// and zero-extends it, a Width64 destination reads the full 8 bytes. LDRB and
-// LDRH have no such choice - a byte or halfword load is one instruction
-// regardless of how wide the caller declared its destination, so both
-// widths share one base word and one scale. LDRSB, LDRSH, and LDRSW pick
-// between a 32-bit and a 64-bit sign-extending form (LDRSW has no 32-bit
-// form - sign-extending 32 into 32 is a no-op - so both entries repeat the
-// only encoding that exists); the access size they read from memory does
-// not change with the destination width, only the field a Wd write leaves
-// zero above bit 31 does.
+// loadOpcodes records width-specific encodings and memory strides.
+// Byte/halfword loads ignore destination width; sign-extending loads use
+// the matching destination-width encoding.
 var loadOpcodes = map[Op]struct {
 	op32, op64       uint32
 	scale32, scale64 int64
@@ -1506,15 +1495,8 @@ func checkBranchOffset(op Op, offset int64, bits uint) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Logical immediate encoder
-//
-// AArch64 logical immediates must describe a pattern of the form:
-//   a sequence of N ones rotated by R within a repeated element of size E,
-//   where E ∈ {2,4,8,16,32,64} and the value is neither all-zeros nor all-ones.
-//
-// Returns (immr, imms, ok) packed as 6-bit fields ready for the instruction word.
-// ---------------------------------------------------------------------------
+// Logical immediate encoding represents a rotated run of ones in a repeated
+// element size 2..64. It returns the packed immr/imms fields or ok=false.
 
 func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 	width := uint(64)

@@ -559,24 +559,9 @@ func nqueens(n int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(nqueensListing, n, 2*n-1))
 }
 
-// fannkuch builds the pancake-flip permutation-search kernel using the
-// recursive Heap's-algorithm formulation from minipy's fannkuch.py (the
-// classic iterative fannkuch-redux state machine is a different algorithm and
-// is not ported here). permute returns three values (permcount, checksum,
-// maxflips) through minivm's native multi-return CALL/RETURN instead of a
-// tuple: program/verify.go's call already pushes every declared return, and
-// RETURN copies the top len(Returns) stack values to the caller in order.
-//
-// Constant 0 is count_flips (params: 0=perm ([]i32); locals: 1=a ([]i32),
-// 2=flips, 3=k, 4=i, 5=j, 6=t). perm is not read again after the copy, so
-// the copy consuming its one retained local.get instance via array.slice
-// needs no dup.
-//
-// Constant 1 is permute (params: 0=a ([]i32), 1=k, 2=permcount, 3=checksum,
-// 4=maxflips; locals: 5=flips, 6=i, 7=tmp), self-recursive through
-// const.get 1 and returning (permcount, checksum, maxflips).
-//
-// Main local 0=perm is []i32. Type 0 is the []i32 type shared by perm/a.
+// fannkuch uses the recursive Heap's-algorithm kernel and exercises native multi-return.
+// count_flips consumes the []i32 permutation; permute is self-recursive and returns
+// (permcount, checksum, maxflips).
 const fannkuchListing = `
 .locals
 []i32

@@ -6,12 +6,12 @@ Topic docs own current contracts; this document `MUST NOT` override them.
 
 ## Direction
 
-- simple embedding
-- bounded execution
-- threaded semantic parity; native execution improvements are evidence-driven
-- measured performance
-- small public APIs
-- simple equivalent implementations
+- small embedding surface;
+- bounded execution;
+- threaded semantic parity;
+- measured native performance;
+- small public APIs;
+- simple equivalent implementations.
 
 ## Priorities
 
