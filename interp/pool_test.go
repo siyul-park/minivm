@@ -118,6 +118,60 @@ func TestPool_Get(t *testing.T) {
 		p.Put(second)
 	})
 
+	t.Run("pooled interpreters observing different callees converge", func(t *testing.T) {
+		native(t)
+		// Baseline and Optimized each pay one refute cycle, in separate waves.
+		const calls = 5
+		const rounds = 600
+		const refute = 8 // interp/native.go's unexported refute constant.
+		prog := applyGlobalProgram(t, calls)
+
+		var wantInc, wantDec int32
+		for i := int32(0); i < calls; i++ {
+			wantInc += i + 1
+			wantDec += i - 1
+		}
+
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		// a always calls inc and b always dec, through one dynamic CALL site.
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		run := func(vm *interp.Interpreter, selector int32, want int32, round int) {
+			require.NoError(t, vm.SetGlobal(1, types.BoxI32(selector)), "round %d", round)
+			require.NoError(t, vm.Run(context.Background()), "round %d", round)
+			got, err := vm.Pop()
+			require.NoError(t, err, "round %d", round)
+			require.Equal(t, types.I32(want), got, "round %d", round)
+			vm.Flush()
+		}
+
+		var entriesAtHalf float64
+		for round := 1; round <= rounds; round++ {
+			run(a, 0, wantInc, round)
+			run(b, 1, wantDec, round)
+			a.Reset()
+			b.Reset()
+
+			if round == rounds/2 {
+				entriesAtHalf, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			}
+		}
+		p.Put(a)
+		p.Put(b)
+
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		require.LessOrEqual(t, deopts, float64(2*refute), "deopts must stay bounded, not run away")
+		require.Greater(t, deopts, float64(0), "the divergence must have been exercised")
+
+		entries, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+		require.Greater(t, entries, entriesAtHalf, "at least one interpreter keeps entering native code")
+	})
 }
 
 func TestPool_Put(t *testing.T) {

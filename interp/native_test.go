@@ -154,6 +154,38 @@ func applyProgram(t *testing.T, warm int) *program.Program {
 		program.WithConstants(applyFunction(), incFunction(), decFunction()))
 }
 
+// applyGlobalProgram reads global 1 (the caller's selector: 0 for inc, 1 for
+// dec) once, stores the matching constant-pool address into global 0, then
+// calls apply(i, global 0) calls times through the same dynamic CALL site,
+// the callee read fresh from global 0 on every call. Constants are [apply,
+// inc, dec]. Module locals [0] the counter and [1] the running sum, left on
+// the stack. The constant-pool address survives Reset, unlike a heap Alloc,
+// so repeated rounds observe the same callee address for the same selector.
+func applyGlobalProgram(t *testing.T, calls int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	useDec, selected := b.Label(), b.Label()
+	b.Emit(instr.GLOBAL_GET, 1).BrIf(useDec)
+	b.Emit(instr.CONST_GET, 1)
+	b.Br(selected)
+	b.Bind(useDec).Emit(instr.CONST_GET, 2)
+	b.Bind(selected).Emit(instr.GLOBAL_SET, 0)
+
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(calls)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithGlobals(types.TypeAny, types.TypeI32),
+		program.WithConstants(applyFunction(), incFunction(), decFunction()))
+}
+
 // wrapFunction calls a closure through param 1, a dynamic CALL: native never
 // records a closure callee (call's own hook only reaches a *types.Function
 // target), so this site never speculates.
