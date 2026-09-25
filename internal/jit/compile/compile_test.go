@@ -36,7 +36,7 @@ type machine struct {
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
 func (m *machine) Reserve() []asm.PReg { return nil }
 
-func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bool, _ int, arguments, results []types.Kind) []asm.VReg {
+func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bool, _ int, arguments, results []types.Kind, _ []bool) []asm.VReg {
 	m.calls = append(m.calls, "prologue")
 	m.kinds = kinds
 	m.count = count
@@ -449,6 +449,33 @@ func TestLower(t *testing.T) {
 			}}},
 			Results: []types.Kind{types.KindI32},
 		}}, exits)
+	})
+
+	t.Run("lends a borrowed argument its state does not own", func(t *testing.T) {
+		// target never writes param 1 (any), so transform.Borrows marks it
+		// borrowed; param 0 (i32) is never borrowable regardless.
+		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}}}
+		lent := func(t *testing.T, argOwned bool) []int {
+			b := ssa.New("f")
+			entry := b.Block()
+			n := constant(b, entry, types.BoxI32(3))
+			self := constant(b, entry, types.BoxRef(2))
+			callee := constant(b, entry, types.BoxRef(2))
+			b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+			at := state(b, entry, 0, ssa.Operand{Value: n}, ssa.Operand{Value: self, Owned: argOwned}, ssa.Operand{Value: callee, Owned: true})
+			got := b.Value(ssa.TypeI32)
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{n, self, callee}, State: at, Results: []ssa.Value{got}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+			m := new(machine)
+			caller := function(0, 0, instr.New(instr.CALL))
+			_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
+			require.NoError(t, err)
+			return exits[0].Lent
+		}
+
+		require.Equal(t, []int{1}, lent(t, false))
+		require.Empty(t, lent(t, true))
 	})
 
 	t.Run("register-passes an i64 argument", func(t *testing.T) {

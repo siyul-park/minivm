@@ -65,13 +65,15 @@ A loop header `MUST` have state before its budget check. An OSR unit loads block
 
 A constant callee stays borrowed when every retain is paired with a call-site use; `guard.value` does not count as a use. A dynamic `CALL` with one recorded feedback target becomes a guarded constant call only for a borrowed callee.
 
+A reference parameter its function never writes (`transform.Borrows`) is borrowed: a native caller lends a local- or constant-backed argument without a retain, and releases an owned one after the call.
+
 ## ARM64 activation
 
 | Area | Contract |
 |---|---|
 | Prologue | Push `Records[Depth]`, save `Record.PC`, count `Entries[address]` when enabled, clear non-parameter locals; OSR skips clearing. |
 | Store | Reference-capable `OpStore` releases the old slot value before overwrite, matching threaded `LOCAL_SET`. |
-| Return | `OpReturn` releases ref slots, returns up to two register results in X0/X1, or stores boxed results; `OpComplete` writes past locals. |
+| Return | `OpReturn` releases reference slots; borrowed parameters only at depth 1 (the Go-entered activation), returns up to two register results in X0/X1, or stores boxed results; `OpComplete` writes past locals. |
 | Call | Constant calls box arguments into the callee frame, then use `Context.Natives[addr]`; self-calls use the unit entry. Missing code, depth, or frame space takes `ExitCall`. |
 
 ### Call convention
@@ -107,6 +109,8 @@ A non-resuming exit materializes native activations outermost-first, then contin
 | Trap | A bridge/box trap abandons its extra retains and follows normal deopt so the instruction executes once. |
 
 A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scratch stack and leaves native registers untouched. The materializer retains borrowed refs; a boxed wide i64 is a fresh owned heap value. Bridge/box resumption shares `resume`/`amortize`.
+
+`Exit.Lent` slots are retained when a callee is materialized or an ExitCall replayed.
 
 ## Store and tiers
 

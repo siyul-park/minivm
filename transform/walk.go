@@ -591,9 +591,10 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	}
 
 	adopted := Adopts(opcode, pops)
+	var borrows []bool
 	switch {
 	case opcode.Writes(instr.Frame):
-		w.adopt()
+		borrows = w.call()
 	case adopted > 0:
 		w.own(len(w.stack) - 1)
 	}
@@ -613,7 +614,48 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	for i := 0; i < len(consumed)-adopted; i++ {
 		w.release(consumed[i])
 	}
+	// A CALL never adopts a borrowed argument, so the callee's OpReturn
+	// never releases it either; the caller releases what it owned for the
+	// call here instead.
+	for i, borrowed := range borrows {
+		if borrowed {
+			w.release(consumed[i])
+		}
+	}
 	return true
+}
+
+// call adopts every stack entry a CALL pops except an argument in a borrowed
+// position (transform.Borrows) backed by a local or a constant: the caller's
+// own local cannot change during the call, and the constant pool is
+// immortal. A global- or upvalue-backed borrowed argument is adopted here,
+// since the callee may overwrite that cell, and released by emit after the
+// call instead of by the callee. It returns the resolved target's Borrows,
+// or nil when the callee does not resolve to a known function.
+func (w *walker) call() []bool {
+	top := len(w.stack) - 1
+	_, target := w.callee(top)
+	if target == nil {
+		w.adopt()
+		return nil
+	}
+	borrows := Borrows(target)
+	base := top - len(borrows)
+	for i := range w.stack {
+		if i >= base && i < top && borrows[i-base] && w.lent(i) {
+			continue
+		}
+		w.own(i)
+	}
+	return borrows
+}
+
+// lent reports whether stack entry i's own backing survives a call unaided:
+// a local slot the caller owns, or a constant, neither of which the call can
+// change or free out from under it.
+func (w *walker) lent(i int) bool {
+	o := w.stack[i]
+	return o.kind == types.KindRef && (o.backing == backingLocal || o.backing == backingConst)
 }
 
 func (w *walker) complete(ip int) ssa.Terminator {

@@ -22,6 +22,10 @@ type Exit struct {
 	// ExitCall replay must retainBox a borrowed Callee before pushing it, so
 	// the interpreter's own CALL has a reference of its own to release.
 	Owned bool
+	// Lent are the callee frame slots this call passes without a reference
+	// of its own: materializing the callee, or replaying the call, retains
+	// each.
+	Lent []int
 	// Frames are the interpreter frames at the exit, innermost last. An
 	// ExitRelease has none: it neither reads nor rebuilds them.
 	Frames []Frame

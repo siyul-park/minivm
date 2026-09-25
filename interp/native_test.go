@@ -161,6 +161,44 @@ func applyProgram(t *testing.T, warm int) *program.Program {
 // inc, dec]. Module locals [0] the counter and [1] the running sum, left on
 // the stack. The constant-pool address survives Reset, unlike a heap Alloc,
 // so repeated rounds observe the same callee address for the same selector.
+// aFunction calls apply(n, global 0) through its own native-to-native CALL:
+// global 0 is an owned (retained, then released) argument at apply's own
+// borrowed param 1.
+func aFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// lentProgram calls a(i) warm times through global 0 = inc, then warm times
+// through global 0 = dec, the same polymorphic feedback and eventual refute
+// applyProgram exercises, but one native-to-native call deeper: a's own call
+// into apply lends its global-backed argument to apply's borrowed param 1,
+// so a refute's deopt rebuilds two native activations, not one. Constants
+// are [apply, a, inc, dec]. Module locals [0] the counter and [1] the
+// running sum, left on the stack.
+func lentProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	for _, callee := range []uint64{2, 3} {
+		b.Emit(instr.CONST_GET, callee).Emit(instr.GLOBAL_SET, 0)
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+	}
+	b.Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithGlobals(types.TypeAny),
+		program.WithConstants(applyFunction(), aFunction(), incFunction(), decFunction()))
+}
+
 func applyGlobalProgram(t *testing.T, calls int) *program.Program {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -585,6 +623,32 @@ func caught(t *testing.T, warm, n int) *program.Program {
 	b.Br(loop)
 	b.Bind(done)
 	b.Bind(start).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Bind(end)
+	b.Bind(catch).Emit(instr.ERROR_CODE)
+	b.Try(start, end, catch, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib), program.WithHandlers(b.Handlers()...))
+}
+
+// caughtIndirect warms indirectFibFunction(5, self) warm times, then calls
+// indirectFibFunction(n, self) inside a try/catch: self is a borrowed,
+// local-backed argument at both of indirectFibFunction's own dynamic CALLs,
+// and a deep enough n deopts at WithFrame's limit. The guest handler
+// swallows the resulting error so RefCount after Run is comparable across
+// threaded and native, as caught's own doc explains.
+func caughtIndirect(t *testing.T, warm, n int) *program.Program {
+	t.Helper()
+	fib := indirectFibFunction()
+	b := instr.NewBuilder()
+	loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 5).Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	b.Bind(start).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
 	b.Bind(end)
 	b.Bind(catch).Emit(instr.ERROR_CODE)
 	b.Try(start, end, catch, 1)
@@ -1782,6 +1846,116 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantValue, value)
 		require.Equal(t, wantCount, count)
 		require.Equal(t, 1, innerCount)
+	})
+
+	t.Run("a borrowed parameter passed through native recursion matches threaded, including RefCount", func(t *testing.T) {
+		native(t)
+		// self (param 1) is borrowed at both of indirectFibFunction's own
+		// dynamic CALLs: a native caller never retains it, so a deopt at the
+		// frame limit exercises the ExitCall replay's own retain of it.
+		prog := caughtIndirect(t, 1000, 30)
+		wantVM := interp.New(prog, interp.WithFrame(8))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		wantConst, err := wantVM.Const(0)
+		require.NoError(t, err)
+		wantRC, err := wantVM.RefCount(wantConst.Ref())
+		require.NoError(t, err)
+
+		var runErr, rcErr error
+		var gotRC int
+		var exits float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			c, _ := vm.Const(0)
+			gotRC, rcErr = vm.RefCount(c.Ref())
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, rcErr)
+		// The module's own constant pool is fib's only live reference: a
+		// mid-depth deopt through the borrowed self parameter must neither
+		// leak an extra retain nor drop the constant pool's own.
+		require.Equal(t, wantRC, gotRC)
+	})
+
+	t.Run("an owned argument lent to a borrowed parameter transfers to the materialized callee", func(t *testing.T) {
+		native(t)
+		const refute = 8 // interp/native.go's unexported refute constant.
+		prog := lentProgram(t, 3000)
+
+		wantVM := interp.New(lentProgram(t, 3000))
+		defer wantVM.Close()
+		require.NoError(t, wantVM.Run(context.Background()))
+		want, err := wantVM.Pop()
+		require.NoError(t, err)
+		wantInc, err := wantVM.Const(2)
+		require.NoError(t, err)
+		wantIncRC, err := wantVM.RefCount(wantInc.Ref())
+		require.NoError(t, err)
+		wantDec, err := wantVM.Const(3)
+		require.NoError(t, err)
+		wantDecRC, err := wantVM.RefCount(wantDec.Ref())
+		require.NoError(t, err)
+
+		var runErr, popErr, rcErr error
+		var got types.Value
+		var gotIncRC, gotDecRC int
+		var deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			gotInc, err := vm.Const(2)
+			if err != nil {
+				popErr = err
+				return true
+			}
+			gotIncRC, rcErr = vm.RefCount(gotInc.Ref())
+			if rcErr != nil {
+				return true
+			}
+			gotDec, err := vm.Const(3)
+			if err != nil {
+				popErr = err
+				return true
+			}
+			gotDecRC, rcErr = vm.RefCount(gotDec.Ref())
+			if rcErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return deopts >= 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, rcErr)
+		require.Equal(t, want, got)
+		// If the !Owned filter in compile.call's Lent were missing, a's own
+		// global-backed argument would be retained twice at the deopt: once
+		// by a's own translator-side owning of it, once by a wrongly
+		// populated Lent entry for apply's borrowed param 1.
+		require.Equal(t, wantIncRC, gotIncRC)
+		require.Equal(t, wantDecRC, gotDecRC)
+		require.GreaterOrEqual(t, deopts, float64(1))
+		require.LessOrEqual(t, deopts, float64(2*refute))
 	})
 
 	t.Run("a deep recursion resuming safepoints and releases then deopting at its frame limit matches threaded", func(t *testing.T) {

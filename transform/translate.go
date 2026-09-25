@@ -75,6 +75,26 @@ func Adopts(code instr.Opcode, pops int) int {
 	}
 }
 
+// Borrows reports, per parameter, whether fn borrows it: a reference
+// parameter fn never writes. Its native caller keeps ownership for the
+// call; fn neither retains nor releases it.
+func Borrows(fn *types.Function) []bool {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	written := map[int]bool{}
+	for _, inst := range instr.Unmarshal(fn.Code) {
+		if inst.Opcode().Writes(instr.Local) {
+			written[int(inst.Operand(0))] = true
+		}
+	}
+	borrows := make([]bool, len(fn.Typ.Params))
+	for i, param := range fn.Typ.Params {
+		borrows[i] = param.Kind() == types.KindRef && !written[i]
+	}
+	return borrows
+}
+
 func translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
 	if len(function.Code) == 0 {
 		return nil, nil

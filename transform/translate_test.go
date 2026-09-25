@@ -515,6 +515,36 @@ blk0: ()
 		require.Equal(t, wantIndirectRecursiveFib(ips), ssa.Format(out))
 	})
 
+	t.Run("lends a global-backed argument by owning it and releasing it after the call", func(t *testing.T) {
+		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}}}
+		fn := &types.Function{
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+			}),
+		}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   transform.Objects{2: {Function: callee}},
+			Globals:   []types.Kind{types.KindRef},
+		}
+
+		out, err := transform.Translate(m, 0, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 0:0
+blk0: ()
+	v1:ref = load global[0]
+	v2:ref = const 2
+	retain v1
+	retain v2
+	v4:state = state {addr=0 base=0 ip=6 returns=0 stack=[v1 owned, v2 owned]}
+	v3:i32 = call v1, v2 state v4
+	release v1 state v4
+	v5:state = state {addr=0 base=0 ip=7 returns=0 stack=[v3]}
+	complete v3 state v5
+`, ssa.Format(out))
+	})
+
 	t.Run("declines a dynamic callee without feedback", func(t *testing.T) {
 		fn, _ := indirectRecursiveFib(t)
 		m := transform.Module{
@@ -592,6 +622,66 @@ func TestAdopts(t *testing.T) {
 	}
 }
 
+func TestBorrows(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   *types.Function
+		want []bool
+	}{
+		{
+			name: "an IRF-shaped func(i32, any) never writes either param",
+			fn: types.NewFunction(
+				&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}},
+				nil,
+				[]instr.Instruction{instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)},
+			),
+			want: []bool{false, true},
+		},
+		{
+			name: "a ref parameter written by local.set",
+			fn: types.NewFunction(
+				&types.FunctionType{Params: []types.Type{types.TypeAny}},
+				nil,
+				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0), instr.New(instr.RETURN)},
+			),
+			want: []bool{false},
+		},
+		{
+			name: "a ref parameter written by local.tee",
+			fn: types.NewFunction(
+				&types.FunctionType{Params: []types.Type{types.TypeAny}},
+				nil,
+				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_TEE, 0), instr.New(instr.RETURN)},
+			),
+			want: []bool{false},
+		},
+		{
+			name: "an i64 parameter",
+			fn: types.NewFunction(
+				&types.FunctionType{Params: []types.Type{types.TypeI64}},
+				nil,
+				[]instr.Instruction{instr.New(instr.RETURN)},
+			),
+			want: []bool{false},
+		},
+		{
+			name: "nil",
+			fn:   nil,
+			want: nil,
+		},
+		{
+			name: "Typ == nil",
+			fn:   &types.Function{},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, transform.Borrows(tt.fn))
+		})
+	}
+}
+
 func loopFunction(t *testing.T) (*types.Function, int) {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -635,6 +725,8 @@ func indirectRecursiveFib(t *testing.T) (*types.Function, []int) {
 
 // wantIndirectRecursiveFib is indirectRecursiveFib's SSA text once both
 // dynamic CALLs speculate their recorded callee (address 1, a self call).
+// Param 1 (self) is a borrowed, local-backed argument at both call sites, so
+// neither retains it.
 func wantIndirectRecursiveFib(ips []int) string {
 	return fmt.Sprintf(`func 1:0
 blk0: ()
@@ -657,9 +749,8 @@ blk2: () <-- (blk0)
 	v13:ref = const 1
 	v15:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v12]}
 	v14:ref = guard.value v12, v13 state v15
-	retain v11
 	retain v13
-	v17:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11 owned, v13 owned]}
+	v17:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v13 owned]}
 	v16:i32 = call v9, v11, v13 state v17
 	v18:i32 = load local[0]
 	v19:i32 = const 2
@@ -670,9 +761,8 @@ blk2: () <-- (blk0)
 	v24:ref = const 1
 	v26:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22, v23]}
 	v25:ref = guard.value v23, v24 state v26
-	retain v22
 	retain v24
-	v28:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22 owned, v24 owned]}
+	v28:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22, v24 owned]}
 	v27:i32 = call v20, v22, v24 state v28
 	v30:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v27]}
 	v29:i32 = i32.add v16, v27 state v30

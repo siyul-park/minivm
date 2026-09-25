@@ -41,6 +41,7 @@ Native execution MUST preserve the threaded ownership totals.
 | local/global/upvalue store | retains new, releases old |
 | `CLOSURE_NEW` | transfers function/capture ownership |
 | `RETURN` | releases frame-owned values |
+| native call to a borrowed parameter | caller keeps ownership; materialization restores it |
 
 Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing storage, but deopt/exits `MUST` restore interpreter ownership.
 

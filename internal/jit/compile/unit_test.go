@@ -23,7 +23,7 @@ type stub struct{}
 
 func (stub) Arch() asm.Arch      { panic("unused") }
 func (stub) Reserve() []asm.PReg { panic("unused") }
-func (stub) Prologue(*asm.Assembler, []types.Kind, int, bool, int, []types.Kind, []types.Kind) []asm.VReg {
+func (stub) Prologue(*asm.Assembler, []types.Kind, int, bool, int, []types.Kind, []types.Kind, []bool) []asm.VReg {
 	panic("unused")
 }
 func (stub) Epilogue(*asm.Assembler)                                          { panic("unused") }

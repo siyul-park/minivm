@@ -26,10 +26,12 @@ type Machine interface {
 	// of them parameters, and count requests its entry hotness counter.
 	// arguments is the function's register-convention parameters (see
 	// arguments), results its register-convention results (see Enter),
-	// both empty when none apply. Prologue returns one register per
-	// argument holding its incoming value, and keeps results for OpReturn
-	// to consult.
-	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind) []asm.VReg
+	// both empty when none apply. borrows is transform.Borrows for a
+	// non-OSR unit and nil for an OSR unit, whose threaded-entered frame
+	// owns every slot; Prologue keeps it for OpReturn to consult. Prologue
+	// returns one register per argument holding its incoming value, and
+	// keeps results for OpReturn to consult.
+	Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind, borrows []bool) []asm.VReg
 	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
 	// Enter emits the Go entry stub after Epilogue and returns its label:
@@ -457,11 +459,13 @@ func (l *lowering) function() error {
 		params = len(kinds)
 	}
 	var args []types.Kind
+	var borrows []bool
 	if !l.osr {
 		args = arguments(l.fn)
+		borrows = transform.Borrows(l.fn)
 	}
 	results := registers(l.fn)
-	l.args = l.m.Prologue(l.a, kinds, params, l.count, l.address, args, results)
+	l.args = l.m.Prologue(l.a, kinds, params, l.count, l.address, args, results, borrows)
 	if l.osr {
 		if err := l.preload(); err != nil {
 			return err
@@ -815,12 +819,18 @@ func (l *lowering) call(op ssa.Operation) error {
 	if !ok || len(state.Frames) == 0 {
 		return fmt.Errorf("%w: call without a state", ErrUnsupported)
 	}
-	below := len(state.Frames[len(state.Frames)-1].Stack) - len(op.Args)
+	frame := state.Frames[len(state.Frames)-1]
+	below := len(frame.Stack) - len(op.Args)
 	owned := l.pending != callee
 	l.pending = ssa.NoValue
 	id := l.exit(jit.ExitCall)
 	l.exits[id].Callee = ref
 	l.exits[id].Owned = owned
+	for j, b := range transform.Borrows(target) {
+		if b && !frame.Stack[below+j].Owned {
+			l.exits[id].Lent = append(l.exits[id].Lent, j)
+		}
+	}
 	bridge, resume := l.stub(id)
 	site := Call{
 		Address:   ref,

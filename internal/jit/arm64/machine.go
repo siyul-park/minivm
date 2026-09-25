@@ -31,6 +31,11 @@ type Machine struct {
 	// results is this function's register-convention results (see compile's
 	// registers), empty when OpReturn boxes to the VM frame instead.
 	results []types.Kind
+	// borrows is per-parameter, from transform.Borrows: OpReturn releases a
+	// borrowed slot only at depth 1, the Go-entered activation, since
+	// threaded CALL pushed it owned; a native caller lent it instead. Empty
+	// for an OSR unit, whose threaded-entered frame owns every slot.
+	borrows []bool
 }
 
 // New returns an ARM64 machine.
@@ -49,8 +54,8 @@ func (m *Machine) Reserve() []asm.PReg {
 // Prologue builds the frame, records the activation, counts the entry when enabled,
 // and clears non-parameter locals. Register-convention arguments are captured
 // from X0/X1 before those registers are repurposed.
-func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind) []asm.VReg {
-	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: results}
+func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind, borrows []bool) []asm.VReg {
+	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: results, borrows: borrows}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -215,9 +220,30 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 	base := len(m.kinds)
 	if t.Op == ssa.OpReturn {
 		base = 0
+		lent := false
+		for _, borrowed := range m.borrows {
+			lent = lent || borrowed
+		}
+		if lent {
+			skip := a.Label()
+			a.Emit(target.CMPI(target.X27, 1), target.BCondLabel(target.OpBNE, skip))
+			for i, borrowed := range m.borrows {
+				if !borrowed {
+					continue
+				}
+				word := m.vreg()
+				a.Emit(target.LDR(word, target.X25, int16(i*8)))
+				m.release(a, word, s)
+			}
+			a.Bind(skip)
+		}
 		for i, k := range m.kinds {
 			switch k.Repr() {
 			case types.KindI32, types.KindF32, types.KindF64:
+				continue
+			}
+			if i < len(m.borrows) && m.borrows[i] {
+				a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 				continue
 			}
 			word := m.vreg()

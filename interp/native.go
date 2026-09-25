@@ -618,6 +618,10 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool)
 
 	maps := make([]jit.Frame, depth)
 	owns := make([]bool, depth)
+	// lent[k] are the parameter slots activation k was entered with but does
+	// not own; the outermost activation is never lent one, since threaded
+	// code pushed its arguments owned.
+	lent := make([][]int, depth)
 	maps[depth-1] = exit.Frames[0]
 	owns[0] = release
 	for k := depth - 2; k >= 0; k-- {
@@ -625,14 +629,24 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool)
 		e := code.Exits[ctx.Records[k].Exit]
 		maps[k] = e.Frames[0]
 		owns[k+1] = e.Owned
+		lent[k+1] = e.Lent
 	}
 
 	for k := 0; k < depth; k++ {
 		n.frame(i, ctx, start, k, maps[k], owns[k])
 	}
+	for k := 1; k < depth; k++ {
+		bp := i.frames[start+k].bp
+		for _, p := range lent[k] {
+			i.retainBox(i.stack[bp+p])
+		}
+	}
 	inner := &i.frames[start+depth-1]
 
 	if exit.Kind == jit.ExitCall {
+		for _, p := range exit.Lent {
+			i.retainBox(i.stack[i.sp+p])
+		}
 		callee := i.heap[exit.Callee].(*types.Function)
 		i.sp += len(callee.Typ.Params)
 		ref := types.BoxRef(exit.Callee)
