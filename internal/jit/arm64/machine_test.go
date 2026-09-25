@@ -312,6 +312,7 @@ func TestMachine_Lower(t *testing.T) {
 	local := func(i int) ssa.Slot { return ssa.Slot{Space: ssa.SpaceLocal, Index: i} }
 	globals := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
 	old := asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)
+	word, prior := old, asm.NewVReg(-4, asm.RegTypeInt, asm.Width64)
 	heap := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
 	counter := []asm.Instruction{
 		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
@@ -493,37 +494,37 @@ func TestMachine_Lower(t *testing.T) {
 		{
 			name: "const i1 is its truth value",
 			regs: regs{1: ssa.TypeI1},
-			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxI1(true), Results: []ssa.Value{1}},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{1}},
 			rows: target.LDI(w(1), 1), lower: true,
 		},
 		{
 			name: "const i8 is its sign-extended lane",
 			regs: regs{1: ssa.TypeI8},
-			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxI8(-1), Results: []ssa.Value{1}},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: 0xffffffff, Results: []ssa.Value{1}},
 			rows: target.LDI(w(1), 0xffffffff), lower: true,
 		},
 		{
 			name: "const i64 is its value",
 			regs: regs{1: i64},
-			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(-3), Results: []ssa.Value{1}},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: uint64(0xfffffffffffffffd), Results: []ssa.Value{1}},
 			rows: target.LDI(x(1), uint64(0xfffffffffffffffd)), lower: true,
 		},
 		{
 			name: "const f32 moves its bits through scratch",
 			regs: regs{1: f32},
-			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxF32(1.5), Results: []ssa.Value{1}},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: uint64(math.Float32bits(1.5)), Results: []ssa.Value{1}},
 			rows: append(target.LDI(target.X16, uint64(math.Float32bits(1.5))), target.FMOV(reg(f32, 1), target.W16)), lower: true,
 		},
 		{
 			name: "const f64 moves its bits through scratch",
 			regs: regs{1: f64},
-			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxF64(1.5), Results: []ssa.Value{1}},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(1.5), Results: []ssa.Value{1}},
 			rows: append(target.LDI(target.X16, math.Float64bits(1.5)), target.FMOV(reg(f64, 1), target.X16)), lower: true,
 		},
 		{
 			name: "const ref is its boxed word",
 			regs: regs{1: ssa.TypeRef},
-			op:   ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(4), Results: []ssa.Value{1}},
+			op:   ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(4)), Results: []ssa.Value{1}},
 			rows: target.LDI(x(1), uint64(types.BoxRef(4))), lower: true,
 		},
 		{
@@ -675,6 +676,40 @@ func TestMachine_Lower(t *testing.T) {
 					target.SUBI(target.X17, target.X17, 1),
 					target.STR(target.X17, target.X16, 0),
 					target.STR(x(1), globals, 8),
+				},
+			), lower: true,
+		},
+		{
+			name: "store global boxes an i64 before releasing the old word",
+			regs: regs{1: i64},
+			op:   ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Args: []ssa.Value{1}},
+			rows: slices.Concat(
+				[]asm.Instruction{target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals))},
+				boxed(types.KindI64, append(target.LDI(target.X16, 1<<48),
+					target.ADD(target.X17, x(1), target.X16),
+					target.LSRI(target.X17, target.X17, 49),
+					target.CBNZLabel(target.X17, exit),
+					target.ANDI(target.X16, x(1), types.VMask),
+				)...),
+				[]asm.Instruction{
+					target.MOV(word, target.X16),
+					target.LDR(prior, globals, 8),
+					target.LSRI(target.X16, prior, 49),
+				},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, resume),
+					target.SBFX(target.X17, prior, 0, 32),
+					target.CBZLabel(target.X17, resume),
+				},
+				counter,
+				[]asm.Instruction{
+					target.CMPI(target.X17, 1),
+					target.BCondLabel(target.OpBLE, exit),
+					target.SUBI(target.X17, target.X17, 1),
+					target.STR(target.X17, target.X16, 0),
+					target.STR(word, globals, 8),
 				},
 			), lower: true,
 		},
@@ -1225,20 +1260,27 @@ func TestMachine_Const(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		dst  asm.VReg
-		c    types.Boxed
+		word uint64
 		rows []asm.Instruction
 	}{
-		{"i1", w, types.BoxI1(true), target.LDI(w, 1)},
-		{"i8", w, types.BoxI8(-2), target.LDI(w, uint64(uint32(0xFFFFFFFE)))},
-		{"i32", w, types.BoxI32(-7), target.LDI(w, uint64(uint32(0xFFFFFFF9)))},
-		{"i64", x, types.BoxI64(1 << 40), target.LDI(x, 1<<40)},
-		{"f32", f, types.BoxF32(1.5), append(target.LDI(target.X16, uint64(math.Float32bits(1.5))), target.FMOV(f, target.W16))},
-		{"f64", d, types.BoxF64(1.5), append(target.LDI(target.X16, uint64(types.BoxF64(1.5))), target.FMOV(d, target.X16))},
-		{"ref", x, types.BoxRef(3), target.LDI(x, uint64(types.BoxRef(3)))},
+		{"i1", w, 1, target.LDI(w, 1)},
+		{"i8", w, uint64(uint32(0xFFFFFFFE)), target.LDI(w, uint64(uint32(0xFFFFFFFE)))},
+		{"i32", w, uint64(uint32(0xFFFFFFF9)), target.LDI(w, uint64(uint32(0xFFFFFFF9)))},
+		{"i64", x, 1 << 40, target.LDI(x, 1<<40)},
+		{"wide i64", x, 0xCBF29CE484222325, []asm.Instruction{
+			target.MOVZ(x, 0x2325, 0),
+			target.MOVK(x, 0x8422, 16),
+			target.MOVK(x, 0x9CE4, 32),
+			target.MOVK(x, 0xCBF2, 48),
+		}},
+		{"f32", f, uint64(math.Float32bits(1.5)), append(target.LDI(target.X16, uint64(math.Float32bits(1.5))), target.FMOV(f, target.W16))},
+		{"f32 by bank", f, uint64(math.Float32bits(1.5)) | 0xDEAD<<32, append(target.LDI(target.X16, uint64(math.Float32bits(1.5))), target.FMOV(f, target.W16))},
+		{"f64", d, math.Float64bits(1.5), append(target.LDI(target.X16, math.Float64bits(1.5)), target.FMOV(d, target.X16))},
+		{"ref", x, uint64(types.BoxRef(3)), target.LDI(x, uint64(types.BoxRef(3)))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			a := asm.New(target.New())
-			require.True(t, arm64.New().Const(a, c.dst, c.c))
+			arm64.New().Const(a, c.dst, c.word)
 			require.Equal(t, c.rows, a.Rows())
 		})
 	}

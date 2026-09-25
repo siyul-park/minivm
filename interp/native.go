@@ -120,6 +120,8 @@ func newModule(i *Interpreter) transform.Module {
 			objects[addr] = transform.Object{Function: v}
 		case *types.Struct:
 			objects[addr] = transform.Object{Struct: v.Typ}
+		case types.I64:
+			objects[addr] = transform.Object{I64: &v}
 		default:
 			if at, ok := v.Type().(*types.ArrayType); ok {
 				objects[addr] = transform.Object{Array: at}
@@ -509,7 +511,8 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	top := len(tail) - exit.Adopts
 	for j, o := range tail {
 		v := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
-		if !o.Owned || j < top {
+		// A boxed wide i64 is fresh and already owned; only a ref borrows.
+		if o.Value.Kind == types.KindRef && (!o.Owned || j < top) {
 			i.retainBox(v)
 		}
 		i.stack[sp+j] = v
@@ -528,7 +531,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 		// A bridgeable handler never writes its argument slots before it can
 		// panic, so i.stack[sp+j] still holds what was retained above.
 		for j, o := range tail {
-			if !o.Owned || j < top {
+			if o.Value.Kind == types.KindRef && (!o.Owned || j < top) {
 				i.releaseBox(i.stack[sp+j])
 			}
 		}
@@ -632,7 +635,8 @@ func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Fra
 	sp := f.bp + len(i.function(m.Address).Declared())
 	for j, o := range m.Stack {
 		boxed := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
-		if !o.Owned {
+		// A boxed wide i64 is fresh and already owned; only a ref borrows.
+		if !o.Owned && o.Value.Kind == types.KindRef {
 			i.retainBox(boxed)
 		}
 		i.stack[sp+j] = boxed

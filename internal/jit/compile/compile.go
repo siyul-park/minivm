@@ -57,9 +57,9 @@ type Machine interface {
 	Call(a *asm.Assembler, c Call, s Site) bool
 	// Move copies one virtual register to another.
 	Move(a *asm.Assembler, dst, src asm.VReg)
-	// Const loads constant c into dst and reports false when the target cannot.
-	// Reg calls it at each use of a remat constant.
-	Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool
+	// Const loads word into dst, by dst's register bank. Reg calls it at
+	// each use of a remat constant.
+	Const(a *asm.Assembler, dst asm.VReg, word uint64)
 }
 
 // Site is what Machine sees of the operation or terminator it lowers.
@@ -133,7 +133,7 @@ type lowering struct {
 	count   bool
 	objects transform.Objects
 	states  map[ssa.Value]ssa.Operation
-	consts  map[ssa.Value]types.Boxed
+	consts  map[ssa.Value]uint64
 	raw     map[ssa.Value]bool
 	// borrow names a value an OpConst ref retained and used only as some
 	// call's callee, once per call site: every one of those retains is
@@ -254,7 +254,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	}
 	l := &lowering{
 		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
-		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
+		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
 		borrow: borrowed(f), homes: homes, tmp: int32(f.Values()) + 4,
 		memo: map[int]map[ssa.Value]asm.VReg{}, remats: map[ssa.Value]bool{},
 		param: map[ssa.Value]bool{},
@@ -289,8 +289,8 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	for id := 0; id < f.Len() && caller; id++ {
 		for _, op := range f.Block(id).Operations {
 			if op.Op == ssa.OpConst && !looped[op.Results[0]] {
-				switch op.Const.Kind() {
-				case types.KindF32, types.KindF64:
+				switch l.f.Type(op.Results[0]) {
+				case ssa.TypeF32, ssa.TypeF64:
 				default:
 					l.remats[op.Results[0]] = true
 				}
@@ -378,7 +378,7 @@ func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
 
 // remat reports v's constant and whether it is loaded at each use instead of
 // held in one register a call would force to spill.
-func (l *lowering) remat(v ssa.Value) (types.Boxed, bool) {
+func (l *lowering) remat(v ssa.Value) (uint64, bool) {
 	c, ok := l.consts[v]
 	return c, ok && l.remats[v]
 }
@@ -767,12 +767,10 @@ func (l *lowering) fresh(v ssa.Value) asm.VReg {
 	return asm.NewVReg(id, like.Type(), like.Width())
 }
 
-// materialize loads constant c for v into a fresh register.
-func (l *lowering) materialize(v ssa.Value, c types.Boxed) asm.VReg {
+// materialize loads word for v into a fresh register.
+func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
 	reg := l.fresh(v)
-	if !l.m.Const(l.a, reg, c) {
-		l.fail(fmt.Errorf("%w: constant v%d", ErrUnsupported, v))
-	}
+	l.m.Const(l.a, reg, word)
 	return reg
 }
 
@@ -791,12 +789,13 @@ func (l *lowering) stub(id int) (exit, resume asm.Label) {
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
 	c, ok := l.consts[callee]
-	if !ok || c.Kind() != types.KindRef {
+	if !ok || l.f.Type(callee) != ssa.TypeRef {
 		return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
 	}
-	target := l.objects[c.Ref()].Function
+	ref := types.Boxed(c).Ref()
+	target := l.objects[ref].Function
 	if target == nil || target.Typ == nil {
-		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
+		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
 	}
 	if registers(target) == nil {
 		for _, v := range op.Results {
@@ -813,11 +812,11 @@ func (l *lowering) call(op ssa.Operation) error {
 	owned := l.pending != callee
 	l.pending = ssa.NoValue
 	id := l.exit(jit.ExitCall)
-	l.exits[id].Callee = c.Ref()
+	l.exits[id].Callee = ref
 	l.exits[id].Owned = owned
 	bridge, resume := l.stub(id)
 	site := Call{
-		Address:   c.Ref(),
+		Address:   ref,
 		Callee:    callee,
 		Args:      op.Args[:len(op.Args)-1],
 		Results:   op.Results,
@@ -828,12 +827,12 @@ func (l *lowering) call(op ssa.Operation) error {
 		Bridge:    bridge,
 		Resume:    resume,
 		Owned:     owned,
-		Self:      !l.osr && c.Ref() == l.address,
+		Self:      !l.osr && ref == l.address,
 		Registers: registers(target),
 		Arguments: arguments(target),
 	}
 	if !l.m.Call(l.a, site, l) {
-		return fmt.Errorf("%w: call of %d", ErrUnsupported, c.Ref())
+		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
 	}
 	return l.err
 }

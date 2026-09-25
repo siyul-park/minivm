@@ -2,6 +2,7 @@ package transform_test
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"strings"
@@ -112,6 +113,35 @@ func TestSSAPass_Run(t *testing.T) {
 			instr.I64_XOR, instr.I64_AND, instr.I64_OR} {
 			require.True(t, folded[op])
 		}
+	})
+
+	t.Run("folds a wide i64.shl into one i64.const immediate", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(transform.NewFoldPass())
+
+		got := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 50),
+			instr.New(instr.I64_SHL)})
+		require.NoError(t, program.Verify(got))
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+		require.NotContains(t, instr.Format(got.Code), "i64.shl")
+		require.Contains(t, instr.Format(got.Code), fmt.Sprintf("i64.const 0x%016X", uint64(1)<<50))
+	})
+
+	t.Run("emits a const.get of a wide i64 pool cell as i64.const", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+
+		wide := int64(-3750763034362895579)
+		got := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.DROP)},
+			program.WithConstants(types.I64(wide)))
+		require.NoError(t, program.Verify(got))
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+		require.NotContains(t, instr.Format(got.Code), "const.get")
+		require.Contains(t, instr.Format(got.Code), fmt.Sprintf("i64.const 0x%016X", uint64(wide)))
 	})
 
 	t.Run("drops the padding an offset-preserving rewrite left behind", func(t *testing.T) {

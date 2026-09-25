@@ -229,7 +229,7 @@ func (e *emitter) perform(operation ssa.Operation) bool {
 	}
 	switch operation.Op {
 	case ssa.OpConst:
-		inst, ok := e.constant(operation.Const)
+		inst, ok := e.constant(e.function.Type(operation.Results[0]), operation.Const)
 		if !ok {
 			return false
 		}
@@ -365,20 +365,26 @@ func (e *emitter) table(edges []ssa.Edge) {
 	}
 }
 
-func (e *emitter) constant(c types.Boxed) (instr.Instruction, bool) {
-	switch c.Kind() {
-	case types.KindI32:
-		return instr.New(instr.I32_CONST, uint64(uint32(c.I32()))), true
-	case types.KindI64:
-		return instr.New(instr.I64_CONST, uint64(c.I64())), true
-	case types.KindF32:
-		return instr.New(instr.F32_CONST, uint64(math.Float32bits(c.F32()))), true
-	case types.KindF64:
-		return instr.New(instr.F64_CONST, uint64(c)), true
-	case types.KindRef:
-		if c == types.BoxedNull {
+func (e *emitter) constant(t ssa.Type, w uint64) (instr.Instruction, bool) {
+	var c types.Boxed
+	switch t {
+	case ssa.TypeI32:
+		return instr.New(instr.I32_CONST, uint64(uint32(w))), true
+	case ssa.TypeI64:
+		return instr.New(instr.I64_CONST, w), true
+	case ssa.TypeF32:
+		return instr.New(instr.F32_CONST, uint64(uint32(w))), true
+	case ssa.TypeF64:
+		return instr.New(instr.F64_CONST, w), true
+	case ssa.TypeRef:
+		if w == uint64(types.BoxedNull) {
 			return instr.New(instr.REF_NULL), true
 		}
+		c = types.Boxed(w)
+	case ssa.TypeI1:
+		c = types.BoxI1(w != 0)
+	case ssa.TypeI8:
+		c = types.BoxI8(int8(w))
 	}
 	index, ok := e.constants.intern(c)
 	if !ok || index > math.MaxUint16 {

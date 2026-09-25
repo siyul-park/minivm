@@ -1,6 +1,7 @@
 package ssa_test
 
 import (
+	"math"
 	"testing"
 
 	"reflect"
@@ -23,7 +24,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 0, Returns: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero, zero}}}})
 
 		index := b.Param(header, ssa.TypeI32)
@@ -43,7 +44,7 @@ func TestFormat(t *testing.T) {
 		b.Add(body, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{index, length}, State: inner})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{checked, index}, State: state, Results: []ssa.Value{elem}})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{total, elem}, State: state, Results: []ssa.Value{next}})
-		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
+		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
 		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{index, one}, State: state, Results: []ssa.Value{step}})
 		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{step, next}}}})
 
@@ -102,7 +103,7 @@ func TestFormat(t *testing.T) {
 		entry := b.Block()
 		counter := b.Value(ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{counter}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 7, Results: []ssa.Value{counter}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
 			{Address: 1, Locals: []ssa.Local{{Index: 1, Value: counter}}},
 		}, Results: []ssa.Value{state}})
@@ -115,6 +116,40 @@ func TestFormat(t *testing.T) {
 			"\tv1:i32 = const 7\n"+
 			"\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[] locals=[1=v1]}\n"+
 			"\texit state v2\n", ssa.Format(f))
+	})
+
+	t.Run("prints one constant per type, wide i64 included", func(t *testing.T) {
+		b := ssa.New("consts")
+		entry := b.Block()
+		i1 := b.Value(ssa.TypeI1)
+		i8 := b.Value(ssa.TypeI8)
+		i32 := b.Value(ssa.TypeI32)
+		i64 := b.Value(ssa.TypeI64)
+		f32 := b.Value(ssa.TypeF32)
+		f64 := b.Value(ssa.TypeF64)
+		ref := b.Value(ssa.TypeRef)
+		i8v, i32v, i64v := int32(-5), int32(-7), int64(-3750763034362895579)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{i1}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(uint32(i8v)), Results: []ssa.Value{i8}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(uint32(i32v)), Results: []ssa.Value{i32}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(i64v), Results: []ssa.Value{i64}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(math.Float32bits(1.5)), Results: []ssa.Value{f32}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(2.5), Results: []ssa.Value{f64}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(9)), Results: []ssa.Value{ref}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i1}})
+
+		f := b.Build()
+		require.NoError(t, ssa.Verify(f))
+		require.Equal(t, "func consts\n"+
+			"blk0: ()\n"+
+			"\tv1:i1 = const true\n"+
+			"\tv2:i8 = const -5\n"+
+			"\tv3:i32 = const -7\n"+
+			"\tv4:i64 = const -3750763034362895579\n"+
+			"\tv5:f32 = const 1.5\n"+
+			"\tv6:f64 = const 2.5\n"+
+			"\tv7:ref = const 9\n"+
+			"\treturn v1\n", ssa.Format(f))
 	})
 
 	t.Run("prints every other operation form", func(t *testing.T) {
@@ -132,13 +167,13 @@ func TestFormat(t *testing.T) {
 		fresh := b.Value(ssa.TypeRef)
 		field := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 2, Base: 4, IP: 3}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxRef(7), Results: []ssa.Value{callee}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(7)), Results: []ssa.Value{callee}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval, Index: 1}, Results: []ssa.Value{slot}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, callee}, State: state, Results: []ssa.Value{target}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{kind}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{target}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Args: []ssa.Value{target}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{three}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{three}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.SELECT, Args: []ssa.Value{kind, three, three}, State: state, Results: []ssa.Value{picked}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{target, three, picked}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})

@@ -10,7 +10,6 @@ import (
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/transform"
-	"github.com/siyul-park/minivm/types"
 )
 
 func TestNewCSEPass(t *testing.T) {
@@ -94,10 +93,10 @@ func TestCSEPass_Run(t *testing.T) {
 		b := ssa.New("f")
 		entry, next := b.Block(), b.Block()
 		first := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 7, Results: []ssa.Value{first}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: next}}})
 		second := b.Value(ssa.TypeI32)
-		b.Add(next, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{second}})
+		b.Add(next, ssa.Operation{Op: ssa.OpConst, Const: 7, Results: []ssa.Value{second}})
 		b.Term(next, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 
@@ -107,6 +106,25 @@ func TestCSEPass_Run(t *testing.T) {
 		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "const 7"))
+	})
+
+	t.Run("keeps an i32, an i64 and an f64 constant of word 0 apart", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		i32, i64, f64 := b.Value(ssa.TypeI32), b.Value(ssa.TypeI64), b.Value(ssa.TypeF64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{i32}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{i64}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{f64}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i32, i64, f64}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, 3, strings.Count(ssa.Format(fn), "const 0"))
 	})
 
 	t.Run("redirects a deopt frame's reference when the value it names collapses into an earlier one", func(t *testing.T) {

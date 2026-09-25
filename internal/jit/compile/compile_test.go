@@ -30,6 +30,7 @@ type machine struct {
 	spills    []int
 	sites     []compile.Call
 	capture   bool
+	consts    []uint64
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
@@ -149,10 +150,10 @@ func (m *machine) Move(a *asm.Assembler, dst, src asm.VReg) {
 	a.Emit(arm64.MOV(dst, src))
 }
 
-func (m *machine) Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool {
+func (m *machine) Const(a *asm.Assembler, dst asm.VReg, word uint64) {
 	m.calls = append(m.calls, "const")
+	m.consts = append(m.consts, word)
 	a.Emit(arm64.LDI(dst, 0)...)
-	return true
 }
 
 func i32(id int32) asm.VReg { return asm.NewVReg(id, asm.RegTypeInt, asm.Width32) }
@@ -184,7 +185,7 @@ func function(params, locals int, code ...instr.Instruction) *types.Function {
 
 func constant(b *ssa.Builder, block int, c types.Boxed) ssa.Value {
 	v := b.Value(ssa.TypeOf(c.Kind()))
-	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: c, Results: []ssa.Value{v}})
+	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c), Results: []ssa.Value{v}})
 	return v
 }
 
@@ -387,6 +388,29 @@ func TestLower(t *testing.T) {
 		require.Equal(t, jit.ExitBox, exits[0].Kind)
 		require.Equal(t, types.KindI64, exits[0].Word.Kind)
 		require.Equal(t, 9, exits[0].Frames[0].IP)
+	})
+
+	t.Run("lowers a wide i64 constant through a remat stall in a function with a call", func(t *testing.T) {
+		seed := int64(-3750763034362895579)
+		b := ssa.New("f")
+		entry := b.Block()
+		wide := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(seed), Results: []ssa.Value{wide}})
+		arg := constant(b, entry, types.BoxI32(7))
+		callee := constant(b, entry, types.BoxRef(2))
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		// wide sits below the call's own operands, so it stays a deopt-only
+		// map entry, materialized only at the exit stall.
+		at := state(b, entry, 0, ssa.Operand{Value: wide}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		caller := function(1, 1, instr.New(instr.CALL))
+		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		require.NoError(t, err)
+		require.Contains(t, m.consts, uint64(seed))
 	})
 
 	t.Run("calls a resolved function at the frame base above its operands, borrowing its once-retained callee", func(t *testing.T) {

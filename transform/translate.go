@@ -34,6 +34,8 @@ type Object struct {
 	Struct *types.StructType
 	// Array is the referenced array's own type, when known.
 	Array *types.ArrayType
+	// I64 is the referenced i64 cell's value, when known.
+	I64 *types.I64
 }
 
 // ErrEntry reports an entry offset that does not start a basic block.

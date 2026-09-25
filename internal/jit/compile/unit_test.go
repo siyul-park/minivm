@@ -37,7 +37,7 @@ func (stub) Spill(*asm.Assembler, asm.VReg, int)                              { 
 func (stub) Results(*asm.Assembler, []asm.VReg)                               { panic("unused") }
 func (stub) Call(*asm.Assembler, compile.Call, compile.Site) bool             { panic("unused") }
 func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg)                          { panic("unused") }
-func (stub) Const(*asm.Assembler, asm.VReg, types.Boxed) bool                 { panic("unused") }
+func (stub) Const(*asm.Assembler, asm.VReg, uint64)                           { panic("unused") }
 
 // noop is a function of one RETURN and no parameters: valid enough for
 // translation and verification to succeed.

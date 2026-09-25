@@ -165,6 +165,8 @@ func resolved(v types.Value) Object {
 		return Object{Function: v}
 	case *types.Struct:
 		return Object{Struct: v.Typ}
+	case types.I64:
+		return Object{I64: &v}
 	default:
 		if at, ok := v.Type().(*types.ArrayType); ok {
 			return Object{Array: at}

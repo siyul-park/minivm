@@ -1611,19 +1611,13 @@ func matmul(n int32) *program.Program {
 }
 
 // fnv1a64Listing computes FNV-1a 64 over n single-byte inputs (index & 0xff).
-// The offset basis 0xcbf29ce484222325 exceeds the translator's inline
-// i64.const range, so it is built at runtime from its 32-bit halves.
 // Locals: 0=n (param), 1=h, 2=i.
 const fnv1a64Listing = `
 .constants
 func(i32) i64
 	i64
 	i32
-	i64.const 3421674724
-	i64.const 32
-	i64.shl
-	i64.const 2216829733
-	i64.or
+	i64.const 0xcbf29ce484222325
 	local.set 1
 	i32.const 0
 	local.set 2

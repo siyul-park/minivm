@@ -2,10 +2,12 @@ package ssa
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/types"
 )
 
 // Format renders a readable SSA dump.
@@ -41,7 +43,7 @@ func op(function *Function, o Operation) string {
 	var args []string
 	switch o.Op {
 	case OpConst:
-		args = append(args, o.Const.String())
+		args = append(args, literal(function, o))
 	case OpLoad, OpStore:
 		args = append(args, slot(o.Slot))
 	case OpState:
@@ -79,6 +81,29 @@ func term(function *Function, t Terminator) string {
 		fmt.Fprintf(&sb, " state v%d", t.State)
 	}
 	return sb.String()
+}
+
+// literal renders an OpConst word by its result type.
+func literal(function *Function, o Operation) string {
+	switch t := function.Type(o.Results[0]); t {
+	case TypeI1:
+		if o.Const != 0 {
+			return "true"
+		}
+		return "false"
+	case TypeI8, TypeI32:
+		return fmt.Sprintf("%d", int32(uint32(o.Const)))
+	case TypeI64:
+		return fmt.Sprintf("%d", int64(o.Const))
+	case TypeF32:
+		return fmt.Sprintf("%g", math.Float32frombits(uint32(o.Const)))
+	case TypeF64:
+		return fmt.Sprintf("%g", math.Float64frombits(o.Const))
+	case TypeRef:
+		return fmt.Sprintf("%d", types.Boxed(o.Const).Ref())
+	default:
+		return "<invalid>"
+	}
 }
 
 func slot(s Slot) string {

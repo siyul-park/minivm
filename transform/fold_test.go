@@ -2,6 +2,7 @@ package transform_test
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"testing"
 
@@ -26,8 +27,8 @@ func TestFoldPass_Run(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		x, y, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
 		fn := b.Build()
@@ -51,7 +52,7 @@ func TestFoldPass_Run(t *testing.T) {
 		entry := b.Block()
 		param := b.Param(entry, ssa.TypeI32)
 		one, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(1), Results: []ssa.Value{one}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{param, one}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
 		fn := b.Build()
@@ -68,8 +69,8 @@ func TestFoldPass_Run(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		x, zero, quotient := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, zero}, State: deoptState(b, entry), Results: []ssa.Value{quotient}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{quotient}})
 		fn := b.Build()
@@ -81,12 +82,12 @@ func TestFoldPass_Run(t *testing.T) {
 		require.Contains(t, ssa.Format(fn), "i32.div_s")
 	})
 
-	t.Run("leaves an i64 result that overflows the boxed constant range unfolded", func(t *testing.T) {
+	t.Run("folds a wide i64 result", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		x, y, product := b.Value(ssa.TypeI64), b.Value(ssa.TypeI64), b.Value(ssa.TypeI64)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1 << 30), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI64(1 << 30), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(int64(1) << 30), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(int64(1) << 30), Results: []ssa.Value{y}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_MUL, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{product}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{product}})
 		fn := b.Build()
@@ -95,16 +96,72 @@ func TestFoldPass_Run(t *testing.T) {
 		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.NotContains(t, ssa.Format(fn), "i64.mul")
+		require.Contains(t, ssa.Format(fn), "const 1152921504606846976")
+	})
+
+	t.Run("folds a wide shl", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, n, result := b.Value(ssa.TypeI64), b.Value(ssa.TypeI64), b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 50, Results: []ssa.Value{n}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_SHL, Args: []ssa.Value{x, n}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.NotContains(t, ssa.Format(fn), "i64.shl")
+		require.Contains(t, ssa.Format(fn), "const 1125899906842624")
+	})
+
+	t.Run("declines f64.to_i64_s outside the int64 range", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, result := b.Value(ssa.TypeF64), b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(1e19), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_TO_I64_S, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
 		require.True(t, preserved)
-		require.Contains(t, ssa.Format(fn), "i64.mul")
+		require.Contains(t, ssa.Format(fn), "f64.to_i64_s")
+	})
+
+	t.Run("declines f64.to_i64_s of NaN", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, result := b.Value(ssa.TypeF64), b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(math.NaN()), Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_TO_I64_S, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Contains(t, ssa.Format(fn), "f64.to_i64_s")
 	})
 
 	t.Run("folds a value a deopt frame references without disturbing what the activation names", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: sum}}}}, Results: []ssa.Value{state}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
@@ -185,7 +242,7 @@ func TestFoldPass_Run(t *testing.T) {
 		entry := b.Block()
 		x, right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{right}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{right}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, right}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 		fn := b.Build()
@@ -219,7 +276,7 @@ func TestFoldPass_Run(t *testing.T) {
 		entry := b.Block()
 		x := b.Param(entry, ssa.TypeI32)
 		right, result := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(8), Results: []ssa.Value{right}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 8, Results: []ssa.Value{right}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, right}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 		fn := b.Build()
@@ -587,7 +644,7 @@ func identity(t *testing.T, code instr.Opcode, valueType ssa.Type, constant type
 		seed = instr.I64_REM_S
 	}
 	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: seed, Args: []ssa.Value{param, param}, State: deoptState(b, entry), Results: []ssa.Value{x}})
-	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: constant, Results: []ssa.Value{right}})
+	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(constant), Results: []ssa.Value{right}})
 	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: code, Args: []ssa.Value{x, right}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 	b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 	fn := b.Build()
@@ -611,7 +668,7 @@ func shift(t *testing.T, code instr.Opcode, valueType ssa.Type, constant types.B
 	entry := b.Block()
 	x := b.Param(entry, valueType)
 	right, result := b.Value(valueType), b.Value(valueType)
-	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: constant, Results: []ssa.Value{right}})
+	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(constant), Results: []ssa.Value{right}})
 	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: code, Args: []ssa.Value{x, right}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 	b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 	fn := b.Build()
@@ -635,7 +692,7 @@ func fold(t *testing.T, code instr.Opcode, boxes []types.Boxed, want types.Boxed
 	args := make([]ssa.Value, len(boxes))
 	for i, box := range boxes {
 		args[i] = b.Value(ssa.TypeOf(box.Kind()))
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: box, Results: []ssa.Value{args[i]}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(box), Results: []ssa.Value{args[i]}})
 	}
 	result := b.Value(ssa.TypeOf(want.Kind()))
 	b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: code, Args: args, State: deoptState(b, entry), Results: []ssa.Value{result}})
@@ -649,5 +706,5 @@ func fold(t *testing.T, code instr.Opcode, boxes []types.Boxed, want types.Boxed
 	require.False(t, preserved)
 	require.NoError(t, ssa.Verify(fn))
 	ops := fn.Block(entry).Operations
-	require.Equal(t, want, ops[len(ops)-1].Const)
+	require.Equal(t, ssa.Word(want), ops[len(ops)-1].Const)
 }

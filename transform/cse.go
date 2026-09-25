@@ -27,10 +27,10 @@ func (p *CSEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-func cseKey(_ *ssa.Function, operation ssa.Operation) (string, bool) {
+func cseKey(function *ssa.Function, operation ssa.Operation) (string, bool) {
 	switch operation.Op {
 	case ssa.OpConst:
-		return fmt.Sprintf("const %d", operation.Const), true
+		return fmt.Sprintf("const %s %d", function.Type(operation.Results[0]), operation.Const), true
 	case ssa.OpExec:
 		if !operation.Code.IsPure() {
 			return "", false

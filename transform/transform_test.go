@@ -20,15 +20,15 @@ func TestPassOrder(t *testing.T) {
 		array := b.Param(entry, ssa.TypeRef)
 
 		x, y := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(2), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(3), Results: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
 		sum1 := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum1}})
 		sum2 := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum2}})
 
 		unused := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(99), Results: []ssa.Value{unused}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 99, Results: []ssa.Value{unused}})
 
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
@@ -67,9 +67,9 @@ func TestPassOrder(t *testing.T) {
 		x, y := b.Param(pre, ssa.TypeI32), b.Param(pre, ssa.TypeI32)
 
 		bound := b.Value(ssa.TypeI32)
-		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(10), Results: []ssa.Value{bound}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
 		zero := b.Value(ssa.TypeI32)
-		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(0), Results: []ssa.Value{zero}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
 		b.Term(pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero}}}})
 
 		counter := b.Param(header, ssa.TypeI32)

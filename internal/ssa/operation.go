@@ -1,6 +1,7 @@
 package ssa
 
 import (
+	"math"
 	"reflect"
 
 	"github.com/siyul-park/minivm/instr"
@@ -71,6 +72,26 @@ type Operand struct {
 	Owned bool
 }
 
+// Word returns b's OpConst word: the native word of b's kind. A wide i64
+// has no Boxed form and never reaches here.
+func Word(b types.Boxed) uint64 {
+	switch b.Kind() {
+	case types.KindI1:
+		if b.Bool() {
+			return 1
+		}
+		return 0
+	case types.KindI8, types.KindI32:
+		return uint64(uint32(b.I32()))
+	case types.KindI64:
+		return uint64(b.I64())
+	case types.KindF32:
+		return uint64(math.Float32bits(b.F32()))
+	default:
+		return uint64(b)
+	}
+}
+
 // Operation is one SSA instruction.
 type Operation struct {
 	// Op identifies the IR operation.
@@ -79,8 +100,10 @@ type Operation struct {
 	Code instr.Opcode
 	// Slot identifies storage for OpLoad/OpStore.
 	Slot Slot
-	// Const is the value for OpConst.
-	Const types.Boxed
+	// Const is the value for OpConst: the result type's native word (i1 0/1,
+	// i8/i32/f32 a zero-extended 32-bit lane, i64/f64 the full 64 bits, ref a
+	// types.Boxed word).
+	Const uint64
 	// Shape is the admitted specialization.
 	Shape Shape
 	// Frames is the deoptimization frame chain.

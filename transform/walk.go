@@ -201,20 +201,16 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		return w.pool(int(inst.Operand(0)))
 	case instr.I32_CONST:
 		val := int32(inst.Operand(0))
-		return w.constant(types.BoxI32(val), fact{kind: types.KindI32, value: val, valueKnown: true})
+		return w.constant(uint64(uint32(val)), fact{kind: types.KindI32, value: val, valueKnown: true})
 	case instr.I64_CONST:
 		val := int64(inst.Operand(0))
-		boxed := types.BoxI64(val)
-		if boxed.I64() != val {
-			return false
-		}
-		return w.constant(boxed, fact{kind: types.KindI64})
+		return w.constant(uint64(val), fact{kind: types.KindI64})
 	case instr.F32_CONST:
-		return w.constant(types.Box(uint64(uint32(inst.Operand(0))), types.KindF32), fact{kind: types.KindF32})
+		return w.constant(uint64(uint32(inst.Operand(0))), fact{kind: types.KindF32})
 	case instr.F64_CONST:
-		return w.constant(types.Boxed(inst.Operand(0)), fact{kind: types.KindF64})
+		return w.constant(inst.Operand(0), fact{kind: types.KindF64})
 	case instr.REF_NULL:
-		return w.constant(types.BoxedNull, fact{kind: types.KindRef})
+		return w.constant(uint64(types.BoxedNull), fact{kind: types.KindRef})
 
 	case instr.DUP:
 		return w.dup()
@@ -510,21 +506,23 @@ func (w *walker) pool(index int) bool {
 		return false
 	}
 	boxed := w.constants[index]
-	out := fact{kind: boxed.Kind()}
+	out, word := fact{kind: boxed.Kind()}, ssa.Word(boxed)
 	if out.kind == types.KindRef {
-		out.backing = backingConst
-		out.reference, out.referenceKnown = boxed.Ref(), true
+		out.backing, out.reference, out.referenceKnown = backingConst, boxed.Ref(), true
+		if obj, ok := w.objects[boxed.Ref()]; ok && obj.I64 != nil {
+			out, word = fact{kind: types.KindI64}, uint64(*obj.I64)
+		}
 	}
-	return w.constant(boxed, out)
+	return w.constant(word, out)
 }
 
-func (w *walker) constant(boxed types.Boxed, out fact) bool {
+func (w *walker) constant(word uint64, out fact) bool {
 	t, ok := typ(out.kind)
 	if !ok {
 		return false
 	}
 	value := w.builder.Value(t)
-	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: boxed, Results: []ssa.Value{value}})
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: word, Results: []ssa.Value{value}})
 	w.push(value, out)
 	return true
 }

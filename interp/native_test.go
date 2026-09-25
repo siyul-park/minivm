@@ -586,6 +586,76 @@ func wideI64SumProgram(t *testing.T, n int) *program.Program {
 	return program.New(code, program.WithConstants(fn))
 }
 
+// fnvFunction hashes [0,n) with FNV-1a64 inside func(i32) i64, seeded by
+// op and operand: an i64.const immediate or a const.get of a pool cell.
+func fnvFunction(t *testing.T, op instr.Opcode, operand uint64) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(op, operand).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_TO_I64_U).Emit(instr.I64_XOR)
+	b.Emit(instr.I64_CONST, 1099511628211).Emit(instr.I64_MUL).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}},
+		Locals: []types.Type{types.TypeI64, types.TypeI32},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// fnvProgram calls fnvFunction(n) once, leaving its wide result on the
+// stack; constants follow the function in the pool.
+func fnvProgram(t *testing.T, n int, op instr.Opcode, operand uint64, constants ...types.Value) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(append([]types.Value{fnvFunction(t, op, operand)}, constants...)...))
+}
+
+// leakArrayFunction keeps a wide i64 constant on the operand stack across
+// array.len, then returns it, discarding the length.
+func leakArrayFunction(t *testing.T, seed int64) *types.Function {
+	t.Helper()
+	fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI64}})
+	fn.Emit(instr.New(instr.I64_CONST, uint64(seed)))
+	fn.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.DROP))
+	fn.Emit(instr.New(instr.RETURN))
+	return fn.MustBuild()
+}
+
+// leakArrayProgram warms leakArrayFunction(warm times) over a freshly built
+// typed array, so its shape guard specializes and stays under refute's
+// retirement count, then calls it once more over global[0] (external test
+// code seeds a *HostArray there): exactly that one call's shape guard fails
+// and deopts, matching hostArrayGlobalProgram's own mismatch.
+func leakArrayProgram(t *testing.T, warm int, seed int64) *program.Program {
+	t.Helper()
+	fn := leakArrayFunction(t, seed)
+	elem := types.NewArrayType(types.TypeI32)
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, 0)
+	b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithGlobals(elem),
+		program.WithConstants(fn), program.WithTypes(elem))
+}
+
 // wideArgFunction returns its i64 parameter plus one.
 func wideArgFunction() *types.Function {
 	b := instr.NewBuilder()
@@ -1377,14 +1447,14 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("recursion past a small frame limit deoptimizes an ExitCall, matching threaded", func(t *testing.T) {
 		native(t)
 		prog := fibOverflowProgram(t, 1000, 30)
-		wantErr := runProgramErr(t, prog, interp.WithFrame(10))
+		wantErr := runProgramErr(t, prog, interp.WithFrame(8))
 		require.Error(t, wantErr)
 
 		var gotErr error
 		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(10), interp.WithProfiler(profiler))
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 			defer vm.Close()
 			gotErr = vm.Run(context.Background())
 			if gotErr == nil {
@@ -1406,7 +1476,7 @@ func TestWithThreshold(t *testing.T) {
 		// threaded and native runs. (An uncaught error leaves abandoned
 		// frames on both paths, by design, and is not comparable this way.)
 		prog := caught(t, 1000, 30)
-		wantVM := interp.New(prog, interp.WithFrame(10))
+		wantVM := interp.New(prog, interp.WithFrame(8))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		wantConst, err := wantVM.Const(0)
@@ -1420,7 +1490,7 @@ func TestWithThreshold(t *testing.T) {
 		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(10), interp.WithProfiler(profiler))
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 			defer vm.Close()
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
@@ -1471,7 +1541,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(rec, types.String("s")), program.WithHandlers(mb.Handlers()...))
 
-		wantVM := interp.New(prog, interp.WithFrame(10))
+		wantVM := interp.New(prog, interp.WithFrame(8))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -1487,7 +1557,7 @@ func TestWithThreshold(t *testing.T) {
 		var exits float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(10), interp.WithProfiler(profiler))
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 			defer vm.Close()
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
@@ -1835,6 +1905,109 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
 		require.Equal(t, want, got)
+	})
+
+	seed := int64(-3750763034362895579)
+	for _, c := range []struct {
+		name string
+		prog *program.Program
+	}{
+		{"a function FNV loop seeded with a wide i64.const compiles and matches threaded", fnvProgram(t, 100_000, instr.I64_CONST, uint64(seed))},
+		{"a function FNV loop seeded by a wide i64 pool cell compiles and matches threaded", fnvProgram(t, 100_000, instr.CONST_GET, 1, types.I64(seed))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			native(t)
+			prog := c.prog
+			want := runProgram(t, prog)
+
+			var got types.Value
+			var runErr, popErr error
+			var deopts, compiles float64
+			require.Eventually(t, func() bool {
+				profiler := prof.New()
+				vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+				defer vm.Close()
+				runErr = vm.Run(context.Background())
+				if runErr != nil {
+					return true
+				}
+				got, popErr = vm.Pop()
+				if popErr != nil {
+					return true
+				}
+				vm.Flush()
+				deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+				compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+				return compiles > 0
+			}, 5*time.Second, time.Millisecond)
+			require.NoError(t, runErr)
+			require.NoError(t, popErr)
+			require.Zero(t, deopts)
+			require.Equal(t, want, got)
+		})
+	}
+
+	t.Run("a wide i64 constant kept across a shape-guard deopt keeps threaded's RefCount", func(t *testing.T) {
+		native(t)
+		const seed = -3750763034362895579
+		prog := leakArrayProgram(t, 20000, seed)
+
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		hostVal, err := threaded.Marshal([]int32{1, 2, 3})
+		require.NoError(t, err)
+		hostAddr, err := threaded.Alloc(hostVal)
+		require.NoError(t, err)
+		require.NoError(t, threaded.SetGlobal(0, types.BoxRef(hostAddr)))
+		require.NoError(t, threaded.Run(context.Background()))
+		wantBoxed, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		wantRC, err := threaded.RefCount(wantBoxed.Ref())
+		require.NoError(t, err)
+		require.Equal(t, 1, wantRC)
+
+		var runErr, popErr, rcErr, marshalErr, allocErr, globalErr error
+		var gotBoxed types.Boxed
+		var gotRC int
+		var exits float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			var hostVal types.Value
+			hostVal, marshalErr = vm.Marshal([]int32{1, 2, 3})
+			if marshalErr != nil {
+				return true
+			}
+			var hostAddr int
+			hostAddr, allocErr = vm.Alloc(hostVal)
+			if allocErr != nil {
+				return true
+			}
+			globalErr = vm.SetGlobal(0, types.BoxRef(hostAddr))
+			if globalErr != nil {
+				return true
+			}
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			gotBoxed, popErr = vm.PopBoxed()
+			if popErr != nil {
+				return true
+			}
+			gotRC, rcErr = vm.RefCount(gotBoxed.Ref())
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return exits > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, marshalErr)
+		require.NoError(t, allocErr)
+		require.NoError(t, globalErr)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, rcErr)
+		require.Equal(t, wantRC, gotRC)
 	})
 
 	t.Run("an OSR module loop promotes a narrow i64 accumulator matching threaded (narrowarg)", func(t *testing.T) {

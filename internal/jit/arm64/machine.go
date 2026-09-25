@@ -2,7 +2,6 @@
 package arm64
 
 import (
-	"math"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -182,7 +181,8 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		if len(op.Results) != 1 {
 			return false
 		}
-		return m.Const(a, s.Reg(op.Results[0]), op.Const)
+		m.Const(a, s.Reg(op.Results[0]), op.Const)
+		return true
 	case ssa.OpLoad:
 		return m.load(a, op, s)
 	case ssa.OpStore:
@@ -431,31 +431,19 @@ func (m *Machine) Move(a *asm.Assembler, dst, src asm.VReg) {
 	a.Emit(target.MOV(dst, src))
 }
 
-// Const loads c into dst.
-func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, c types.Boxed) bool {
-	switch c.Kind() {
-	case types.KindI1:
-		value := uint64(0)
-		if c.Bool() {
-			value = 1
-		}
-		a.Emit(target.LDI(dst, value)...)
-	case types.KindI8, types.KindI32:
-		a.Emit(target.LDI(dst, uint64(uint32(c.I32())))...)
-	case types.KindI64:
-		a.Emit(target.LDI(dst, uint64(c.I64()))...)
-	case types.KindF32:
-		a.Emit(target.LDI(target.X16, uint64(math.Float32bits(c.F32())))...)
-		a.Emit(target.FMOV(dst, target.W16))
-	case types.KindF64:
-		a.Emit(target.LDI(target.X16, uint64(c))...)
-		a.Emit(target.FMOV(dst, target.X16))
-	case types.KindRef:
-		a.Emit(target.LDI(dst, uint64(c))...)
-	default:
-		return false
+// Const loads word into dst, by dst's register bank.
+func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, word uint64) {
+	if dst.Type() != asm.RegTypeFloat {
+		a.Emit(target.LDI(dst, word)...)
+		return
 	}
-	return true
+	if dst.Width() == asm.Width32 {
+		a.Emit(target.LDI(target.X16, uint64(uint32(word)))...)
+		a.Emit(target.FMOV(dst, target.W16))
+		return
+	}
+	a.Emit(target.LDI(target.X16, word)...)
+	a.Emit(target.FMOV(dst, target.X16))
 }
 
 // register is the register-convention result register at index i (0 or 1).
@@ -491,13 +479,21 @@ func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	if !ok {
 		return false
 	}
+	// Box first: a box exit that deopts leaves the old occupant to threaded.
+	word := m.box(a, s, op.Args[0])
 	// An i64 slot may hold a heap-promoted ref; release skips inline words.
 	if k := s.Slot(op.Slot); k == ssa.TypeRef || k == ssa.TypeI64 {
+		if _, ok := word.(asm.VReg); !ok {
+			// Release clobbers the X16 box result.
+			boxed := m.vreg()
+			a.Emit(target.MOV(boxed, word))
+			word = boxed
+		}
 		old := m.vreg()
 		a.Emit(target.LDR(old, base, int16(op.Slot.Index*8)))
 		m.release(a, old, s)
 	}
-	a.Emit(target.STR(m.box(a, s, op.Args[0]), base, int16(op.Slot.Index*8)))
+	a.Emit(target.STR(word, base, int16(op.Slot.Index*8)))
 	return true
 }
 

@@ -115,7 +115,7 @@ func TestGuardPass_Run(t *testing.T) {
 		entry := b.Block()
 		value, observed := b.Param(entry, ssa.TypeI32), b.Value(ssa.TypeI32)
 		state := b.Value(ssa.TypeState)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: types.BoxI32(7), Results: []ssa.Value{observed}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 7, Results: []ssa.Value{observed}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{value, observed}, State: state, Results: []ssa.Value{first}})

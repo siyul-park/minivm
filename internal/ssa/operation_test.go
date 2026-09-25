@@ -1,9 +1,11 @@
 package ssa_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -101,4 +103,24 @@ func TestSpace_String(t *testing.T) {
 	t.Run("names an unknown space invalid", func(t *testing.T) {
 		require.Equal(t, "invalid", (ssa.SpaceUpval + 1).String())
 	})
+}
+
+func TestWord(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		box  types.Boxed
+		want uint64
+	}{
+		{"i1", types.BoxI1(true), 1},
+		{"i8", types.BoxI8(-2), 0xFFFFFFFE},
+		{"i32", types.BoxI32(-7), 0xFFFFFFF9},
+		{"i64", types.BoxI64(-3), 0xFFFFFFFFFFFFFFFD},
+		{"f32", types.BoxF32(1.5), uint64(math.Float32bits(1.5))},
+		{"f64", types.BoxF64(2.5), math.Float64bits(2.5)},
+		{"ref", types.BoxRef(9), uint64(types.BoxRef(9))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, ssa.Word(c.box))
+		})
+	}
 }

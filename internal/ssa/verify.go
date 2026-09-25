@@ -126,7 +126,14 @@ func operation(function *Function, sites []position, o Operation) error {
 	args, results := len(o.Args), len(o.Results)
 	deopts := false
 	switch o.Op {
-	case OpConst, OpLoad:
+	case OpConst:
+		if args != 0 || results != 1 {
+			return counted(o.name(), args, results)
+		}
+		if err := canonical(function, o); err != nil {
+			return err
+		}
+	case OpLoad:
 		if args != 0 || results != 1 {
 			return counted(o.name(), args, results)
 		}
@@ -322,6 +329,22 @@ func resume(function *Function, sites []position, v Value, name string, deopts b
 		return Operation{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
 	}
 	return function.Block(def.block).Operations[def.index], nil
+}
+
+// canonical rejects an OpConst whose result type's 32-bit lane has a nonzero
+// upper half, or whose i1 result is not 0 or 1.
+func canonical(function *Function, o Operation) error {
+	switch t := function.Type(o.Results[0]); t {
+	case TypeI1:
+		if o.Const > 1 {
+			return fmt.Errorf("%w: i1 const %d is not 0 or 1", ErrType, o.Const)
+		}
+	case TypeI8, TypeI32, TypeF32:
+		if o.Const>>32 != 0 {
+			return fmt.Errorf("%w: %s const 0x%x has a nonzero upper half", ErrType, t, o.Const)
+		}
+	}
+	return nil
 }
 
 func constant(function *Function, sites []position, v Value) bool {

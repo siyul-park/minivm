@@ -89,7 +89,9 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MU
 | `f64` | 64-bit float lane |
 | `ref` | boxed 64-bit value |
 
-Native code boxes only at VM-slot boundaries. Narrow and `f32` values use the low 32 bits; `f64` and `ref` use the full word. An `i64` slot is guarded before unboxing because a promoted value is a `KindRef`; an out-of-range native `i64` deopts rather than allocating.
+Native code boxes only at VM-slot boundaries. Narrow and `f32` values use the low 32 bits; `f64` and `ref` use the full word. An `i64` slot is guarded before unboxing because a promoted value is a `KindRef`; a wide native `i64` boxes through `ExitBox` rather than deopting.
+
+An SSA constant (`ssa.Operation.Const`) is its result type's native word; `types.Boxed` appears only at the pool boundary and in the materializer.
 
 Every interpreter, container, storage, or host boundary `MUST` restore the exact boxed representation and ownership.
 
