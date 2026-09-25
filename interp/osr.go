@@ -222,35 +222,7 @@ func (n *native) finish(i *Interpreter, s *site, c *jit.Code) {
 func (n *native) materialize(i *Interpreter, exit jit.Exit) {
 	ctx := n.ctx
 	depth := int(ctx.Depth)
-
-	maps := make([]jit.Frame, depth)
-	owns := make([]bool, depth)
-	maps[depth-1] = exit.Frames[0]
-	owns[0] = i.fr.release
-	for k := depth - 2; k >= 0; k-- {
-		code := n.store.Find(ctx.Records[k+1].PC)
-		e := code.Exits[ctx.Records[k].Exit]
-		maps[k] = e.Frames[0]
-		owns[k+1] = e.Owned
-	}
-
-	start := i.fp - 1
-	for k := 0; k < depth; k++ {
-		n.frame(i, ctx, start, k, maps[k], owns[k])
-	}
-	inner := &i.frames[start+depth-1]
-
-	if exit.Kind == jit.ExitCall {
-		callee := i.heap[exit.Callee].(*types.Function)
-		i.sp += len(callee.Typ.Params)
-		ref := types.BoxRef(exit.Callee)
-		if !exit.Owned {
-			i.retainBox(ref)
-		}
-		i.stack[i.sp] = ref
-		i.sp++
-		inner.ip--
-	}
+	inner := n.rebuild(i, exit, i.fp-1, i.fr.release)
 
 	i.fp += depth - 1
 	i.fr = inner

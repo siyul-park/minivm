@@ -599,6 +599,22 @@ func (n *native) word(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
 func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int) {
 	ctx := n.ctx
 	depth := int(ctx.Depth)
+	inner := n.rebuild(i, exit, i.fp, release)
+
+	i.fr.ip += advance
+	i.fp += depth
+	i.fr = inner
+
+	ctx.Depth = 0
+	ctx.Abandon()
+}
+
+// rebuild materializes every native activation as a frame from start,
+// replays an ExitCall's callee, and returns the innermost frame. release
+// reports whether activation 0 owns the callee reference it was entered with.
+func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool) *frame {
+	ctx := n.ctx
+	depth := int(ctx.Depth)
 
 	maps := make([]jit.Frame, depth)
 	owns := make([]bool, depth)
@@ -611,7 +627,6 @@ func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int)
 		owns[k+1] = e.Owned
 	}
 
-	start := i.fp
 	for k := 0; k < depth; k++ {
 		n.frame(i, ctx, start, k, maps[k], owns[k])
 	}
@@ -633,12 +648,7 @@ func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int)
 		inner.ip--
 	}
 
-	i.fr.ip += advance
-	i.fp += depth
-	i.fr = inner
-
-	ctx.Depth = 0
-	ctx.Abandon()
+	return inner
 }
 
 // frame materializes activation k from m. release reports whether k owns
