@@ -114,6 +114,47 @@ func fibonacci(t *testing.T) (*types.Function, transform.Module) {
 	return fib, transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: fib}}}
 }
 
+// indirectFibonacci is fib(n, self) = n < 2 ? n : fib(n-1, self)(n-1, self) +
+// fib(n-2, self)(n-2, self), calling itself through param 1 (the callee
+// arrives on the stack, not by CONST_GET), speculated from feedback recorded
+// at both of its dynamic CALLs.
+func indirectFibonacci(t *testing.T) (*types.Function, transform.Module) {
+	t.Helper()
+	b := instr.NewBuilder()
+	small := b.Label()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_LT_S).BrIf(small)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_SUB)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.CALL)
+	b.Emit(instr.I32_ADD).Emit(instr.RETURN)
+	b.Bind(small).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	fib := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal(code),
+	}
+	ips := calls(fib.Code)
+	module := transform.Module{
+		Constants: []types.Boxed{types.BoxRef(1)},
+		Objects:   transform.Objects{1: {Function: fib}},
+		Callees:   map[int]int{ips[0]: 1, ips[1]: 1},
+	}
+	return fib, module
+}
+
+// calls returns the offset of every CALL in code, in order.
+func calls(code []byte) []int {
+	var out []int
+	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+		if instr.Instruction(code[ip:]).Opcode() == instr.CALL {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
 // run compiles u and every callee with m, publishes them in a Store of
 // their own natives table, and runs u over stack.
 func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.Unit) (*jit.Context, jit.Trap) {
@@ -321,6 +362,15 @@ func TestCompile(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 		require.Zero(t, c.Results)
+	})
+
+	t.Run("compiles a speculated indirect self call at both tiers", func(t *testing.T) {
+		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
+			fib, module := indirectFibonacci(t)
+			c, err := compile.Compile(compile.Unit{Address: 1, Function: fib, Module: module, Tier: tier}, arm64.New())
+			require.NoError(t, err)
+			require.NoError(t, c.Free())
+		}
 	})
 
 	t.Run("runs fib through its own native code at every tier", func(t *testing.T) {

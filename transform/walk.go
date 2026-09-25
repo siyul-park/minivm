@@ -305,7 +305,11 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) == 0 {
 			return false
 		}
-		_, target := w.callee(len(w.stack) - 1)
+		at := len(w.stack) - 1
+		_, target := w.callee(at)
+		if target == nil {
+			target = w.speculate(at)
+		}
 		if target == nil {
 			return false
 		}
@@ -425,6 +429,38 @@ func (w *walker) callee(at int) (int, *types.Function) {
 		return 0, nil
 	}
 	return o.reference, target
+}
+
+// speculate admits an unresolved CALL's callee from the unit's recorded
+// feedback at this ip (see Module.Callees): the one function observed there,
+// for a non-owned ref operand only (an owned one would leak its own count on
+// substitution). It declines by returning nil. On success it guards the
+// operand against the admitted constant and replaces the stack entry with
+// it, so the CALL proceeds exactly as a resolved one.
+func (w *walker) speculate(at int) *types.Function {
+	ref, ok := w.callees[w.ip]
+	if !ok {
+		return nil
+	}
+	target := w.objects.function(ref)
+	if target == nil || target.Typ == nil {
+		return nil
+	}
+	o := w.stack[at]
+	if o.kind != types.KindRef || o.backing == backingStack {
+		return nil
+	}
+	c := w.builder.Value(ssa.TypeRef)
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(ref)), Results: []ssa.Value{c}})
+	guarded := w.builder.Value(ssa.TypeRef)
+	w.builder.Add(w.block, ssa.Operation{
+		Op:      ssa.OpGuardValue,
+		Args:    []ssa.Value{o.value, c},
+		State:   w.deopt(),
+		Results: []ssa.Value{guarded},
+	})
+	w.stack[at] = operand{value: c, fact: fact{kind: types.KindRef, backing: backingConst, reference: ref, referenceKnown: true}}
+	return target
 }
 
 func (w *walker) load(space ssa.Space, index int) bool {

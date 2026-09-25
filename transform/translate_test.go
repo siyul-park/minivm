@@ -1,6 +1,7 @@
 package transform_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -499,6 +500,60 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
+	t.Run("speculates a dynamic callee its feedback observed", func(t *testing.T) {
+		fn, ips := indirectRecursiveFib(t)
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1)},
+			Objects:   transform.Objects{1: {Function: fn}},
+			Callees:   map[int]int{ips[0]: 1, ips[1]: 1},
+		}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, wantIndirectRecursiveFib(ips), ssa.Format(out))
+	})
+
+	t.Run("declines a dynamic callee without feedback", func(t *testing.T) {
+		fn, _ := indirectRecursiveFib(t)
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1)},
+			Objects:   transform.Objects{1: {Function: fn}},
+		}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
+	t.Run("declines feedback naming no function", func(t *testing.T) {
+		fn, ips := indirectRecursiveFib(t)
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1)},
+			Objects:   transform.Objects{1: {Function: fn}, 7: {Struct: &types.StructType{}}},
+			Callees:   map[int]int{ips[0]: 7, ips[1]: 7},
+		}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
+	t.Run("declines to speculate an owned callee", func(t *testing.T) {
+		fn, ip := ownedCalleeFunction(t)
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1)},
+			Objects:   transform.Objects{1: {Function: target}},
+			Callees:   map[int]int{ip: 1},
+		}
+
+		out, err := transform.Translate(m, 0, fn, 0)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
 	t.Run("guards an i64 slot load against a heap-promoted value", func(t *testing.T) {
 		fn := &types.Function{
 			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
@@ -553,6 +608,103 @@ func loopFunction(t *testing.T) (*types.Function, int) {
 		Locals: []types.Type{types.TypeAny, types.TypeI32},
 		Code:   instr.Marshal(code),
 	}, instr.New(instr.LOCAL_GET, 0).Width()
+}
+
+// indirectRecursiveFib builds func(i32, any) i32 calling itself through
+// param 1 (the callee arrives on the stack, not by CONST_GET) twice, and
+// reports both dynamic CALLs' own ip in source order.
+func indirectRecursiveFib(t *testing.T) (*types.Function, []int) {
+	t.Helper()
+	b := instr.NewBuilder()
+	base := b.Label()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_LT_S).BrIf(base)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_SUB)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.CALL)
+	b.Emit(instr.I32_ADD).Emit(instr.RETURN)
+	b.Bind(base).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	fn := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal(code),
+	}
+	return fn, calls(fn.Code)
+}
+
+// wantIndirectRecursiveFib is indirectRecursiveFib's SSA text once both
+// dynamic CALLs speculate their recorded callee (address 1, a self call).
+func wantIndirectRecursiveFib(ips []int) string {
+	return fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	v2:i32 = const 2
+	v4:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
+	v3:i1 = i32.lt_s v1, v2 state v4
+	br v3, blk1(), blk2()
+blk1: () <-- (blk0)
+	v5:i32 = load local[0]
+	v6:state = state {addr=1 base=0 ip=41 returns=1 stack=[v5]}
+	return v5 state v6
+blk2: () <-- (blk0)
+	v7:i32 = load local[0]
+	v8:i32 = const 1
+	v10:state = state {addr=1 base=0 ip=18 returns=1 stack=[v7, v8]}
+	v9:i32 = i32.sub v7, v8 state v10
+	v11:ref = load local[1]
+	v12:ref = load local[1]
+	v13:ref = const 1
+	v15:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v12]}
+	v14:ref = guard.value v12, v13 state v15
+	retain v11
+	retain v13
+	v17:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11 owned, v13 owned]}
+	v16:i32 = call v9, v11, v13 state v17
+	v18:i32 = load local[0]
+	v19:i32 = const 2
+	v21:state = state {addr=1 base=0 ip=31 returns=1 stack=[v16, v18, v19]}
+	v20:i32 = i32.sub v18, v19 state v21
+	v22:ref = load local[1]
+	v23:ref = load local[1]
+	v24:ref = const 1
+	v26:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22, v23]}
+	v25:ref = guard.value v23, v24 state v26
+	retain v22
+	retain v24
+	v28:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22 owned, v24 owned]}
+	v27:i32 = call v20, v22, v24 state v28
+	v30:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v27]}
+	v29:i32 = i32.add v16, v27 state v30
+	v31:state = state {addr=1 base=0 ip=38 returns=1 stack=[v29]}
+	return v29 state v31
+`, ips[0], ips[1])
+}
+
+// ownedCalleeFunction builds a function whose dynamic CALL's callee operand
+// is owned (ref.cast adopts it), and reports the CALL's own ip.
+func ownedCalleeFunction(t *testing.T) (*types.Function, int) {
+	t.Helper()
+	b := instr.NewBuilder()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, 0).Emit(instr.CALL).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	fn := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal(code),
+	}
+	return fn, calls(fn.Code)[0]
+}
+
+// calls returns the offset of every CALL in code, in order.
+func calls(code []byte) []int {
+	var out []int
+	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+		if instr.Instruction(code[ip:]).Opcode() == instr.CALL {
+			out = append(out, ip)
+		}
+	}
+	return out
 }
 
 func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {

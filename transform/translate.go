@@ -11,7 +11,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Module contains read-only module facts used by translation.
+// Module contains facts translation may assume beyond the bytecode.
 type Module struct {
 	// Constants is the constant pool.
 	Constants []types.Boxed
@@ -21,6 +21,10 @@ type Module struct {
 	Objects Objects
 	// Types is the declared-type table.
 	Types []types.Type
+	// Callees maps a dynamic CALL's offset in the translated function to the
+	// one function reference observed there. A recorded snapshot, never live
+	// state; unset for a site never seen or seen with more than one callee.
+	Callees map[int]int
 }
 
 // Objects maps constant references to object facts.
@@ -80,6 +84,7 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		globals:   module.Globals,
 		objects:   module.Objects,
 		types:     module.Types,
+		callees:   module.Callees,
 	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {

@@ -14,6 +14,9 @@ type facts struct {
 	globals   []types.Kind
 	objects   Objects
 	types     []types.Type
+	// callees is a dynamic CALL's ip to its recorded single callee (see
+	// Module.Callees).
+	callees map[int]int
 }
 
 type activation struct {
