@@ -122,39 +122,54 @@ func TestFoldPass_Run(t *testing.T) {
 		require.Contains(t, ssa.Format(fn), "const 1125899906842624")
 	})
 
-	t.Run("declines f64.to_i64_s outside the int64 range", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		x, result := b.Value(ssa.TypeF64), b.Value(ssa.TypeI64)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(1e19), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_TO_I64_S, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
-		fn := b.Build()
-		require.NoError(t, ssa.Verify(fn))
+	for _, c := range []struct {
+		code   instr.Opcode
+		arg    ssa.Type
+		value  float64
+		result ssa.Type
+	}{
+		{instr.F32_TO_I32_S, ssa.TypeF32, math.NaN(), ssa.TypeI32},
+		{instr.F32_TO_I32_S, ssa.TypeF32, 3e9, ssa.TypeI32},
+		{instr.F32_TO_I32_S, ssa.TypeF32, -3e9, ssa.TypeI32},
+		{instr.F32_TO_I32_U, ssa.TypeF32, math.NaN(), ssa.TypeI32},
+		{instr.F32_TO_I32_U, ssa.TypeF32, -1, ssa.TypeI32},
+		{instr.F32_TO_I32_U, ssa.TypeF32, 5e9, ssa.TypeI32},
+		{instr.F64_TO_I32_S, ssa.TypeF64, math.NaN(), ssa.TypeI32},
+		{instr.F64_TO_I32_S, ssa.TypeF64, 3e9, ssa.TypeI32},
+		{instr.F64_TO_I32_S, ssa.TypeF64, -3e9, ssa.TypeI32},
+		{instr.F64_TO_I32_U, ssa.TypeF64, math.NaN(), ssa.TypeI32},
+		{instr.F64_TO_I32_U, ssa.TypeF64, -1, ssa.TypeI32},
+		{instr.F64_TO_I32_U, ssa.TypeF64, 5e9, ssa.TypeI32},
+		{instr.F64_TO_I64_S, ssa.TypeF64, math.NaN(), ssa.TypeI64},
+		{instr.F64_TO_I64_S, ssa.TypeF64, 1e19, ssa.TypeI64},
+		{instr.F64_TO_I64_S, ssa.TypeF64, -1e19, ssa.TypeI64},
+		{instr.F64_TO_I64_U, ssa.TypeF64, math.NaN(), ssa.TypeI64},
+		{instr.F64_TO_I64_U, ssa.TypeF64, -1, ssa.TypeI64},
+		{instr.F64_TO_I64_U, ssa.TypeF64, 2e19, ssa.TypeI64},
+	} {
+		// Threaded saturates these; Go's conversion is implementation-specific.
+		name := instr.TypeOf(c.code).Mnemonic
+		t.Run(fmt.Sprintf("declines %s of %g", name, c.value), func(t *testing.T) {
+			word := math.Float64bits(c.value)
+			if c.arg == ssa.TypeF32 {
+				word = uint64(math.Float32bits(float32(c.value)))
+			}
+			b := ssa.New("f")
+			entry := b.Block()
+			x, result := b.Value(c.arg), b.Value(c.result)
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: word, Results: []ssa.Value{x}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+			fn := b.Build()
+			require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+			preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
-		require.NoError(t, err)
-		require.True(t, preserved)
-		require.Contains(t, ssa.Format(fn), "f64.to_i64_s")
-	})
-
-	t.Run("declines f64.to_i64_s of NaN", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		x, result := b.Value(ssa.TypeF64), b.Value(ssa.TypeI64)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(math.NaN()), Results: []ssa.Value{x}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_TO_I64_S, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
-		fn := b.Build()
-		require.NoError(t, ssa.Verify(fn))
-
-		preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
-
-		require.NoError(t, err)
-		require.True(t, preserved)
-		require.Contains(t, ssa.Format(fn), "f64.to_i64_s")
-	})
+			require.NoError(t, err)
+			require.True(t, preserved)
+			require.Contains(t, ssa.Format(fn), name)
+		})
+	}
 
 	t.Run("folds a value a deopt frame references without disturbing what the activation names", func(t *testing.T) {
 		b := ssa.New("f")

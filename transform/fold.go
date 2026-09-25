@@ -209,19 +209,37 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 		return evalF32(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
 	case instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
 		return evalF32Cmp(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
+	// Threaded saturates NaN and out-of-range float-to-int conversions, where
+	// Go's result is implementation-specific: fold leaves those to it.
 	case instr.F32_TO_I32_S:
-		return word(int32(math.Float32frombits(uint32(args[0])))), true
+		f := float64(math.Float32frombits(uint32(args[0])))
+		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {
+			return 0, false
+		}
+		return word(int32(f)), true
 	case instr.F32_TO_I32_U:
-		return word(int32(uint32(math.Float32frombits(uint32(args[0]))))), true
+		f := float64(math.Float32frombits(uint32(args[0])))
+		if math.IsNaN(f) || f < 0 || f >= 1<<32 {
+			return 0, false
+		}
+		return word(int32(uint32(f))), true
 
 	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD:
 		return evalF64(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
 	case instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
 		return evalF64Cmp(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
 	case instr.F64_TO_I32_S:
-		return word(int32(math.Float64frombits(args[0]))), true
+		f := math.Float64frombits(args[0])
+		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {
+			return 0, false
+		}
+		return word(int32(f)), true
 	case instr.F64_TO_I32_U:
-		return word(int32(uint32(math.Float64frombits(args[0])))), true
+		f := math.Float64frombits(args[0])
+		if math.IsNaN(f) || f < 0 || f >= 1<<32 {
+			return 0, false
+		}
+		return word(int32(uint32(f))), true
 	case instr.F64_TO_I64_S:
 		f := math.Float64frombits(args[0])
 		if math.IsNaN(f) || f < -(1<<63) || f >= 1<<63 {
