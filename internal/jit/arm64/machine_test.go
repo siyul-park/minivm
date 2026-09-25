@@ -565,6 +565,16 @@ func TestMachine_Lower(t *testing.T) {
 			), lower: true,
 		},
 		{
+			name: "guard.value compares its argument with the admitted word and deopts on any other",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{1, 2}, Results: []ssa.Value{3}},
+			rows: []asm.Instruction{
+				target.CMP(x(1), x(2)),
+				target.BCondLabel(target.OpBNE, exit),
+				target.MOV(x(3), x(1)),
+			}, lower: true,
+		},
+		{
 			name: "retain counts any reference up",
 			regs: regs{1: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{1}},

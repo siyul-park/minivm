@@ -395,7 +395,8 @@ func (l *lowering) validate(args []ssa.Value) error {
 
 // borrowed reports every OpConst ref value used only as CALL callees and
 // retained once per such call: the constant pool keeps it alive, so every
-// retain is redundant.
+// retain is redundant. A guard.value comparing against the constant is not
+// itself a use: the admitted word (Args[1]) stays borrowed at the call.
 func borrowed(f *ssa.Function) map[ssa.Value]bool {
 	retains, uses, callees := map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]int{}
 	use := func(args []ssa.Value) {
@@ -410,6 +411,8 @@ func borrowed(f *ssa.Function) map[ssa.Value]bool {
 			case ssa.OpRetain:
 				retains[op.Args[0]]++
 			case ssa.OpRelease:
+			case ssa.OpGuardValue:
+				uses[op.Args[0]]++
 			default:
 				use(op.Args)
 				if op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 {
@@ -624,7 +627,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if i, ok := l.argument(op.Slot); ok {
 			l.args[i] = asm.VReg{}
 		}
-	case ssa.OpRelease, ssa.OpGuardShape:
+	case ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}

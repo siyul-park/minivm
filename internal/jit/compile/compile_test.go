@@ -763,6 +763,48 @@ func TestLower(t *testing.T) {
 		require.Contains(t, m.calls, ssa.OpGuardShape.String())
 	})
 
+	t.Run("routes a value guard to Machine.Lower", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		v := constant(b, entry, types.BoxRef(1))
+		c := constant(b, entry, types.BoxRef(1))
+		at := state(b, entry, 0)
+		guarded := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{v, c}, State: at, Results: []ssa.Value{guarded}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Contains(t, m.calls, ssa.OpGuardValue.String())
+	})
+
+	t.Run("borrows a constant callee a value guard also compares", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI32(7))
+		operand := constant(b, entry, types.BoxRef(2))
+		callee := constant(b, entry, types.BoxRef(2))
+		at0 := state(b, entry, 0)
+		guarded := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{operand, callee}, State: at0, Results: []ssa.Value{guarded}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		caller := function(1, 1, instr.New(instr.CALL))
+		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		require.NoError(t, err)
+		// No "retain" row: the callee's single retain, consumed only by this
+		// call, is redundant even though a guard.value also compares it.
+		require.NotContains(t, m.calls, "retain")
+		require.False(t, m.sites[0].Owned)
+		require.False(t, exits[0].Owned)
+	})
+
 	t.Run("rejects a suspension", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

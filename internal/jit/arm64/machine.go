@@ -193,6 +193,8 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return m.guard(a, op, s)
 	case ssa.OpGuardShape:
 		return m.shape(a, op, s)
+	case ssa.OpGuardValue:
+		return m.value(a, op, s)
 	case ssa.OpRetain:
 		m.retain(a, s.Reg(op.Args[0]))
 		return true
@@ -955,6 +957,18 @@ func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	a.Bind(inline)
 	a.Emit(target.SBFX(dst, word, 0, 49))
 	a.Bind(done)
+	return true
+}
+
+// value lowers guard.value: Args[0] must equal the admitted word Args[1],
+// or the guard deopts. Result is Args[0]'s own word.
+func (m *Machine) value(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if len(op.Args) != 2 || len(op.Results) != 1 {
+		return false
+	}
+	got, want := s.Reg(op.Args[0]), s.Reg(op.Args[1])
+	a.Emit(target.CMP(got, want), target.BCondLabel(target.OpBNE, s.Deopt()))
+	m.Move(a, s.Reg(op.Results[0]), got)
 	return true
 }
 
