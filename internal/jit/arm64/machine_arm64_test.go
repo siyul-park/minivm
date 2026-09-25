@@ -155,7 +155,11 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("unboxes an inline i64 slot and a heap-promoted one, deopts on a ref to a non-I64", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI64}, nil, func(b *instr.Builder) {
+		// Three params keep this function out of the register convention
+		// (compile.arguments admits at most two), so slot 0's LOCAL_GET
+		// reaches guard.kind's own heap-unbox logic instead of a register
+		// capture's raw move.
+		fn := function(t, []types.Type{types.TypeI64, types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
 		})
 		fn.Typ.Returns = []types.Type{types.TypeI64}

@@ -616,6 +616,48 @@ func wideArgProgram(t *testing.T, warm int) *program.Program {
 	return program.New(code, program.WithConstants(fn))
 }
 
+// wideRelayFunction spins four back edges, then calls wideArgFunction
+// (module constant 0) with its i64 parameter widened past 49 bits: the back
+// edges amortize the argument slot's box exit, so the caller stays native and
+// the wide word crosses Call's register move, never Enter.
+func wideRelayFunction() *types.Function {
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_CONST, 50).Emit(instr.I64_SHL).Emit(instr.I64_ADD)
+	b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	if err != nil {
+		panic(err)
+	}
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+		Locals: []types.Type{types.TypeI32},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// wideRelayProgram warms wideArgFunction, then wideRelayFunction, each warm
+// times with a narrow argument, unrolled so the module stays threaded, then
+// calls wideRelayFunction(1) once more, leaving its result on the stack.
+func wideRelayProgram(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	inner := wideArgFunction()
+	outer := wideRelayFunction()
+	b := instr.NewBuilder()
+	for index := range 2 * warm {
+		b.Emit(instr.I64_CONST, 1).Emit(instr.CONST_GET, uint64(index/warm)).Emit(instr.CALL).Emit(instr.DROP)
+	}
+	b.Emit(instr.I64_CONST, 1).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(inner, outer))
+}
+
 // narrowArgProgram calls wideArgFunction(5) n times in a module loop,
 // XOR-accumulating each (narrow) result into module local 0, an i64
 // promoted local whose own loop header is OSR-eligible: closing gap 5 (P)
@@ -1701,6 +1743,39 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("a wide i64 argument from threaded code into a native function matches threaded", func(t *testing.T) {
 		native(t)
 		prog := wideArgProgram(t, 2000)
+		want := runProgram(t, prog)
+
+		var got types.Value
+		var runErr, popErr error
+		var deopts, entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			baseline, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			entries = baseline + optimized
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Zero(t, deopts)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a native caller passes a wide i64 register argument matching threaded", func(t *testing.T) {
+		native(t)
+		prog := wideRelayProgram(t, 2000)
 		want := runProgram(t, prog)
 
 		var got types.Value

@@ -111,6 +111,19 @@ func TestMachine_Prologue(t *testing.T) {
 			target.FMOV(want[1], target.X1),
 		}, a.Rows()[8:])
 	})
+
+	t.Run("captures an i64 register-passed parameter by a raw 64-bit MOV", func(t *testing.T) {
+		a := asm.New(target.New())
+		got := arm64.New().Prologue(a, []types.Kind{types.KindI64, types.KindRef}, 2, false, 0, []types.Kind{types.KindI64, types.KindRef}, nil)
+		want := []asm.VReg{asm.NewVReg(-2, asm.RegTypeInt, asm.Width64), asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)}
+		require.Equal(t, want, got)
+		require.Equal(t, []asm.Instruction{
+			target.DEF(target.X0),
+			target.DEF(target.X1),
+			target.MOV(want[0], target.X0),
+			target.MOV(want[1], target.X1),
+		}, a.Rows()[8:])
+	})
 }
 
 func TestMachine_Epilogue(t *testing.T) {
@@ -243,6 +256,28 @@ func TestMachine_Enter(t *testing.T) {
 			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(asm.NewPReg(target.X0.ID(), asm.RegTypeInt, asm.Width32), target.X25, 0),
 			target.LDR(target.X1, target.X25, 8),
+			target.SUBI(target.SP, target.SP, 16),
+			target.STR(target.LR, target.SP, 8),
+			target.BLLabel(1),
+			target.LDR(target.LR, target.SP, 8),
+			target.ADDI(target.SP, target.SP, 16),
+			target.RET(),
+		}, a.Rows()[start:])
+	})
+
+	t.Run("loads an i64 register-passed parameter's slot and unboxes its 49-bit payload inline", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, nil, 0, true, 0, nil, nil)
+		m.Epilogue(a)
+		start := len(a.Rows())
+		m.Enter(a, []types.Kind{types.KindI64}, nil)
+
+		require.Equal(t, []asm.Instruction{
+			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
+			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.LDR(target.X0, target.X25, 0),
+			target.SBFX(target.X0, target.X0, 0, 49),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
@@ -1050,6 +1085,57 @@ func TestMachine_Call(t *testing.T) {
 				target.FMOV(target.X1, r.Reg(3)),
 				target.USE(target.X0),
 				target.USE(target.X1),
+				target.BLLabel(entry),
+				target.SUBI(target.X25, target.X25, 32),
+			},
+		), a.Rows()[start:])
+	})
+
+	t.Run("moves a register-passed i64 argument by a raw 64-bit MOV, on top of its boxed slot store", func(t *testing.T) {
+		r64 := regs{1: ssa.TypeI64}
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, nil, 0, true, 0, nil, nil)
+		bridge, join := a.Label(), a.Label()
+		start := len(a.Rows())
+		require.True(t, m.Call(a, compile.Call{
+			Address: 5, Callee: 2, Args: []ssa.Value{1}, Base: 4, Size: 3, Exit: 7,
+			Bridge: bridge, Resume: join, Self: true,
+			Arguments: []types.Kind{types.KindI64},
+		}, r64))
+
+		// entry is Prologue's own label, bound before any other row: the
+		// second label a fresh Assembler allocates (end is the first).
+		entry := asm.Label(1)
+		require.Equal(t, slices.Concat(
+			target.LDI(target.X16, 1<<48),
+			[]asm.Instruction{
+				target.ADD(target.X17, r64.Reg(1), target.X16),
+				target.LSRI(target.X17, target.X17, 49),
+				target.CBNZLabel(target.X17, exit),
+				target.ANDI(target.X16, r64.Reg(1), types.VMask),
+			},
+			target.LDI(target.X17, types.Tag(types.KindI64)),
+			[]asm.Instruction{
+				target.ORR(target.X16, target.X16, target.X17),
+				target.STR(target.X16, target.X25, 32),
+				target.ADDI(target.X16, target.X25, 56),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBHI, bridge),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.CMP(target.X27, target.X17),
+				target.BCondLabel(target.OpBCS, bridge),
+				target.LSLI(target.X16, target.X27, 5),
+				target.ADD(target.X16, target.Ctx, target.X16),
+				target.ADDI(target.X17, target.SP, 0),
+				target.STR(target.X17, target.X16, record(jit.RecordSP)),
+			},
+			target.LDI(target.X17, 7),
+			[]asm.Instruction{
+				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.ADDI(target.X25, target.X25, 32),
+				target.MOV(target.X0, r64.Reg(1)),
+				target.USE(target.X0),
 				target.BLLabel(entry),
 				target.SUBI(target.X25, target.X25, 32),
 			},

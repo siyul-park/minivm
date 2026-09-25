@@ -164,6 +164,10 @@ type lowering struct {
 	// activation (see rotate), and until an OpStore to that slot. Cleared
 	// entries and every later block read the slot instead.
 	args []asm.VReg
+	// param marks an OpLoad result that read a register-passed i64
+	// parameter (see args): already the raw unboxed payload, so its
+	// guard.kind moves instead of unboxing it.
+	param map[ssa.Value]bool
 
 	// op is the operation or terminator being lowered.
 	op ssa.Operation
@@ -260,6 +264,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]types.Boxed{}, raw: map[ssa.Value]bool{},
 		borrow: borrowed(f), homes: homes, tmp: int32(f.Values()) + 4,
 		memo: map[int]map[ssa.Value]asm.VReg{}, remats: map[ssa.Value]bool{},
+		param: map[ssa.Value]bool{},
 	}
 	// A scalar or ref constant is rematerialized when f has a call and no
 	// loop block uses it: a loop keeps its constants in registers.
@@ -456,10 +461,10 @@ func registers(fn *types.Function) []types.Kind {
 	return types.Kinds(returns)
 }
 
-// arguments reports fn's register-convention parameters: at most two, none
-// i64, in X0/X1 like registers' results. Every other function passes its
-// arguments through slots alone. Caller and callee agree on this static fact
-// of fn at every unit and tier.
+// arguments reports fn's register-convention parameters: at most two, of any
+// kind (an i64 one stays raw), in X0/X1 like registers' results. Every other
+// function passes its arguments through slots alone. Caller and callee agree
+// on this static fact of fn at every unit and tier.
 func arguments(fn *types.Function) []types.Kind {
 	if fn == nil || fn.Typ == nil {
 		return nil
@@ -468,13 +473,7 @@ func arguments(fn *types.Function) []types.Kind {
 	if len(params) == 0 || len(params) > 2 {
 		return nil
 	}
-	kinds := types.Kinds(params)
-	for _, k := range kinds {
-		if k == types.KindI64 {
-			return nil
-		}
-	}
-	return kinds
+	return types.Kinds(params)
 }
 
 // preload loads block 0's parameters from the operand-stack slots the
@@ -517,12 +516,22 @@ func (l *lowering) operation(op ssa.Operation) error {
 	case ssa.OpLoad:
 		if i, ok := l.argument(op.Slot); ok {
 			l.m.Move(l.a, l.Reg(op.Results[0]), l.args[i])
+			if l.f.Type(op.Results[0]) == ssa.TypeI64 {
+				l.raw[op.Results[0]] = true
+				l.param[op.Results[0]] = true
+			}
 			return nil
 		}
 		if l.f.Type(op.Results[0]) == ssa.TypeI64 {
 			l.raw[op.Results[0]] = true
 		}
 	case ssa.OpGuardKind:
+		// A register-passed i64 parameter's load already holds the raw
+		// unboxed payload (see param): its guard moves instead of unboxing.
+		if l.param[op.Args[0]] {
+			l.m.Move(l.a, l.Reg(op.Results[0]), l.Reg(op.Args[0]))
+			return nil
+		}
 		// Only a slot word reaches a guard (promote aliases the rest away);
 		// unboxing a raw int would corrupt it.
 		if !l.raw[op.Args[0]] {

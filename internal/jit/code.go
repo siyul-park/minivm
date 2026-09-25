@@ -50,6 +50,11 @@ type Code struct {
 	// when Return boxes to the frame. An i64 one reaches its frame slot as
 	// a raw word the caller must box.
 	Registers []types.Kind
+	// Arguments is the function's register-convention parameter kinds, nil
+	// when Prologue reads only slots. A caller whose i64 argument slot holds
+	// a heap ref (KindRef) must decline Entry: the Go entry stub unboxes an
+	// i64 parameter inline (SBFX), never through the heap.
+	Arguments []types.Kind
 	Exits     []Exit
 
 	// native is the body's own address: offset 0, what natives[Address]

@@ -16,7 +16,8 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// machine records every call Lower makes, in order.
+// machine records every call Lower makes, in order. With capture, Prologue
+// returns one register per argument, as arm64.Machine does.
 type machine struct {
 	calls     []string
 	kinds     []types.Kind
@@ -28,6 +29,7 @@ type machine struct {
 	uses      [][]asm.VReg
 	spills    []int
 	sites     []compile.Call
+	capture   bool
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
@@ -39,7 +41,14 @@ func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bo
 	m.count = count
 	m.arguments = arguments
 	m.results = results
-	return nil
+	if !m.capture {
+		return nil
+	}
+	regs := make([]asm.VReg, len(arguments))
+	for i := range arguments {
+		regs[i] = asm.NewVReg(int32(-2-i), asm.RegTypeInt, asm.Width64)
+	}
+	return regs
 }
 
 func (m *machine) Epilogue(*asm.Assembler) { m.calls = append(m.calls, "epilogue") }
@@ -418,7 +427,7 @@ func TestLower(t *testing.T) {
 		}}, exits)
 	})
 
-	t.Run("does not register-pass an i64 argument", func(t *testing.T) {
+	t.Run("register-passes an i64 argument", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		arg := constant(b, entry, types.BoxI64(7))
@@ -433,7 +442,7 @@ func TestLower(t *testing.T) {
 		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}}}
 		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
-		require.Empty(t, m.sites[0].Arguments)
+		require.Equal(t, []types.Kind{types.KindI64}, m.sites[0].Arguments)
 	})
 
 	t.Run("keeps the retain and release for a callee retained more than once", func(t *testing.T) {
@@ -614,6 +623,23 @@ func TestLower(t *testing.T) {
 
 		_, _, _, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
+	})
+
+	t.Run("moves a guard.kind of a register-passed i64 parameter instead of unboxing it", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		word := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{word}})
+		at := state(b, entry, 0)
+		value := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{word}, State: at, Results: []ssa.Value{value}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}})
+
+		m := &machine{capture: true}
+		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}}}
+		_, _, _, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"prologue", "move", "move", "return", "epilogue", "enter"}, m.calls)
 	})
 
 	t.Run("rejects an unguarded i64 slot word", func(t *testing.T) {

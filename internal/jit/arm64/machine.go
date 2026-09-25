@@ -96,7 +96,7 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, cou
 		case types.KindF64:
 			regs[i] = asm.NewVReg(m.temp, asm.RegTypeFloat, asm.Width64)
 			a.Emit(target.FMOV(regs[i], src))
-		case types.KindRef:
+		case types.KindRef, types.KindI64:
 			regs[i] = asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
 			a.Emit(target.MOV(regs[i], src))
 		default:
@@ -124,11 +124,13 @@ func (m *Machine) Epilogue(a *asm.Assembler) {
 // the function body stays at offset 0 for native-to-native calls. It loads
 // X25 and X27 from Context (the interpreter writes both before every Enter
 // and Resume), loads each register-convention parameter from its slot into
-// X0/X1 (low 32 bits for a narrow or f32 payload, the whole word for f64
-// and ref), calls the function's own entry, boxes each register-convention
-// result from X0/X1 into the VM frame by its declared kind (ref, f64 and
-// i64 stored raw; the caller boxes an i64), and returns to Go. Enter returns
-// the stub's label so Lower can resolve its byte offset after Build.
+// X0/X1 (low 32 bits for a narrow or f32 payload, the whole word for f64 and
+// ref, an i64's SBFX-extracted 49-bit payload: the caller declines Enter
+// when the slot holds a heap ref instead), calls the function's own entry,
+// boxes each register-convention result from X0/X1 into the VM frame by its
+// declared kind (ref, f64 and i64 stored raw; the caller boxes an i64), and
+// returns to Go. Enter returns the stub's label so Lower can resolve its
+// byte offset after Build.
 func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
 	label := a.Label()
 	a.Bind(label)
@@ -142,6 +144,9 @@ func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.L
 		switch k.Repr() {
 		case types.KindRef, types.KindF64:
 			a.Emit(target.LDR(dst, target.X25, int16(8*i)))
+		case types.KindI64:
+			a.Emit(target.LDR(dst, target.X25, int16(8*i)))
+			a.Emit(target.SBFX(dst, dst, 0, 49))
 		default:
 			a.Emit(target.LDR(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), target.X25, int16(8*i)))
 		}

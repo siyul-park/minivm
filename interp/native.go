@@ -234,7 +234,20 @@ func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool
 		n.count(i, addr, fn)
 		return false
 	}
-	retire := n.run(i, addr, fn, code, release, advance)
+	// Entry's SBFX unboxes an i64 register argument inline; a heap-promoted
+	// one (slot tagged Ref) would misread. Decline and run threaded instead,
+	// counting neither an entry nor a deopt.
+	bp := i.sp - len(fn.Typ.Params)
+	if release {
+		bp--
+	}
+	for index, k := range code.Arguments {
+		if k == types.KindI64 && i.stack[bp+index].Kind() == types.KindRef {
+			n.store.Leave()
+			return false
+		}
+	}
+	retire := n.run(i, addr, fn, code, bp, release, advance)
 	n.store.Leave()
 	if retire {
 		n.store.Retire(addr)
@@ -327,14 +340,10 @@ func (n *native) drain(i *Interpreter) {
 	n.candidates = live
 }
 
-// run executes one native call and reports whether it should retire.
-func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, release bool, advance int) bool {
-	params := len(fn.Typ.Params)
+// run executes one native call whose frame starts at bp and reports whether
+// it should retire.
+func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, bp int, release bool, advance int) bool {
 	returns := len(fn.Typ.Returns)
-	bp := i.sp - params
-	if release {
-		bp--
-	}
 
 	ctx := n.ctx
 	ctx.Stack = base(i.stack)
