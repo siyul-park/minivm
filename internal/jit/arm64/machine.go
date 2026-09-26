@@ -101,15 +101,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 		a.Emit(target.DEF(register(i)))
 	}
 	for i, dst := range args {
-		src := register(i)
-		switch {
-		case dst.Type() == asm.RegTypeFloat:
-			a.Emit(target.FMOV(dst, src))
-		case dst.Width() == asm.Width32:
-			a.Emit(target.MOVW(dst, src))
-		default:
-			a.Emit(target.MOV(dst, src))
-		}
+		convention(a, dst, i, true)
 	}
 }
 
@@ -207,7 +199,6 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 
 // Branch transfers control to labels: OpBranch takes labels[0] on nonzero,
 // OpTable takes labels[i] for index i and the last label out of range.
-// Branch emits a branch for a SSA terminator.
 func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label) {
 	switch t.Op {
 	case ssa.OpJump:
@@ -235,7 +226,6 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 
 // Return boxes results into the interpreter's return slots. OpReturn first
 // releases reference-capable frame slots, matching threaded RETURN.
-// Return emits a native return.
 func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 	base := len(m.kinds)
 	if t.Op == ssa.OpReturn {
@@ -277,15 +267,7 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 		// through the whole sequence, so the allocator never assigns a
 		// later Arg's own value to a register a prior move already wrote.
 		for i, v := range t.Args {
-			src, dst := s.Reg(v), register(i)
-			switch {
-			case src.Type() == asm.RegTypeFloat:
-				a.Emit(target.FMOV(dst, src))
-			case src.Width() == asm.Width32:
-				a.Emit(target.MOV(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), src))
-			default:
-				a.Emit(target.MOV(dst, src))
-			}
+			convention(a, s.Reg(v), i, false)
 		}
 		a.Emit(target.USE(target.X0))
 		if len(t.Args) > 1 {
@@ -313,8 +295,8 @@ func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 // writer, so both are exact at every trap), writes the exit id and trap,
 // then calls the preserving stub through EXIT; a resumed exit reloads X24,
 // which Go may have refilled. EXIT has BLR encoding with FlowNext, so use intervals stay
-// live across the stub; deopt does not resume and other exits resume in
-// native code.
+// live across the stub; a non-resuming exit does not resume and other exits
+// resume in native code.
 func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	trap := jit.TrapBridge
 	if k == jit.ExitDeopt {
@@ -335,7 +317,7 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	for _, u := range uses {
 		a.Emit(target.USE(u))
 	}
-	if k == jit.ExitDeopt {
+	if !k.Resumes() {
 		a.Emit(target.BRK(0))
 		return
 	}
@@ -361,7 +343,6 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 // through Context.Natives, or, when Self, branches directly to the unit's
 // own entry. Missing code, depth, or space takes ExitCall; an owned Callee
 // is released once the callee returns, a borrowed one left alone.
-// Call emits a native call.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > 4095 {
 		return false
@@ -399,15 +380,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	// boxed slot store (exits read only the slot). The moves sit right
 	// before the branch so no other value is allocated X0/X1 in between.
 	for i := range c.Arguments {
-		src, dst := s.Reg(c.Args[i]), register(i)
-		switch {
-		case src.Type() == asm.RegTypeFloat:
-			a.Emit(target.FMOV(dst, src))
-		case src.Width() == asm.Width32:
-			a.Emit(target.MOV(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), src))
-		default:
-			a.Emit(target.MOV(dst, src))
-		}
+		convention(a, s.Reg(c.Args[i]), i, false)
 	}
 	if len(c.Arguments) > 0 {
 		a.Emit(target.USE(target.X0))
@@ -434,16 +407,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	}
 	if len(c.Registers) > 0 {
 		for j, v := range c.Results {
-			dst := s.Reg(v)
-			src := register(j)
-			switch {
-			case dst.Type() == asm.RegTypeFloat:
-				a.Emit(target.FMOV(dst, src))
-			case dst.Width() == asm.Width32:
-				a.Emit(target.MOV(dst, asm.NewPReg(src.ID(), asm.RegTypeInt, asm.Width32)))
-			default:
-				a.Emit(target.MOV(dst, src))
-			}
+			convention(a, s.Reg(v), j, true)
 		}
 		return true
 	}
@@ -477,12 +441,41 @@ func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, word uint64) {
 	a.Emit(target.FMOV(dst, target.X16))
 }
 
-// register is the register-convention result register at index i (0 or 1).
+// register is the register-convention register at index i (0 or 1).
 func register(i int) asm.PReg {
 	if i == 1 {
 		return target.X1
 	}
 	return target.X0
+}
+
+// convention moves v to its register-convention slot i when into, or from it
+// otherwise, by v's own type and width: FMOV for a float v, a width-narrowed
+// move for a 32-bit v, a plain move otherwise. The slot register is always a
+// full-width X0/X1; only v may be float or 32-bit.
+func convention(a *asm.Assembler, v asm.Reg, i int, into bool) {
+	reg := register(i)
+	switch {
+	case v.Type() == asm.RegTypeFloat:
+		if into {
+			a.Emit(target.FMOV(v, reg))
+		} else {
+			a.Emit(target.FMOV(reg, v))
+		}
+	case v.Width() == asm.Width32:
+		if into {
+			// reg is full width; MOVW takes its low 32 bits into v.
+			a.Emit(target.MOVW(v, reg))
+		} else {
+			a.Emit(target.MOV(asm.NewPReg(reg.ID(), asm.RegTypeInt, asm.Width32), v))
+		}
+	default:
+		if into {
+			a.Emit(target.MOV(v, reg))
+		} else {
+			a.Emit(target.MOV(reg, v))
+		}
+	}
 }
 
 // load unboxes a slot: a narrow or f32 payload is the slot's low 32 bits,

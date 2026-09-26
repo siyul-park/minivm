@@ -199,7 +199,7 @@ func TestLower(t *testing.T) {
 		require.Len(t, exits, 1)
 		require.Equal(t, []int{0}, m.spills)
 		require.Empty(t, m.uses[0])
-		require.Equal(t, []jit.Local{{Index: 0, Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}}}, exits[0].Frames[0].Locals)
+		require.Equal(t, []jit.Local{{Index: 0, Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}}}, exits[0].Frame.Locals)
 	})
 
 	t.Run("keeps a deopt-only local live across a call that a callee deopt can materialize", func(t *testing.T) {
@@ -221,7 +221,7 @@ func TestLower(t *testing.T) {
 		// v, a constant, is loaded once for the call's map and kept live
 		// across the call; the local and the stack entry share it.
 		require.Len(t, m.sites[0].Live, 1)
-		frame := exits[0].Frames[0]
+		frame := exits[0].Frame
 		require.Equal(t, []jit.Local{{Index: 0, Value: frame.Stack[0].Value}}, frame.Locals)
 	})
 
@@ -320,10 +320,10 @@ func TestLower(t *testing.T) {
 			Kind: jit.ExitBridge,
 			Code: instr.MAP_GET,
 			Pops: 2,
-			Frames: []jit.Frame{{Address: 1, IP: 7, Returns: 1, Stack: []jit.Operand{
+			Frame: jit.Frame{Address: 1, IP: 7, Returns: 1, Stack: []jit.Operand{
 				{Value: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}}, Owned: true},
 				{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W1}}},
-			}}},
+			}},
 			Results: []types.Kind{types.KindRef},
 		}}, exits)
 	})
@@ -344,7 +344,7 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []string{"prologue", "const", "const", "exec", "jump", "exit 0 0", "return", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
-		require.Equal(t, 3, exits[0].Frames[0].IP)
+		require.Equal(t, 3, exits[0].Frame.IP)
 	})
 
 	t.Run("resumes after a release exit", func(t *testing.T) {
@@ -378,7 +378,7 @@ func TestLower(t *testing.T) {
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitBox, exits[0].Kind)
 		require.Equal(t, types.KindI64, exits[0].Word.Kind)
-		require.Equal(t, 9, exits[0].Frames[0].IP)
+		require.Equal(t, 9, exits[0].Frame.IP)
 	})
 
 	t.Run("lowers a wide i64 constant through a remat stall in a function with a call", func(t *testing.T) {
@@ -431,9 +431,9 @@ func TestLower(t *testing.T) {
 			Kind:   jit.ExitCall,
 			Callee: 2,
 			Owned:  false,
-			Frames: []jit.Frame{{Address: 1, IP: 1, Returns: 1, Stack: []jit.Operand{
+			Frame: jit.Frame{Address: 1, IP: 1, Returns: 1, Stack: []jit.Operand{
 				{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W0}}},
-			}}},
+			}},
 		}}, exits)
 	})
 
@@ -579,7 +579,7 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, jit.ExitSafepoint, exits[0].Kind)
-		require.Equal(t, 9, exits[0].Frames[0].IP)
+		require.Equal(t, 9, exits[0].Frame.IP)
 	})
 
 	t.Run("keeps a loop's constant in one register even when the function calls", func(t *testing.T) {

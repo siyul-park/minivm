@@ -63,8 +63,8 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitDeopt, exit.Kind)
-		require.Equal(t, 2*instr.New(instr.LOCAL_GET, 0).Width(), exit.Frames[0].IP)
-		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frames[0]))
+		require.Equal(t, 2*instr.New(instr.LOCAL_GET, 0).Width(), exit.Frame.IP)
+		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frame))
 	})
 
 	t.Run("boxes and stores a wide i64 through a resumable exit", func(t *testing.T) {
@@ -190,7 +190,7 @@ func TestNew(t *testing.T) {
 		badCtx := enter(t, mismatched)
 		badCtx.Heap = address(t, badHeap)
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, badCtx))
-		require.Zero(t, exits[badCtx.Exit()].Frames[0].IP)
+		require.Zero(t, exits[badCtx.Exit()].Frame.IP)
 	})
 
 	t.Run("bridges an operation it does not lower", func(t *testing.T) {
@@ -216,7 +216,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.ExitBridge, exit.Kind)
 		require.Equal(t, instr.MAP_GET, exit.Code)
 		require.Equal(t, []types.Kind{types.KindRef}, exit.Results)
-		require.Equal(t, []uint64{uint64(types.BoxRef(5)), 2}, operands(ctx, exit.Frames[0]))
+		require.Equal(t, []uint64{uint64(types.BoxRef(5)), 2}, operands(ctx, exit.Frame))
 
 		ctx.Results[0] = uint64(types.BoxRef(9))
 		require.Equal(t, jit.TrapReturn, jit.Resume(ctx))
@@ -342,8 +342,8 @@ func TestNew(t *testing.T) {
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitCall, exit.Kind)
 		require.Equal(t, 2, exit.Callee)
-		require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frames[0].IP-1]))
-		require.Empty(t, exit.Frames[0].Stack)
+		require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frame.IP-1]))
+		require.Empty(t, exit.Frame.Stack)
 		require.Equal(t, types.BoxI32(9), stack[1])
 		// The borrowed callee's retain is never emitted, so bridging costs
 		// no RC movement.
@@ -843,8 +843,8 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitDeopt, exit.Kind)
-		require.Equal(t, entry+instr.New(instr.LOCAL_GET, 0).Width()*2, exit.Frames[0].IP)
-		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frames[0]))
+		require.Equal(t, entry+instr.New(instr.LOCAL_GET, 0).Width()*2, exit.Frame.IP)
+		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frame))
 	})
 
 	t.Run("completes module code from a header entry", func(t *testing.T) {

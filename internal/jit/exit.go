@@ -24,9 +24,9 @@ type Exit struct {
 	// of its own: materializing the callee, or replaying the call, retains
 	// each.
 	Lent []int
-	// Frames are the interpreter frames at the exit, innermost last. An
-	// ExitRelease has none: it neither reads nor rebuilds them.
-	Frames []Frame
+	// Frame is the interpreter frame at the exit. An ExitRelease has a zero
+	// Frame: it neither reads nor rebuilds it.
+	Frame Frame
 	// Results are the kinds of the values an ExitBridge reads back from
 	// Context.Results, in order.
 	Results []types.Kind
@@ -38,9 +38,9 @@ type Exit struct {
 // Kind is why native code exits.
 type Kind uint8
 
-// Frame is one interpreter frame at an exit.
+// Frame is the interpreter frame at an exit.
 type Frame struct {
-	Address, Base, IP, Returns int
+	Address, IP, Returns int
 	// Stack is the operand stack, bottom first.
 	Stack []Operand
 	// Locals are slots the interpreter writes back before resuming.
@@ -88,6 +88,13 @@ const (
 	// wide i64 outside the inline range, into Context.Results[0].
 	ExitBox
 )
+
+// Resumes reports whether native code continues after k: ExitDeopt abandons
+// the activation and ExitCall hands it to the interpreter's own replay, so
+// neither returns to native code.
+func (k Kind) Resumes() bool {
+	return k != ExitDeopt && k != ExitCall
+}
 
 // String returns the exit kind name.
 func (k Kind) String() string {

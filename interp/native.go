@@ -578,7 +578,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 
 	ctx := n.ctx
 	k := int(ctx.Depth) - 1
-	m := exit.Frames[0]
+	m := exit.Frame
 	bp := int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
 	sp := bp + len(i.function(m.Address).Declared())
 
@@ -671,12 +671,12 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool)
 	// not own; the outermost activation is never lent one, since threaded
 	// code pushed its arguments owned.
 	lent := make([][]int, depth)
-	maps[depth-1] = exit.Frames[0]
+	maps[depth-1] = exit.Frame
 	owns[0] = release
 	for k := depth - 2; k >= 0; k-- {
 		code := n.store.Find(ctx.Records[k+1].PC)
 		e := code.Exits[ctx.Records[k].Exit]
-		maps[k] = e.Frames[0]
+		maps[k] = e.Frame
 		owns[k+1] = e.Owned
 		lent[k+1] = e.Lent
 	}

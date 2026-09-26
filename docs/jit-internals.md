@@ -91,7 +91,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 | `ExitCall` | `CALL` that cannot run natively | no |
 | `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `OpComplete` | yes |
 
-A non-resuming exit materializes native activations outermost-first, then continues threaded; `jit.Enter` never nests.
+`jit.Kind.Resumes` owns the "Resumes native" column above; `compile.stub`/`function` and `arm64.Machine.Exit` all read it instead of comparing kinds themselves. A non-resuming exit's stub ends in `BRK` and skips the `X24` (`Budget`) reload, since native code never runs past it; it materializes native activations outermost-first, then continues threaded, and `jit.Enter` never nests.
 
 | Exit | Resume rule |
 |---|---|

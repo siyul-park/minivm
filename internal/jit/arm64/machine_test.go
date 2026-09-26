@@ -306,8 +306,11 @@ func TestMachine_Lower(t *testing.T) {
 	type emit2 = func(dst, src asm.Reg) asm.Instruction
 	type emit3 = func(dst, src1, src2 asm.Reg) asm.Instruction
 	type test struct {
-		name  string
-		regs  regs
+		name string
+		regs regs
+		// guard, when set, lowers a shape guard first, unmeasured, so op's
+		// own rows can assume it already ran.
+		guard *ssa.Operation
 		op    ssa.Operation
 		rows  []asm.Instruction
 		lower bool
@@ -747,10 +750,433 @@ func TestMachine_Lower(t *testing.T) {
 		},
 	}...)
 
+	i32array := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+	i8array := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI8}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+	i1array := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI1}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+	refarray := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindRef}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+	structShape := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x10}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+
+	tests = append(tests, []test{
+		{
+			name: "admits a matching array and passes the same word through",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				}
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.TypedArray[int32](nil))))...)
+				return append(rows,
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "admits a struct of the exact type and additionally checks Typ",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x2a}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				}
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab((*types.Struct)(nil))))...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit))
+				rows = append(rows,
+					target.LDR(target.X16, vr(1), int16(jit.OffsetData)),
+					target.LDR(target.X16, target.X16, int16(jit.OffsetStructTyp)),
+				)
+				rows = append(rows, target.LDI(target.X17, uint64(0x2a))...)
+				return append(rows,
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "admits any struct generically when Type is unset",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				}
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab((*types.Struct)(nil))))...)
+				return append(rows,
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "declines a shape naming no representation",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.Kind(99)}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+		},
+		{
+			name:  "array.len loads the element count",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32},
+			guard: &i32array,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{2}, Results: []ssa.Value{3}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.MOVW(reg(i32, 3), vr(5)),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.get loads a 4-byte scalar element",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			guard: &i32array,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.LSLI(vr(7), vr(6), 2), target.ADD(vr(7), vr(4), vr(7)),
+				target.LDR(reg(i32, 4), vr(7), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.get loads a signed 1-byte element",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeI8},
+			guard: &i8array,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.ADD(vr(7), vr(4), vr(6)),
+				target.LDRSB(reg(ssa.TypeI8, 4), vr(7), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.get retains a loaded ref element",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeRef},
+			guard: &refarray,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
+					target.LDR(vr(4), vr(3), 0),
+					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+					target.SXTW(vr(6), reg(i32, 3)),
+					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
+					target.LDR(reg(ssa.TypeRef, 4), vr(7), 0),
+				}
+				return append(rows, retainRows(reg(ssa.TypeRef, 4))...)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "array.set releases the old element and stores a new ref, adopting it",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeRef},
+			guard: &refarray,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
+					target.LDR(vr(4), vr(3), 0),
+					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+					target.SXTW(vr(6), reg(i32, 3)),
+					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
+					target.LDR(vr(8), vr(7), 0),
+					target.STR(reg(ssa.TypeRef, 4), vr(7), 0),
+				}
+				return append(rows, releaseRows(vr(8))...)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "array.set boxes a scalar written into a []any element",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			guard: &refarray,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
+					target.LDR(vr(4), vr(3), 0),
+					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+					target.SXTW(vr(6), reg(i32, 3)),
+					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
+					target.UXTW(target.X16, reg(i32, 4)),
+				}
+				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
+				rows = append(rows,
+					target.ORR(target.X16, target.X16, target.X17),
+					target.LDR(vr(8), vr(7), 0),
+					target.STR(target.X16, vr(7), 0),
+				)
+				return append(rows, releaseRows(vr(8))...)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "array.set stores a 4-byte i32 element with the narrow STRW form",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			guard: &i32array,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.LSLI(vr(7), vr(6), 2), target.ADD(vr(7), vr(4), vr(7)),
+				target.STRW(reg(i32, 4), vr(7), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.set stores a 1-byte scalar element",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeI8},
+			guard: &i8array,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.ADD(vr(7), vr(4), vr(6)),
+				target.STRB(reg(ssa.TypeI8, 4), vr(7), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.set narrows an i32 value to a 0/1 byte for an i1 element",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			guard: &i1array,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.ADD(vr(7), vr(4), vr(6)),
+				target.CMPI(reg(i32, 4), 0), target.CSET(vr(8), target.CondNE),
+				target.STRB(vr(8), vr(7), 0),
+			},
+			lower: true,
+		},
+		{
+			name: "declines a container that carries no shape guard",
+			regs: regs{1: ssa.TypeRef, 3: i32, 4: i32},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{1, 3}, Results: []ssa.Value{4}},
+		},
+		{
+			name:  "struct.get loads a 4-byte field with no bounds check",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			guard: &structShape,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), int16(jit.OffsetStructData)),
+				target.SXTW(vr(5), reg(i32, 3)),
+				target.LSLI(vr(6), vr(5), 3), target.ADD(vr(6), vr(4), vr(6)),
+				target.LDR(reg(i32, 4), vr(6), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "struct.get retains a ref field",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeRef},
+			guard: &structShape,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.LDR(vr(4), vr(3), int16(jit.OffsetStructData)),
+					target.SXTW(vr(5), reg(i32, 3)),
+					target.LSLI(vr(6), vr(5), 3), target.ADD(vr(6), vr(4), vr(6)),
+					target.LDR(reg(ssa.TypeRef, 4), vr(6), 0),
+				}
+				return append(rows, retainRows(reg(ssa.TypeRef, 4))...)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "struct.set stores a 4-byte field, bounds-checked at Typ.Fields' own length",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			guard: &structShape,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
+					target.LDR(vr(5), vr(4), int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)),
+					target.SXTW(vr(6), reg(i32, 3)),
+					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
+				}
+				rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+				return append(rows,
+					target.MUL(vr(8), vr(6), target.X16), target.ADD(vr(8), vr(7), vr(8)),
+					target.LDRB(target.X16, vr(8), int16(jit.OffsetStructFieldKind)),
+					target.CMPI(target.X16, uint16(types.KindI32)), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(vr(9), vr(3), int16(jit.OffsetStructData)),
+					target.LSLI(vr(10), vr(6), 3), target.ADD(vr(10), vr(9), vr(10)),
+					target.UXTW(target.X16, reg(i32, 4)),
+					target.STR(target.X16, vr(10), 0),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "struct.set widens and sign-extends a 1-byte field",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeI8},
+			guard: &structShape,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
+					target.LDR(vr(5), vr(4), int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)),
+					target.SXTW(vr(6), reg(i32, 3)),
+					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
+				}
+				rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+				return append(rows,
+					target.MUL(vr(8), vr(6), target.X16), target.ADD(vr(8), vr(7), vr(8)),
+					target.LDRB(target.X16, vr(8), int16(jit.OffsetStructFieldKind)),
+					target.CMPI(target.X16, uint16(types.KindI8)), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(vr(9), vr(3), int16(jit.OffsetStructData)),
+					target.LSLI(vr(10), vr(6), 3), target.ADD(vr(10), vr(9), vr(10)),
+					target.SBFX(target.W16, reg(ssa.TypeI8, 4), 0, 8),
+					target.STR(target.X16, vr(10), 0),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "struct.set releases the old ref field and adopts the new one",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeRef},
+			guard: &structShape,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(2), target.X16, vr(2)),
+					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
+					target.LDR(vr(5), vr(4), int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)),
+					target.SXTW(vr(6), reg(i32, 3)),
+					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
+				}
+				rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+				rows = append(rows,
+					target.MUL(vr(8), vr(6), target.X16), target.ADD(vr(8), vr(7), vr(8)),
+					target.LDRB(target.X16, vr(8), int16(jit.OffsetStructFieldKind)),
+					target.CMPI(target.X16, uint16(types.KindRef)), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(vr(9), vr(3), int16(jit.OffsetStructData)),
+					target.LSLI(vr(10), vr(6), 3), target.ADD(vr(10), vr(9), vr(10)),
+					target.LDR(vr(11), vr(10), 0),
+					target.STR(reg(ssa.TypeRef, 4), vr(10), 0),
+				)
+				return append(rows, releaseRows(vr(11))...)
+			}(),
+			lower: true,
+		},
+		{
+			name: "ref.is_null tests the low word of a boxed ref, no guard required",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.REF_IS_NULL, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: []asm.Instruction{
+				target.SBFX(target.X16, reg(ssa.TypeRef, 1), 0, 32),
+				target.CMPI(target.X16, 0),
+				target.CSET(reg(ssa.TypeI1, 2), target.CondEQ),
+			},
+			lower: true,
+		},
+	}...)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, a := arm64.New(), asm.New(target.New())
 			m.Prologue(a, 0, true, compile.Layout{}, nil)
+			if tt.guard != nil {
+				require.True(t, m.Lower(a, *tt.guard, tt.regs))
+			}
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, tt.regs))
 			if tt.lower {
@@ -1317,6 +1743,12 @@ func TestMachine_Exit(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Exit(a, 4, jit.ExitDeopt, uses)
 		require.Equal(t, append(rows(4, jit.TrapDeopt), target.BRK(0)), a.Rows())
+	})
+
+	t.Run("never returns from a call", func(t *testing.T) {
+		a := asm.New(target.New())
+		arm64.New().Exit(a, 5, jit.ExitCall, uses)
+		require.Equal(t, append(rows(5, jit.TrapBridge), target.BRK(0)), a.Rows())
 	})
 }
 

@@ -58,9 +58,13 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 	if err != nil {
 		return nil, err
 	}
+	var args []types.Kind
+	if !u.OSR {
+		args = arguments(u.Function)
+	}
 	c, err := jit.NewCode(
 		u.Address, u.Entry, u.OSR, u.Tier, completion(f),
-		registers(u.Function), arguments(u.Function), code, exits, entry,
+		registers(u.Function), args, code, exits, entry,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)

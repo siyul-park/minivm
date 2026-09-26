@@ -101,7 +101,7 @@ type stall struct {
 // function-entry hotness counter. An OSR unit's block
 // 0 may carry parameters, the operand stack the interpreter left at its
 // header (transform.Translate roots there); Lower loads them itself (see
-// params) instead of rejecting them.
+// preload) instead of rejecting them.
 func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) ([]byte, []jit.Exit, int, error) {
 	if f.Len() == 0 {
 		return nil, nil, 0, fmt.Errorf("%w: function shape", ErrUnsupported)
@@ -345,7 +345,7 @@ func (l *lowering) function() error {
 	for _, s := range l.stubs {
 		l.a.Bind(s.label)
 		l.emit(s.id)
-		if k := l.exits[s.id].Kind; k != jit.ExitDeopt && k != jit.ExitCall {
+		if l.exits[s.id].Kind.Resumes() {
 			l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{s.resume})
 		}
 	}
@@ -597,11 +597,10 @@ func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
 }
 
 // stub places the stub of exit id; a resumable one continues at resume,
-// which its caller binds. ExitDeopt never resumes; ExitCall's interpreter
-// replay never returns to native code either.
+// which its caller binds.
 func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	s := stub{label: l.a.Label(), id: id}
-	if k := l.exits[id].Kind; k != jit.ExitDeopt && k != jit.ExitCall {
+	if l.exits[id].Kind.Resumes() {
 		s.resume = l.a.Label()
 	}
 	l.stubs = append(l.stubs, s)
@@ -714,52 +713,48 @@ func (l *lowering) exit(k jit.Kind) int {
 		l.fail(fmt.Errorf("%w: %s exits without a state", ErrUnsupported, l.op.Op))
 		return id
 	}
-	e.Frames = make([]jit.Frame, len(state.Frames))
-	for i, frame := range state.Frames {
-		f := &e.Frames[i]
-		*f = jit.Frame{Address: frame.Address, Base: frame.Base, IP: frame.IP, Returns: frame.Returns}
-		stack := frame.Stack
-		if k == jit.ExitCall && i == len(state.Frames)-1 {
-			stack = stack[:len(stack)-len(l.op.Args)]
-			f.IP += instr.Instruction(l.fn.Code[f.IP:]).Width()
+	frame := state.Frames[len(state.Frames)-1]
+	f := &e.Frame
+	*f = jit.Frame{Address: frame.Address, IP: frame.IP, Returns: frame.Returns}
+	stack := frame.Stack
+	if k == jit.ExitCall {
+		stack = stack[:len(stack)-len(l.op.Args)]
+		f.IP += instr.Instruction(l.fn.Code[f.IP:]).Width()
+	}
+	if len(stack) > 0 {
+		f.Stack = make([]jit.Operand, len(stack))
+	}
+	for j, o := range stack {
+		f.Stack[j].Owned = o.Owned
+		l.place(id, &f.Stack[j].Value, o.Value)
+	}
+	if len(frame.Locals) > 0 {
+		f.Locals = make([]jit.Local, len(frame.Locals))
+	}
+	for j, local := range frame.Locals {
+		to := &f.Locals[j]
+		to.Index = local.Index
+		// A call's map also describes the caller while a callee runs, so
+		// its promoted locals must stay live across the call itself.
+		if k == jit.ExitCall || slices.Contains(l.op.Args, local.Value) {
+			l.place(id, &to.Value, local.Value)
+			continue
 		}
-		if len(stack) > 0 {
-			f.Stack = make([]jit.Operand, len(stack))
+		slot, ok := l.homes[local.Index]
+		if !ok {
+			l.fail(fmt.Errorf("%w: deopt local %d has no home", ErrUnsupported, local.Index))
+			continue
 		}
-		for j, o := range stack {
-			f.Stack[j].Owned = o.Owned
-			l.place(id, &f.Stack[j].Value, o.Value)
+		if l.raw[local.Value] {
+			l.fail(fmt.Errorf("%w: exit %d names unguarded i64 slot word v%d", ErrUnsupported, id, local.Value))
+			continue
 		}
-		if len(frame.Locals) > 0 {
-			f.Locals = make([]jit.Local, len(frame.Locals))
-		}
-		for j, local := range frame.Locals {
-			to := &f.Locals[j]
-			to.Index = local.Index
-			// A call's map also describes the caller while a callee runs, so
-			// its promoted locals must stay live across the call itself.
-			if k == jit.ExitCall || slices.Contains(l.op.Args, local.Value) {
-				l.place(id, &to.Value, local.Value)
-				continue
-			}
-			slot, ok := l.homes[local.Index]
-			if !ok {
-				l.fail(fmt.Errorf("%w: deopt local %d has no home", ErrUnsupported, local.Index))
-				continue
-			}
-			if l.raw[local.Value] {
-				l.fail(fmt.Errorf("%w: exit %d names unguarded i64 slot word v%d", ErrUnsupported, id, local.Value))
-				continue
-			}
-			to.Value = jit.Value{Kind: l.f.Type(local.Value).Kind(), Loc: asm.Loc{Slot: slot, Spilled: true}}
-			l.saves[id] = append(l.saves[id], save{reg: l.Reg(local.Value), slot: slot})
-		}
+		to.Value = jit.Value{Kind: l.f.Type(local.Value).Kind(), Loc: asm.Loc{Slot: slot, Spilled: true}}
+		l.saves[id] = append(l.saves[id], save{reg: l.Reg(local.Value), slot: slot})
 	}
 	if k == jit.ExitBridge {
 		e.Code = l.op.Code
 		e.Pops = len(l.op.Args)
-	}
-	if k == jit.ExitBridge {
 		for _, v := range l.op.Results {
 			e.Results = append(e.Results, l.f.Type(v).Kind())
 		}
