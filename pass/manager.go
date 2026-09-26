@@ -20,14 +20,6 @@ type cacheKey struct {
 // ErrUnregisteredAnalysis reports a result type with no registered analysis.
 var ErrUnregisteredAnalysis = errors.New("unregistered analysis")
 
-// NewManager returns a pass manager.
-func NewManager() *Manager {
-	return &Manager{
-		analyses: make(map[reflect.Type]func(*Manager, any) (any, error)),
-		cache:    make(map[cacheKey]any),
-	}
-}
-
 // Register adds an analysis, keyed by its result type R.
 func Register[U, R any](m *Manager, a Analysis[U, R]) {
 	m.register(reflect.TypeFor[R](), func(m *Manager, unit any) (any, error) {
@@ -46,6 +38,21 @@ func GetResult[R any](m *Manager, unit any) (R, error) {
 		return zero, nil
 	}
 	return res.(R), nil
+}
+
+// NewManager returns a pass manager.
+func NewManager() *Manager {
+	return &Manager{
+		analyses: make(map[reflect.Type]func(*Manager, any) (any, error)),
+		cache:    make(map[cacheKey]any),
+	}
+}
+
+// Invalidate drops cached analyses when they may be stale.
+func (m *Manager) Invalidate(preserved bool) {
+	if !preserved {
+		clear(m.cache)
+	}
 }
 
 func (m *Manager) register(result reflect.Type, run func(*Manager, any) (any, error)) {
@@ -68,11 +75,4 @@ func (m *Manager) result(result reflect.Type, unit any) (any, error) {
 		m.cache[key] = res
 	}
 	return res, nil
-}
-
-// Invalidate drops cached analyses when they may be stale.
-func (m *Manager) Invalidate(preserved bool) {
-	if !preserved {
-		clear(m.cache)
-	}
 }

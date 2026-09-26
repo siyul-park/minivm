@@ -8,7 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/graph"
 )
 
-func TestReversePostorder(t *testing.T) {
+func TestOrder(t *testing.T) {
 	t.Run("returns reachable nodes from the entry in reverse postorder", func(t *testing.T) {
 		g := newFixture(5, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}, {3, 4}})
 

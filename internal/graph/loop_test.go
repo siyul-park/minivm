@@ -8,7 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/graph"
 )
 
-func TestLoopHeaders(t *testing.T) {
+func TestHeaders(t *testing.T) {
 	t.Run("finds no headers in an acyclic graph", func(t *testing.T) {
 		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
 		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
@@ -45,7 +45,7 @@ func TestLoopHeaders(t *testing.T) {
 	})
 }
 
-func TestLoopBody(t *testing.T) {
+func TestBody(t *testing.T) {
 	t.Run("returns the natural loop nodes including the header", func(t *testing.T) {
 		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}, {3, 4}})
 		d := graph.NewDominance(g)

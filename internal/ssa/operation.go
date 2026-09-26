@@ -72,26 +72,6 @@ type Operand struct {
 	Owned bool
 }
 
-// Word returns b's OpConst word: the native word of b's kind. A wide i64
-// has no Boxed form and never reaches here.
-func Word(b types.Boxed) uint64 {
-	switch b.Kind() {
-	case types.KindI1:
-		if b.Bool() {
-			return 1
-		}
-		return 0
-	case types.KindI8, types.KindI32:
-		return uint64(uint32(b.I32()))
-	case types.KindI64:
-		return uint64(b.I64())
-	case types.KindF32:
-		return uint64(math.Float32bits(b.F32()))
-	default:
-		return uint64(b)
-	}
-}
-
 // Operation is one SSA instruction.
 type Operation struct {
 	// Op identifies the IR operation.
@@ -163,6 +143,26 @@ const (
 	SpaceGlobal
 	SpaceUpval
 )
+
+// Word returns b's OpConst word: the native word of b's kind. A wide i64
+// has no Boxed form and never reaches here.
+func Word(b types.Boxed) uint64 {
+	switch b.Kind() {
+	case types.KindI1:
+		if b.Bool() {
+			return 1
+		}
+		return 0
+	case types.KindI8, types.KindI32:
+		return uint64(uint32(b.I32()))
+	case types.KindI64:
+		return uint64(b.I64())
+	case types.KindF32:
+		return uint64(math.Float32bits(b.F32()))
+	default:
+		return uint64(b)
+	}
+}
 
 // OverflowsI64 reports opcodes that can exceed the boxed i64 payload.
 func OverflowsI64(code instr.Opcode) bool {

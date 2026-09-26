@@ -2,9 +2,8 @@ package ssa_test
 
 import (
 	"math"
-	"testing"
-
 	"reflect"
+	"testing"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
@@ -152,6 +151,27 @@ func TestFormat(t *testing.T) {
 			"\treturn v1\n", ssa.Format(f))
 	})
 
+	t.Run("prints kind f64 even though its Kind value is the zero value", func(t *testing.T) {
+		b := ssa.New("f64shape")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		array := b.Value(ssa.TypeRef)
+		checked := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindF64}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{checked}})
+
+		f := b.Build()
+		require.NoError(t, ssa.Verify(f))
+		require.Equal(t, "func f64shape\n"+
+			"blk0: ()\n"+
+			"\tv1:state = state {addr=1 base=0 ip=0 returns=1 stack=[]}\n"+
+			"\tv2:ref = load local[0]\n"+
+			"\tv3:ref = guard.shape v2 kind f64 state v1\n"+
+			"\treturn v3\n", ssa.Format(f))
+	})
+
 	t.Run("prints every other operation form", func(t *testing.T) {
 		b := ssa.New("forms")
 		entry, stop, give, end := b.Block(), b.Block(), b.Block(), b.Block()
@@ -166,6 +186,7 @@ func TestFormat(t *testing.T) {
 		returned := b.Value(ssa.TypeI32)
 		fresh := b.Value(ssa.TypeRef)
 		field := b.Value(ssa.TypeI32)
+		record := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 2, Base: 4, IP: 3}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(7)), Results: []ssa.Value{callee}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval, Index: 1}, Results: []ssa.Value{slot}})
@@ -179,7 +200,8 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{fresh}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Shape: ssa.Shape{Struct: true, Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target, three}, State: state, Results: []ssa.Value{field}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{record}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{record, three}, State: state, Results: []ssa.Value{field}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
 
 		b.Term(stop, ssa.Terminator{Op: ssa.OpSuspend, State: state})
@@ -203,7 +225,8 @@ func TestFormat(t *testing.T) {
 			"\tv8:i32 = call v2, v6 state v1\n"+
 			"\tv9:ref = array.new_default v8 state v1\n"+
 			"\trelease v9 state v1\n"+
-			"\tv10:i32 = struct.get v4, v6 struct type 0x40 host int16 state v1\n"+
+			"\tv11:ref = guard.shape v4 struct type 0x40 host int16 state v1\n"+
+			"\tv10:i32 = struct.get v11, v6 state v1\n"+
 			"\ttable v10, blk1(), blk2(), blk3()\n"+
 			"blk1: () <-- (blk0)\n"+
 			"\tsuspend state v1\n"+
