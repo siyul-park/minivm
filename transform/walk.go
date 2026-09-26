@@ -311,7 +311,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		at := len(w.stack) - 1
-		_, target := w.callee(at)
+		target := w.callee(at)
 		if target == nil {
 			target = w.speculate(at)
 		}
@@ -424,16 +424,16 @@ func (w *walker) record(container fact) *types.StructType {
 	return nil
 }
 
-func (w *walker) callee(at int) (int, *types.Function) {
+func (w *walker) callee(at int) *types.Function {
 	o := w.stack[at]
 	if !o.referenceKnown || o.reference <= 0 {
-		return 0, nil
+		return nil
 	}
 	target := w.objects.function(o.reference)
 	if target == nil || target.Typ == nil {
-		return 0, nil
+		return nil
 	}
-	return o.reference, target
+	return target
 }
 
 // speculate admits an unresolved CALL's callee from the unit's recorded
@@ -568,6 +568,18 @@ func (w *walker) constant(word uint64, out fact) bool {
 	return true
 }
 
+// adopts returns the number of popped operands transferred to the destination.
+func adopts(code instr.Opcode, pops int) int {
+	switch {
+	case code.Writes(instr.Frame):
+		return pops
+	case code.Reads(instr.Heap) && code.Writes(instr.Heap):
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	if len(w.stack) < pops {
 		return false
@@ -636,14 +648,10 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 // pool is immortal. A global- or upvalue-backed borrowed argument is adopted
 // here, since the callee may overwrite that cell, and released by emit after
 // the call instead of by the callee. It returns the resolved target's
-// Borrows, or nil when the callee does not resolve to a known function.
+// Borrows: CALL reaches emit only after callee or speculate has resolved one.
 func (w *walker) call() []bool {
 	top := len(w.stack) - 1
-	_, target := w.callee(top)
-	if target == nil {
-		w.adopt()
-		return nil
-	}
+	target := w.callee(top)
 	borrows := Borrows(target)
 	base := top - len(borrows)
 	for i := range w.stack {
@@ -691,7 +699,7 @@ func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if len(w.stack) == 0 {
 		return ssa.Terminator{}, false
 	}
-	_, target := w.callee(len(w.stack) - 1)
+	target := w.callee(len(w.stack) - 1)
 	if target == nil || len(w.stack) < 1+len(target.Typ.Params) {
 		return ssa.Terminator{}, false
 	}

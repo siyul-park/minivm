@@ -48,46 +48,7 @@ var ErrEntry = errors.New("entry starts no block")
 // Translate converts one bytecode function from entry to SSA.
 // It returns ErrEntry for a non-block entry and nil when translation is unsupported.
 func Translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
-	if function == nil {
-		return nil, nil
-	}
-	return translate(module, address, function, entry)
-}
-
-// adopts returns the number of popped operands transferred to the destination.
-func adopts(code instr.Opcode, pops int) int {
-	switch {
-	case code.Writes(instr.Frame):
-		return pops
-	case code.Reads(instr.Heap) && code.Writes(instr.Heap):
-		return 1
-	default:
-		return 0
-	}
-}
-
-// Borrows reports, per parameter, whether fn borrows it: a reference
-// parameter fn never writes. Its native caller keeps ownership for the
-// call; fn neither retains nor releases it.
-func Borrows(fn *types.Function) []bool {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	written := map[int]bool{}
-	for _, inst := range instr.Unmarshal(fn.Code) {
-		if inst.Opcode().Writes(instr.Local) {
-			written[int(inst.Operand(0))] = true
-		}
-	}
-	borrows := make([]bool, len(fn.Typ.Params))
-	for i, param := range fn.Typ.Params {
-		borrows[i] = param.Kind() == types.KindRef && !written[i]
-	}
-	return borrows
-}
-
-func translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
-	if len(function.Code) == 0 {
+	if function == nil || len(function.Code) == 0 {
 		return nil, nil
 	}
 	f := facts{
@@ -128,6 +89,26 @@ func translate(module Module, address int, function *types.Function, entry int) 
 		built = rotate(built)
 	}
 	return built, nil
+}
+
+// Borrows reports, per parameter, whether fn borrows it: a reference
+// parameter fn never writes. Its native caller keeps ownership for the
+// call; fn neither retains nor releases it.
+func Borrows(fn *types.Function) []bool {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	written := map[int]bool{}
+	for _, inst := range instr.Unmarshal(fn.Code) {
+		if inst.Opcode().Writes(instr.Local) {
+			written[int(inst.Operand(0))] = true
+		}
+	}
+	borrows := make([]bool, len(fn.Typ.Params))
+	for i, param := range fn.Typ.Params {
+		borrows[i] = param.Kind() == types.KindRef && !written[i]
+	}
+	return borrows
 }
 
 // rotate prepends an empty block ahead of f's own block 0 when it has a

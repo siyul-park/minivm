@@ -195,7 +195,7 @@ func operation(function *Function, sites []position, o Operation) error {
 	default:
 		return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
 	}
-	if _, err := resume(function, sites, o.State, o.name(), deopts); err != nil {
+	if err := resume(function, sites, o.State, o.name(), deopts); err != nil {
 		return err
 	}
 	return typed(function, o)
@@ -304,28 +304,24 @@ func terminator(function *Function, sites []position, t Terminator) error {
 			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Op, edge.Block)
 		}
 	}
-	_, err := resume(function, sites, t.State, t.Op.String(), deopts)
-	if err != nil {
-		return err
-	}
-	return nil
+	return resume(function, sites, t.State, t.Op.String(), deopts)
 }
 
-func resume(function *Function, sites []position, v Value, name string, deopts bool) (Operation, error) {
+func resume(function *Function, sites []position, v Value, name string, deopts bool) error {
 	if !deopts {
 		if v != NoValue {
-			return Operation{}, fmt.Errorf("%w: %s cannot resume into v%d", ErrState, name, v)
+			return fmt.Errorf("%w: %s cannot resume into v%d", ErrState, name, v)
 		}
-		return Operation{}, nil
+		return nil
 	}
 	if v <= NoValue || int(v) >= len(sites) || function.Type(v) != TypeState {
-		return Operation{}, fmt.Errorf("%w: %s resumes into v%d", ErrState, name, v)
+		return fmt.Errorf("%w: %s resumes into v%d", ErrState, name, v)
 	}
 	def := sites[v]
 	if def.index < 0 || function.Block(def.block).Operations[def.index].Op != OpState {
-		return Operation{}, fmt.Errorf("%w: v%d is not a state", ErrState, v)
+		return fmt.Errorf("%w: v%d is not a state", ErrState, v)
 	}
-	return function.Block(def.block).Operations[def.index], nil
+	return nil
 }
 
 // canonical rejects an OpConst whose result type's 32-bit lane has a nonzero
