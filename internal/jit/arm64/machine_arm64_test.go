@@ -88,7 +88,7 @@ func TestNew(t *testing.T) {
 		stack := []types.Boxed{0}
 		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
@@ -140,7 +140,7 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 0, 0, 1}
 		stack := []types.Boxed{types.BoxRef(3)}
 		ctx := enter(t, stack)
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.RC = address(t, rc)
 
 		// rc=1 on the old occupant: store's release is the last reference,
 		// so it takes its own resumable exit; native code never decrements
@@ -178,22 +178,19 @@ func TestNew(t *testing.T) {
 		heap := []types.Value{nil, nil, nil, types.I64(1 << 50)}
 		rc := []int{0, 0, 0, 2}
 		ctx := enter(t, promoted)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		raw = int64(1<<50) + 1
 		require.Equal(t, types.Boxed(uint64(raw)), promoted[0])
 		require.Equal(t, 1, rc[3])
-		runtime.KeepAlive(heap)
-		runtime.KeepAlive(rc)
 
 		mismatched := []types.Boxed{types.BoxRef(3)}
 		badHeap := []types.Value{nil, nil, nil, types.I32(5)}
 		badCtx := enter(t, mismatched)
-		badCtx.Heap = uintptr(unsafe.Pointer(&badHeap[0]))
+		badCtx.Heap = address(t, badHeap)
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, badCtx))
 		require.Zero(t, exits[badCtx.Exit()].Frames[0].IP)
-		runtime.KeepAlive(badHeap)
 	})
 
 	t.Run("bridges an operation it does not lower", func(t *testing.T) {
@@ -242,7 +239,7 @@ func TestNew(t *testing.T) {
 		stack := []types.Boxed{types.BoxRef(2)}
 		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
@@ -264,7 +261,7 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(3)}
 		ctx := enter(t, stack)
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.RC = address(t, rc)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, []int{0, 0, 0, 1}, rc)
 		require.Equal(t, types.BoxI32(1), stack[0])
@@ -288,8 +285,8 @@ func TestNew(t *testing.T) {
 		stack := make([]types.Boxed, 64)
 		stack[0] = types.BoxI32(10)
 		ctx := enter(t, stack)
-		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Natives = address(t, natives)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(55), stack[0])
@@ -314,8 +311,8 @@ func TestNew(t *testing.T) {
 		stack := make([]types.Boxed, 64)
 		stack[0] = types.BoxI32(10)
 		ctx := enter(t, stack)
-		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Natives = address(t, natives)
+		ctx.RC = address(t, rc)
 		ctx.Limit = 2
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code+uintptr(stub), ctx))
@@ -338,8 +335,8 @@ func TestNew(t *testing.T) {
 		stack := make([]types.Boxed, 64)
 		stack[0] = types.BoxI32(10)
 		ctx := enter(t, stack)
-		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Natives = address(t, natives)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
@@ -369,8 +366,8 @@ func TestNew(t *testing.T) {
 			stack := make([]types.Boxed, 64)
 			stack[0] = types.BoxI32(10)
 			ctx := enter(t, stack)
-			ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
-			ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+			ctx.Natives = address(t, natives)
+			ctx.RC = address(t, rc)
 			limit(ctx, stack)
 
 			require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
@@ -488,7 +485,7 @@ func TestNew(t *testing.T) {
 		natives := []uintptr{0, 0, 0, 0, 0, 0, 0, calleeBody}
 		stack := make([]types.Boxed, 1)
 		ctx := enter(t, stack)
-		ctx.Natives = uintptr(unsafe.Pointer(&natives[0]))
+		ctx.Natives = address(t, natives)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(42), stack[0])
@@ -538,8 +535,8 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 2}
 		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(100), stack[0])
@@ -562,8 +559,8 @@ func TestNew(t *testing.T) {
 		stack := []types.Boxed{types.BoxRef(1)}
 		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxRef(2), stack[0])
@@ -597,7 +594,7 @@ func TestNew(t *testing.T) {
 		stack := make([]types.Boxed, 4)
 		code, _ := lower(t, arm64.New(), f, fn, m.Objects, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.Heap = address(t, heap)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(6), stack[0])
@@ -630,7 +627,7 @@ func TestNew(t *testing.T) {
 		stack := []types.Boxed{0}
 		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.Heap = address(t, heap)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		// int8(-1) -> int32(-1) -> uint32(0xFFFFFFFF) -> uint64(0x00000000FFFFFFFF).
@@ -682,8 +679,8 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 2}
 		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.TypedArray[int32]{1, 2, 3, 5, 7, 9}, heap[1])
@@ -700,8 +697,8 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 2}
 		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.TypedArray[int32]{-1, 42}, heap[1])
@@ -718,8 +715,8 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 2}
 		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.TypedArray[float32]{-1.5, 42.5}, heap[1])
@@ -741,8 +738,8 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 2}
 		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
-		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI1(true), stack[0])
@@ -757,7 +754,7 @@ func TestNew(t *testing.T) {
 		stack := []types.Boxed{types.BoxRef(1)}
 		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
-		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.Heap = address(t, heap)
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		require.Equal(t, jit.ExitDeopt, exits[ctx.Exit()].Kind)
@@ -949,15 +946,14 @@ func enter(t *testing.T, stack []types.Boxed) *jit.Context {
 	t.Helper()
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
-	ctx.FB = uintptr(unsafe.Pointer(&stack[0]))
+	ctx.FB = address(t, stack)
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
 	ctx.Limit = uint64(len(ctx.Records))
 	ctx.Budget = 1000
 	// entries backs the prologue's own entry count, indexed by address;
 	// none of these cases uses past 7.
 	entries := make([]int64, 8)
-	ctx.Entries = uintptr(unsafe.Pointer(&entries[0]))
-	t.Cleanup(func() { runtime.KeepAlive(entries) })
+	ctx.Entries = address(t, entries)
 	return ctx
 }
 
@@ -975,4 +971,11 @@ func operands(ctx *jit.Context, f jit.Frame) []uint64 {
 		out = append(out, read(ctx, o.Value))
 	}
 	return out
+}
+
+// address is the base of s kept on the heap for the test's life: native code
+// holds it as a uintptr, which a copied goroutine stack would leave dangling.
+func address[T any](t *testing.T, s []T) uintptr {
+	t.Cleanup(func() { runtime.KeepAlive(s) })
+	return uintptr(unsafe.Pointer(&s[0]))
 }

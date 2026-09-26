@@ -187,17 +187,15 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.U
 
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
-	ctx.FB = uintptr(unsafe.Pointer(&stack[0]))
+	ctx.FB = address(t, stack)
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
 	ctx.Limit = uint64(len(ctx.Records))
 	ctx.Budget = 1 << 20
 	ctx.Natives = store.Natives()
-	ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
-	ctx.Entries = uintptr(unsafe.Pointer(&entries[0]))
+	ctx.RC = address(t, rc)
+	ctx.Entries = address(t, entries)
 
 	trap := jit.Enter(c.Entry(), ctx)
-	runtime.KeepAlive(rc)
-	runtime.KeepAlive(entries)
 	return ctx, trap
 }
 
@@ -493,4 +491,11 @@ func TestCompile(t *testing.T) {
 			require.Zero(t, ctx.Depth)
 		}
 	})
+}
+
+// address is the base of s kept on the heap for the test's life: native code
+// holds it as a uintptr, which a copied goroutine stack would leave dangling.
+func address[T any](t *testing.T, s []T) uintptr {
+	t.Cleanup(func() { runtime.KeepAlive(s) })
+	return uintptr(unsafe.Pointer(&s[0]))
 }
