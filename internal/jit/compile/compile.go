@@ -398,7 +398,7 @@ func (l *lowering) function() error {
 	for _, s := range l.stubs {
 		l.a.Bind(s.label)
 		l.emit(s.id)
-		if l.exits[s.id].Kind != jit.ExitDeopt {
+		if k := l.exits[s.id].Kind; k != jit.ExitDeopt && k != jit.ExitCall {
 			l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{s.resume})
 		}
 	}
@@ -425,9 +425,10 @@ func registers(fn *types.Function) []types.Kind {
 }
 
 // arguments reports fn's register-convention parameters: at most two, of any
-// kind (an i64 one stays raw), in X0/X1 like registers' results. Every other
-// function passes its arguments through slots alone. Caller and callee agree
-// on this static fact of fn at every unit and tier.
+// kind (an i64 one stays raw), in the target's register-convention registers
+// like registers' results. Every other function passes its arguments through
+// slots alone. Caller and callee agree on this static fact of fn at every
+// unit and tier.
 func arguments(fn *types.Function) []types.Kind {
 	if fn == nil || fn.Typ == nil {
 		return nil
@@ -676,10 +677,11 @@ func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
 }
 
 // stub places the stub of exit id; a resumable one continues at resume,
-// which its caller binds.
+// which its caller binds. ExitDeopt never resumes; ExitCall's interpreter
+// replay never returns to native code either.
 func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	s := stub{label: l.a.Label(), id: id}
-	if l.exits[id].Kind != jit.ExitDeopt {
+	if k := l.exits[id].Kind; k != jit.ExitDeopt && k != jit.ExitCall {
 		s.resume = l.a.Label()
 	}
 	l.stubs = append(l.stubs, s)
@@ -721,7 +723,7 @@ func (l *lowering) call(op ssa.Operation) error {
 			l.exits[id].Lent = append(l.exits[id].Lent, j)
 		}
 	}
-	bridge, resume := l.stub(id)
+	bridge, _ := l.stub(id)
 	site := Call{
 		Address:   ref,
 		Callee:    callee,
@@ -732,7 +734,6 @@ func (l *lowering) call(op ssa.Operation) error {
 		Exit:      id,
 		Live:      l.live(id),
 		Bridge:    bridge,
-		Resume:    resume,
 		Owned:     owned,
 		Self:      !l.osr && ref == l.address,
 		Registers: registers(target),
@@ -834,10 +835,9 @@ func (l *lowering) exit(k jit.Kind) int {
 	}
 	if k == jit.ExitBridge {
 		e.Code = l.op.Code
-		e.Adopts = transform.Adopts(l.op.Code, len(l.op.Args))
 		e.Pops = len(l.op.Args)
 	}
-	if k == jit.ExitBridge || k == jit.ExitCall {
+	if k == jit.ExitBridge {
 		for _, v := range l.op.Results {
 			e.Results = append(e.Results, l.f.Type(v).Kind())
 		}

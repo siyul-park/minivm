@@ -291,7 +291,7 @@ func terminator(function *Function, sites []position, t Terminator) error {
 			return counted(t.Op.String(), args, edges)
 		}
 		deopts = t.State != NoValue
-	case OpExit, OpSuspend:
+	case OpExit:
 		if args != 0 || edges != 0 {
 			return counted(t.Op.String(), args, edges)
 		}
@@ -304,12 +304,9 @@ func terminator(function *Function, sites []position, t Terminator) error {
 			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Op, edge.Block)
 		}
 	}
-	state, err := resume(function, sites, t.State, t.Op.String(), deopts)
+	_, err := resume(function, sites, t.State, t.Op.String(), deopts)
 	if err != nil {
 		return err
-	}
-	if t.Op == OpSuspend && len(state.Frames) != 1 {
-		return fmt.Errorf("%w: %s resumes into %d frames", ErrState, t.Op, len(state.Frames))
 	}
 	return nil
 }

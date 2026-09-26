@@ -2,6 +2,7 @@
 package arm64
 
 import (
+	"math/bits"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -38,6 +39,11 @@ type Machine struct {
 	borrows []bool
 }
 
+// recordShift is jit.Record's size expressed as a left-shift amount, so the
+// activation depth (X27) turns into a Records byte offset by shifting
+// instead of multiplying; jit's own layout test pins the size to 32.
+var recordShift = uint8(bits.TrailingZeros64(uint64(unsafe.Sizeof(jit.Record{}))))
+
 // New returns an ARM64 machine.
 func New() *Machine {
 	return &Machine{}
@@ -63,7 +69,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		asm.Instruction{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
-		target.LSLI(target.X17, target.X27, 5),
+		target.LSLI(target.X17, target.X27, recordShift),
 		target.ADD(target.X17, target.Ctx, target.X17),
 		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
 		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
@@ -147,7 +153,7 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 			a.Emit(target.LDR(dst, target.X25, int16(8*i)))
 		case types.KindI64:
 			a.Emit(target.LDR(dst, target.X25, int16(8*i)))
-			a.Emit(target.SBFX(dst, dst, 0, 49))
+			a.Emit(target.SBFX(dst, dst, 0, types.VBits))
 		default:
 			a.Emit(target.LDR(asm.NewPReg(dst.ID(), asm.RegTypeInt, asm.Width32), target.X25, int16(8*i)))
 		}
@@ -388,7 +394,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
 		target.CMP(target.X27, target.X17),
 		target.BCondLabel(target.OpBCS, c.Bridge),
-		target.LSLI(target.X16, target.X27, 5),
+		target.LSLI(target.X16, target.X27, recordShift),
 		target.ADD(target.X16, target.Ctx, target.X16),
 		target.ADDI(target.X17, target.SP, 0),
 		target.STR(target.X17, target.X16, record(jit.RecordSP)),
@@ -435,7 +441,6 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if c.Owned {
 		m.release(a, s.Reg(c.Callee), s)
 	}
-	a.Bind(c.Resume)
 	if len(c.Registers) > 0 {
 		for j, v := range c.Results {
 			dst := s.Reg(v)
@@ -975,8 +980,8 @@ func (m *Machine) choose(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	word, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
 	inline, done := a.Label(), a.Label()
-	a.Emit(target.LSRI(target.X16, word, 49), target.TSTI(target.X16, 1), target.BCondLabel(target.OpBEQ, inline))
-	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>49)...)
+	a.Emit(target.LSRI(target.X16, word, types.VBits), target.TSTI(target.X16, 1), target.BCondLabel(target.OpBEQ, inline))
+	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>types.VBits)...)
 	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, inline))
 	heap := m.heap(a, word)
 	a.Emit(target.LDR(target.X16, heap, 0))
@@ -985,7 +990,7 @@ func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	a.Emit(target.LDR(dst, heap, int16(jit.OffsetData)), target.LDR(dst, dst, 0), target.BLabel(done))
 
 	a.Bind(inline)
-	a.Emit(target.SBFX(dst, word, 0, 49))
+	a.Emit(target.SBFX(dst, word, 0, types.VBits))
 	a.Bind(done)
 	return true
 }
@@ -1030,8 +1035,8 @@ func (m *Machine) release(a *asm.Assembler, ref asm.VReg, s compile.Site) {
 // value that is no reference skips; so does the null reference, a zero index,
 // unless null is counted.
 func (m *Machine) count(a *asm.Assembler, ref asm.VReg, skip asm.Label, null bool) {
-	a.Emit(target.LSRI(target.X16, ref, 49))
-	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>49)...)
+	a.Emit(target.LSRI(target.X16, ref, types.VBits))
+	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>types.VBits)...)
 	a.Emit(
 		target.CMP(target.X16, target.X17),
 		target.BCondLabel(target.OpBNE, skip),
@@ -1062,8 +1067,8 @@ func (m *Machine) box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	case types.KindF64, types.KindRef:
 		return src
 	case types.KindI64:
-		a.Emit(target.LDI(target.X16, 1<<48)...)
-		a.Emit(target.ADD(target.X17, src, target.X16), target.LSRI(target.X17, target.X17, 49))
+		a.Emit(target.LDI(target.X16, 1<<(types.VBits-1))...)
+		a.Emit(target.ADD(target.X17, src, target.X16), target.LSRI(target.X17, target.X17, types.VBits))
 		exit, resume := s.Box(src)
 		a.Emit(
 			target.CBNZLabel(target.X17, exit),

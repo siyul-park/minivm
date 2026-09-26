@@ -81,17 +81,6 @@ func TestNewCode(t *testing.T) {
 	})
 }
 
-func TestCode_Holds(t *testing.T) {
-	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, 0)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, c.Free()) })
-
-	require.False(t, c.Holds(c.Native()-1))
-	require.True(t, c.Holds(c.Native()))
-	require.True(t, c.Holds(c.Native()+uintptr(len(ret())-1)))
-	require.False(t, c.Holds(c.Native()+uintptr(len(ret()))))
-}
-
 func TestCode_Free(t *testing.T) {
 	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, 0)
 	require.NoError(t, err)

@@ -80,8 +80,7 @@ func completion(f *ssa.Function) int {
 	return 0
 }
 
-// passes is the tier's pipeline: Baseline folds and eliminates dead code;
-// Optimized runs the same order as O3.
+// passes is the tier's pipeline: Baseline folds and eliminates dead code.
 func passes(tier jit.Tier) []pass.Pass[*ssa.Function] {
 	switch tier {
 	case jit.Baseline:

@@ -118,7 +118,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 		case instr.RETURN_CALL:
 			return w.tail(ip)
 		case instr.YIELD, instr.RESUME:
-			return w.suspend(ip), true
+			return ssa.Terminator{}, false
 		}
 		if !w.instruction(inst) {
 			return ssa.Terminator{}, false
@@ -595,7 +595,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 		out[i] = w.builder.Value(t)
 	}
 
-	adopted := Adopts(opcode, pops)
+	adopted := adopts(opcode, pops)
 	var borrows []bool
 	switch {
 	case opcode.Writes(instr.Frame):
@@ -699,12 +699,6 @@ func (w *walker) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
 	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
-}
-
-func (w *walker) suspend(ip int) ssa.Terminator {
-	w.begin(ip)
-	w.adopt()
-	return ssa.Terminator{Op: ssa.OpSuspend, State: w.deopt()}
 }
 
 func (w *walker) guard(at int, shape ssa.Shape) {

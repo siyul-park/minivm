@@ -51,20 +51,11 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 	if function == nil {
 		return nil, nil
 	}
-	f, err := translate(module, address, function, entry)
-	if err != nil || f == nil {
-		return nil, err
-	}
-	for id := 0; id < f.Len(); id++ {
-		if f.Block(id).Terminator.Op == ssa.OpSuspend {
-			return nil, nil
-		}
-	}
-	return f, nil
+	return translate(module, address, function, entry)
 }
 
-// Adopts returns the number of popped operands transferred to the destination.
-func Adopts(code instr.Opcode, pops int) int {
+// adopts returns the number of popped operands transferred to the destination.
+func adopts(code instr.Opcode, pops int) int {
 	switch {
 	case code.Writes(instr.Frame):
 		return pops

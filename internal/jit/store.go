@@ -53,8 +53,7 @@ func (s *Store) Code(address int) *Code {
 }
 
 // CodeAt returns the published OSR code at (address, ip), or nil. Unlike
-// Code, it takes the mutex — an OSR site calls it only when its own counter
-// crosses a publish-check interval, never every iteration.
+// Code, it takes the mutex.
 func (s *Store) CodeAt(address, ip int) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -66,17 +65,17 @@ func (s *Store) Find(pc uintptr) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.codes {
-		if c := s.codes[i].Load(); c != nil && c.Holds(pc) {
+		if c := s.codes[i].Load(); c != nil && c.holds(pc) {
 			return c
 		}
 	}
 	for _, c := range s.osr {
-		if c.Holds(pc) {
+		if c.holds(pc) {
 			return c
 		}
 	}
 	for _, c := range s.retired {
-		if c.Holds(pc) {
+		if c.holds(pc) {
 			return c
 		}
 	}

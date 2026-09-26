@@ -112,9 +112,9 @@ type Call struct {
 	Exit int
 	Live []asm.VReg
 	// Bridge is the ExitCall the call takes when the callee is not native,
-	// the activation is too deep, or the frame does not fit. It resumes at
-	// Resume, which Call binds where both paths load the results.
-	Bridge, Resume asm.Label
+	// the activation is too deep, or the frame does not fit. The interpreter
+	// replays the call itself; Bridge never returns to native code.
+	Bridge asm.Label
 	// Owned reports whether the call adopted Callee's reference, so it
 	// releases it once the callee returns.
 	Owned bool
@@ -128,7 +128,8 @@ type Call struct {
 	// agree on it regardless of which unit or tier either compiles as.
 	Registers []types.Kind
 	// Arguments is the callee's register-convention parameters (see
-	// arguments): each also moves into X0/X1, on top of its slot store.
+	// arguments): each also moves into the target's register-convention
+	// registers, on top of its slot store.
 	Arguments []types.Kind
 }
 

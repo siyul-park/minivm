@@ -122,6 +122,9 @@ const resume = refute
 // next bridge count as paid-for native work rather than against resume.
 const amortize = 2
 
+// graduate is the Baseline entry count that tiers an address to Optimized.
+const graduate = 1024
+
 // mixed marks a dynamic CALL site (native.callees) that has seen more than
 // one callee: it never speculates.
 const mixed = -1
@@ -379,7 +382,7 @@ func (n *native) markFailed(addr int, tier jit.Tier) {
 }
 
 // drain publishes completed jobs, records permanent compile failures, and
-// tiers every Baseline candidate whose prologue count reached jit.Promote.
+// tiers every Baseline candidate whose prologue count reached graduate.
 // A candidate leaves once it is no longer Baseline or Optimized has failed.
 func (n *native) drain(i *Interpreter) {
 	for _, job := range n.queue.Drain() {
@@ -407,13 +410,13 @@ func (n *native) drain(i *Interpreter) {
 		n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
 	}
 	// Candidates are pool-wide: a native that never drains a Baseline job
-	// still promotes it once its own entries reach jit.Promote.
+	// still promotes it once its own entries reach graduate.
 	n.sweep(func(addr int) bool {
 		code := n.store.Code(addr)
 		if code == nil || code.Tier != jit.Baseline || n.hasFailed(addr, jit.Optimized) {
 			return false
 		}
-		if n.entries[addr] >= jit.Promote {
+		if n.entries[addr] >= graduate {
 			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.feedback(addr), Tier: jit.Optimized})
 		}
 		return true
@@ -485,7 +488,6 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	returns := len(fn.Typ.Returns)
 
 	ctx := n.ctx
-	ctx.Stack = base(i.stack)
 	ctx.Heap = heapBase(i.heap)
 	ctx.Globals = base(i.globals)
 	ctx.RC = rcBase(i.rc)
@@ -577,15 +579,14 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	ctx := n.ctx
 	k := int(ctx.Depth) - 1
 	m := exit.Frames[0]
-	bp := int((ctx.Records[k].FB - ctx.Stack) / unsafe.Sizeof(types.Boxed(0)))
+	bp := int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
 	sp := bp + len(i.function(m.Address).Declared())
 
 	tail := m.Stack[len(m.Stack)-exit.Pops:]
-	top := len(tail) - exit.Adopts
 	for j, o := range tail {
 		v := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
-		// A boxed wide i64 is fresh and already owned; only a ref borrows.
-		if o.Value.Kind == types.KindRef && (!o.Owned || j < top) {
+		// A boxed wide i64 is fresh and already owned; a ref is retained for the handler.
+		if o.Value.Kind == types.KindRef {
 			i.retainBox(v)
 		}
 		i.stack[sp+j] = v
@@ -604,7 +605,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 		// A bridgeable handler never writes its argument slots before it can
 		// panic, so i.stack[sp+j] still holds what was retained above.
 		for j, o := range tail {
-			if o.Value.Kind == types.KindRef && (!o.Owned || j < top) {
+			if o.Value.Kind == types.KindRef {
 				i.releaseBox(i.stack[sp+j])
 			}
 		}
@@ -723,7 +724,7 @@ func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Fra
 	f.code = n.exactCode(i, m.Address)
 	f.ref = m.Address
 	f.release = release
-	f.bp = int((ctx.Records[k].FB - ctx.Stack) / unsafe.Sizeof(types.Boxed(0)))
+	f.bp = int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
 	f.returns = m.Returns
 	f.ip = m.IP
 	f.upvals = nil

@@ -115,7 +115,6 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	}
 
 	ctx := n.ctx
-	ctx.Stack = base(i.stack)
 	ctx.Heap = heapBase(i.heap)
 	ctx.Globals = base(i.globals)
 	ctx.RC = rcBase(i.rc)

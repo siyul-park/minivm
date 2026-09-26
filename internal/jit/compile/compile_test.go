@@ -137,7 +137,6 @@ func (m *machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		a.Emit(arm64.USE(u))
 	}
 	a.Emit(arm64.BLabel(c.Bridge))
-	a.Bind(c.Resume)
 	for _, v := range c.Results {
 		a.Emit(arm64.LDI(s.Reg(v), 0)...)
 	}
@@ -431,9 +430,9 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		// No "retain" row: the callee's single retain, consumed only by
 		// this call, is redundant — the constant pool already holds it.
-		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
-		site.Bridge, site.Resume = 0, 0
+		site.Bridge = 0
 		require.Equal(t, compile.Call{
 			Address: 2, Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
 			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(10)}, Owned: false,
@@ -447,7 +446,6 @@ func TestLower(t *testing.T) {
 			Frames: []jit.Frame{{Address: 1, IP: 1, Returns: 1, Stack: []jit.Operand{
 				{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W0}}},
 			}}},
-			Results: []types.Kind{types.KindI32},
 		}}, exits)
 	})
 
@@ -515,7 +513,7 @@ func TestLower(t *testing.T) {
 		caller := function(1, 1, instr.New(instr.CALL))
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "retain", "retain", "call", "return", "exit 0 4", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "retain", "retain", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		require.True(t, site.Owned)
 		require.True(t, exits[0].Owned)
@@ -543,7 +541,7 @@ func TestLower(t *testing.T) {
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		// No "retain" row before either call.
-		require.Equal(t, []string{"prologue", "call", "call", "return", "exit 0 4", "jump", "exit 1 4", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "call", "call", "return", "exit 0 4", "exit 1 4", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 2)
 		require.False(t, exits[0].Owned)
 		require.False(t, exits[1].Owned)
@@ -832,11 +830,11 @@ func TestLower(t *testing.T) {
 		require.False(t, exits[0].Owned)
 	})
 
-	t.Run("rejects a suspension", func(t *testing.T) {
+	t.Run("rejects an unsupported terminator", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		at := state(b, entry, 0)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpSuspend, State: at})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpGuardKind, State: at})
 
 		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)

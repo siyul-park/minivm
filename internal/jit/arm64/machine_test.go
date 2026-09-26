@@ -956,11 +956,11 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("calls through the natives table and bridges when it cannot", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{})
-		bridge, join := a.Label(), a.Label()
+		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join, Owned: true,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Owned: true,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -1020,11 +1020,11 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("borrows a callee it does not own", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{})
-		bridge, join := a.Label(), a.Label()
+		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -1067,11 +1067,11 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("reads a register-convention result from X0 instead of the slot", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{})
-		bridge, join := a.Label(), a.Label()
+		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge,
 			Registers: []types.Kind{types.KindF64},
 		}, r))
 
@@ -1116,11 +1116,11 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("calls its own entry directly when it is a self call", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{})
-		bridge, join := a.Label(), a.Label()
+		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Resume: join, Owned: true, Self: true,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Owned: true, Self: true,
 		}, r))
 
 		// entry is Prologue's own label, bound before any other row: the
@@ -1176,11 +1176,11 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("moves register-passed arguments into X0/X1 on top of their boxed slot store", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{})
-		bridge, join := a.Label(), a.Label()
+		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1, 3}, Base: 4, Size: 3, Exit: 7,
-			Bridge: bridge, Resume: join, Self: true,
+			Bridge: bridge, Self: true,
 			Arguments: []types.Kind{types.KindI32, types.KindF64},
 		}, r))
 
@@ -1224,11 +1224,11 @@ func TestMachine_Call(t *testing.T) {
 		r64 := regs{1: ssa.TypeI64}
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{})
-		bridge, join := a.Label(), a.Label()
+		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Base: 4, Size: 3, Exit: 7,
-			Bridge: bridge, Resume: join, Self: true,
+			Bridge: bridge, Self: true,
 			Arguments: []types.Kind{types.KindI64},
 		}, r64))
 

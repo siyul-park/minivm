@@ -204,7 +204,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{record, three}, State: state, Results: []ssa.Value{field}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
 
-		b.Term(stop, ssa.Terminator{Op: ssa.OpSuspend, State: state})
+		b.Term(stop, ssa.Terminator{Op: ssa.OpReturn, State: state})
 		b.Term(give, ssa.Terminator{Op: ssa.OpExit, State: state})
 		b.Term(end, ssa.Terminator{Op: ssa.OpComplete})
 
@@ -229,7 +229,7 @@ func TestFormat(t *testing.T) {
 			"\tv10:i32 = struct.get v11, v6 state v1\n"+
 			"\ttable v10, blk1(), blk2(), blk3()\n"+
 			"blk1: () <-- (blk0)\n"+
-			"\tsuspend state v1\n"+
+			"\treturn state v1\n"+
 			"blk2: () <-- (blk0)\n"+
 			"\texit state v1\n"+
 			"blk3: () <-- (blk0)\n"+

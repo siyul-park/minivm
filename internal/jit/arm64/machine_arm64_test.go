@@ -342,7 +342,6 @@ func TestNew(t *testing.T) {
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitCall, exit.Kind)
 		require.Equal(t, 2, exit.Callee)
-		require.Equal(t, []types.Kind{types.KindI32}, exit.Results)
 		require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frames[0].IP-1]))
 		require.Empty(t, exit.Frames[0].Stack)
 		require.Equal(t, types.BoxI32(9), stack[1])

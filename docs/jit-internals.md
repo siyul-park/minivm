@@ -39,7 +39,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack. |
 | `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | `asm.State` first, then `Trap`, exit id, then `Stack`, `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes bases before every `Enter`/`Resume`. |
+| `jit.Context` | `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
 | `jit.Store` | Published code and `Context.Natives`. |
@@ -119,11 +119,11 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Publish | Non-OSR code replaces only a lower tier at an address; OSR code installs once at `(address, ip)`. |
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
-| Promotion | Baseline entries count calls; a live Baseline reaching `jit.Promote` queues Optimized. Optimized/OSR entries do not count. |
+| Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
 | Failure | A deopt refutes that tier. A compile failure is permanent only when feedback is unchanged from its snapshot. |
 | Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, or safepoint. |
-| Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach `jit.Promote` requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
+| Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 
 ## OSR
 

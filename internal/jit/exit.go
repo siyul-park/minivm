@@ -11,16 +11,14 @@ type Exit struct {
 	Kind Kind
 	// Code is the opcode resumed by an ExitBridge.
 	Code instr.Opcode
-	// Adopts is the number of popped operands transferred to Code.
-	Adopts int
 	// Pops is Code's own operand count: the number of Frame.Stack's own
 	// trailing entries, top frame, an ExitBridge resume reads as arguments.
 	Pops int
-	// Callee is the function address resumed by an ExitCall.
+	// Callee is the function address an ExitCall replays.
 	Callee int
 	// Owned reports whether the call site retained Callee's reference: an
-	// ExitCall replay must retainBox a borrowed Callee before pushing it, so
-	// the interpreter's own CALL has a reference of its own to release.
+	// ExitCall replay must retain a borrowed Callee's reference itself before
+	// pushing it, so the interpreter's own CALL has one of its own to release.
 	Owned bool
 	// Lent are the callee frame slots this call passes without a reference
 	// of its own: materializing the callee, or replaying the call, retains
@@ -30,7 +28,7 @@ type Exit struct {
 	// ExitRelease has none: it neither reads nor rebuilds them.
 	Frames []Frame
 	// Results are the kinds of the values an ExitBridge reads back from
-	// Context.Results, or an ExitCall from the callee's frame base, in order.
+	// Context.Results, in order.
 	Results []types.Kind
 	// Word is the value an ExitRelease or ExitBox hands to the interpreter:
 	// the reference to release, or the raw i64 word to box.
@@ -80,11 +78,11 @@ const (
 	// interpreter to run its safepoint and refill Context.Budget.
 	ExitSafepoint
 	// ExitRelease suspends native code for the interpreter to release the
-	// last reference to Release.
+	// last reference named by Word.
 	ExitRelease
-	// ExitCall suspends native code for the interpreter to call Callee; it
-	// resumes once the callee returns. Frames are the caller's state after
-	// the call, which is also its state while a native callee runs.
+	// ExitCall abandons native code for the interpreter to replay the call to
+	// Callee; it never resumes native code. Frames are the caller's state
+	// after the call, which is also its state while a native callee runs.
 	ExitCall
 	// ExitBox suspends native code for the interpreter to heap-box Word, a
 	// wide i64 outside the inline range, into Context.Results[0].

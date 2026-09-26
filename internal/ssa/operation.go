@@ -135,7 +135,6 @@ const (
 	OpReturn
 	OpComplete
 	OpExit
-	OpSuspend
 )
 
 const (
@@ -212,8 +211,6 @@ func (o Op) String() string {
 		return "complete"
 	case OpExit:
 		return "exit"
-	case OpSuspend:
-		return "suspend"
 	default:
 		return "invalid"
 	}

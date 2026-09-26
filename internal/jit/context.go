@@ -26,8 +26,9 @@ type Context struct {
 	trap Trap
 	exit uint64
 
-	// Bases are written by the interpreter before every Enter and Resume.
-	Stack   uintptr
+	// Bases are all written by the interpreter before Enter; Heap and RC are
+	// rewritten before every Resume too, since serving an exit can grow and
+	// so relocate those two append-grown slices, never the others.
 	Heap    uintptr
 	Globals uintptr
 	RC      uintptr
@@ -79,7 +80,6 @@ func (t Trap) String() string {
 const (
 	OffsetTrap    = unsafe.Offsetof(Context{}.trap)
 	OffsetExit    = unsafe.Offsetof(Context{}.exit)
-	OffsetStack   = unsafe.Offsetof(Context{}.Stack)
 	OffsetHeap    = unsafe.Offsetof(Context{}.Heap)
 	OffsetGlobals = unsafe.Offsetof(Context{}.Globals)
 	OffsetRC      = unsafe.Offsetof(Context{}.RC)

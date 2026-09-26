@@ -243,15 +243,6 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
-	t.Run("rejects a suspension from an inlined frame", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		state := b.Value(ssa.TypeState)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}, {Address: 2}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpSuspend, State: state})
-		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
-	})
-
 	t.Run("accepts a frame owning the reference it resumes with", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

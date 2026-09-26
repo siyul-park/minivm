@@ -629,23 +629,6 @@ blk0: ()
 	})
 }
 
-func TestAdopts(t *testing.T) {
-	tests := []struct {
-		code instr.Opcode
-		pops int
-		want int
-	}{
-		{instr.CALL, 3, 3},
-		{instr.ARRAY_SET, 3, 1},
-		{instr.I32_ADD, 2, 0},
-	}
-	for _, tt := range tests {
-		t.Run(instr.TypeOf(tt.code).Mnemonic, func(t *testing.T) {
-			require.Equal(t, tt.want, transform.Adopts(tt.code, tt.pops))
-		})
-	}
-}
-
 func TestBorrows(t *testing.T) {
 	tests := []struct {
 		name string

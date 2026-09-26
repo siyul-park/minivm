@@ -52,11 +52,6 @@ const (
 	Optimized
 )
 
-// Promote is the entry count, written by a Baseline prologue on every
-// interpreted or native entry, at which the interpreter tiers an address to
-// Optimized.
-const Promote = 1024
-
 // NewCode links code into a new Buffer and returns one native code value with
 // its identity, signature metadata, exits, and Go entry stub.
 func NewCode(address, ip int, osr bool, tier Tier, results int, registers, arguments []types.Kind, code []byte, exits []Exit, stub int) (*Code, error) {
@@ -103,8 +98,8 @@ func (c *Code) Entry() uintptr {
 	return c.entry
 }
 
-// Holds reports whether pc lies inside c's native code.
-func (c *Code) Holds(pc uintptr) bool {
+// holds reports whether pc lies inside c's native code.
+func (c *Code) holds(pc uintptr) bool {
 	return pc >= c.native && pc < c.native+uintptr(c.size)
 }
 

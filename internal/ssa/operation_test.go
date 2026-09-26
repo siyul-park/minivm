@@ -78,12 +78,8 @@ func TestOp_String(t *testing.T) {
 		require.Equal(t, "exit", ssa.OpExit.String())
 	})
 
-	t.Run("names suspend", func(t *testing.T) {
-		require.Equal(t, "suspend", ssa.OpSuspend.String())
-	})
-
 	t.Run("names an unknown operation invalid", func(t *testing.T) {
-		require.Equal(t, "invalid", (ssa.OpSuspend + 1).String())
+		require.Equal(t, "invalid", (ssa.OpExit + 1).String())
 	})
 }
 
