@@ -6,13 +6,11 @@ Owns test contracts, structure, methodology, reachability, completeness, and val
 
 ## Contract
 
-Tests are the executable specification of a feature. A test `MUST` show how the feature is used and what behavior it promises; test structure exists to preserve that specification, not to mirror implementation or maximize coverage.
+Tests are the executable specification of a feature. A test `MUST` show public usage and promised behavior; structure serves that contract, not implementation shape or coverage.
 
 ### Public Boundary
 
-Feature contract tests `MUST` use only target-package public symbols and `MUST` live in an external test package (`package <target>_test`). This makes the user-visible boundary explicit and prevents unexported implementation dependencies.
-
-The agent `MUST NOT` wrap or re-abstract the target package merely to remove duplication. A wrapper that hides target API usage cannot serve as the feature specification. Setup helpers `MAY` be used only when they do not hide the specified behavior.
+Feature contract tests `MUST` use only target-package public symbols and `MUST` live in `package <target>_test`. Wrappers that hide target API usage `MUST NOT` be added merely for reuse; setup helpers `MAY` exist only when they keep the specified behavior visible.
 
 ### Readability
 
@@ -20,13 +18,13 @@ Tests `MUST` stay clear, concise, and directly understandable. Each case `MUST` 
 
 ### Organization
 
-Each public symbol under test `MUST` have one top-level test function as its test owner. Its detailed cases `MUST` belong directly under that function; test hierarchy `MUST` be limited to one level and nested cases `MUST NOT` be used.
+Each public symbol `MUST` have one top-level test owner; its cases sit directly beneath it at one depth. A test function `MUST` use either direct cases or table-driven cases, never both, and `MUST NOT` mix abstraction levels.
 
-The agent `MUST` use one case representation per test function: direct cases or table-driven cases, never both. It `MUST NOT` mix cases with different abstraction levels or depths.
+`require.Eventually` callbacks `MUST` contain no assertions. They `MUST` capture results and errors, return only readiness conditions, and assert the captured state after polling.
 
 When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice `MAY` be used. The data and generation code `MUST` remain simple enough to read as specification.
 
-Tests `MUST` use only the public interface of the code under test. Direct reference to a private symbol indicates a design problem and `MUST` be resolved by changing the design so the behavior is testable through its appropriate public boundary.
+Tests `MUST` use only the code under test's public interface. Direct private-symbol reference indicates a design problem and `MUST` be resolved by changing the design so the behavior is specified through its proper boundary.
 
 ### F.I.R.S.T.
 
@@ -46,7 +44,7 @@ Tests `MUST` cover applicable success, failure, boundaries, ownership/lifecycle,
 
 ## Evidence
 
-Coverage measures reachability, not quality. When behavior already exists and no red phase is available, the agent `MUST` use coverage to prove reachability and `MUST NOT` change production behavior to manufacture a failure.
+Coverage proves reachability, not quality. When no red phase is available, `MUST` use coverage to prove execution and `MUST NOT` alter production behavior to manufacture failure.
 
 | Layer | Proves |
 |---|---|
@@ -62,9 +60,18 @@ Coverage measures reachability, not quality. When behavior already exists and no
 
 ## Native / JIT
 
-Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points when a native backend exists. Interpreter tests `MUST` prove threaded parity through public results, errors, ownership, and execution; native parity becomes applicable when the rebuild exists.
+Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points when a native backend exists. Interpreter tests `MUST` prove threaded parity through public results, errors, ownership, and execution; native parity applies wherever the native tier can enter.
 
-ARM64 goldens are the native instruction specification: the agent `MUST` define expected instructions independently of the emitter, `MUST` build the input shape explicitly, `MUST` fix the expected stream first and then build the assembler, and `MUST` assert the complete stream and relevant metadata.
+Current proof layers for the native tier:
+
+| Layer | Owner |
+|---|---|
+| Backend goldens | `internal/jit/arm64` |
+| Compile maps | `internal/jit/compile` |
+| Runtime e2e | `internal/jit` |
+| Interpreter parity | `interp` `TestWithThreshold`, `benchmarks` `TestKernels/*/jit` |
+
+ARM64 goldens are the native instruction specification. The expected stream `MUST` be authored independently, with explicit input shape, complete instruction output, and required metadata checked.
 
 ## Validation
 

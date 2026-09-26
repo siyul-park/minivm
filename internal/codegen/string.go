@@ -4,13 +4,8 @@ import (
 	"github.com/dave/jennifer/jen"
 )
 
-// stringConcat joins the two operand strings. Results share one append-only
-// byte buffer: when the left operand's text ends exactly where the buffer ends,
-// the right operand is appended past that end and the join is published as a new
-// cell viewing the longer prefix. Bytes below any published length are never
-// rewritten, so every existing string keeps its own content whatever its
-// reference count, and an accumulating join costs no prefix copy. Any other left
-// operand starts a fresh buffer from a copy.
+// stringConcat reuses the left buffer only when its published text reaches the
+// buffer end. Published prefixes are immutable; otherwise it copies to a new buffer.
 func stringConcat() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(

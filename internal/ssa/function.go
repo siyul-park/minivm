@@ -1,50 +1,41 @@
-// Package ssa holds minivm's SSA intermediate representation: the form a JIT
-// frontend lowers bytecode or a recorded trace into, an optimizer rewrites,
-// and a backend emits native code from. Values are defined once and merge
-// points take block parameters rather than phis, so control flow carries its
-// own dataflow. It knows the opcode and value vocabularies and nothing about
-// how they execute: it never imports interp, the JIT, or any assembler.
 package ssa
 
-// Function is one compilable unit in SSA form: a block graph whose entry is
-// block 0, together with the type of every value the blocks define. It
-// satisfies graph.Graph, so dominance and natural loop headers are computed
-// over it directly.
+// Function is one SSA control-flow graph.
 type Function struct {
 	name   string
 	types  []Type
 	blocks []Block
 	succs  [][]int
 	preds  [][]int
+	entry  Frame
 }
 
-// Block is one straight-line run of operations ending in a Terminator. Params
-// are the values its predecessors pass on their edges; the entry block's
-// params are the operands live when the function is entered.
+// Block is a straight-line sequence ending in a terminator.
 type Block struct {
+	// Params are values passed by predecessor edges.
 	Params []Value
-	Ops    []Operation
-	Term   Terminator
+	// Operations are the block instructions.
+	Operations []Operation
+	// Terminator ends the block.
+	Terminator Terminator
 }
 
-// Name returns the function's name, as given to New. It carries no meaning
-// beyond identifying the function in a Format dump.
+// Name returns the function name.
 func (f *Function) Name() string {
 	return f.name
 }
 
-// Len returns the number of blocks.
+// Len returns the block count.
 func (f *Function) Len() int {
 	return len(f.blocks)
 }
 
-// Succ returns the blocks control may reach from block, edge order preserved,
-// including a repeated target named by more than one edge.
+// Succ returns block successors in edge order.
 func (f *Function) Succ(block int) []int {
 	return f.succs[block]
 }
 
-// Pred returns the blocks control may reach block from, each named once.
+// Pred returns blocks that reach block.
 func (f *Function) Pred(block int) []int {
 	return f.preds[block]
 }
@@ -54,11 +45,38 @@ func (f *Function) Block(id int) Block {
 	return f.blocks[id]
 }
 
-// Type returns v's type, or the invalid zero Type when v is not a value of
-// this function.
+// Values bounds the value ids: every value of f is below it.
+func (f *Function) Values() int {
+	return len(f.types)
+}
+
+// Type returns v's type or zero for an invalid value.
 func (f *Function) Type(v Value) Type {
 	if v <= NoValue || int(v) >= len(f.types) {
 		return 0
 	}
 	return f.types[v]
+}
+
+// Entry returns the frame f enters at (see Builder.Entry).
+func (f *Function) Entry() Frame {
+	return f.entry
+}
+
+func newFunction(name string, types []Type, blocks []Block, entry Frame) *Function {
+	f := &Function{name: name, types: types, blocks: blocks, entry: entry}
+	f.succs = make([][]int, len(blocks))
+	f.preds = make([][]int, len(blocks))
+	for id, block := range blocks {
+		for _, edge := range block.Terminator.Edges {
+			if edge.Block < 0 || edge.Block >= len(blocks) {
+				continue
+			}
+			f.succs[id] = append(f.succs[id], edge.Block)
+			if preds := f.preds[edge.Block]; len(preds) == 0 || preds[len(preds)-1] != id {
+				f.preds[edge.Block] = append(preds, id)
+			}
+		}
+	}
+	return f
 }

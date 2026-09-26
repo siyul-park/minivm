@@ -10,7 +10,7 @@ transform IR → mutation
 pipeline   ordered transforms + invalidation
 ```
 
-`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses `MUST NOT` mutate IR. Transforms `MUST` report preserved analyses through `pass.Preserved`.
+`pass.Manager` owns analysis registration/cache; `pass.Pipeline` owns transform order/invalidation. Analyses `MUST NOT` mutate IR. A transform returns `true` only when all cached analyses remain valid; errors `MUST` invalidate them because an in-place transform may have partially mutated IR.
 
 ## Layers
 
@@ -23,15 +23,15 @@ pipeline   ordered transforms + invalidation
 
 ## SSA
 
-Each pass owns one policy. Current passes include constant folding, algebraic simplification, local promotion, load forwarding, CSE, guard elimination, LICM, and DCE.
+Each pass owns one policy. Current passes include folding, simplification, promotion, forwarding, CSE, guard elimination, LICM, and DCE.
 
 SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`.
 
 ## Bytecode
 
-A size-changing transform `MUST` repair all position-sensitive metadata or leave the function unchanged. `transform.SSAPass` re-emits from SSA and `MUST` decline when the encoding is invalid.
+A size-changing transform `MUST` repair position-sensitive metadata or leave the function unchanged. `transform.SSAPass` `MUST` decline invalid encodings.
 
-The agent `SHOULD` prefer local passes, `SHOULD` reuse existing analyses, and `MUST` keep target-specific policy out of target-independent passes.
+Passes `SHOULD` stay local, reuse existing analyses, and keep target policy out of target-independent code.
 
 ## Related
 

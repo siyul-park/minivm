@@ -6,11 +6,17 @@ Applied naming/vocabulary reference.
 
 ## Current Vocabulary
 
-Current implementation vocabulary is owned by package docs. The rows below are historical/rebuild terms and MUST NOT be used to describe current symbols.
+Package and topic docs own current names. This document records only cross-package vocabulary; historical/rebuild terms `MUST NOT` be used for current symbols.
 
-## Rebuild Vocabulary
+## Native Vocabulary
 
-The native rebuild is planned. Future compiler, backend, and target packages MUST define terminology in their owner docs before implementation.
+New compiler or target terms `MUST` be introduced by the owning package or topic doc before use.
+
+| Package | Naming domain |
+|---|---|
+| `internal/jit` | native runtime and tiering |
+| `internal/jit/compile` | native compilation and lowering coordination |
+| `internal/jit/arm64` | ARM64 lowering |
 
 ## Ownership Vocabulary
 
@@ -25,7 +31,7 @@ The native rebuild is planned. Future compiler, backend, and target packages MUS
 
 Naming rules, symbol-removal review, ownership checks, and simplification checks are owned by `coding-patterns.md` and `refactoring.md`.
 
-The agent `MUST NOT` record rename history here. Historical decisions belong in dated plans/audits.
+Rename history does not belong here; dated plans and audits own historical decisions.
 
 ## Related
 

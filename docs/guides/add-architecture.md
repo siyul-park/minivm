@@ -2,7 +2,7 @@
 
 Checklist for adding architecture-specific executable-memory and encoding support.
 
-`compatibility.md` owns platform support; `instruction-set.md` owns opcode status; `jit-internals.md` owns the planned native rebuild.
+`compatibility.md` owns platform support; `instruction-set.md` owns opcode status; `jit-internals.md` owns the native tier's runtime contract.
 
 ## Ownership
 
@@ -12,7 +12,7 @@ Checklist for adding architecture-specific executable-memory and encoding suppor
 | reference encoder | `internal/asm/arm64/` |
 | executable memory | `internal/asm/` |
 | platform selection | `internal/asm/` build-tagged files |
-| future native lowering | JIT rebuild |
+| SSA lowering for a target | `internal/jit/<arch>/` implementing `compile.Machine` |
 | platform support | `compatibility.md` |
 
 An architecture package MUST expose one concrete constructor when its behavior is consumed by another package.
@@ -25,9 +25,9 @@ Encoders MUST accept the architecture-neutral instruction representation and MUS
 
 ## Native Layer
 
-Native compilation is planned, not current. The future native layer MUST keep target lowering separate from the encoder and MUST use the runtime contract defined during the JIT rebuild.
+`internal/jit/arm64` is the current native layer: it implements `compile.Machine` and keeps target lowering separate from the encoder in `internal/asm/arm64`, using the runtime contract `jit-internals.md` owns. A new architecture's lowering package MUST do the same.
 
-A future lowering MUST return the concrete target type from one exported constructor and MUST keep unsupported operations on the threaded execution path until an explicit bridge contract exists.
+A `compile.Machine` implementation MUST return the concrete target type from one exported constructor (see `arm64.New`) and MUST decline (return `false` from `Lower`) rather than emit incorrect code for an operation it does not support — `compile.Lower` bridges that operation into the interpreter through `ExitBridge` instead.
 
 ## Platform
 
@@ -35,18 +35,18 @@ The agent MUST update `compatibility.md` with GOOS/GOARCH, CGO, executable-memor
 
 ## Coverage
 
-The agent MUST start with low-risk paths in this order:
+Add proof in dependency order:
 
-1. register and instruction encoding;
-2. constants and simple data movement;
-3. arithmetic and comparison encodings;
-4. numeric conversions;
+1. registers/encoding;
+2. constants/data movement;
+3. arithmetic/comparisons;
+4. conversions;
 5. memory operands;
-6. branches and relaxation;
+6. branches/relaxation;
 7. executable-memory publication;
-8. architecture-specific runtime entry when the native rebuild exists.
+8. native entry.
 
-The agent MUST add native lowering, host interaction, calls, heap access, loops, and suspension only after the core runtime contract is stable.
+Calls, host interaction, heap access, loops, and suspension require the core runtime contract first.
 
 ## Validation
 
@@ -58,7 +58,7 @@ GOOS=linux GOARCH=<arch> go build ./...
 GOOS=linux GOARCH=<arch> go test -exec=true ./...
 ```
 
-When the native rebuild exists, the agent MUST also run its architecture-specific lowering tests and benchmark gates.
+Once the architecture has a `compile.Machine` lowering, the agent MUST also run its architecture-specific lowering tests and benchmark gates, following `internal/jit/arm64`'s golden tests as the pattern (see `testing.md` Native / JIT).
 
 ## Related
 

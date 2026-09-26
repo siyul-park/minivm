@@ -57,85 +57,94 @@ func TestVerify(t *testing.T) {
 	// checks the verifier's outcome. fn is built through types.FunctionBuilder
 	// except for "control/function branch to end", which needs a raw jump
 	// operand (see its comment) that no label-based builder call can produce.
-	functionCases := []struct {
-		name  string
-		fn    *types.Function
-		check func(t *testing.T, err error)
-	}{
-		{
-			// i8 and i1 share the i32 representation: an i8 param and an i1
-			// comparison result both satisfy i32 operands.
-			name: "valid/narrow int operands",
-			fn: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
-				Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
-				).MustBuild(),
-			check: func(t *testing.T, err error) { require.NoError(t, err) },
-		},
-		{
-			// Width-closed bitwise ops on a shared narrow kind keep that kind
-			// (i8 & i8 → i8); the result still satisfies an i32 operand, so
-			// chaining another i32 op on it verifies.
-			name: "valid/narrow bitwise operands",
-			fn: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
-				Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_AND),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_OR),
-					instr.New(instr.RETURN),
-				).MustBuild(),
-			check: func(t *testing.T, err error) { require.NoError(t, err) },
-		},
-		{
-			name: "calls/function returns",
-			fn: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
-				MustBuild(),
-			check: func(t *testing.T, err error) { require.NoError(t, err) },
-		},
-		{
-			// Left as a raw literal: it needs a BR_IF with a hand-picked jump
-			// operand landing past the function's last real instruction.
-			// FunctionBuilder only ever emits branches to labels it resolved
-			// to instructions it actually assembled, so it cannot produce this
-			// out-of-range target; the point of the case is exercising the
-			// verifier's rejection of a malformed function body.
-			name: "control/function branch to end",
-			fn: &types.Function{
-				Typ: &types.FunctionType{},
-				Code: instr.Marshal([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR_IF, 0),
-				}),
+	t.Run("function cases", func(t *testing.T) {
+		functionCases := []struct {
+			name     string
+			fn       *types.Function
+			wantErr  error
+			wantSlot int
+		}{
+			{
+				// i8 and i1 share the i32 representation: an i8 param and an i1
+				// comparison result both satisfy i32 operands.
+				name: "valid/narrow int operands",
+				fn: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
+					Emit(
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.I32_LT_S),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_ADD),
+						instr.New(instr.RETURN),
+					).MustBuild(),
+				wantSlot: -1,
 			},
-			check: func(t *testing.T, err error) { require.ErrorIs(t, err, program.ErrInvalidJump) },
-		},
-		{
-			name: "control/function falls through",
-			fn: types.NewFunctionBuilder(&types.FunctionType{}).
-				Emit(instr.New(instr.I32_CONST, 1)).
-				MustBuild(),
-			check: func(t *testing.T, err error) {
-				var ve *program.VerifyError
-				require.ErrorAs(t, err, &ve)
-				require.ErrorIs(t, ve.Err, program.ErrFallThrough)
-				require.Equal(t, 1, ve.Slot)
+			{
+				// Width-closed bitwise ops on a shared narrow kind keep that kind
+				// (i8 & i8 → i8); the result still satisfies an i32 operand, so
+				// chaining another i32 op on it verifies.
+				name: "valid/narrow bitwise operands",
+				fn: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
+					Emit(
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_AND),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.I32_OR),
+						instr.New(instr.RETURN),
+					).MustBuild(),
+				wantSlot: -1,
 			},
-		},
-	}
-	for _, tc := range functionCases {
-		t.Run(tc.name, func(t *testing.T) {
+			{
+				name: "calls/function returns",
+				fn: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+					Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+					MustBuild(),
+				wantSlot: -1,
+			},
+			{
+				// Left as a raw literal: it needs a BR_IF with a hand-picked jump
+				// operand landing past the function's last real instruction.
+				// FunctionBuilder only ever emits branches to labels it resolved
+				// to instructions it actually assembled, so it cannot produce this
+				// out-of-range target; the point of the case is exercising the
+				// verifier's rejection of a malformed function body.
+				name: "control/function branch to end",
+				fn: &types.Function{
+					Typ: &types.FunctionType{},
+					Code: instr.Marshal([]instr.Instruction{
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.BR_IF, 0),
+					}),
+				},
+				wantErr:  program.ErrInvalidJump,
+				wantSlot: -1,
+			},
+			{
+				name: "control/function falls through",
+				fn: types.NewFunctionBuilder(&types.FunctionType{}).
+					Emit(instr.New(instr.I32_CONST, 1)).
+					MustBuild(),
+				wantErr:  program.ErrFallThrough,
+				wantSlot: 1,
+			},
+		}
+		for _, tc := range functionCases {
 			prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(tc.fn))
-			tc.check(t, program.Verify(prog))
-		})
-	}
+			err := program.Verify(prog)
+			if tc.wantErr == nil {
+				require.NoError(t, err, tc.name)
+				continue
+			}
+			require.ErrorIs(t, err, tc.wantErr, tc.name)
+			if tc.wantSlot < 0 {
+				continue
+			}
+			var ve *program.VerifyError
+			require.ErrorAs(t, err, &ve, tc.name)
+			require.Equal(t, tc.wantSlot, ve.Slot, tc.name)
+		}
+	})
 
 	t.Run("calls/direct call", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
@@ -164,8 +173,8 @@ func TestVerify(t *testing.T) {
 			wantErr: program.ErrStackMismatch,
 		},
 	}
-	for _, tc := range mergeCases {
-		t.Run(tc.name, func(t *testing.T) {
+	t.Run("control/stack merge cases", func(t *testing.T) {
+		for _, tc := range mergeCases {
 			b := program.NewBuilder()
 			els, end := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0)
@@ -180,14 +189,14 @@ func TestVerify(t *testing.T) {
 			b.Bind(end)
 			b.Emit(instr.DROP)
 			prog, err := b.Build()
-			require.NoError(t, err)
+			require.NoError(t, err, tc.name)
 			if tc.wantErr != nil {
-				require.ErrorIs(t, program.Verify(prog), tc.wantErr)
+				require.ErrorIs(t, program.Verify(prog), tc.wantErr, tc.name)
 			} else {
-				require.NoError(t, program.Verify(prog))
+				require.NoError(t, program.Verify(prog), tc.name)
 			}
-		})
-	}
+		}
+	})
 
 	t.Run("control/loop fixpoint", func(t *testing.T) {
 		b := program.NewBuilder()
@@ -233,12 +242,12 @@ func TestVerify(t *testing.T) {
 			opts:   []func(*program.Program){program.WithGlobals(types.TypeI32)},
 		},
 	}
-	for _, tc := range boundsCases {
-		t.Run(tc.name, func(t *testing.T) {
+	t.Run("bounds cases", func(t *testing.T) {
+		for _, tc := range boundsCases {
 			prog := program.New(tc.instrs, tc.opts...)
-			require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange)
-		})
-	}
+			require.ErrorIs(t, program.Verify(prog), program.ErrIndexOutOfRange, tc.name)
+		}
+	})
 
 	t.Run("stack/underflow", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_ADD)})
@@ -293,13 +302,13 @@ func TestVerify(t *testing.T) {
 			opts:   []func(*program.Program){program.WithGlobals(types.TypeI32)},
 		},
 	}
-	for _, tc := range typeMismatchCases {
-		t.Run(tc.name, func(t *testing.T) {
+	t.Run("type mismatch cases", func(t *testing.T) {
+		for _, tc := range typeMismatchCases {
 			instrs := append([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1)))}, tc.follow...)
 			prog := program.New(instrs, tc.opts...)
-			require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch)
-		})
-	}
+			require.ErrorIs(t, program.Verify(prog), program.ErrTypeMismatch, tc.name)
+		}
+	})
 
 	t.Run("structure/unknown opcode", func(t *testing.T) {
 		prog := &program.Program{Code: []byte{0xFE}}

@@ -1170,14 +1170,8 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
-		// array.new_default's type index names a ref-element array type, so
-		// it allocates the generic *types.Array boxed-element representation
-		// (never TypedArray[int32]), while the local it is stored into is
-		// declared types.TypeI32Array. array.get's fused LOCAL_GET path
-		// proves only the local's declared element kind at threading time,
-		// so it must fall back from its specialized TypedArray[int32]
-		// assertion to the *types.Array representation actually on the heap
-		// instead of trapping.
+		// array.new_default stores a generic *types.Array in an i32-declared slot; fused array.get
+		// must miss TypedArray[int32] specialization and read the actual representation.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1189,14 +1183,8 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// LOCAL_SET does not recheck the declared type of the slot it writes
-		// into, so a local declared as a concrete i32-element array can still
-		// hold a different concrete element kind (here f32) at runtime.
-		// array.get's fused LOCAL_GET path proves only the local's declared
-		// element kind at threading time, so a miss on its specialized
-		// TypedArray[int32] assertion must fall back through every other
-		// concrete TypedArray[_] representation, not just *types.Array,
-		// instead of trapping a case the unfused handler accepts.
+		// LOCAL_SET permits a f32 array in an i32-declared slot. Fused array.get must miss the
+		// TypedArray[int32] specialization and preserve generic behavior.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1372,15 +1360,8 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// The generated GLOBAL_SET handler does not recheck the declared type
-		// of the slot it writes into, so a global declared as a concrete
-		// i32-element array can still hold a different concrete element kind
-		// (here f32) at runtime. array.get's fused GLOBAL_GET path proves
-		// only the global's declared element kind at threading time, so a
-		// miss on its specialized TypedArray[int32] assertion must fall back
-		// through every other concrete TypedArray[_] representation, not
-		// just *types.Array, instead of trapping a case the unfused handler
-		// accepts.
+		// GLOBAL_SET permits a f32 array in an i32-declared global. Fusion must miss
+		// TypedArray[int32] and fall back to the generic array reader.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1453,15 +1434,8 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// CLOSURE_NEW does not recheck a captured value's type against the
-		// callee's declared Captures, so an upvalue declared as a concrete
-		// i32-element array can still hold a different concrete element kind
-		// (here f32) at runtime. array.get's fused UPVAL_GET path proves only
-		// the upvalue's declared element kind at threading time, so a miss on
-		// its specialized TypedArray[int32] assertion must fall back through
-		// every other concrete TypedArray[_] representation, not just
-		// *types.Array, instead of trapping a case the unfused handler
-		// accepts.
+		// CLOSURE_NEW permits a f32 array in an i32-declared capture. Fusion must miss
+		// TypedArray[int32] and fall back to the generic array reader.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CONST_GET, 1),
@@ -1868,15 +1842,8 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		// Mirrors the LOCAL_GET parity case for array.get: array.new_default's
-		// type index names a ref-element array type, so it allocates the
-		// generic *types.Array boxed-element representation (never
-		// TypedArray[int32]), while the local it is stored into is declared
-		// types.TypeI32Array. array.set's fused LOCAL_GET path proves only
-		// the local's declared element kind at threading time, so a miss on
-		// its specialized TypedArray[int32] assertion must fall back to
-		// (*Interpreter).arraySet, which stores the boxed value as-is,
-		// instead of trapping.
+		// array.new_default produces generic *types.Array even when the slot declares i32
+		// elements. Fused array.set must miss specialization and preserve the generic store.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1889,19 +1856,8 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// Mirrors the LOCAL_GET parity case for array.get: LOCAL_SET does
-		// not recheck the declared type of the slot it writes into, so a
-		// local declared as a concrete i32-element array can still hold a
-		// different concrete element kind (here f32) at runtime. array.set's
-		// fused LOCAL_GET path proves only the local's declared element kind
-		// at threading time, so a miss on its specialized TypedArray[int32]
-		// assertion must fall back through every other concrete
-		// TypedArray[_] representation, not just *types.Array, instead of
-		// trapping a case the unfused handler accepts. The fallback stores
-		// through val.F32(), which reinterprets the fused I32_CONST
-		// payload's raw bits rather than numerically converting it, so
-		// I32_CONST 0 lands as float32(0) -- distinct from the constant's
-		// original 1.5, proving the write actually happened.
+		// LOCAL_SET permits a f32 array in an i32-declared slot. Fusion must miss
+		// TypedArray[int32] and preserve the generic store, including raw-bit conversion.
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_SET),
@@ -2085,21 +2041,21 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.BoxI32(4*heapRunway), got)
 	})
 
-	for _, tt := range []struct {
-		name        string
-		typ         types.Type
-		initial     types.Boxed
-		replacement types.Boxed
-		want        types.Value
-	}{
-		{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
-		{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
-		{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
-		{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
-		{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
-		{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
-	} {
-		t.Run("ref set and get round-trip "+tt.name, func(t *testing.T) {
+	t.Run("ref set and get round-trip", func(t *testing.T) {
+		for _, tt := range []struct {
+			name        string
+			typ         types.Type
+			initial     types.Boxed
+			replacement types.Boxed
+			want        types.Value
+		}{
+			{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
+			{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
+			{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
+			{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
+			{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
+			{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
+		} {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0),
 				instr.New(instr.REF_NEW),
@@ -2113,12 +2069,12 @@ func TestInterpreter_Run(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, tt.initial))
 			require.NoError(t, i.SetGlobal(1, tt.replacement))
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, got, tt.name)
+		}
+	})
 
 	modes := []struct {
 		name string
@@ -2127,28 +2083,29 @@ func TestInterpreter_Run(t *testing.T) {
 		{name: "standalone", opts: []interp.Option{interp.WithTick(1)}},
 		{name: "fused", opts: []interp.Option{}},
 	}
-	for _, tt := range runTests {
-		name := runTestName(tt.program)
-		for _, mode := range modes {
-			t.Run(name+"/"+mode.name, func(t *testing.T) {
+	t.Run("interpreter modes", func(t *testing.T) {
+		for _, tt := range runTests {
+			name := runTestName(tt.program)
+			for _, mode := range modes {
 				i := interp.New(tt.program, mode.opts...)
-				defer i.Close()
 
 				err := i.Run(context.Background())
 				if tt.err != nil {
-					require.ErrorIs(t, err, tt.err)
-					return
+					require.ErrorIs(t, err, tt.err, name+"/"+mode.name)
+					require.NoError(t, i.Close(), name+"/"+mode.name)
+					continue
 				}
-				require.NoError(t, err)
+				require.NoError(t, err, name+"/"+mode.name)
 				for _, want := range tt.values {
 					got, err := i.Pop()
-					require.NoError(t, err)
-					require.Equal(t, want, got)
+					require.NoError(t, err, name+"/"+mode.name)
+					require.Equal(t, want, got, name+"/"+mode.name)
 				}
-				require.Equal(t, len(tt.program.Locals), i.Len())
-			})
+				require.Equal(t, len(tt.program.Locals), i.Len(), name+"/"+mode.name)
+				require.NoError(t, i.Close(), name+"/"+mode.name)
+			}
 		}
-	}
+	})
 
 	var benchmarkNumeric []instr.Instruction
 	for range 64 {
@@ -2250,13 +2207,12 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		return result
 	}
-	for _, tt := range parityPrograms {
-		oracle := run(t, tt.prog, interp.WithTick(1))
-		t.Run("parity/"+tt.name+"/fused", func(t *testing.T) {
-			require.Equal(t, oracle, run(t, tt.prog))
-		})
-
-	}
+	t.Run("interpreter parity corpus", func(t *testing.T) {
+		for _, tt := range parityPrograms {
+			oracle := run(t, tt.prog, interp.WithTick(1))
+			require.Equal(t, oracle, run(t, tt.prog), tt.name)
+		}
+	})
 
 	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
@@ -2632,14 +2588,14 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
-	for _, tt := range []struct {
-		name string
-		opts []interp.Option
-	}{
-		{name: "fused"},
-		{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
-	} {
-		t.Run("host call releases the consumed callable ref on fused and generic paths "+tt.name, func(t *testing.T) {
+	t.Run("host call releases the consumed callable ref", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			opts []interp.Option
+		}{
+			{name: "fused"},
+			{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
+		} {
 			hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 					return []types.Boxed{args[0]}, nil
@@ -2651,12 +2607,12 @@ func TestInterpreter_Run(t *testing.T) {
 			i := interp.New(prog, tt.opts...)
 			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			rc, err := i.RefCount(1)
-			require.NoError(t, err)
-			require.Equal(t, 1, rc)
-		})
-	}
+			require.NoError(t, err, tt.name)
+			require.Equal(t, 1, rc, tt.name)
+		}
+	})
 
 	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
 		hostFn := interp.NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
@@ -2881,8 +2837,8 @@ func TestInterpreter_Run(t *testing.T) {
 			}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
 		},
 	}
-	for _, tt := range parity {
-		t.Run(tt.name, func(t *testing.T) {
+	t.Run("parity corpus", func(t *testing.T) {
+		for _, tt := range parity {
 			states := make([]parityState, 0, 2)
 			for _, opts := range [][]interp.Option{
 				{interp.WithTick(1)},
@@ -2891,9 +2847,9 @@ func TestInterpreter_Run(t *testing.T) {
 				i := interp.New(tt.prog, opts...)
 				err := i.Run(context.Background())
 				if tt.err == nil {
-					require.NoError(t, err)
+					require.NoError(t, err, tt.name)
 				} else {
-					require.ErrorIs(t, err, tt.err)
+					require.ErrorIs(t, err, tt.err, tt.name)
 				}
 
 				state := parityState{
@@ -2905,12 +2861,12 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 				for idx := 0; idx < state.sp; idx++ {
 					v, peekErr := i.Peek(state.sp - 1 - idx)
-					require.NoError(t, peekErr)
+					require.NoError(t, peekErr, tt.name)
 					state.stack = append(state.stack, v)
 				}
 				for idx := range tt.prog.Globals {
 					v, globalErr := i.Global(idx)
-					require.NoError(t, globalErr)
+					require.NoError(t, globalErr, tt.name)
 					state.globals = append(state.globals, v)
 				}
 				for addr := 1; addr < i.HeapLen(); addr++ {
@@ -2921,11 +2877,11 @@ func TestInterpreter_Run(t *testing.T) {
 					state.rc[addr] = count
 				}
 				states = append(states, state)
-				require.NoError(t, i.Close())
+				require.NoError(t, i.Close(), tt.name)
 			}
-			require.Equal(t, states[0], states[1])
-		})
-	}
+			require.Equal(t, states[0], states[1], tt.name)
+		}
+	})
 
 	// Regression: fused rhs loaders must borrow promoted I64 values without
 	// releasing the reference owned by the source slot.
@@ -3067,17 +3023,17 @@ func TestInterpreter_Run(t *testing.T) {
 			want: types.I32(8),
 		},
 	}
-	for _, tt := range fusions {
-		t.Run("fuses "+tt.name, func(t *testing.T) {
+	t.Run("fusion cases", func(t *testing.T) {
+		for _, tt := range fusions {
 			i := interp.New(tt.prog)
 			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, got, tt.name)
+		}
+	})
 
 	refs := []struct {
 		name string
@@ -3135,15 +3091,15 @@ func TestInterpreter_Run(t *testing.T) {
 			refs: 1,
 		},
 	}
-	for _, tt := range refs {
-		t.Run(tt.name, func(t *testing.T) {
+	t.Run("reference cases", func(t *testing.T) {
+		for _, tt := range refs {
 			i := interp.New(tt.prog)
 			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, got, tt.name)
 			live := 0
 			for addr := 1; addr < i.HeapLen(); addr++ {
 				count, rcErr := i.RefCount(addr)
@@ -3152,9 +3108,9 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 				live += count
 			}
-			require.Equal(t, tt.refs, live)
-		})
-	}
+			require.Equal(t, tt.refs, live, tt.name)
+		}
+	})
 
 	t.Run("global/upval pair fusion is disabled in exact mode and still computes correctly", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
@@ -4981,14 +4937,8 @@ func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
 	}
 }
 
-// BenchmarkInterpreter_ArrayGetContainerFusion measures ARRAY_GET fused onto
-// a GLOBAL_GET and an UPVAL_GET container -- the two sources this change adds
-// to the LOCAL_GET container fusion BenchmarkInterpreter_StructGetLocalFusion
-// already covers. No canonical kernel in benchmarks/ holds an array or struct
-// in a global or an upvalue (#176), so this is the only coverage of either
-// path's runtime win; both sources share one benchmark function, run as
-// subtests, because they exercise the identical sum-loop shape and differ
-// only in where the container lives.
+// BenchmarkInterpreter_ArrayGetContainerFusion covers GLOBAL_GET and UPVAL_GET
+// container fusion; both paths share the same sum-loop shape.
 func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
 	const size, repeats = 64, 4000
 	for _, tt := range []struct {
@@ -5020,13 +4970,8 @@ func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
 	}
 }
 
-// BenchmarkInterpreter_ArraySetContainerFusion measures ARRAY_SET fused onto
-// a LOCAL_GET, GLOBAL_GET, and UPVAL_GET container -- the three sources
-// arrayStore()'s isContainerSource branch (internal/codegen/array.go)
-// specializes. Each subtest writes arr[j] = j through the fused container in
-// a nested loop instead of summing, so the timed body is dominated by
-// array.set rather than array.get; a final single pass sums the written
-// array so the benchmark can still verify correctness.
+// BenchmarkInterpreter_ArraySetContainerFusion measures fused LOCAL_GET, GLOBAL_GET,
+// and UPVAL_GET stores; a final sum verifies the writes outside the timed body.
 func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
 	const size, repeats = 64, 4000
 	for _, tt := range []struct {
@@ -5059,14 +5004,8 @@ func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
 	}
 }
 
-// BenchmarkInterpreter_StructGetHost measures STRUCT_GET against the value the
-// reflection codec picks for a Go struct that carries a method and an
-// unexported field. Field 0 is a plain i32, so the loop isolates per-access
-// dispatch cost from any boxing or heap traffic. The marshal and reset work
-// outside the inner loop is amortized over repeats field reads per run, the
-// same way BenchmarkInterpreter_StructGetLocalFusion amortizes its tree build.
-// The two rows separate the threaded read from the lowered one, which is the
-// pair a change to hostGet has to report.
+// BenchmarkInterpreter_StructGetHost isolates STRUCT_GET on a host struct with an
+// unexported field; field 0 is i32, so the loop measures dispatch apart from boxing.
 func BenchmarkInterpreter_StructGetHost(b *testing.B) {
 	const repeats = 10000
 	prog := structGetHostLoop(repeats)

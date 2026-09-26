@@ -13,9 +13,7 @@ Bytecode-level debugger for `interp.Run`.
 | stop result | `interp.ErrStopped` |
 | REPL commands | `guides/repl.md` |
 
-Debugger provides breakpoints, stepping, function/IP inspection, frames, operand stack, locals, globals, constants, and heap lookup.
-
-`WithDebugger` sets `WithTick(1)` and execution stops at bytecode boundaries.
+The debugger exposes breakpoints, stepping, bytecode location, frames, stack, locals, globals, constants, and heap inspection. `WithDebugger` sets `WithTick(1)` so stops occur at bytecode boundaries.
 
 ## Setup
 
@@ -80,11 +78,11 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
 
 ## Precision
 
-Debugger execution is exact bytecode execution. Optimization paths that hide instruction boundaries are disabled by `WithDebugger`.
+`WithDebugger` disables optimization paths that hide bytecode boundaries; debugger execution is exact bytecode execution.
 
-## Maintenance
+## Invariants
 
-The agent `MUST` keep stop state explicit, bytecode locations stable, mutable interpreter state unexposed, and debugger semantics independent of optimization details.
+Stop state is explicit, bytecode locations remain stable, mutable interpreter state stays unexposed, and debugger semantics do not depend on optimization details.
 
 ## Related
 

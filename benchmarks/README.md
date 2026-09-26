@@ -23,7 +23,7 @@ Read when adding a VM workload, comparing execution tiers, or running cross-runt
 
 Canonical fixture sizes are part of the benchmark contract: iterative Fibonacci 30, recursive Fibonacci 20 and 35, sieve 256, closure iterations 128, typed-array elements 256, allocation depth 128, branch-tree nodes 96 with input 37, permutation size 24 at depth 64, and struct-tree depth 9.
 
-Every fixture uses fixed input and has a correctness test with an exact result or graph checksum. Program construction, verification, result checks, reset, and JIT warmup stay outside execution-only timers.
+Every fixture uses fixed input and an exact-result or checksum test. Construction, verification, result checks, reset, and JIT warmup stay outside execution timers.
 
 ## Ported minipy Kernels
 
@@ -56,7 +56,7 @@ Two programs use minipy host builtins that minivm has no opcode for. Both are tr
 
 ## Modes
 
-Every canonical kernel defines one minivm sub-benchmark, `threaded`: the generated threaded interpreter with no options. A native mode returns with the JIT rebuild (`docs/jit-internals.md`).
+Every canonical kernel defines `threaded`, the generated interpreter with no options, and `jit`, the ARM64 native tier when the kernel reaches a compiled function. Native scope and entry rules belong to `docs/jit-internals.md`.
 
 With the `compare` build tag, each kernel also adds the applicable external runtimes: native Go, wazero, Tengo, gopher-lua, Goja, gpython, CPython, and Yaegi. A runtime whose script is empty is skipped, so a kernel declares only the comparisons that answer a question about it; the ported minipy kernels declare `native`, `cpython`, and `gpython`, and wazero is omitted when no equivalent canonical WASM fixture exists.
 
@@ -92,4 +92,4 @@ Keep inputs deterministic. Add a kernel only when it exposes a distinct VM signa
 
 - `../docs/benchmarks.md` - current measurements, ownership, and methodology
 - `../docs/instruction-set.md` - opcode semantics and JIT support
-- `../docs/jit-internals.md` - trace and native execution lifecycle
+- `../docs/jit-internals.md` - native execution lifecycle and contract

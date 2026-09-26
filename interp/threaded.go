@@ -176,6 +176,9 @@ var (
 					if locals > 0 {
 						clear(i.stack[i.sp-1 : i.sp+locals-1])
 					}
+					if i.native != nil && i.native.call(i, addr, fn, true, 1) {
+						return
+					}
 					f := &i.frames[i.fp]
 					f.code = i.code[addr]
 					f.upvals = nil
@@ -304,71 +307,8 @@ var (
 				if i.fp == 1 {
 					panic(ErrFrameUnderflow)
 				}
-				{
-					f := i.fr
-					if i.sp < f.returns {
-						panic(ErrStackUnderflow)
-					}
-					if f.coro != 0 {
-						coAddr := f.coro
-						co, ok := i.heap[coAddr].(*coroutine)
-						if !ok {
-							panic(ErrTypeMismatch)
-						}
-						if f.returns > 0 {
-							for _, value := range i.stack[f.bp : i.sp-1] {
-								i.releaseBox(value)
-							}
-							co.value = i.stack[i.sp-1]
-						} else {
-							for _, value := range i.stack[f.bp:i.sp] {
-								i.releaseBox(value)
-							}
-							i.retain(0)
-							co.value = types.BoxedNull
-						}
-						co.done = true
-						co.image = co.image[:0]
-						co.upvals = nil
-						if f.release {
-							i.release(f.ref)
-						}
-						co.ref = 0
-						co.release = false
-						bp := f.bp
-						f.code = nil
-						f.upvals = nil
-						f.coro = 0
-						i.fp--
-						i.fr = &i.frames[i.fp-1]
-						i.stack[bp] = types.BoxRef(coAddr)
-						i.sp = bp + 1
-						return
-					}
-					// A frame owns its params, locals, and any operands left below the
-					// returned values; only the returns pass to the caller, so everything
-					// under them is released here. land does the same when an exception
-					// unwinds the frame, and the cycle collector needs counts to be exact.
-					if owned || i.sp != f.bp+slots+f.returns {
-						for _, value := range i.stack[f.bp : i.sp-f.returns] {
-							i.releaseBox(value)
-						}
-					}
-					switch f.returns {
-					case 0:
-					case 1:
-						i.stack[f.bp] = i.stack[i.sp-1]
-					default:
-						copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
-					}
-					i.sp = f.bp + f.returns
-					if f.release {
-						i.release(f.ref)
-					}
-					f.code = nil
-					i.fp--
-					i.fr = &i.frames[i.fp-1]
-				}
+				f := i.fr
+				i.retire(owned || i.sp != f.bp+slots+f.returns)
 			}
 		},
 		instr.RETURN_CALL: func(c *threader) func(i *Interpreter) {
@@ -67162,6 +67102,9 @@ var (
 						}
 						if locals > 0 {
 							clear(i.stack[i.sp : i.sp+locals])
+						}
+						if i.native != nil && i.native.call(i, addr, fn, false, 4) {
+							return
 						}
 						f := &i.frames[i.fp]
 						f.code = i.code[addr]

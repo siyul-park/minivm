@@ -9,11 +9,11 @@
 
 ## A compact, embeddable bytecode VM for Go
 
-Run dynamic logic inside your Go application without giving up control over performance, resources, or host integration.
+Run dynamic logic inside Go with explicit resource limits, typed host calls, and a threaded semantic baseline.
 
-- **Bounded execution** — limit stack, heap, call depth, fuel, hooks, and context.
-- **Direct host integration** — call Go through typed, reflection-free host functions.
-- **Explicit execution** — use the threaded interpreter with bounded resources and controlled host integration.
+- **Bounded execution** — stack, heap, frame depth, fuel, hooks, context.
+- **Direct host calls** — typed, reflection-free `HostFunction` path.
+- **Native tier** — opt-in ARM64 execution with threaded fallback.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -40,7 +40,7 @@ if err := vm.Run(context.Background()); err != nil {
 }
 
 result, _ := vm.Pop() // types.I32(42)
-```go
+```
 
 minivm keeps the execution model explicit: bytecode in, controlled runtime, typed value out.
 
@@ -51,8 +51,8 @@ minivm keeps the execution model explicit: bytecode in, controlled runtime, type
 | Embeddable runtime | First-class functions, locals, globals, closures, refs, strings, arrays, structs, maps, coroutines, and structured errors |
 | Host integration | Typed `HostFunction` calls plus `Marshal` and `Unmarshal` for ordinary Go values |
 | Resource control | Stack, heap, frame, fuel, context, hook, and debugger controls |
-| Fast baseline | Closure-threaded dispatch with low steady-state allocation on core workloads |
-| Execution baseline | Threaded interpreter with explicit resource controls |
+| Fast baseline | Closure-threaded dispatch with low steady-state allocation |
+| Semantic baseline | Threaded interpreter with explicit resource controls |
 | Safe admission | Static bytecode verification before execution |
 
 ### Built for
@@ -77,7 +77,7 @@ lookup := interp.NewHostFunction(
         return []types.Boxed{types.BoxI32(price)}, nil
     },
 )
-```go
+```
 
 Parameters and results stay in typed `[]types.Boxed` values. The direct path does not require reflection or `interface{}` boxing.
 
@@ -85,7 +85,7 @@ See [Host Integration](docs/host-integration.md) for marshaling, host objects, a
 
 ## Performance
 
-The threaded interpreter is the current execution baseline. The native rebuild is planned; current measurements and reproduction commands are owned by [Benchmarks](docs/benchmarks.md).
+Threaded execution is the semantic baseline. ARM64 native execution is opt-in via `interp.WithThreshold`; measurements and reproduction live in [Benchmarks](docs/benchmarks.md).
 
 ## Runtime Tooling
 
@@ -95,7 +95,7 @@ The threaded interpreter is the current execution baseline. The native rebuild i
 if err := program.Verify(prog); err != nil {
     log.Fatal(err)
 }
-```go
+```
 
 The verifier rejects malformed control flow, invalid stack behavior, and type mismatches before execution. The `run` CLI verifies loaded programs by default.
 
@@ -103,7 +103,7 @@ The verifier rejects malformed control flow, invalid stack behavior, and type mi
 
 ```go
 prog, err := optimize.New(optimize.O2).Optimize(prog)
-```go
+```
 
 Optimization levels range from local constant folding and deduplication to dead-code elimination and cross-block global value numbering.
 
@@ -117,17 +117,17 @@ vm := interp.New(prog,
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
-```text
+```
 
 Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instruction-accurate breakpoints and stepping.
 
 ## Architecture
 
 ```text
-Program -> verifier / optimizer -> threaded interpreter
-```text
+Program → Verify → optimize? → threaded ⇄ native (ARM64, opt-in)
+```
 
-The threaded interpreter is the complete current execution engine. Native compilation is a planned rebuild and is not part of the current runtime.
+The threaded interpreter is the semantic baseline and complete execution engine. `WithThreshold` adds ARM64 native execution for hot functions; unsupported paths return to threaded execution.
 
 The instruction set is WebAssembly-inspired but intentionally custom. It uses one-byte opcodes with fixed-width or length-prefixed operands.
 
@@ -143,7 +143,7 @@ The instruction set is WebAssembly-inspired but intentionally custom. It uses on
 | Threaded interpreter | ✅ Available |
 | Static bytecode verifier | ✅ Available |
 | AOT optimizer (`O1`-`O3`) | ✅ Available |
-| ARM64 native rebuild | ⬜ Planned |
+| ARM64 native tier (opt-in, `interp.WithThreshold`) | ✅ Available |
 | Debugger and profiler | ✅ Available |
 | x86-64 native backend | 🔲 Not implemented |
 

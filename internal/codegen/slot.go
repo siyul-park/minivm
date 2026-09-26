@@ -33,15 +33,8 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 		raw:   name,
 		boxed: fmt.Sprintf("r%d", slot),
 		index: fmt.Sprintf("i%d", slot),
-		// addr names a runtime local-slot address temp declared inside the
-		// closure body (LOCAL_GET only; see (loader).read). It uses a
-		// distinct prefix from index so it can never shadow another fused
-		// producer's compile-time index variable "iN" regardless of how
-		// many producers a pattern fuses; index and addr previously shared
-		// the "i" prefix at a fixed +2 offset, which collided once
-		// array.set's three-producer container fusion put a LOCAL_GET
-		// container at slot 0 (addr "i2") alongside a GLOBAL_GET/UPVAL_GET
-		// producer at slot 2 (index "i2").
+		// addr is a runtime slot address. Keep its prefix distinct from compile-time
+		// index names so fused producers cannot generate colliding locals.
 		addr:       fmt.Sprintf("a%d", slot),
 		pos:        at,
 		label:      label,
@@ -228,13 +221,8 @@ func (l loader) arrayGuard(result *value, current step) error {
 	return nil
 }
 
-// structGuard proves, once at threading time, that the local, global, or
-// upvalue slot l.index addresses is declared as a concrete *types.StructType,
-// and records that declared type so a fused STRUCT_GET consumer can resolve
-// each accessed field's static Kind without re-deriving it from the runtime
-// heap value. A miss rejects the fusion attempt so the container's runtime
-// value keeps its own type check in the standalone STRUCT_GET handler; it
-// never assumes the runtime struct shares the declared type's field shape.
+// structGuard records a concrete declared StructType so fusion can specialize
+// field kinds. A miss leaves runtime type checks to STRUCT_GET.
 func (l loader) structGuard(result *value, current step) error {
 	field, ok := declaredTypesField(current.op)
 	if !ok {

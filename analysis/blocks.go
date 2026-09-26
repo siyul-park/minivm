@@ -10,8 +10,10 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// BlocksAnalysis computes the control-flow blocks of a function.
 type BlocksAnalysis struct{}
 
+// BasicBlock is one control-flow region and its predecessor/successor ids.
 type BasicBlock struct {
 	Start int
 	End   int
@@ -19,6 +21,7 @@ type BasicBlock struct {
 	Preds []int
 }
 
+// ErrInvalidJump reports a jump target that is not a valid instruction boundary.
 var ErrInvalidJump = errors.New("invalid jump")
 
 var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BlocksAnalysis)(nil)
@@ -122,11 +125,13 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	return blocks, nil
 }
 
+// NewBlocksAnalysis returns a blocks analysis.
 func NewBlocksAnalysis() *BlocksAnalysis {
 	return &BlocksAnalysis{}
 }
 
-func (p *BlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
+// Run computes the control-flow blocks of fn.
+func (p *BlocksAnalysis) Run(_ *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
 	return Blocks(fn)
 }
 

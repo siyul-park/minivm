@@ -31,10 +31,16 @@ func Parse(r io.Reader) (*Program, error) {
 	}
 	firstLine = strings.TrimSpace(firstLine)
 
+	parse := legacy
 	if strings.HasPrefix(firstLine, ".") {
-		return sections(text)
+		parse = sections
 	}
-	return legacy(text)
+	prog, err := parse(text)
+	if err != nil {
+		return nil, err
+	}
+	(&canon{}).program(prog)
+	return prog, nil
 }
 
 func sections(text string) (*Program, error) {
@@ -202,6 +208,83 @@ func legacy(text string) (*Program, error) {
 		opts = append(opts, WithTypes(typs...))
 	}
 	return New(code, opts...), nil
+}
+
+// canon deduplicates the *types.StructType pointers a parsed program reaches,
+// so structurally equal struct literals collapse to one pointer per equality
+// class. Parse gives every struct literal it reads a distinct pointer; the JIT
+// guards struct.get on pointer identity against the declared type, so
+// duplicate pointers defeat that guard even though the types are equal.
+type canon struct {
+	seen []*types.StructType
+}
+
+// program canonicalizes every type prog's parsed data reaches. .types is
+// walked first so its pointers become canonical; children are canonicalized
+// before their parent is compared.
+func (c *canon) program(prog *Program) {
+	for i, t := range prog.Types {
+		prog.Types[i] = c.typ(t)
+	}
+	for i, t := range prog.Locals {
+		prog.Locals[i] = c.typ(t)
+	}
+	for i, t := range prog.Globals {
+		prog.Globals[i] = c.typ(t)
+	}
+	for _, v := range prog.Constants {
+		switch tv := v.(type) {
+		case *types.Function:
+			tv.Typ, _ = c.typ(tv.Typ).(*types.FunctionType)
+			for i, t := range tv.Locals {
+				tv.Locals[i] = c.typ(t)
+			}
+			for i, t := range tv.Captures {
+				tv.Captures[i] = c.typ(t)
+			}
+		case *types.Struct:
+			tv.Typ, _ = c.typ(tv.Typ).(*types.StructType)
+		}
+	}
+}
+
+// typ canonicalizes t and every struct type nested inside it, returning the
+// canonical pointer when t is itself a struct type.
+func (c *canon) typ(t types.Type) types.Type {
+	switch v := t.(type) {
+	case *types.StructType:
+		for i := range v.Fields {
+			v.Fields[i].Type = c.typ(v.Fields[i].Type)
+		}
+		return c.intern(v)
+	case *types.ArrayType:
+		v.Elem = c.typ(v.Elem)
+	case *types.MapType:
+		v.Key = c.typ(v.Key)
+		v.Elem = c.typ(v.Elem)
+	case *types.IteratorType:
+		v.Elem = c.typ(v.Elem)
+	case *types.FunctionType:
+		for i := range v.Params {
+			v.Params[i] = c.typ(v.Params[i])
+		}
+		for i := range v.Returns {
+			v.Returns[i] = c.typ(v.Returns[i])
+		}
+	}
+	return t
+}
+
+// intern returns the first-seen pointer structurally equal to t, recording t
+// as canonical when none matches yet.
+func (c *canon) intern(t *types.StructType) *types.StructType {
+	for _, s := range c.seen {
+		if s.Equals(t) {
+			return s
+		}
+	}
+	c.seen = append(c.seen, t)
+	return t
 }
 
 func parseTypes(lines []string) ([]types.Type, error) {

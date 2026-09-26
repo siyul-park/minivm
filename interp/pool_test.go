@@ -9,6 +9,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	interp "github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,134 @@ func TestPool_Get(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrPoolClosed)
 	})
 
+	t.Run("shares one native JIT runtime across pooled interpreters, compiling once", func(t *testing.T) {
+		native(t)
+		prog := fibFlatCallsProgram(t, 1000)
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		require.NoError(t, first.Run(context.Background()))
+		_, err = first.Pop()
+		require.NoError(t, err)
+		first.Flush()
+
+		var compiles float64
+		require.Eventually(t, func() bool {
+			first.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles == 1
+		}, 5*time.Second, time.Millisecond)
+
+		require.NoError(t, second.Run(context.Background()))
+		_, err = second.Pop()
+		require.NoError(t, err)
+		second.Flush()
+
+		compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.Equal(t, float64(1), compiles)
+
+		p.Put(first)
+		p.Put(second)
+	})
+
+	t.Run("pooled interpreters observing different callees match threaded with bounded deopts", func(t *testing.T) {
+		native(t)
+		const calls = 5
+		const rounds = 600
+		prog := applyGlobalProgram(t, calls)
+
+		var wantInc, wantDec int32
+		for i := int32(0); i < calls; i++ {
+			wantInc += i + 1
+			wantDec += i - 1
+		}
+
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		// a always calls inc and b always dec, through one dynamic CALL site.
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		run := func(vm *interp.Interpreter, selector int32, want int32, round int) {
+			require.NoError(t, vm.SetGlobal(1, types.BoxI32(selector)), "round %d", round)
+			require.NoError(t, vm.Run(context.Background()), "round %d", round)
+			got, err := vm.Pop()
+			require.NoError(t, err, "round %d", round)
+			require.Equal(t, types.I32(want), got, "round %d", round)
+			vm.Flush()
+		}
+
+		for round := 1; round <= rounds; round++ {
+			run(a, 0, wantInc, round)
+			run(b, 1, wantDec, round)
+			a.Reset()
+			b.Reset()
+		}
+		p.Put(a)
+		p.Put(b)
+
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		// Retired sites stop deopting long before every round does.
+		require.Less(t, deopts, float64(2*rounds))
+		require.Greater(t, deopts, float64(0))
+	})
+
+	t.Run("a pooled interpreter promotes code another interpreter drained", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithConstants(sumFunction(t)))
+
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer p.Close()
+		compiles := func(tier string) float64 {
+			v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: tier}, prof.Label{Key: "outcome", Value: "ok"})
+			return v
+		}
+		call := func(vm *interp.Interpreter) error {
+			defer vm.Reset()
+			if err := vm.Run(context.Background()); err != nil {
+				return err
+			}
+			_, err := vm.Pop()
+			vm.Flush()
+			return err
+		}
+
+		// first alone drains the Baseline compile, calling too rarely to promote it.
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			err = call(first)
+			return err != nil || compiles("baseline") == 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, err)
+
+		// second never drains a Baseline job; its own calls must promote it.
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			err = call(second)
+			return err != nil || compiles("optimized") >= 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, err)
+
+		p.Put(first)
+		p.Put(second)
+	})
 }
 
 func TestPool_Put(t *testing.T) {

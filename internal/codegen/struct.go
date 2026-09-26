@@ -7,20 +7,9 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-// structGet fuses STRUCT_GET onto a LOCAL_GET, GLOBAL_GET, or UPVAL_GET
-// container whose declared type is a concrete *types.StructType, with the
-// field index a compile-time constant. A struct field's Kind depends on
-// which StructType the container declares, not on any Go type the catalog
-// can name ahead of time, so the switch over Kind runs once here at
-// threading time instead of once per execution: it selects one specialized
-// runtime closure per Kind, and that closure boxes the field directly with
-// no switch of its own. Every runtime guard the standalone STRUCT_GET
-// handler performs — ref kind, heap value type, field bounds, and the
-// runtime field's actual Kind — still runs on every execution in the same
-// order, because the declared type only proves what to specialize for, never
-// what the runtime value actually holds; a mismatch on any guard, or a field
-// index outside the declared type's own fields, rejects the fusion or traps
-// exactly as the unfused sequence would.
+// structGet specializes a constant field from the declared StructType.
+// Runtime checks still validate ref kind, concrete type, bounds, and field kind;
+// the declaration proves specialization, not runtime representation.
 func structGet(state *state, current step) (value, error) {
 	container := state.stack[0]
 	idx := state.stack[1]

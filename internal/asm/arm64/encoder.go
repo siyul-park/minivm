@@ -15,17 +15,17 @@ type Encoder struct{}
 // Sentinel errors
 // ---------------------------------------------------------------------------
 
+// Stable ARM64 encoder errors.
 var (
-	ErrUnsupportedOpcode         = errors.New("unsupported opcode")
-	ErrMissingDestinationReg     = errors.New("missing destination register")
-	ErrMissingSourceReg          = errors.New("missing source register")
-	ErrMissingSourceRegs         = errors.New("missing source registers")
-	ErrMissingImmediate          = errors.New("missing immediate")
-	ErrMissingShiftImmediate     = errors.New("missing shift immediate")
-	ErrMissingMemoryOperand      = errors.New("missing memory operand")
-	ErrMissingRegisterOperand    = errors.New("missing register operand")
-	ErrMissingBranchOffset       = errors.New("missing branch offset")
-	ErrUnexpectedRegisterOperand = errors.New("unexpected register operand")
+	ErrUnsupportedOpcode      = errors.New("unsupported opcode")
+	ErrMissingDestinationReg  = errors.New("missing destination register")
+	ErrMissingSourceReg       = errors.New("missing source register")
+	ErrMissingSourceRegs      = errors.New("missing source registers")
+	ErrMissingImmediate       = errors.New("missing immediate")
+	ErrMissingShiftImmediate  = errors.New("missing shift immediate")
+	ErrMissingMemoryOperand   = errors.New("missing memory operand")
+	ErrMissingRegisterOperand = errors.New("missing register operand")
+	ErrMissingBranchOffset    = errors.New("missing branch offset")
 )
 
 var _ asm.Encoder = (*Encoder)(nil)
@@ -144,20 +144,9 @@ var moveOpcodes = map[Op]struct{ op32, op64 uint32 }{
 	OpMOVN: {0x12800000, 0x92800000},
 }
 
-// loadOpcodes maps each unsigned-offset load opcode to its 32- and 64-bit
-// base words, picked by the destination's declared width, and the access
-// size (in bytes) that scales the byte offset at each width.
-//
-// LDR genuinely differs by width: a Width32 destination reads a 4-byte word
-// and zero-extends it, a Width64 destination reads the full 8 bytes. LDRB and
-// LDRH have no such choice - a byte or halfword load is one instruction
-// regardless of how wide the caller declared its destination, so both
-// widths share one base word and one scale. LDRSB, LDRSH, and LDRSW pick
-// between a 32-bit and a 64-bit sign-extending form (LDRSW has no 32-bit
-// form - sign-extending 32 into 32 is a no-op - so both entries repeat the
-// only encoding that exists); the access size they read from memory does
-// not change with the destination width, only the field a Wd write leaves
-// zero above bit 31 does.
+// loadOpcodes records width-specific encodings and memory strides.
+// Byte/halfword loads ignore destination width; sign-extending loads use
+// the matching destination-width encoding.
 var loadOpcodes = map[Op]struct {
 	op32, op64       uint32
 	scale32, scale64 int64
@@ -479,6 +468,16 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Move
 	// -----------------------------------------------------------------------
 
+	case OpMOVW: // MOV Wd, Xn: take the low 32 bits
+		d, n, err := e.decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+		if d.Type() != asm.RegTypeInt || d.Width() != asm.Width32 || n.Type() != asm.RegTypeInt || n.Width() != asm.Width64 {
+			return nil, asm.ErrInvalidOperand
+		}
+		return enc(0x2A0003E0 | reg(n)<<16 | reg(d)), nil
+
 	case OpMOV: // MOV Xd, Xn  →  ORR Xd, XZR, Xn
 		d, n, err := e.decodeReg2(inst)
 		if err != nil {
@@ -513,10 +512,16 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// -----------------------------------------------------------------------
 
 	case OpLDR, OpLDRB, OpLDRSB, OpLDRH, OpLDRSH, OpLDRSW:
+		if op == OpLDR && isFloat(inst.Dst) {
+			return e.encodeLoad(0xBD400000, 0xFD400000, 4, 8, inst)
+		}
 		ld := loadOpcodes[op]
 		return e.encodeLoad(ld.op32, ld.op64, ld.scale32, ld.scale64, inst)
 
 	case OpSTR, OpSTRB, OpSTRH, OpSTRW:
+		if op == OpSTR && isFloat(inst.Src1) {
+			return e.encodeStore(0xFD000000, 8, inst)
+		}
 		st := storeOpcodes[op]
 		return e.encodeStore(st.base, st.scale, inst)
 
@@ -755,6 +760,21 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
 
+	case OpFCSEL:
+		d, n, m, cond, err := e.decodeSelect(inst)
+		if err != nil {
+			return nil, err
+		}
+		if d.Type() != asm.RegTypeFloat || n.Type() != asm.RegTypeFloat || m.Type() != asm.RegTypeFloat ||
+			d.Width() != n.Width() || d.Width() != m.Width() {
+			return nil, asm.ErrInvalidOperand
+		}
+		base := uint32(0x1E600C00)
+		if d.Width() == asm.Width32 {
+			base = 0x1E200C00
+		}
+		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
+
 	case OpCSET, OpCSETM: // CSET(M) Xd, cond  →  CSINC/CSINV Xd, XZR, XZR, !cond
 		d, condImm, err := e.decodeDstImm(inst)
 		if err != nil {
@@ -805,7 +825,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(0xD61F0000 | reg(r)<<5), nil
 
-	case OpBLR:
+	case OpBLR, OpEXIT:
 		r, err := e.decodeRegOnly(inst)
 		if err != nil {
 			return nil, err
@@ -913,6 +933,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	case OpNOP:
 		return enc(0xD503201F), nil
 
+	case OpUSE, OpDEF:
+		return nil, nil
+
 	case OpHLT:
 		return enc(0xD4400000), nil // HLT #0
 
@@ -1009,6 +1032,9 @@ func (e *Encoder) encodeCompareImm(op uint32, inst asm.Instruction) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
+	if err := imm12(imm, 1); err != nil {
+		return nil, err
+	}
 	base, err := intBase(op, n)
 	if err != nil {
 		return nil, err
@@ -1028,19 +1054,35 @@ func (e *Encoder) encodeLoad(op32, op64 uint32, scale32, scale64 int64, inst asm
 	if dst.Width() == asm.Width32 {
 		op, scale = op32, scale32
 	}
+	if err := imm12(offset, scale); err != nil {
+		return nil, err
+	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(dst)), nil
 }
 
 // encodeStore emits an unsigned-offset store, scaling the byte offset by the
-// access size.
+// access size. A Width32 float source stores a single word: STR St is STR Dt
+// with size 10 instead of 11, and the offset scales by 4.
 func (e *Encoder) encodeStore(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
 	src, base, offset, err := e.decodeStrOp(inst)
 	if err != nil {
 		return nil, err
 	}
+	if src.Type() == asm.RegTypeFloat && src.Width() == asm.Width32 {
+		op, scale = op&^(1<<30), 4
+	}
+	if err := imm12(offset, scale); err != nil {
+		return nil, err
+	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(src)), nil
+}
+
+// isFloat reports whether op names a float register.
+func isFloat(op asm.Operand) bool {
+	r, ok := op.(asm.PRegOperand)
+	return ok && r.Reg.Type() == asm.RegTypeFloat
 }
 
 // encodeFloatBinary emits a 3-register scalar float op (FADD/FSUB/FMUL/FDIV),
@@ -1341,11 +1383,23 @@ func encR4(base uint32, d, n, m, a asm.PReg) ([]byte, error) {
 
 // encRImm12 emits an arithmetic-immediate (imm12<<10 | Rn<<5 | Rd).
 func encRImm12(base uint32, d, n asm.PReg, imm int64) ([]byte, error) {
+	if err := imm12(imm, 1); err != nil {
+		return nil, err
+	}
 	b, err := intBase(base, d, n)
 	if err != nil {
 		return nil, err
 	}
 	return enc(b | (uint32(imm)&0xFFF)<<10 | reg(n)<<5 | reg(d)), nil
+}
+
+// imm12 rejects a value that is not a non-negative multiple of scale whose
+// quotient fits an unsigned 12-bit immediate field.
+func imm12(v, scale int64) error {
+	if v < 0 || v%scale != 0 || v/scale > 0xFFF {
+		return asm.ErrInvalidOperand
+	}
+	return nil
 }
 
 func logicalImmediate(base uint32, dst, src asm.PReg, imm int64) (uint32, error) {
@@ -1462,15 +1516,8 @@ func checkBranchOffset(op Op, offset int64, bits uint) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Logical immediate encoder
-//
-// AArch64 logical immediates must describe a pattern of the form:
-//   a sequence of N ones rotated by R within a repeated element of size E,
-//   where E ∈ {2,4,8,16,32,64} and the value is neither all-zeros nor all-ones.
-//
-// Returns (immr, imms, ok) packed as 6-bit fields ready for the instruction word.
-// ---------------------------------------------------------------------------
+// Logical immediate encoding represents a rotated run of ones in a repeated
+// element size 2..64. It returns the packed immr/imms fields or ok=false.
 
 func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 	width := uint(64)

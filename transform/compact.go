@@ -9,26 +9,28 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type DedupPass struct{}
+// CompactPass removes unused and duplicate constants and types.
+type CompactPass struct{}
 
-var _ pass.Pass[*program.Program] = (*DedupPass)(nil)
+var _ pass.Pass[*program.Program] = (*CompactPass)(nil)
 
-func NewDedupPass() *DedupPass {
-	return &DedupPass{}
+// NewCompactPass returns the pass.
+func NewCompactPass() *CompactPass {
+	return &CompactPass{}
 }
 
-func (p *DedupPass) Run(_ *pass.Manager, prog *program.Program) (pass.Preserved, error) {
-	// Every function whose code names a constant or a type: the top-level
-	// body, then each function the pool holds.
+// Run compacts a program's constant and type pools.
+func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	codes := [][]byte{prog.Code}
 	for _, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			codes = append(codes, fn.Code)
+		if function, ok := v.(*types.Function); ok {
+			codes = append(codes, function.Code)
 		}
 	}
 
 	constants := prog.Constants
 	typs := prog.Types
+	constantLen, typeLen := len(constants), len(typs)
 
 	constUsed := make([]bool, len(constants))
 	typeUsed := make([]bool, len(typs))
@@ -50,8 +52,8 @@ func (p *DedupPass) Run(_ *pass.Manager, prog *program.Program) (pass.Preserved,
 		}
 	}
 
-	constIndex, constSize := dedupValues(constants, constUsed)
-	typeIndex, typesSize := dedupTypes(typs, typeUsed)
+	constIndex, constSize := compactValues(constants, constUsed)
+	typeIndex, typesSize := compactTypes(typs, typeUsed)
 
 	for i, v := range constIndex {
 		if v >= 0 {
@@ -96,16 +98,10 @@ func (p *DedupPass) Run(_ *pass.Manager, prog *program.Program) (pass.Preserved,
 	prog.Constants = constants
 	prog.Types = typs
 
-	return pass.PreserveNone(), nil
+	return constantLen == constSize && typeLen == typesSize, nil
 }
 
-// dedupValues builds a compaction index for constants: each used entry is
-// renumbered into a dense range. Entries whose dynamic type supports ==
-// collapse to one slot per distinct value via a single map pass; entries
-// backed by an uncomparable dynamic type (e.g. an array or map value) keep
-// their own slot, since inserting one into a Go map panics. Unused entries
-// map to -1. Returns the index and compacted size.
-func dedupValues(items []types.Value, used []bool) ([]int, int) {
+func compactValues(items []types.Value, used []bool) ([]int, int) {
 	index := make([]int, len(items))
 	seen := make(map[types.Value]int, len(items))
 	size := 0
@@ -114,7 +110,7 @@ func dedupValues(items []types.Value, used []bool) ([]int, int) {
 		if !used[i] {
 			continue
 		}
-		if typ := reflect.TypeOf(v); typ != nil && !typ.Comparable() {
+		if valueType := reflect.TypeOf(v); valueType != nil && !valueType.Comparable() {
 			index[i] = size
 			size++
 			continue
@@ -130,12 +126,7 @@ func dedupValues(items []types.Value, used []bool) ([]int, int) {
 	return index, size
 }
 
-// dedupTypes builds a compaction index for types: each used entry is
-// renumbered into a dense range with structurally equal types (per
-// types.Type.Equals) collapsed to one slot. Types have no cheap canonical key
-// to use as a map key, so this stays a pairwise scan. Unused entries map to
-// -1. Returns the index and compacted size.
-func dedupTypes(items []types.Type, used []bool) ([]int, int) {
+func compactTypes(items []types.Type, used []bool) ([]int, int) {
 	index := make([]int, len(items))
 	for i := range index {
 		index[i] = -1

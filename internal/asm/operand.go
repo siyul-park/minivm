@@ -35,6 +35,18 @@ type MemOperand struct {
 	Offset int64
 }
 
+// SlotsOperand is the byte size of the spill area, known only once Build
+// has allocated. A prologue subtracts it from SP where an immediate would
+// go, and Build substitutes the value - a multiple of 16, possibly zero -
+// before encoding. It stands only where an immediate stands, never as a
+// memory base.
+type SlotsOperand struct{}
+
+// Slots returns the spill-area size operand.
+func Slots() SlotsOperand {
+	return SlotsOperand{}
+}
+
 // Virtual wraps a VReg as an operand.
 func Virtual(r VReg) VRegOperand {
 	return VRegOperand{Reg: r}
@@ -55,22 +67,32 @@ func Mem(base Operand, offset int64) MemOperand {
 	return MemOperand{Base: base, Offset: offset}
 }
 
+// String returns the operand's assembly form.
 func (o VRegOperand) String() string {
 	return o.Reg.String()
 }
 
+// String returns the operand's assembly form.
 func (o PRegOperand) String() string {
 	return o.Reg.String()
 }
 
+// String returns the operand's assembly form.
 func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
+// String returns the operand's assembly form.
 func (o LabelOperand) String() string {
 	return fmt.Sprintf("label%d", o.ID)
 }
 
+// String returns the operand's assembly form.
+func (SlotsOperand) String() string {
+	return "#slots"
+}
+
+// String returns the operand's assembly form.
 func (o MemOperand) String() string {
 	if o.Offset != 0 {
 		return fmt.Sprintf("[%s, #%d]", o.Base, o.Offset)
@@ -87,3 +109,5 @@ func (ImmOperand) operand() {}
 func (LabelOperand) operand() {}
 
 func (MemOperand) operand() {}
+
+func (SlotsOperand) operand() {}

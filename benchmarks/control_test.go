@@ -16,7 +16,7 @@ func BenchmarkControl_IterativeFib(b *testing.B) {
 	prog := iterativeFib(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			var current int32
@@ -77,7 +77,7 @@ func BenchmarkControl_Sieve(b *testing.B) {
 	prog := sieve(size)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			composite := make([]int32, size)

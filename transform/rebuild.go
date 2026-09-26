@@ -2,116 +2,94 @@ package transform
 
 import "github.com/siyul-park/minivm/internal/ssa"
 
-// rebuilder assembles a replacement function over an existing one's reachable
-// blocks, renumbering every surviving value as it goes and translating every
-// value an operation, its state, or its frames read through whatever a pass
-// has already decided that value now stands for. A pass that only renumbers
-// aliases every old value to its own new one; a pass that also elides an
-// operation aliases its old result to whichever surviving value now stands in
-// for it instead. Every pass in this package shares this one
-// construction: cse.go and guard.go through number, dce.go, fold.go, and
-// forward.go alike.
-type rebuilder struct {
-	b      *ssa.Builder
-	blocks map[int]int
-	values map[ssa.Value]ssa.Value
+type site struct {
+	block int
+	index int
 }
 
-func newRebuilder(fn *ssa.Function) *rebuilder {
+type rebuilder struct {
+	builder *ssa.Builder
+	blocks  map[int]int
+	values  map[ssa.Value]ssa.Value
+}
+
+func newRebuilder(function *ssa.Function) *rebuilder {
+	builder := ssa.New(function.Name())
+	builder.Entry(function.Entry())
 	return &rebuilder{
-		b:      ssa.New(fn.Name()),
-		blocks: map[int]int{},
-		values: map[ssa.Value]ssa.Value{},
+		builder: builder,
+		blocks:  map[int]int{},
+		values:  map[ssa.Value]ssa.Value{},
 	}
 }
 
-// block returns block's replacement, allocating it on first reference - from
-// the pass's own traversal or from an edge reaching it before that traversal
-// gets there.
 func (r *rebuilder) block(block int) int {
 	if id, ok := r.blocks[block]; ok {
 		return id
 	}
-	id := r.b.Block()
+	id := r.builder.Block()
 	r.blocks[block] = id
 	return id
 }
 
-// value returns v's current replacement, or NoValue for NoValue.
-func (r *rebuilder) value(v ssa.Value) ssa.Value {
-	if v == ssa.NoValue {
+func (r *rebuilder) value(value ssa.Value) ssa.Value {
+	if value == ssa.NoValue {
 		return ssa.NoValue
 	}
-	return r.values[v]
+	return r.values[value]
 }
 
-func (r *rebuilder) list(vs []ssa.Value) []ssa.Value {
-	if len(vs) == 0 {
+func (r *rebuilder) list(values []ssa.Value) []ssa.Value {
+	if len(values) == 0 {
 		return nil
 	}
-	out := make([]ssa.Value, len(vs))
-	for i, v := range vs {
-		out[i] = r.value(v)
+	out := make([]ssa.Value, len(values))
+	for i, value := range values {
+		out[i] = r.value(value)
 	}
 	return out
 }
 
-// stack translates the operands one frame resumes with, each keeping the
-// ownership its entry carries: renumbering a value never moves a retain.
-func (r *rebuilder) stack(os []ssa.Operand) []ssa.Operand {
-	if len(os) == 0 {
+func (r *rebuilder) stack(operands []ssa.Operand) []ssa.Operand {
+	if len(operands) == 0 {
 		return nil
 	}
-	out := make([]ssa.Operand, len(os))
-	for i, o := range os {
+	out := make([]ssa.Operand, len(operands))
+	for i, o := range operands {
 		out[i] = ssa.Operand{Value: r.value(o.Value), Owned: o.Owned}
 	}
 	return out
 }
 
-// locals translates the local slots one frame is written back with. A slot
-// keeps its index: renumbering a value never moves it to another frame.
-func (r *rebuilder) locals(ls []ssa.Local) []ssa.Local {
-	if len(ls) == 0 {
+func (r *rebuilder) locals(locals []ssa.Local) []ssa.Local {
+	if len(locals) == 0 {
 		return nil
 	}
-	out := make([]ssa.Local, len(ls))
-	for i, l := range ls {
+	out := make([]ssa.Local, len(locals))
+	for i, l := range locals {
 		out[i] = ssa.Local{Index: l.Index, Value: r.value(l.Value)}
 	}
 	return out
 }
 
-// alias records that old now reads back as at: at is at's own renumbering
-// when old survives, or the survivor standing in for old when a pass elides
-// old's defining operation.
 func (r *rebuilder) alias(old, at ssa.Value) {
 	r.values[old] = at
 }
 
-// operation returns op with every value it reads - its arguments, the stacks
-// and promoted locals the frames an OpState carries hold, and the state it
-// resumes into - translated through the
-// rebuilder's current substitution. Its results are left as op's own old
-// values; a caller that keeps op still has to allocate and alias their
-// replacements itself.
-func (r *rebuilder) operation(op ssa.Operation) ssa.Operation {
-	op.Args = r.list(op.Args)
-	if len(op.Frames) > 0 {
-		frames := make([]ssa.Frame, len(op.Frames))
-		for i, fr := range op.Frames {
-			fr.Stack, fr.Locals = r.stack(fr.Stack), r.locals(fr.Locals)
-			frames[i] = fr
+func (r *rebuilder) operation(operation ssa.Operation) ssa.Operation {
+	operation.Args = r.list(operation.Args)
+	if len(operation.Frames) > 0 {
+		frames := make([]ssa.Frame, len(operation.Frames))
+		for i, frame := range operation.Frames {
+			frame.Stack, frame.Locals = r.stack(frame.Stack), r.locals(frame.Locals)
+			frames[i] = frame
 		}
-		op.Frames = frames
+		operation.Frames = frames
 	}
-	op.State = r.value(op.State)
-	return op
+	operation.State = r.value(operation.State)
+	return operation
 }
 
-// terminator returns t with every value and edge it names translated the
-// same way operation does, allocating the replacement for an edge's target
-// block if nothing has referenced it yet.
 func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
 	t.Args = r.list(t.Args)
 	if len(t.Edges) > 0 {
@@ -127,19 +105,16 @@ func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
 	return t
 }
 
-// define allocates op's replacement results in fn's own type vocabulary,
-// aliasing each old result to its new one, and returns op with those results
-// installed - ready to add to the rebuilder's builder.
-func (r *rebuilder) define(fn *ssa.Function, op ssa.Operation) ssa.Operation {
-	if len(op.Results) == 0 {
-		return op
+func (r *rebuilder) define(function *ssa.Function, operation ssa.Operation) ssa.Operation {
+	if len(operation.Results) == 0 {
+		return operation
 	}
-	results := make([]ssa.Value, len(op.Results))
-	for i, old := range op.Results {
-		nv := r.b.Value(fn.Type(old))
+	results := make([]ssa.Value, len(operation.Results))
+	for i, old := range operation.Results {
+		nv := r.builder.Value(function.Type(old))
 		r.alias(old, nv)
 		results[i] = nv
 	}
-	op.Results = results
-	return op
+	operation.Results = results
+	return operation
 }

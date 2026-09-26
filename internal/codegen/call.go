@@ -99,7 +99,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
 			jen.Id("locals").Op(":=").Len(jen.Id("fn").Dot("Locals")),
 		}
-		function = append(function, pushFrame(functionTarget, 1, true, 1, jen.Id("addr"))...)
+		function = append(function, pushFrame(functionTarget, 1, true, true, 1, jen.Id("addr"))...)
 		closure = []jen.Code{
 			frameOverflow(),
 			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")),
@@ -108,7 +108,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
 			jen.Id("locals").Op(":=").Len(jen.Id("tmpl").Dot("Locals")),
 		}
-		closure = append(closure, pushFrame(closureTarget, 1, true, 1, jen.Int().Parens(jen.Id("fn").Dot("Fn")))...)
+		closure = append(closure, pushFrame(closureTarget, 1, true, false, 1, jen.Int().Parens(jen.Id("fn").Dot("Fn")))...)
 	}
 
 	hostCore := []jen.Code{
@@ -145,7 +145,7 @@ func callDirect(tail bool, label string, advance int) []jen.Code {
 	if tail {
 		return append([]jen.Code{guard}, reuseFrame(callee, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")), advance)...)
 	}
-	return append([]jen.Code{guard}, enterFrame(callee, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")), advance)...)
+	return append([]jen.Code{guard}, enterFrame(callee, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")), advance, true)...)
 }
 
 func callClosure(tail bool, label string, advance int) []jen.Code {
@@ -158,20 +158,24 @@ func callClosure(tail bool, label string, advance int) []jen.Code {
 	if tail {
 		return append(preflight, reuseFrame(callee, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")), advance)...)
 	}
-	return append(preflight, enterFrame(callee, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")), advance)...)
+	return append(preflight, enterFrame(callee, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")), advance, false)...)
 }
 
-func enterFrame(callee target, typ, locals jen.Code, advance int) []jen.Code {
+func enterFrame(callee target, typ, locals jen.Code, advance int, native bool) []jen.Code {
 	return []jen.Code{
 		jen.Id("params").Op(":=").Len(jen.Add(typ).Dot("Params")),
 		jen.Id("returns").Op(":=").Len(jen.Add(typ).Dot("Returns")),
 		jen.Id("locals").Op(":=").Add(locals),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(pushFrame(callee, 0, false, advance, nil)...)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(pushFrame(callee, 0, false, native, advance, nil)...)),
 	}
 }
 
-func pushFrame(callee target, targetSlots int, releaseTarget bool, advance int, coroutine jen.Code) []jen.Code {
+// pushFrame builds a CALL's frame-entry body for callee. native is true only
+// for a direct *types.Function target, never a closure: there alone, before
+// the frame is filled, a jit-enabled interpreter may run the call to
+// completion in native code instead.
+func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advance int, coroutine jen.Code) []jen.Code {
 	body := []jen.Code{}
 	if targetSlots == 0 {
 		body = append(body, overflow())
@@ -191,6 +195,13 @@ func pushFrame(callee target, targetSlots int, releaseTarget bool, advance int, 
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
 		)
+	}
+	if native {
+		body = append(body, jen.If(
+			jen.Id("i").Dot("native").Op("!=").Nil().Op("&&").Id("i").Dot("native").Dot("call").Call(
+				jen.Id("i"), jen.Add(callee.addr), jen.Id("fn"), jen.Lit(releaseTarget), jen.Lit(advance),
+			),
+		).Block(jen.Return()))
 	}
 	body = append(body,
 		jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),

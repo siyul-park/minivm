@@ -37,7 +37,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, "func f\nblk0: ()\n\tv1:i32 = load local[0]\n\treturn v1, v1\n", ssa.Format(fn))
 	})
@@ -56,7 +56,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
@@ -66,7 +66,7 @@ func TestForwardPass_Run(t *testing.T) {
 		entry := b.Block()
 		first, second, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: local(0), Args: []ssa.Value{first}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
@@ -76,7 +76,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 
@@ -85,7 +85,7 @@ func TestForwardPass_Run(t *testing.T) {
 		entry := b.Block()
 		first, second, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{first}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
@@ -95,35 +95,36 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 
-	t.Run("keeps a global read a call separates but forwards a local one", func(t *testing.T) {
+	t.Run("keeps a global read and a local read a call separates", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := b.Param(entry, ssa.TypeRef)
-		global, held, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		global, held, redundant, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{global}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{held}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{redundant}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
 		again, local0 := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{again}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{local0}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{global, held, again, local0}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{global, held, redundant, again, local0}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveNone(), preserved)
+		require.False(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
 		require.Equal(t, 2, strings.Count(out, "load global[0]"))
-		require.Equal(t, 1, strings.Count(out, "load local[0]"))
+		require.Equal(t, 2, strings.Count(out, "load local[0]"))
 	})
 
 	t.Run("keeps a read in a block more than one edge reaches", func(t *testing.T) {
@@ -136,7 +137,7 @@ func TestForwardPass_Run(t *testing.T) {
 		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
 		stored, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(right, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{stored}})
-		b.Add(right, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Addr: 1}}, Results: []ssa.Value{state}})
+		b.Add(right, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(right, ssa.Operation{Op: ssa.OpStore, Slot: local(0), Args: []ssa.Value{stored}, State: state})
 		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
 		second := b.Value(ssa.TypeI32)
@@ -148,7 +149,7 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.Equal(t, pass.PreserveAll(), preserved)
+		require.True(t, preserved)
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 }

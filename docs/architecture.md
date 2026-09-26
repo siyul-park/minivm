@@ -4,13 +4,13 @@ Package ownership, dependencies, execution flow, and the current threaded runtim
 
 ## Instruction Levels
 
-| Level | Owner |
-|---|---|
-| Bytecode | `instr` — `Instruction`, `Opcode` |
-| SSA | `internal/ssa` — `Operation`, `Function` |
-| Machine | `internal/asm/<arch>` — machine instructions |
+| Level | Owner | Meaning |
+|---|---|---|
+| Bytecode | `instr` | VM semantics and encoding |
+| SSA | `internal/ssa` | compiler state and control flow |
+| Machine | `internal/asm/<arch>` | target instructions |
 
-Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machine IR is target-specific.
+Semantics originate in bytecode; SSA and machine forms refine representation, not meaning.
 
 ## Package Ownership
 
@@ -23,9 +23,12 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `internal/codegen` | generated threaded handlers and fusion |
 | `internal/graph` | CFG analysis |
 | `internal/ssa` | SSA IR and verification |
-| `internal/asm` | machine IR, encoding, linking, executable memory |
+| `internal/asm` | machine IR, register allocation, encoding, linking, executable memory, native stack and trampoline |
 | `internal/asm/arm64` | ARM64 encoding |
-| `pass` | pass lifecycle, pipelines, analysis cache |
+| `internal/jit` | native runtime contract shared by the interpreter and the compiler; publishes and retires native code (`Code`, `Store`) |
+| `internal/jit/compile` | SSA to machine rows: block layout, value registers, edge moves, loop budget; compiles a unit by tier and queues compiles (`Compile`, `Queue`) |
+| `internal/jit/arm64` | ARM64 lowering of SSA operations |
+| `pass` | pass API, lifecycle, pipelines, analysis cache |
 | `analysis` | reusable read-only facts |
 | `transform` | bytecode transforms, bytecode↔SSA conversion, SSA transforms |
 | `optimize` | optimization composition |
@@ -33,50 +36,47 @@ Bytecode defines semantics. SSA adds compiler state/control-flow concepts. Machi
 | `debug` | debugging policy |
 | `cli` | command parsing and presentation |
 
-The agent `MUST` place behavior by dominant ownership, not import convenience. It `MUST` extend an owner before adding a coordinator.
+Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUST` be extended before adding a coordinator.
 
 ## Dependencies
 
 - `instr` and `internal/graph` `MUST` remain leaf-like.
 - `internal/ssa` and `transform` `MUST NOT` depend on runtime or target packages.
-- `internal/asm` MUST remain below the runtime and compiler layers.
+- `internal/asm` MUST remain below the runtime and compiler layers and MUST NOT own JIT or interpreter exit semantics; it may own the low-level native-stack and trampoline mechanics required to enter, suspend, and resume native code.
+- `internal/jit` MUST NOT import `interp`.
 - ARM64 encoding MUST stay under `internal/asm/arm64`.
-- The planned native compiler MUST NOT become a dependency of `internal/ssa*` or `transform`.
+- `internal/jit/compile` MUST NOT name a physical register or target instruction; `internal/jit/arm64` MUST NOT walk SSA control flow.
+- The native compiler MUST NOT become a dependency of `internal/ssa*` or `transform`.
 - `program.Verify` `MUST` stay independent of runtime and optimization policy.
 
 ## Execution
 
 ```text
-program → Verify → optimize? → interp → threaded
-                                         ↓ hot root
-                                      JIT compile
-                                         ↓
-                              native ↔ threaded fallback
+program → Verify → optimize? → interp → threaded ⇄ native
 ```
 
-Threaded execution is the semantic baseline. Native execution `MUST` preserve observable behavior.
+Threaded execution is the semantic baseline. On ARM64, `WithThreshold` may compile hot functions; native execution returns to threaded execution at unsupported or non-native boundaries.
 
 ## Runtime
 
-`interp.Interpreter` owns stack, frames, globals, heap, reference counts, threaded dispatch, tracing, and JIT installation. A shared `Pool` owns compile coordination; an interpreter owns its execution state and dispatch table.
+`interp.Interpreter` owns stack, frames, globals, heap/RC, threaded dispatch, tracing, and native installation. Threshold-enabled interpreters own a `jit.Context`; pooled interpreters share published code and compile state through `Pool`.
 
 Execution is single-goroutine-owned. Background compilation consumes immutable input and `MUST NOT` mutate live interpreter state.
 
 ## Invariants
 
-The following invariants `MUST` hold, and the agent `MUST` preserve them:
+The following invariants `MUST` hold:
 
 - Heap index `0` is permanent null.
 - Only `KindRef` participates in reference counting.
 - Heap indexes are stable; reference cleanup is iterative.
 - A frame distinguishes function address from callable reference.
 - External bytecode is verified before execution.
-- Native fallback materializes exactly the state required by threaded execution.
 - Debugger mode disables JIT and preserves bytecode boundaries.
 
-## Planned Native Boundary
+## Native Boundary
 
-The native rebuild is a future consumer of `transform`, `internal/ssa`, and `internal/asm`. It MUST NOT change ownership of threaded execution or AOT optimization.
+The native tier consumes `transform`, `internal/ssa`, and `internal/asm`; `interp` owns native entry, exit, materialization, and tiering.
 
 ## Related
 

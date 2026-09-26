@@ -7,60 +7,35 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// CSEPass collapses a pure computation into an equal one a dominating
-// operation already performed: two operations of the same opcode over the
-// same arguments, related by dominance, become one. It is the SSA
-// counterpart of the bytecode global value numbering minivm used to carry,
-// and is dramatically smaller than it, because most of what that computed -
-// within-block value numbering, an available-expression dataflow to carry
-// numbers across block boundaries, and a conservative story for which
-// mutable loads are even nameable across blocks - is not this pass's problem
-// to solve. It is the IR's own: a value here is its definition, so identity
-// is free, and dominance alone (number's dominator-tree-scoped table) decides
-// what one definition may stand in for, with no dataflow fixpoint needed for
-// merges a dominator already covers.
-//
-// Eligibility is exactly instr's own purity, as OpExec states it, plus
-// OpConst, which the frontend never expresses as an OpExec: an OpLoad reads
-// mutable interpreter storage, and whether a store to that storage intervened
-// is ForwardPass's question, not this one's - run it first and a repeated read
-// is already one value here. A pure OpExec can carry deopt State (see
-// ssa.OverflowsI64's five arithmetic opcodes), so cseKey/number do merge two
-// dominance-related occurrences with different State, discarding the
-// dominated one's. That is sound because a boxability guard's exit is a
-// total TrapFallback to threaded execution, never a bridge resumed back into
-// native code, so either occurrence's State resumes the rest of the program
-// threaded the same way.
+// CSEPass removes dominating duplicate pure computations.
 type CSEPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*CSEPass)(nil)
 
+// NewCSEPass returns the pass.
 func NewCSEPass() *CSEPass {
 	return &CSEPass{}
 }
 
-func (p *CSEPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
-	next, changed := number(fn, cseKey)
+// Run applies the pass to one SSA function.
+func (p *CSEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
+	next, changed := deduplicate(function, cseKey)
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
-	*fn = *next
-	return pass.PreserveNone(), nil
+	*function = *next
+	return false, nil
 }
 
-// cseKey identifies a CSE-eligible operation by what it computes: an
-// OpConst by its boxed value, a pure OpExec by its opcode and its arguments
-// (already translated to the rebuild's current value numbers). Anything else
-// is not eligible.
-func cseKey(_ *ssa.Function, op ssa.Operation) (string, bool) {
-	switch op.Op {
+func cseKey(function *ssa.Function, operation ssa.Operation) (string, bool) {
+	switch operation.Op {
 	case ssa.OpConst:
-		return fmt.Sprintf("const %d", op.Const), true
+		return fmt.Sprintf("const %s %d", function.Type(operation.Results[0]), operation.Const), true
 	case ssa.OpExec:
-		if !op.Code.IsPure() {
+		if !operation.Code.IsPure() {
 			return "", false
 		}
-		return fmt.Sprintf("exec %d %v", op.Code, op.Args), true
+		return fmt.Sprintf("exec %d %v", operation.Code, operation.Args), true
 	default:
 		return "", false
 	}

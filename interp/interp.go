@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Interpreter executes a program.
 type Interpreter struct {
 	// ctx is non-nil only while Run is executing and is cleared before Run returns.
 	ctx context.Context
@@ -22,6 +23,7 @@ type Interpreter struct {
 	codec    Codec
 	profiler *prof.Profiler
 	samples  *prof.Collector
+	native   *native
 	closed   bool
 
 	types       []types.Type
@@ -77,6 +79,7 @@ type Interpreter struct {
 // Option configures an Interpreter or Pool at construction. Only the With
 // constructors produce one, so callers can name and collect options without
 // reaching the unexported state they configure.
+// Option configures an Interpreter.
 type Option func(*option)
 
 type option struct {
@@ -84,12 +87,13 @@ type option struct {
 	codec    Codec
 	profiler *prof.Profiler
 
-	frame   int
-	stack   int
-	heap    int
-	maxHeap int
-	tick    int
-	fuel    uint64
+	frame     int
+	stack     int
+	heap      int
+	maxHeap   int
+	tick      int
+	fuel      uint64
+	threshold int
 }
 
 type frame struct {
@@ -117,6 +121,7 @@ const (
 	negZeroF64 = uint64(1) << 63
 )
 
+// WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
 }
@@ -134,38 +139,53 @@ func WithProfiler(p *prof.Profiler) Option {
 	return func(o *option) { o.profiler = p }
 }
 
+// WithFrame sets initial frame capacity.
 func WithFrame(val int) Option {
 	return func(o *option) { o.frame = val }
 }
 
+// WithStack sets initial stack capacity.
 func WithStack(val int) Option {
 	return func(o *option) { o.stack = val }
 }
 
+// WithHeap sets initial heap capacity.
 func WithHeap(val int) Option {
 	return func(o *option) { o.heap = val }
 }
 
+// WithHeapLimit sets the heap limit.
 func WithHeapLimit(val int) Option {
 	return func(o *option) { o.maxHeap = val }
 }
 
+// WithTick sets the execution tick interval.
 func WithTick(val int) Option {
 	return func(o *option) { o.tick = val }
 }
 
+// WithFuel sets the execution fuel.
 func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
+}
+
+// WithThreshold enables the JIT: n calls to a *types.Function before it is
+// compiled to native code. n < 0 disables it; this is the default. The JIT
+// also requires runtime.GOARCH == "arm64" and neither WithHook nor WithFuel.
+// WithThreshold sets the JIT compilation threshold.
+func WithThreshold(n int) Option {
+	return func(o *option) { o.threshold = n }
 }
 
 // New builds an interpreter for prog. It trusts prog to be well-formed; run
 // program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
 func New(prog *program.Program, opts ...Option) *Interpreter {
 	opt := option{
-		frame: 128,
-		stack: 1024,
-		heap:  128,
-		tick:  128,
+		frame:     128,
+		stack:     1024,
+		heap:      128,
+		tick:      128,
+		threshold: -1,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -300,8 +320,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	// the boundary contract for SetGlobal and Reset.
 	i.seed()
 
-	c := i.threader()
-	i.code[0] = c.Compile(prog.Code, i.module.Slots(), i.module.Declared(), types.Kinds(i.module.Captures), i.module.Captures)
+	i.code[0] = i.compile(i.module, i.tick == 1)
 
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
@@ -319,9 +338,14 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.fr = &i.frames[0]
 	i.retain(0)
 
+	if jitEnabled(opt) {
+		i.native = newNative(i, opt.threshold)
+	}
+
 	return i
 }
 
+// Run executes the program until it returns or exits.
 func (i *Interpreter) Run(ctx context.Context) (err error) {
 	i.ctx = ctx
 	i.done = nil
@@ -341,23 +365,28 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	}
 }
 
+// Marshal converts a host value to a VM value.
 func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
 	defer i.guard(&err)
 	return i.codec.Marshal(i, v)
 }
 
+// Unmarshal converts a VM value to a host value.
 func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
 	return i.codec.Unmarshal(i, v, dst)
 }
 
+// Context returns the current execution context.
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
+// FP returns the current frame pointer.
 func (i *Interpreter) FP() int {
 	return i.fp
 }
 
+// Opcode returns the current opcode.
 func (i *Interpreter) Opcode() (instr.Opcode, error) {
 	fn, ip := i.Func(), i.IP()
 	if fn < 0 || fn >= len(i.instrs) || ip < 0 || ip >= len(i.instrs[fn]) {
@@ -366,14 +395,17 @@ func (i *Interpreter) Opcode() (instr.Opcode, error) {
 	return instr.Opcode(i.instrs[fn][ip]), nil
 }
 
+// Func returns the current function address.
 func (i *Interpreter) Func() int {
 	return i.fr.addr
 }
 
+// IP returns the current instruction pointer.
 func (i *Interpreter) IP() int {
 	return i.fr.ip
 }
 
+// Frame returns an active frame by depth.
 func (i *Interpreter) Frame(n int) (fn, ip, bp int, err error) {
 	if n < 0 || n >= i.fp {
 		return 0, 0, 0, ErrFrameUnderflow
@@ -382,6 +414,7 @@ func (i *Interpreter) Frame(n int) (fn, ip, bp int, err error) {
 	return f.addr, f.ip, f.bp, nil
 }
 
+// Const returns a constant by index.
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {
 		return 0, ErrSegmentationFault
@@ -389,6 +422,7 @@ func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	return i.constants[idx], nil
 }
 
+// Global returns a global by index.
 func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.globals) {
 		return 0, ErrSegmentationFault
@@ -426,6 +460,7 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	return nil
 }
 
+// Local returns a local by index.
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 	f := i.fr
 	addr := f.bp + idx
@@ -460,6 +495,7 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	return nil
 }
 
+// Load returns and owns a heap value.
 func (i *Interpreter) Load(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
@@ -516,6 +552,7 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	return nil
 }
 
+// Alloc allocates or retains a heap value.
 func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	defer i.guard(&err)
 	switch v := val.(type) {
@@ -548,6 +585,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	return addr, nil
 }
 
+// Retain adds one heap reference.
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
@@ -558,6 +596,7 @@ func (i *Interpreter) Retain(addr int) (types.Value, error) {
 	return val, nil
 }
 
+// Release drops one heap reference.
 func (i *Interpreter) Release(addr int) error {
 	if !i.alive(addr) {
 		return ErrSegmentationFault
@@ -587,6 +626,7 @@ func (i *Interpreter) HeapLen() int {
 	return len(i.heap)
 }
 
+// Push adds a value to the operand stack.
 func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {
@@ -604,6 +644,7 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	return nil
 }
 
+// Pop removes and returns the top stack value.
 func (i *Interpreter) Pop() (types.Value, error) {
 	if i.sp == 0 {
 		return nil, ErrStackUnderflow
@@ -617,13 +658,9 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return val, nil
 }
 
-// PopBoxed consumes the top-of-stack value and returns its raw NaN-boxed word
-// without constructing a types.Value, so scalar results incur no allocation
-// (read them with Boxed.F64/I32/...). It is the zero-alloc counterpart to Pop.
-// For a KindRef result the stack's reference is transferred to the caller
-// unchanged: resolve it with Load and balance it with Release, or Retain to keep
-// an extra reference. Pop instead detaches the heap value and releases the
-// stack's reference, so the two stay symmetric on the consumed slot.
+// PopBoxed returns the raw stack word without allocating. For KindRef it transfers
+// stack ownership to the caller; Pop instead releases that ownership while returning
+// the detached value.
 func (i *Interpreter) PopBoxed() (types.Boxed, error) {
 	if i.sp == 0 {
 		return 0, ErrStackUnderflow
@@ -641,6 +678,7 @@ func (i *Interpreter) Peek(n int) (types.Boxed, error) {
 	return i.stack[i.sp-1-n], nil
 }
 
+// Len returns the operand stack length.
 func (i *Interpreter) Len() int {
 	return i.sp
 }
@@ -662,9 +700,13 @@ func (i *Interpreter) Close() error {
 	i.arrays.clear()
 	i.structs.clear()
 	i.closed = true
-	return nil
+	if i.native == nil {
+		return nil
+	}
+	return i.native.close()
 }
 
+// Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
 	// Keep the recent peak, but let a smaller heap shrink an old high-water mark.
 	dynamic := len(i.heap) - i.base
@@ -1015,6 +1057,88 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 	i.fr = f
 }
 
+// retire finishes the current frame exactly as threaded RETURN does: results
+// at bp, sp, frame pop, and the frame's release of its callee ref. Generated
+// RETURN and native's own OSR return path share it so the two never diverge.
+// sweep, the codegen's own compile-time fact, skips releasing intermediate
+// operands a frame provably holds none of; always true is always correct.
+func (i *Interpreter) retire(sweep bool) {
+	f := i.fr
+	if i.sp < f.returns {
+		panic(ErrStackUnderflow)
+	}
+	if f.coro != 0 {
+		i.retireCoroutine(f)
+		return
+	}
+	if sweep {
+		for _, value := range i.stack[f.bp : i.sp-f.returns] {
+			i.releaseBox(value)
+		}
+	}
+	switch f.returns {
+	case 0:
+	case 1:
+		i.stack[f.bp] = i.stack[i.sp-1]
+	default:
+		copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
+	}
+	i.leave(f, f.bp+f.returns)
+}
+
+// leave pops f once its results already sit at f.bp..sp and the rest of its
+// operand stack is accounted for, releasing the frame's own callee ref.
+// retire calls it after its copy; native's OSR return path, whose compiled
+// RETURN already writes results at f.bp itself, needs no copy and calls it
+// directly.
+func (i *Interpreter) leave(f *frame, sp int) {
+	i.sp = sp
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+// retireCoroutine finishes f as retire does when f belongs to a coroutine:
+// the result becomes the coroutine's value instead of moving to the caller.
+func (i *Interpreter) retireCoroutine(f *frame) {
+	coAddr := f.coro
+	co, ok := i.heap[coAddr].(*coroutine)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	if f.returns > 0 {
+		for _, value := range i.stack[f.bp : i.sp-1] {
+			i.releaseBox(value)
+		}
+		co.value = i.stack[i.sp-1]
+	} else {
+		for _, value := range i.stack[f.bp:i.sp] {
+			i.releaseBox(value)
+		}
+		i.retain(0)
+		co.value = types.BoxedNull
+	}
+	co.done = true
+	co.image = co.image[:0]
+	co.upvals = nil
+	if f.release {
+		i.release(f.ref)
+	}
+	co.ref = 0
+	co.release = false
+	bp := f.bp
+	f.code = nil
+	f.upvals = nil
+	f.coro = 0
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+	i.stack[bp] = types.BoxRef(coAddr)
+	i.sp = bp + 1
+}
+
 // discard releases an unwound frame's activation: its function reference and any
 // in-flight coroutine handle. Operand slots are released by land in one sweep.
 func (i *Interpreter) discard(f *frame) {
@@ -1093,18 +1217,9 @@ func (i *Interpreter) zero(kind types.Kind) types.Boxed {
 	}
 }
 
-// mapKey indexes one entry of a generic map. It is the single owner of the
-// rule every map opcode and the codec must agree on, because a key written
-// under one spelling and looked up under another is unreachable.
-//
-// A scalar keys by value, i1 and i8 through their i32 representation. A string
-// keys by content, so equal strings index one entry however each was
-// published, as strings compare by content everywhere else. Every other
-// reference keys by heap address.
-//
-// The second result is the key a new entry stores: zero when the MapKey alone
-// reconstructs it, and otherwise a reference the entry takes ownership of. A
-// caller that only looks up releases it instead.
+// mapKey defines the canonical map key: i1/i8 normalize to i32, strings key
+// by content, and other refs by heap address. The optional second result is
+// the owned stored key when normalization alone cannot reconstruct it.
 func (i *Interpreter) mapKey(key types.Boxed) (types.MapKey, types.Boxed) {
 	switch key.Kind() {
 	case types.KindI1, types.KindI8, types.KindI32:
@@ -1213,17 +1328,9 @@ func (i *Interpreter) decoder(r *Registry) *Decoder {
 	return d
 }
 
-// arrayGet reads the element at index at off the array bound to heap
-// address addr, covering every TypedArray[_] representation and the generic
-// *types.Array alike. It is the generic counterpart to the specialized reads
-// array.get fusion emits when a slot's declared element kind matches the
-// runtime representation: a fused handler falls back to arrayGet exactly
-// when that specialization misses, and the unfused ARRAY_GET handler calls
-// it unconditionally. A *types.Array element is always an owned ref and is
-// retained here; a TypedArray[_] element is a scalar copy and needs none.
-// arrayGet does not release addr itself — callers that only borrowed the
-// container ref (a fused read) must leave it alone, and callers that popped
-// an owned ref (the unfused handler) must release it themselves.
+// arrayGet is the generic ARRAY_GET path for all container representations.
+// Generic refs are retained on read; the container address itself is owned
+// and released by the caller.
 func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 	switch array := i.heap[addr].(type) {
 	case types.TypedArray[bool]:
@@ -1326,14 +1433,8 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 	}
 }
 
-// structField reads the field at index at off the struct bound to heap address
-// addr, covering a *types.Struct and a *HostStruct alike. It is the
-// generic counterpart to the specialized reads struct.get
-// fusion emits for a declared *types.StructType slot: the unfused STRUCT_GET
-// handler calls it unconditionally, and a fused handler falls back to it when
-// the runtime value does not match the slot it specialized for. A KindRef
-// field is retained. structField does not release addr itself, for the same
-// reason arrayGet does not.
+// structField is the generic STRUCT_GET path for VM and host structs. Ref fields
+// are retained; the caller owns and releases the container address.
 func (i *Interpreter) structField(addr, at int) types.Boxed {
 	switch value := i.heap[addr].(type) {
 	case *types.Struct:
@@ -1506,7 +1607,6 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 }
 
 func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
-	c := i.threader()
 	n := addr + 1
 	if addr >= len(i.instrs) {
 		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
@@ -1525,10 +1625,21 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	}
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
-	i.code[addr] = c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
+	i.code[addr] = i.compile(fn, i.tick == 1)
 	if dynamic {
 		i.dynamic[addr] = true
 	}
+}
+
+// function returns the *types.Function addr names: i.module for address 0,
+// the heap object at addr otherwise. native's frame and exact code lookups
+// share it, since deopt materialization can name address 0 once OSR can
+// enter native code from within module code.
+func (i *Interpreter) function(addr int) *types.Function {
+	if addr == 0 {
+		return i.module
+	}
+	return i.heap[addr].(*types.Function)
 }
 
 // globalDecls returns the declared kinds for threaded handler selection,
@@ -1546,17 +1657,20 @@ func (i *Interpreter) globalDecls() []types.Kind {
 	return kinds
 }
 
-// threader builds generated dispatch state.
-func (i *Interpreter) threader() *threader {
-	return &threader{
+// compile builds fn's threaded code: fused unless exact, which every
+// materialized native frame needs because a fusion leaves no handler at the
+// IPs it absorbs (interp/native.go's deopt resumes exactly there).
+func (i *Interpreter) compile(fn *types.Function, exact bool) []func(*Interpreter) {
+	c := &threader{
 		types:       i.types,
 		constants:   i.constants,
 		heap:        i.heap,
 		coros:       i.coros,
 		globals:     i.globalDecls(),
 		globalTypes: i.globalTypes,
-		exact:       i.tick == 1,
+		exact:       exact,
 	}
+	return c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after

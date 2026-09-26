@@ -9,11 +9,11 @@
 
 ## Go를 위한 작고 내장하기 쉬운 바이트코드 VM
 
-성능, 자원, 호스트 연동에 대한 통제력을 유지하면서 Go 애플리케이션 안에서 동적 로직을 실행합니다.
+Go 안에서 자원 제한, 타입이 지정된 호스트 호출, 스레디드 기준 실행을 명시적으로 제어하며 동적 로직을 실행합니다.
 
-- **제한된 실행** — 스택, 힙, 호출 깊이, fuel, hook, context를 제어합니다.
-- **직접적인 호스트 연동** — 타입이 지정된 리플렉션 없는 함수로 Go를 호출합니다.
-- **명확한 실행 모델** — 스레디드 인터프리터를 기준으로 자원과 호스트 연동을 제어합니다.
+- **제한된 실행** — 스택, 힙, 프레임 깊이, fuel, hook, context.
+- **직접 호스트 호출** — 타입이 지정된 리플렉션 없는 `HostFunction` 경로.
+- **네이티브 티어** — 옵트인 ARM64 실행과 스레디드 폴백.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -40,7 +40,7 @@ if err := vm.Run(context.Background()); err != nil {
 }
 
 result, _ := vm.Pop() // types.I32(42)
-```go
+```
 
 minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 통제된 런타임에서 실행한 뒤, 타입이 지정된 값을 꺼냅니다.
 
@@ -51,8 +51,8 @@ minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 통
 | 내장형 런타임 | 일급 함수, 로컬, 글로벌, 클로저, ref, 문자열, 배열, 구조체, 맵, 코루틴, 구조화된 에러 |
 | 호스트 연동 | 타입이 지정된 `HostFunction`과 일반 Go 값용 `Marshal`, `Unmarshal` |
 | 자원 제어 | 스택, 힙, 프레임, fuel, context, hook, 디버거 제어 |
-| 빠른 기본 실행 | 핵심 워크로드에서 낮은 정상 상태 할당을 유지하는 클로저 기반 스레디드 디스패치 |
-| 실행 기준 | 명시적인 자원 제어를 갖는 스레디드 인터프리터 |
+| 빠른 기본 실행 | 낮은 정상 상태 할당을 유지하는 클로저 기반 스레디드 디스패치 |
+| 의미론적 기준 | 명시적인 자원 제어를 갖는 스레디드 인터프리터 |
 | 안전한 실행 허용 | 실행 전 정적 바이트코드 검증 |
 
 ### 활용 분야
@@ -77,7 +77,7 @@ lookup := interp.NewHostFunction(
         return []types.Boxed{types.BoxI32(price)}, nil
     },
 )
-```go
+```
 
 파라미터와 결과는 타입이 지정된 `[]types.Boxed`로 유지됩니다. 직접 호출 경로에는 리플렉션이나 `interface{}` 박싱이 필요하지 않습니다.
 
@@ -85,7 +85,7 @@ lookup := interp.NewHostFunction(
 
 ## 성능
 
-스레디드 인터프리터가 현재 실행 기준입니다. 네이티브 재구축은 계획 상태이며, 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
+스레디드 인터프리터가 현재 실행 기준입니다. `interp.WithThreshold`를 통해 arm64에서만 옵트인으로 네이티브 티어를 사용할 수 있습니다. 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
 
 ## 런타임 도구
 
@@ -95,7 +95,7 @@ lookup := interp.NewHostFunction(
 if err := program.Verify(prog); err != nil {
     log.Fatal(err)
 }
-```go
+```
 
 검증기는 실행 전에 잘못된 제어 흐름, 스택 동작, 타입 불일치를 거부합니다. `run` CLI는 불러온 프로그램을 기본적으로 검증합니다.
 
@@ -103,7 +103,7 @@ if err := program.Verify(prog); err != nil {
 
 ```go
 prog, err := optimize.New(optimize.O2).Optimize(prog)
-```go
+```
 
 최적화 단계는 로컬 상수 폴딩과 중복 제거부터 데드 코드 제거, 블록 간 전역 값 번호화까지 지원합니다.
 
@@ -117,17 +117,17 @@ vm := interp.New(prog,
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
-```text
+```
 
-정책 검사는 hook을 사용하고, 명령어 단위 중단점과 단계 실행은 `NewDebugger`와 `WithDebugger`를 사용합니다.
+정책 검사는 hook으로, 명령어 단위 중단점과 단계 실행은 `NewDebugger`와 `WithDebugger`로 처리합니다.
 
 ## 아키텍처
 
 ```text
-Program -> verifier / optimizer -> threaded interpreter
-```text
+Program → Verify → optimize? → threaded ⇄ native (ARM64, opt-in)
+```
 
-스레디드 인터프리터가 현재 완전한 실행 엔진입니다. 네이티브 컴파일은 계획된 재구축이며 현재 런타임에는 포함되지 않습니다.
+스레디드 인터프리터가 의미론적 기준이자 전체 실행 엔진입니다. `WithThreshold`는 hot function에 ARM64 네이티브 실행을 추가하고, 지원하지 않는 경로는 스레디드 실행으로 돌아갑니다.
 
 명령어 셋은 WebAssembly를 참고했지만 의도적으로 독자 설계했습니다. 1바이트 opcode와 고정 폭 또는 길이 접두사 피연산자를 사용합니다.
 
@@ -143,7 +143,7 @@ Program -> verifier / optimizer -> threaded interpreter
 | 스레디드 인터프리터 | ✅ 사용 가능 |
 | 정적 바이트코드 검증기 | ✅ 사용 가능 |
 | AOT 최적화 (`O1`-`O3`) | ✅ 사용 가능 |
-| ARM64 네이티브 재구축 | ⬜ 계획 |
+| ARM64 네이티브 티어 (옵트인, `interp.WithThreshold`) | ✅ 사용 가능 |
 | 디버거와 프로파일러 | ✅ 사용 가능 |
 | x86-64 네이티브 백엔드 | 🔲 미구현 |
 

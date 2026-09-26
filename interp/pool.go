@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -19,6 +20,9 @@ type Pool struct {
 
 	idle chan *Interpreter
 	live atomic.Int64
+
+	shared   *shared
+	sharedMu sync.Mutex
 
 	mu     sync.RWMutex
 	closed bool
@@ -111,6 +115,12 @@ func (p *Pool) Close() error {
 		}
 		p.live.Add(-1)
 	}
+	p.sharedMu.Lock()
+	if p.shared != nil {
+		errs = append(errs, p.shared.release())
+		p.shared = nil
+	}
+	p.sharedMu.Unlock()
 	return errors.Join(errs...)
 }
 
@@ -123,9 +133,33 @@ func (p *Pool) grow() *Interpreter {
 			return nil
 		}
 		if p.live.CompareAndSwap(live, live+1) {
-			return New(p.prog, p.opts...)
+			i := New(p.prog, p.opts...)
+			p.share(i)
+			return i
 		}
 	}
+}
+
+// share adopts a matching interpreter JIT runtime into the pool. The pool owns
+// its reference; a mismatched runtime stays private. Interpreters without JIT
+// have no shared runtime.
+func (p *Pool) share(i *Interpreter) {
+	if i.native == nil {
+		return
+	}
+	p.sharedMu.Lock()
+	defer p.sharedMu.Unlock()
+
+	if p.shared == nil {
+		p.shared = i.native.shared.retain()
+		return
+	}
+	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
+		return
+	}
+	own := i.native.shared
+	i.native.shared = p.shared.retain()
+	_ = own.release()
 }
 
 func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {

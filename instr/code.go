@@ -35,17 +35,9 @@ func Targets(code []byte, ip int) []int {
 	}
 }
 
-// Format disassembles code into one line per instruction, prefixed with its
-// byte offset. Every branch target that lands exactly on an instruction
-// boundary is also given a stable "L%04d:" label line ahead of that
-// instruction, and BR/BR_IF/BR_TABLE operands reaching such a target render
-// as the label name instead of a raw relative offset; ParseAll(Format(code))
-// reproduces code exactly. A target that is out of range or falls inside
-// another instruction (only reachable from malformed code) has no label and
-// falls back to the numeric rendering Instruction.String() uses. BR_TABLE
-// renders in the same field order as Instruction.String(), "count case0
-// case1 ... default", so Format's dialect is a strict superset of
-// Instruction.String()'s.
+// Format disassembles code with byte offsets and stable labels for branch
+// targets on instruction boundaries. ParseAll(Format(code)) round-trips valid
+// code; invalid targets remain numeric.
 func Format(code []byte) string {
 	instrs := Unmarshal(code)
 	labelAt := branchLabelNames(code, instrs)

@@ -54,16 +54,15 @@ The agent `MUST` preserve:
 - borrow/retain/release ownership;
 - existing runtime error/panic conventions.
 
-## JIT
+## Native
 
-The agent `MUST` add ARM64 lowering only when guards and fallback are explicit:
+An opcode without an ARM64 lowering is handled by the existing exit/deopt path. A new lowering MUST:
 
-- decline before mutating lowering state when unsupported;
-- deopt before unsupported behavior executes;
-- prefer terminal fallback over duplicated interpreter behavior;
-- preserve stack/local/global/upvalue/ref ownership.
+- return `false` before changing lowering state when unsupported;
+- preserve the threaded ownership and failure semantics;
+- use the runtime contract in `jit-internals.md` rather than duplicate interpreter behavior.
 
-See `jit-internals.md`.
+See `jit-internals.md` and `internal/jit/arm64/machine.go` for the current set.
 
 ## Tests
 
@@ -71,9 +70,9 @@ The agent `MUST` add runtime behavior to the existing opcode corpus when one row
 
 ## Documentation
 
-The agent `MUST` update only owner docs:
+Update only the owner of changed facts:
 
-| Change | Owner |
+| Fact | Owner |
 |---|---|
 | semantics/status | `instruction-set.md` |
 | verification | `verification.md` |
@@ -90,7 +89,7 @@ make check-generated
 make check-tidy check-fmt vet
 ```
 
-With the native rebuild, the agent MUST run the relevant ARM64 tests/benchmarks on ARM64.
+When ARM64 lowering is affected, the agent MUST run the affected ARM64 tests and benchmark gates.
 
 ## Related
 

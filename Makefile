@@ -10,7 +10,7 @@ GOIMPORTS ?= goimports
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 test coverage coverage-check benchmark benchmark-pr benchmark-core benchmark-nightly benchmark-compare lint fmt vet doc fuzz
+.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark benchmark-pr benchmark-core benchmark-nightly benchmark-compare lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -51,7 +51,7 @@ clean-cache:
 sync:
 	@go work sync
 
-check: check-generated check-tidy check-fmt vet test check-arm64
+check: check-generated check-tidy check-fmt vet check-inline test check-arm64
 	@go build ./...
 
 check-generated:
@@ -68,6 +68,10 @@ check-fmt:
 check-arm64:
 	@GOOS=linux GOARCH=arm64 go build ./...
 	@GOOS=linux GOARCH=arm64 go test -exec=true ./...
+
+check-inline:
+	@go build -gcflags=-m ./interp 2>&1 | grep -q 'can inline (\*native).call' || \
+		{ echo "(*native).call no longer inlines"; exit 1; }
 
 test:
 	@go test -race $(test-options) ./...
@@ -110,15 +114,20 @@ benchmark-pr:
 		printf '%s\n' "$$root" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
 	done; \
 	kernels="$$(cd benchmarks && \
-		go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./... && \
-		go test -run='^$$' -bench='^BenchmarkCall_RecursiveFib$$/^(20|35)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
+		go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^(threaded|jit)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./... && \
+		go test -run='^$$' -bench='^BenchmarkCall_RecursiveFib$$/^(20|35)$$/^(threaded|jit)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
 	printf '%s\n' "$$kernels"; \
 	for name in \
 		BenchmarkControl_IterativeFib/threaded \
+		BenchmarkControl_IterativeFib/jit \
 		BenchmarkCall_RecursiveFib/20/threaded \
+		BenchmarkCall_RecursiveFib/20/jit \
 		BenchmarkCall_RecursiveFib/35/threaded \
+		BenchmarkCall_RecursiveFib/35/jit \
 		BenchmarkMemory_TypedArraySum/threaded \
-		BenchmarkNumeric_BranchTree/threaded; do \
+		BenchmarkMemory_TypedArraySum/jit \
+		BenchmarkNumeric_BranchTree/threaded \
+		BenchmarkNumeric_BranchTree/jit; do \
 		printf '%s\n' "$$kernels" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
 	done
 

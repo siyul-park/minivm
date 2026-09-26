@@ -7,22 +7,20 @@ Supported platforms and native-tier availability.
 | Platform | Threaded | AOT | Native |
 |---|---:|---:|---:|
 | Other Go-supported platforms | ✅ | ✅ | — |
-| Darwin / ARM64 | ✅ | ✅ | planned |
-| Linux / ARM64 | ✅ | ✅ | planned |
+| Darwin / ARM64 | ✅ | ✅ | ✅ |
+| Linux / ARM64 | ✅ | ✅ | ✅ |
 | Darwin / x86-64 | ✅ | ✅ | — |
 | Linux / x86-64 | ✅ | ✅ | — |
 
-ARM64 is the executable-memory and encoding target (`internal/asm`, `internal/asm/arm64`); no native tier is installed today. AMD64 has no encoder.
+ARM64 is the native target. `internal/asm` owns build-tagged entry/icache paths; `internal/jit/arm64` owns lowering. AMD64 has no encoder or native tier.
 
 The minimum Go version is the version declared in `go.mod`.
 
 ## Build
 
-Platform mechanics stay behind build constraints in `internal/asm` (`icache_darwin_arm64.go`, `memory.go`, `memory_stub.go`); normal builds `MUST NOT` need manual tags.
+Platform mechanics are build-tagged in `internal/asm`; normal builds `MUST NOT` require manual tags or cgo.
 
-## Ownership
-
-Executable memory and target mechanics belong to `internal/asm` and target packages. Native-tier contracts belong to `jit-internals.md`; opcode status belongs to `instruction-set.md`.
+Executable memory and target mechanics belong to `internal/asm`; native runtime contracts belong to `jit-internals.md`; opcode status belongs to `instruction-set.md`.
 
 ## Related
 

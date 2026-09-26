@@ -10,7 +10,8 @@ Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may u
 | Kinds | `instr/kind.go` |
 | Runtime types | `types/type.go` |
 | Host conversion | `interp/codec.go`, `encode.go`, `decode.go` |
-| Planned native representation | JIT rebuild |
+| Native representation: type to register class | `internal/jit/compile` (`class`) |
+| Native representation: lowering | `internal/jit/arm64` |
 
 ## Boxed Layout
 
@@ -42,7 +43,7 @@ minivm uses NaN boxing.
 
 ## Computational Types
 
-`i1`, `i8`, and `i32` share one 32-bit computational representation while retaining distinct runtime kinds.
+`i1`, `i8`, and `i32` share one 32-bit computational lane while retaining distinct runtime kinds.
 
 ```text
 i8 & i8 → i8
@@ -51,7 +52,7 @@ i8 + i8 → i32
 comparison / eqz → i1
 ```
 
-Constant folding `MUST` preserve result kinds.
+Constant folding `MUST` preserve the declared result kind.
 
 ## I64
 
@@ -77,7 +78,7 @@ Larger signed values `MUST` use heap-backed `types.I64` objects and `KindRef`.
 | `BoxF64` | `KindF64` |
 | `BoxRef` | `KindRef` |
 
-Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MUST` check `Kind()` unless the contract proves the kind.
+Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Callers `MUST` check `Kind()` unless the contract proves the kind.
 
 ## Native Representation
 
@@ -88,6 +89,10 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. The agent `MU
 | `f32` | 32-bit float lane |
 | `f64` | 64-bit float lane |
 | `ref` | boxed 64-bit value |
+
+Native code boxes only at VM-slot boundaries. Narrow and `f32` values use the low 32 bits; `f64` and `ref` use the full word. An `i64` slot is guarded before unboxing because a promoted value is a `KindRef`; a wide native `i64` boxes through `ExitBox` (see `jit-internals.md`'s Exits section) rather than deopting.
+
+An SSA constant (`ssa.Operation.Const`) is its result type's native word. For a non-ref kind that word is unboxed; `types.Boxed` appears only at the pool boundary and in the materializer. A `ref` constant's native word is already the boxed 64-bit value, since refs travel as boxed words.
 
 Every interpreter, container, storage, or host boundary `MUST` restore the exact boxed representation and ownership.
 
