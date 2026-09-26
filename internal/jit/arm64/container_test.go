@@ -317,6 +317,31 @@ func TestMachine_Container(t *testing.T) {
 		require.Equal(t, rows, a.Rows()[start:])
 	})
 
+	t.Run("array.set narrows an i32 value to a 0/1 byte for an i1 element", func(t *testing.T) {
+		i1array := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI1}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+		r := regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI32, 4: ssa.TypeI32}
+		m, a := guarded(t, r, i1array)
+		start := len(a.Rows())
+		op := ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}}
+		require.True(t, m.Lower(a, op, r))
+
+		rows := []asm.Instruction{
+			target.SBFX(vr(2), r.Reg(2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+			target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+			target.ADD(vr(2), target.X16, vr(2)),
+			target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+			target.LDR(vr(4), vr(3), 0),
+			target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+			target.SXTW(vr(6), r.Reg(3)),
+			target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
+			target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+			target.ADD(vr(7), vr(4), vr(6)),
+			target.CMPI(r.Reg(4), 0), target.CSET(vr(8), target.CondNE),
+			target.STRB(vr(8), vr(7), 0),
+		}
+		require.Equal(t, rows, a.Rows()[start:])
+	})
+
 	t.Run("declines a container that carries no shape guard", func(t *testing.T) {
 		r := regs{1: ssa.TypeRef, 3: ssa.TypeI32, 4: ssa.TypeI32}
 		m, a := arm64.New(), asm.New(target.New())

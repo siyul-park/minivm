@@ -266,10 +266,15 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		kind := w.stack[len(w.stack)-1].kind
-		if elem, ok := w.element(w.stack[len(w.stack)-3].fact); ok && elem == types.KindRef {
-			// A []any stores Boxed words of any kind: guard the container.
-			kind = types.KindRef
-		} else if !kind.IsNumeric() && kind != types.KindRef {
+		if elem, ok := w.element(w.stack[len(w.stack)-3].fact); ok {
+			if elem == types.KindRef {
+				// A []any stores Boxed words of any kind: guard the container.
+				kind = types.KindRef
+			} else if (elem == types.KindI1 || elem == types.KindI8) && kind == types.KindI32 {
+				kind = elem
+			}
+		}
+		if !kind.IsNumeric() && kind != types.KindRef {
 			return false
 		}
 		w.guard(len(w.stack)-3, ssa.Shape{Kind: kind})

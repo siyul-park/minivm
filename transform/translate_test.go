@@ -380,6 +380,30 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
+	t.Run("guards an array store of an i32 value through a declared i1 element kind", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI1)}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
+			})}
+
+		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:ref = load local[0]
+	v2:i32 = const 0
+	v3:i32 = const 1
+	v5:state = state {addr=1 base=0 ip=12 returns=0 stack=[v1, v2, v3]}
+	v4:ref = guard.shape v1 kind i1 state v5
+	array.set v4, v2, v3 state v5
+	v6:state = state {addr=1 base=0 ip=13 returns=0 stack=[]}
+	return state v6
+`, ssa.Format(out))
+	})
+
 	t.Run("guards an array load through a constant cell's resolved element type", func(t *testing.T) {
 		fn := &types.Function{
 			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},

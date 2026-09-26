@@ -725,6 +725,29 @@ func TestNew(t *testing.T) {
 		require.Equal(t, types.TypedArray[float32]{-1.5, 42.5}, heap[1])
 	})
 
+	t.Run("array.set narrows an i32 value into a []i1 element, matching threaded array.get", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+		insts, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI1)}, Returns: []types.Type{types.TypeI1}},
+			Code: instr.Marshal(insts),
+		}
+
+		heap := []types.Value{nil, types.TypedArray[bool]{false}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		rc := []int{0, 2}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+		ctx := enter(t, stack)
+		ctx.Heap = uintptr(unsafe.Pointer(&heap[0]))
+		ctx.RC = uintptr(unsafe.Pointer(&rc[0]))
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI1(true), stack[0])
+	})
+
 	t.Run("deopts an out-of-bounds array.get, matching threaded ErrIndexOutOfRange", func(t *testing.T) {
 		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.ARRAY_GET).Emit(instr.RETURN)

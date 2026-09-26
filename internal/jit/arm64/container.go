@@ -145,7 +145,13 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	case 1:
 		addr := m.vreg()
 		a.Emit(target.ADD(addr, ptr, idx))
-		a.Emit(target.STRB(val, addr, 0))
+		if shape.Kind == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
+			// A bool byte is 0 or 1: store val != 0, as threaded does.
+			bit := m.vreg()
+			a.Emit(target.CMPI(val, 0), target.CSET(bit, target.CondNE), target.STRB(bit, addr, 0))
+		} else {
+			a.Emit(target.STRB(val, addr, 0))
+		}
 	case 4:
 		// int32 elements use STRW: array stride is 4 bytes, while generic
 		// integer STR writes 8 bytes. Float32 STR is already width-correct.
