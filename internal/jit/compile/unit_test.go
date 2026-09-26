@@ -21,11 +21,9 @@ import (
 // is refused before Compile reaches the backend.
 type stub struct{}
 
-func (stub) Arch() asm.Arch      { panic("unused") }
-func (stub) Reserve() []asm.PReg { panic("unused") }
-func (stub) Prologue(*asm.Assembler, int, bool, compile.Layout) []asm.VReg {
-	panic("unused")
-}
+func (stub) Arch() asm.Arch                                                   { panic("unused") }
+func (stub) Reserve() []asm.PReg                                              { panic("unused") }
+func (stub) Prologue(*asm.Assembler, int, bool, compile.Layout, []asm.VReg)   { panic("unused") }
 func (stub) Epilogue(*asm.Assembler)                                          { panic("unused") }
 func (stub) Enter(*asm.Assembler, compile.Layout) asm.Label                   { panic("unused") }
 func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool           { panic("unused") }

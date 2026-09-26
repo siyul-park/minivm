@@ -630,13 +630,13 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	return true
 }
 
-// call adopts every stack entry a CALL pops except an argument in a borrowed
-// position (Borrows) backed by a local or a constant: the caller's
-// own local cannot change during the call, and the constant pool is
-// immortal. A global- or upvalue-backed borrowed argument is adopted here,
-// since the callee may overwrite that cell, and released by emit after the
-// call instead of by the callee. It returns the resolved target's Borrows,
-// or nil when the callee does not resolve to a known function.
+// call adopts every stack entry a CALL pops except a constant callee and an
+// argument in a borrowed position (Borrows) backed by a local or a constant:
+// the caller's own local cannot change during the call, and the constant
+// pool is immortal. A global- or upvalue-backed borrowed argument is adopted
+// here, since the callee may overwrite that cell, and released by emit after
+// the call instead of by the callee. It returns the resolved target's
+// Borrows, or nil when the callee does not resolve to a known function.
 func (w *walker) call() []bool {
 	top := len(w.stack) - 1
 	_, target := w.callee(top)
@@ -647,6 +647,9 @@ func (w *walker) call() []bool {
 	borrows := Borrows(target)
 	base := top - len(borrows)
 	for i := range w.stack {
+		if i == top && w.stack[i].backing == backingConst {
+			continue
+		}
 		if i >= base && i < top && borrows[i-base] && w.lent(i) {
 			continue
 		}

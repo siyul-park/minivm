@@ -62,7 +62,7 @@ func TestMachine_Reserve(t *testing.T) {
 func TestMachine_Prologue(t *testing.T) {
 	t.Run("counts entry and clears locals", func(t *testing.T) {
 		a := asm.New(target.New())
-		arm64.New().Prologue(a, 3, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1})
+		arm64.New().Prologue(a, 3, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1}, nil)
 		require.Equal(t, []asm.Instruction{
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
@@ -83,7 +83,7 @@ func TestMachine_Prologue(t *testing.T) {
 
 	t.Run("counts entry through a register when the offset exceeds imm12", func(t *testing.T) {
 		a := asm.New(target.New())
-		arm64.New().Prologue(a, 4096, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1})
+		arm64.New().Prologue(a, 4096, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1}, nil)
 		require.Equal(t, []asm.Instruction{
 			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
 			target.MOVZ(target.X17, 0x8000, 0),
@@ -98,47 +98,44 @@ func TestMachine_Prologue(t *testing.T) {
 
 	t.Run("skips entry count", func(t *testing.T) {
 		a := asm.New(target.New())
-		arm64.New().Prologue(a, 3, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1})
+		arm64.New().Prologue(a, 3, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1}, nil)
 		require.Len(t, a.Rows(), 10)
 		require.NotContains(t, a.Rows(), target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
 	})
 
-	t.Run("captures register-passed parameters once the frame is built", func(t *testing.T) {
+	t.Run("moves register-passed parameters into their registers once the frame is built", func(t *testing.T) {
 		a := asm.New(target.New())
-		got := arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindRef}, Params: 2, Arguments: []types.Kind{types.KindI32, types.KindRef}})
-		want := []asm.VReg{asm.NewVReg(-2, asm.RegTypeInt, asm.Width32), asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)}
-		require.Equal(t, want, got)
+		args := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width32), asm.NewVReg(2, asm.RegTypeInt, asm.Width64)}
+		arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindRef}, Params: 2, Arguments: []types.Kind{types.KindI32, types.KindRef}}, args)
 		require.Equal(t, []asm.Instruction{
 			target.DEF(target.X0),
 			target.DEF(target.X1),
-			target.MOVW(want[0], target.X0),
-			target.MOV(want[1], target.X1),
+			target.MOVW(args[0], target.X0),
+			target.MOV(args[1], target.X1),
 		}, a.Rows()[8:])
 	})
 
-	t.Run("captures a float register-passed parameter by FMOV", func(t *testing.T) {
+	t.Run("moves a float register-passed parameter by FMOV", func(t *testing.T) {
 		a := asm.New(target.New())
-		got := arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindF32, types.KindF64}, Params: 2, Arguments: []types.Kind{types.KindF32, types.KindF64}})
-		want := []asm.VReg{asm.NewVReg(-2, asm.RegTypeFloat, asm.Width32), asm.NewVReg(-3, asm.RegTypeFloat, asm.Width64)}
-		require.Equal(t, want, got)
+		args := []asm.VReg{asm.NewVReg(1, asm.RegTypeFloat, asm.Width32), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
+		arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindF32, types.KindF64}, Params: 2, Arguments: []types.Kind{types.KindF32, types.KindF64}}, args)
 		require.Equal(t, []asm.Instruction{
 			target.DEF(target.X0),
 			target.DEF(target.X1),
-			target.FMOV(want[0], target.X0),
-			target.FMOV(want[1], target.X1),
+			target.FMOV(args[0], target.X0),
+			target.FMOV(args[1], target.X1),
 		}, a.Rows()[8:])
 	})
 
-	t.Run("captures an i64 register-passed parameter by a raw 64-bit MOV", func(t *testing.T) {
+	t.Run("moves an i64 register-passed parameter by a raw 64-bit MOV", func(t *testing.T) {
 		a := asm.New(target.New())
-		got := arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindI64, types.KindRef}, Params: 2, Arguments: []types.Kind{types.KindI64, types.KindRef}})
-		want := []asm.VReg{asm.NewVReg(-2, asm.RegTypeInt, asm.Width64), asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)}
-		require.Equal(t, want, got)
+		args := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeInt, asm.Width64)}
+		arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindI64, types.KindRef}, Params: 2, Arguments: []types.Kind{types.KindI64, types.KindRef}}, args)
 		require.Equal(t, []asm.Instruction{
 			target.DEF(target.X0),
 			target.DEF(target.X1),
-			target.MOV(want[0], target.X0),
-			target.MOV(want[1], target.X1),
+			target.MOV(args[0], target.X0),
+			target.MOV(args[1], target.X1),
 		}, a.Rows()[8:])
 	})
 }
@@ -153,7 +150,7 @@ func TestMachine_Epilogue(t *testing.T) {
 	}
 
 	m, a := arm64.New(), asm.New(target.New())
-	m.Prologue(a, 0, true, compile.Layout{})
+	m.Prologue(a, 0, true, compile.Layout{}, nil)
 	start := len(a.Rows())
 	m.Epilogue(a)
 	require.Equal(t, pop, a.Rows()[start:])
@@ -162,7 +159,7 @@ func TestMachine_Epilogue(t *testing.T) {
 func TestMachine_Enter(t *testing.T) {
 	t.Run("loads the pinned registers, calls the body, and returns with no results", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		label := m.Enter(a, compile.Layout{})
@@ -192,7 +189,7 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("boxes a narrow result by tag in slot 0 and a ref raw in slot 1", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindI32, types.KindRef}})
@@ -220,7 +217,7 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("boxes an f64 result raw", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindF64}})
@@ -230,7 +227,7 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("stores an i64 result raw", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindI64}})
@@ -240,7 +237,7 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Arguments: []types.Kind{types.KindI32, types.KindRef}})
@@ -262,7 +259,7 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("loads an f32 register-passed parameter's low word and an f64's whole word", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Arguments: []types.Kind{types.KindF32, types.KindF64}})
@@ -284,7 +281,7 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("loads an i64 register-passed parameter's slot and unboxes its 49-bit payload inline", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		m.Epilogue(a)
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Arguments: []types.Kind{types.KindI64}})
@@ -753,7 +750,7 @@ func TestMachine_Lower(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, a := arm64.New(), asm.New(target.New())
-			m.Prologue(a, 0, true, compile.Layout{})
+			m.Prologue(a, 0, true, compile.Layout{}, nil)
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, tt.regs))
 			if tt.lower {
@@ -811,7 +808,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("stores results from slot zero", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
 		require.Equal(t, rows(0), a.Rows()[start:])
@@ -819,7 +816,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("stores completed operands past the locals", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{1}}, r)
 		require.Equal(t, rows(16), a.Rows()[start:])
@@ -849,7 +846,7 @@ func TestMachine_Return(t *testing.T) {
 		}
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindRef, types.KindI8, types.KindI64}, Params: 1})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindRef, types.KindI8, types.KindI64}, Params: 1}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
 		require.Equal(t, slices.Concat(
@@ -883,7 +880,7 @@ func TestMachine_Return(t *testing.T) {
 		word2, word3 := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64), asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindRef, types.KindRef}, Params: 2, Borrows: []bool{true, false}})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindRef, types.KindRef}, Params: 2, Borrows: []bool{true, false}}, nil)
 		// Prologue's own Label calls claim end (0) then entry (1); Return's
 		// skip is the next one allocated.
 		skip := asm.Label(2)
@@ -906,7 +903,7 @@ func TestMachine_Return(t *testing.T) {
 		// ref parameter it writes, or none borrowed) must not pay the
 		// CMPI/B.NE at every return.
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindI32}, Params: 1, Borrows: []bool{false}})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindI32}, Params: 1, Borrows: []bool{false}}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn}, r)
 		require.Equal(t, []asm.Instruction{target.BLabel(0)}, a.Rows()[start:])
@@ -914,7 +911,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("moves one register-convention result to X0 instead of boxing it", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindI32}})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindI32}}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
 		require.Equal(t, []asm.Instruction{
@@ -927,7 +924,7 @@ func TestMachine_Return(t *testing.T) {
 	t.Run("moves two register-convention results to X0 and X1, a float by FMOV", func(t *testing.T) {
 		r2 := regs{1: ssa.TypeF64, 2: ssa.TypeRef}
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindF64, types.KindRef}})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindF64, types.KindRef}}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1, 2}}, r2)
 		require.Equal(t, []asm.Instruction{
@@ -941,7 +938,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("keeps OpComplete boxing to slots even under the register convention", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindI32}})
+		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindI32}}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{1}}, r)
 		require.Equal(t, rows(16), a.Rows()[start:])
@@ -955,7 +952,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("calls through the natives table and bridges when it cannot", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -1019,7 +1016,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("borrows a callee it does not own", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -1066,7 +1063,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("reads a register-convention result from X0 instead of the slot", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -1115,7 +1112,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("calls its own entry directly when it is a self call", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -1175,7 +1172,7 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("moves register-passed arguments into X0/X1 on top of their boxed slot store", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -1223,7 +1220,7 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("moves a register-passed i64 argument by a raw 64-bit MOV, on top of its boxed slot store", func(t *testing.T) {
 		r64 := regs{1: ssa.TypeI64}
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
@@ -1273,14 +1270,14 @@ func TestMachine_Call(t *testing.T) {
 
 	t.Run("declines a frame beyond the reach of an immediate", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		require.False(t, m.Call(a, compile.Call{Address: 5, Callee: 2, Base: 510, Size: 2}, r))
 	})
 }
 
 func TestMachine_Budget(t *testing.T) {
 	m, a := arm64.New(), asm.New(target.New())
-	m.Prologue(a, 0, true, compile.Layout{})
+	m.Prologue(a, 0, true, compile.Layout{}, nil)
 	start := len(a.Rows())
 	m.Budget(a, exit)
 	require.Equal(t, []asm.Instruction{

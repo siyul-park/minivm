@@ -29,14 +29,10 @@ type lowering struct {
 	states  map[ssa.Value]ssa.Operation
 	consts  map[ssa.Value]uint64
 	raw     map[ssa.Value]bool
-	// borrow names a value an OpConst ref retained and used only as some
-	// call's callee, once per call site: every one of those retains is
-	// redundant, since the constant pool already holds the callee alive.
-	borrow map[ssa.Value]bool
-	homes  map[int]int
-	exits  []*jit.Exit
-	places [][]place
-	saves  [][]save
+	homes   map[int]int
+	exits   []*jit.Exit
+	places  [][]place
+	saves   [][]save
 	// stalls holds each exit's remat constants, materialized at its stub.
 	stalls [][]stall
 	// memo is each ExitCall map's one register per remat constant.
@@ -65,9 +61,6 @@ type lowering struct {
 
 	// op is the operation or terminator being lowered.
 	op ssa.Operation
-	// pending is a borrow candidate's retain deferred until the operation
-	// right after it either is, or is not, the call it feeds.
-	pending ssa.Value
 }
 
 // place is where exit map value to lives in the rows: register reg.
@@ -146,7 +139,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	l := &lowering{
 		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
-		borrow: borrowed(f), homes: homes, tmp: int32(f.Values()) + 4,
+		homes: homes, tmp: int32(f.Values()) + 4,
 		memo: map[int]map[ssa.Value]asm.VReg{}, remats: map[ssa.Value]bool{},
 		param: map[ssa.Value]bool{},
 	}
@@ -284,51 +277,6 @@ func (l *lowering) validate(args []ssa.Value) error {
 	return nil
 }
 
-// borrowed reports every OpConst ref value used only as CALL callees and
-// retained once per such call: the constant pool keeps it alive, so every
-// retain is redundant. A guard.value comparing against the constant is not
-// itself a use: the admitted word (Args[1]) stays borrowed at the call.
-func borrowed(f *ssa.Function) map[ssa.Value]bool {
-	retains, uses, callees := map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]int{}
-	use := func(args []ssa.Value) {
-		for _, v := range args {
-			uses[v]++
-		}
-	}
-	for id := 0; id < f.Len(); id++ {
-		b := f.Block(id)
-		for _, op := range b.Operations {
-			if op.Op == ssa.OpRetain {
-				retains[op.Args[0]]++
-				continue
-			}
-			if op.Op == ssa.OpRelease {
-				continue
-			}
-			if op.Op == ssa.OpGuardValue {
-				uses[op.Args[0]]++
-				continue
-			}
-
-			use(op.Args)
-			if op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 {
-				callees[op.Args[len(op.Args)-1]]++
-			}
-		}
-		use(b.Terminator.Args)
-		for _, e := range b.Terminator.Edges {
-			use(e.Args)
-		}
-	}
-	out := map[ssa.Value]bool{}
-	for v, n := range callees {
-		if retains[v] == n && uses[v] == n {
-			out[v] = true
-		}
-	}
-	return out
-}
-
 func (l *lowering) function() error {
 	order := graph.Order(l.f)
 	labels := make([]asm.Label, l.f.Len())
@@ -355,7 +303,11 @@ func (l *lowering) function() error {
 	}
 	results := registers(l.fn)
 	layout := Layout{Kinds: kinds, Params: params, Arguments: args, Results: results, Borrows: borrows}
-	l.args = l.m.Prologue(l.a, l.address, l.count, layout)
+	l.args = make([]asm.VReg, len(args))
+	for i, k := range args {
+		l.args[i] = l.fresh(ssa.TypeOf(k))
+	}
+	l.m.Prologue(l.a, l.address, l.count, layout, l.args)
 	if l.osr {
 		if err := l.preload(); err != nil {
 			return err
@@ -379,11 +331,6 @@ func (l *lowering) function() error {
 		}
 		if !counted {
 			return fmt.Errorf("%w: loop header %d without state", ErrUnsupported, block)
-		}
-		if l.pending != ssa.NoValue {
-			if err := l.flush(); err != nil {
-				return err
-			}
 		}
 		if err := l.terminator(b.Terminator, labels); err != nil {
 			return err
@@ -456,11 +403,6 @@ func (l *lowering) preload() error {
 }
 
 func (l *lowering) operation(op ssa.Operation) error {
-	if l.pending != ssa.NoValue && op.Op != ssa.OpState && !l.calls(op) {
-		if err := l.flush(); err != nil {
-			return err
-		}
-	}
 	if op.Op != ssa.OpGuardKind {
 		if err := l.validate(op.Args); err != nil {
 			return err
@@ -501,11 +443,6 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if !l.raw[op.Args[0]] {
 			return fmt.Errorf("%w: guard.kind of raw int", ErrUnsupported)
 		}
-	case ssa.OpRetain:
-		if l.borrow[op.Args[0]] {
-			l.pending = op.Args[0]
-			return nil
-		}
 	case ssa.OpExec:
 		if op.Code == instr.CALL {
 			return l.call(op)
@@ -526,7 +463,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if i, ok := l.argument(op.Slot); ok {
 			l.args[i] = asm.VReg{}
 		}
-	case ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue:
+	case ssa.OpRetain, ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
@@ -558,28 +495,6 @@ func (l *lowering) deopt() {
 	}
 	l.a.Bind(resume)
 	l.deopts = nil
-}
-
-// calls reports whether op is the CALL that consumes l.pending as its
-// callee: the only shape a borrow-candidate retain feeds. OpState never
-// intervenes (operation skips it above): it records a snapshot and emits no
-// row, so it never places an exit map between the retain and its call.
-func (l *lowering) calls(op ssa.Operation) bool {
-	return op.Op == ssa.OpExec && op.Code == instr.CALL && len(op.Args) > 0 && op.Args[len(op.Args)-1] == l.pending
-}
-
-// flush lowers a deferred retain whose call did not immediately follow it
-// (an operation genuinely came between, so an exit could name the value),
-// keeping today's code for that value.
-func (l *lowering) flush() error {
-	op := ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{l.pending}}
-	delete(l.borrow, l.pending)
-	l.pending = ssa.NoValue
-	l.op = op
-	if !l.m.Lower(l.a, op, l) {
-		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
-	}
-	return l.err
 }
 
 // terminator lowers t. An edge that moves values gets a stub of its own, so
@@ -645,33 +560,38 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	return nil
 }
 
-// reg is v's virtual register, typed by its static representation.
+// reg is v's virtual register.
 func (l *lowering) reg(v ssa.Value) asm.VReg {
-	switch l.f.Type(v) {
+	return class(int32(v), l.f.Type(v))
+}
+
+// fresh returns an unshared register of type t.
+func (l *lowering) fresh(t ssa.Type) asm.VReg {
+	id := l.tmp
+	l.tmp++
+	return class(id, t)
+}
+
+// class is register id typed by t's static representation: its bank and
+// width.
+func class(id int32, t ssa.Type) asm.VReg {
+	switch t {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
-		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width32)
+		return asm.NewVReg(id, asm.RegTypeInt, asm.Width32)
 	case ssa.TypeI64, ssa.TypeRef:
-		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width64)
+		return asm.NewVReg(id, asm.RegTypeInt, asm.Width64)
 	case ssa.TypeF32:
-		return asm.NewVReg(int32(v), asm.RegTypeFloat, asm.Width32)
+		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width32)
 	case ssa.TypeF64:
-		return asm.NewVReg(int32(v), asm.RegTypeFloat, asm.Width64)
+		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64)
 	default:
 		return asm.VReg{}
 	}
 }
 
-// fresh returns an unshared register of v's bank and width.
-func (l *lowering) fresh(v ssa.Value) asm.VReg {
-	like := l.reg(v)
-	id := l.tmp
-	l.tmp++
-	return asm.NewVReg(id, like.Type(), like.Width())
-}
-
 // materialize loads word for v into a fresh register.
 func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
-	reg := l.fresh(v)
+	reg := l.fresh(l.f.Type(v))
 	l.m.Const(l.a, reg, word)
 	return reg
 }
@@ -713,8 +633,12 @@ func (l *lowering) call(op ssa.Operation) error {
 	}
 	frame := state.Frames[len(state.Frames)-1]
 	below := len(frame.Stack) - len(op.Args)
-	owned := l.pending != callee
-	l.pending = ssa.NoValue
+	if below < 0 {
+		return fmt.Errorf("%w: call state without its operands", ErrUnsupported)
+	}
+	// The state's top entry is the callee operand, owned only when
+	// translation retained it.
+	owned := frame.Stack[len(frame.Stack)-1].Owned
 	id := l.exit(jit.ExitCall)
 	l.exits[id].Callee = ref
 	l.exits[id].Owned = owned
@@ -803,9 +727,7 @@ func (l *lowering) exit(k jit.Kind) int {
 			f.Stack = make([]jit.Operand, len(stack))
 		}
 		for j, o := range stack {
-			// A borrowed callee's retain was never emitted: the materializer
-			// must retain it itself.
-			f.Stack[j].Owned = o.Owned && !l.borrow[o.Value]
+			f.Stack[j].Owned = o.Owned
 			l.place(id, &f.Stack[j].Value, o.Value)
 		}
 		if len(frame.Locals) > 0 {

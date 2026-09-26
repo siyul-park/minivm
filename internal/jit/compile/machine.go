@@ -18,10 +18,10 @@ type Machine interface {
 	// Prologue begins a function at address, whose shape is l; count
 	// requests its entry hotness counter. A Machine lowers many functions in
 	// sequence (a Queue worker reuses one), so Prologue resets all
-	// per-function state. Prologue returns one register per l.Arguments
-	// entry holding its incoming value, and keeps l.Results for OpReturn to
-	// consult.
-	Prologue(a *asm.Assembler, address int, count bool, l Layout) []asm.VReg
+	// per-function state. Prologue moves each l.Arguments entry's incoming
+	// value into args, one register of its class per entry, and keeps
+	// l.Results for OpReturn to consult.
+	Prologue(a *asm.Assembler, address int, count bool, l Layout, args []asm.VReg)
 	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
 	// Enter emits the Go entry stub after Epilogue and returns its label:
@@ -115,8 +115,8 @@ type Call struct {
 	// the activation is too deep, or the frame does not fit. The interpreter
 	// replays the call itself; Bridge never returns to native code.
 	Bridge asm.Label
-	// Owned reports whether the call adopted Callee's reference, so it
-	// releases it once the callee returns.
+	// Owned reports whether the call's state owns Callee's reference, so
+	// the call releases it once the callee returns.
 	Owned bool
 	// Self reports whether Address is the unit being lowered's own address
 	// and the unit is not OSR (its entry is a loop header): the call branches

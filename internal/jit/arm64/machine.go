@@ -59,10 +59,10 @@ func (m *Machine) Reserve() []asm.PReg {
 
 // Prologue builds the frame, records the activation, counts the entry when
 // enabled, and clears non-parameter locals. Register-convention arguments
-// are captured from X0/X1 before those registers are repurposed. A Machine
+// move from X0/X1 into args before those registers are repurposed. A Machine
 // lowers many functions in sequence (a Queue worker reuses one), so Prologue
 // resets all per-function state.
-func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout) []asm.VReg {
+func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout, args []asm.VReg) {
 	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: l.Results, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(
@@ -97,29 +97,20 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	for i := l.Params; i < len(l.Kinds); i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 	}
-	for i := range l.Arguments {
+	for i := range args {
 		a.Emit(target.DEF(register(i)))
 	}
-	regs := make([]asm.VReg, len(l.Arguments))
-	for i, k := range l.Arguments {
+	for i, dst := range args {
 		src := register(i)
-		m.temp--
-		switch k.Repr() {
-		case types.KindF32:
-			regs[i] = asm.NewVReg(m.temp, asm.RegTypeFloat, asm.Width32)
-			a.Emit(target.FMOV(regs[i], src))
-		case types.KindF64:
-			regs[i] = asm.NewVReg(m.temp, asm.RegTypeFloat, asm.Width64)
-			a.Emit(target.FMOV(regs[i], src))
-		case types.KindRef, types.KindI64:
-			regs[i] = asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
-			a.Emit(target.MOV(regs[i], src))
+		switch {
+		case dst.Type() == asm.RegTypeFloat:
+			a.Emit(target.FMOV(dst, src))
+		case dst.Width() == asm.Width32:
+			a.Emit(target.MOVW(dst, src))
 		default:
-			regs[i] = asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width32)
-			a.Emit(target.MOVW(regs[i], src))
+			a.Emit(target.MOV(dst, src))
 		}
 	}
-	return regs
 }
 
 // Epilogue ends a function: every return branches here to pop the record

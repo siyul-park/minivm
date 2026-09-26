@@ -58,12 +58,12 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
 | Optimized | fold → forward → CSE → guard → hoist → DCE → promote → DCE |
-| Lower | assign registers by SSA type, order blocks in reverse postorder, resolve block parameters with edge moves |
+| Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder, resolve block parameters with edge moves |
 | Build | assemble, allocate, encode, publish through `jit.Code` |
 
 A loop header `MUST` have state before its budget check. An OSR unit loads block-0 parameters from the current operand stack and clears no locals.
 
-A constant callee stays borrowed when every retain is paired with a call-site use; `guard.value` does not count as a use. A dynamic `CALL` with one recorded feedback target becomes a guarded constant call only for a borrowed callee.
+Translate never retains a constant callee: the pool keeps it alive, so its call state does not own it and the native call neither retains nor releases it. Lower takes `Call.Owned` from that state. A dynamic `CALL` with one recorded feedback target becomes a guarded constant call only for a callee operand its state does not own.
 
 A reference parameter its function never writes (`transform.Borrows`) is borrowed: a native caller lends a local- or constant-backed argument without a retain, and releases an owned one after the call.
 

@@ -466,9 +466,8 @@ func TestNew(t *testing.T) {
 		callee32 := cb.Value(ssa.TypeRef)
 		got := cb.Value(ssa.TypeI32)
 		cb.Add(centry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(7)), Results: []ssa.Value{callee32}})
-		// Retained once and used only as this call's callee: borrowed, so
-		// Call neither retains nor releases it (no Context.RC needed here).
-		cb.Add(centry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee32}})
+		// Its state does not own the callee, so Call neither retains nor
+		// releases it (no Context.RC needed here).
 		cat := cb.Value(ssa.TypeState)
 		cb.Add(centry, ssa.Operation{
 			Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1, Stack: []ssa.Operand{{Value: callee32}}}},

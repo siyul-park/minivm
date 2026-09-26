@@ -87,8 +87,7 @@ blk3: () <-- (blk1)
 		require.Equal(t, `func 0:0
 blk0: ()
 	v1:ref = const 2
-	retain v1
-	v3:state = state {addr=0 base=0 ip=3 returns=0 stack=[v1 owned]}
+	v3:state = state {addr=0 base=0 ip=3 returns=0 stack=[v1]}
 	v2:i32 = call v1 state v3
 	v4:state = state {addr=0 base=0 ip=4 returns=0 stack=[v2]}
 	complete v2 state v4
@@ -560,8 +559,7 @@ blk0: ()
 	v1:ref = load global[0]
 	v2:ref = const 2
 	retain v1
-	retain v2
-	v4:state = state {addr=0 base=0 ip=6 returns=0 stack=[v1 owned, v2 owned]}
+	v4:state = state {addr=0 base=0 ip=6 returns=0 stack=[v1 owned, v2]}
 	v3:i32 = call v1, v2 state v4
 	release v1 state v4
 	v5:state = state {addr=0 base=0 ip=7 returns=0 stack=[v3]}
@@ -732,8 +730,8 @@ func indirectRecursiveFib(t *testing.T) (*types.Function, []int) {
 
 // wantIndirectRecursiveFib is indirectRecursiveFib's SSA text once both
 // dynamic CALLs speculate their recorded callee (address 1, a self call).
-// Param 1 (self) is a borrowed, local-backed argument at both call sites, so
-// neither retains it.
+// Neither call retains param 1 (self), a borrowed local-backed argument, or
+// its constant callee.
 func wantIndirectRecursiveFib(ips []int) string {
 	return fmt.Sprintf(`func 1:0
 blk0: ()
@@ -756,25 +754,21 @@ blk2: () <-- (blk0)
 	v13:ref = const 1
 	v15:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v12]}
 	v14:ref = guard.value v12, v13 state v15
-	retain v13
-	v17:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v13 owned]}
-	v16:i32 = call v9, v11, v13 state v17
-	v18:i32 = load local[0]
-	v19:i32 = const 2
-	v21:state = state {addr=1 base=0 ip=31 returns=1 stack=[v16, v18, v19]}
-	v20:i32 = i32.sub v18, v19 state v21
+	v16:i32 = call v9, v11, v13 state v15
+	v17:i32 = load local[0]
+	v18:i32 = const 2
+	v20:state = state {addr=1 base=0 ip=31 returns=1 stack=[v16, v17, v18]}
+	v19:i32 = i32.sub v17, v18 state v20
+	v21:ref = load local[1]
 	v22:ref = load local[1]
-	v23:ref = load local[1]
-	v24:ref = const 1
-	v26:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22, v23]}
-	v25:ref = guard.value v23, v24 state v26
-	retain v24
-	v28:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v20, v22, v24 owned]}
-	v27:i32 = call v20, v22, v24 state v28
-	v30:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v27]}
-	v29:i32 = i32.add v16, v27 state v30
-	v31:state = state {addr=1 base=0 ip=38 returns=1 stack=[v29]}
-	return v29 state v31
+	v23:ref = const 1
+	v25:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v19, v21, v22]}
+	v24:ref = guard.value v22, v23 state v25
+	v26:i32 = call v19, v21, v23 state v25
+	v28:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v26]}
+	v27:i32 = i32.add v16, v26 state v28
+	v29:state = state {addr=1 base=0 ip=38 returns=1 stack=[v27]}
+	return v27 state v29
 `, ips[0], ips[1])
 }
 

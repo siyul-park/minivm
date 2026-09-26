@@ -16,40 +16,32 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// machine records every call Lower makes, in order. With capture, Prologue
-// returns one register per argument, as arm64.Machine does.
+// machine records every call Lower makes, in order.
 type machine struct {
 	calls     []string
 	kinds     []types.Kind
 	count     bool
 	arguments []types.Kind
+	args      []asm.VReg
 	results   []types.Kind
 	regs      map[ssa.Value]asm.VReg
 	moves     [][2]asm.VReg
 	uses      [][]asm.VReg
 	spills    []int
 	sites     []compile.Call
-	capture   bool
 	consts    []uint64
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
 func (m *machine) Reserve() []asm.PReg { return nil }
 
-func (m *machine) Prologue(_ *asm.Assembler, _ int, count bool, l compile.Layout) []asm.VReg {
+func (m *machine) Prologue(_ *asm.Assembler, _ int, count bool, l compile.Layout, args []asm.VReg) {
 	m.calls = append(m.calls, "prologue")
 	m.kinds = l.Kinds
 	m.count = count
 	m.arguments = l.Arguments
+	m.args = args
 	m.results = l.Results
-	if !m.capture {
-		return nil
-	}
-	regs := make([]asm.VReg, len(l.Arguments))
-	for i := range l.Arguments {
-		regs[i] = asm.NewVReg(int32(-2-i), asm.RegTypeInt, asm.Width64)
-	}
-	return regs
 }
 
 func (m *machine) Epilogue(*asm.Assembler) { m.calls = append(m.calls, "epilogue") }
@@ -397,10 +389,9 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(seed), Results: []ssa.Value{wide}})
 		arg := constant(b, entry, types.BoxI32(7))
 		callee := constant(b, entry, types.BoxRef(2))
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
 		// wide sits below the call's own operands, so it stays a deopt-only
 		// map entry, materialized only at the exit stall.
-		at := state(b, entry, 0, ssa.Operand{Value: wide}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: wide}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -412,14 +403,13 @@ func TestLower(t *testing.T) {
 		require.Contains(t, m.consts, uint64(seed))
 	})
 
-	t.Run("calls a resolved function at the frame base above its operands, borrowing its once-retained callee", func(t *testing.T) {
+	t.Run("calls a resolved function at the frame base above its operands, borrowing a callee its state does not own", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		below := constant(b, entry, types.BoxI32(5))
 		arg := constant(b, entry, types.BoxI32(7))
 		callee := constant(b, entry, types.BoxRef(2))
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		at := state(b, entry, 0, ssa.Operand{Value: below}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: below}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -428,14 +418,12 @@ func TestLower(t *testing.T) {
 		caller := function(1, 1, instr.New(instr.CALL))
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
-		// No "retain" row: the callee's single retain, consumed only by
-		// this call, is redundant — the constant pool already holds it.
 		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		site.Bridge = 0
 		require.Equal(t, compile.Call{
 			Address: 2, Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
-			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(10)}, Owned: false,
+			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(11)}, Owned: false,
 			Registers: []types.Kind{types.KindI32},
 			Arguments: []types.Kind{types.KindI32},
 		}, site)
@@ -459,8 +447,7 @@ func TestLower(t *testing.T) {
 			n := constant(b, entry, types.BoxI32(3))
 			self := constant(b, entry, types.BoxRef(2))
 			callee := constant(b, entry, types.BoxRef(2))
-			b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-			at := state(b, entry, 0, ssa.Operand{Value: n}, ssa.Operand{Value: self, Owned: argOwned}, ssa.Operand{Value: callee, Owned: true})
+			at := state(b, entry, 0, ssa.Operand{Value: n}, ssa.Operand{Value: self, Owned: argOwned}, ssa.Operand{Value: callee})
 			got := b.Value(ssa.TypeI32)
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{n, self, callee}, State: at, Results: []ssa.Value{got}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -481,7 +468,7 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		arg := constant(b, entry, types.BoxI64(7))
 		callee := constant(b, entry, types.BoxRef(2))
-		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -494,15 +481,11 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []types.Kind{types.KindI64}, m.sites[0].Arguments)
 	})
 
-	t.Run("keeps the retain and release for a callee retained more than once", func(t *testing.T) {
+	t.Run("releases a callee its state owns once the call returns", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		arg := constant(b, entry, types.BoxI32(7))
 		callee := constant(b, entry, types.BoxRef(2))
-		// A second retain of callee — e.g. CSE unifying two call sites'
-		// constants onto one value — means it is not this call's alone, so
-		// today's code (retain before, release after) stays.
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
 		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
 		got := b.Value(ssa.TypeI32)
@@ -513,38 +496,9 @@ func TestLower(t *testing.T) {
 		caller := function(1, 1, instr.New(instr.CALL))
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "retain", "retain", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
-		site := m.sites[0]
-		require.True(t, site.Owned)
+		require.Equal(t, []string{"prologue", "retain", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
+		require.True(t, m.sites[0].Owned)
 		require.True(t, exits[0].Owned)
-	})
-
-	t.Run("borrows a CSE'd constant callee used by two calls", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		arg := constant(b, entry, types.BoxI32(7))
-		callee := constant(b, entry, types.BoxRef(2))
-		// CSE unifies both calls' callee constant onto one value: one retain
-		// per call site, two calls, no other use. Both are redundant.
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		at1 := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
-		got1 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at1, Results: []ssa.Value{got1}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		at2 := state(b, entry, 1, ssa.Operand{Value: got1}, ssa.Operand{Value: callee, Owned: true})
-		got2 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{got1, callee}, State: at2, Results: []ssa.Value{got2}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got2}})
-
-		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL), instr.New(instr.CALL))
-		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
-		require.NoError(t, err)
-		// No "retain" row before either call.
-		require.Equal(t, []string{"prologue", "call", "call", "return", "exit 0 4", "exit 1 4", "epilogue", "enter"}, m.calls)
-		require.Len(t, exits, 2)
-		require.False(t, exits[0].Owned)
-		require.False(t, exits[1].Owned)
 	})
 
 	t.Run("branches to its own entry directly on a self call", func(t *testing.T) {
@@ -552,8 +506,7 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		arg := constant(b, entry, types.BoxI32(7))
 		callee := constant(b, entry, types.BoxRef(9))
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -572,8 +525,7 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		arg := constant(b, entry, types.BoxI32(7))
 		callee := constant(b, entry, types.BoxRef(9))
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -586,6 +538,21 @@ func TestLower(t *testing.T) {
 		require.Equal(t, 9, site.Address)
 		require.False(t, site.Self)
 	})
+	t.Run("hands the machine one register of each register-passed parameter's class", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI8, types.TypeF64}}}
+		_, _, _, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, m.args, 2)
+		require.NotEqual(t, m.args[0].ID(), m.args[1].ID())
+		require.Equal(t, [2]any{asm.RegTypeInt, asm.Width32}, [2]any{m.args[0].Type(), m.args[0].Width()})
+		require.Equal(t, [2]any{asm.RegTypeFloat, asm.Width64}, [2]any{m.args[1].Type(), m.args[1].Width()})
+	})
+
 	t.Run("hands the machine the kinds of its slots", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
@@ -624,8 +591,7 @@ func TestLower(t *testing.T) {
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
 		arg := constant(b, exit, types.BoxI32(7))
 		callee := constant(b, exit, types.BoxRef(2))
-		b.Add(exit, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		call := state(b, exit, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
+		call := state(b, exit, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
 		b.Add(exit, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: call, Results: []ssa.Value{got}})
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
@@ -684,7 +650,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{word}, State: at, Results: []ssa.Value{value}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}})
 
-		m := &machine{capture: true}
+		m := new(machine)
 		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}}}
 		_, _, _, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
 		require.NoError(t, err)
@@ -706,7 +672,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := constant(b, entry, types.BoxRef(2))
-		at := state(b, entry, 0, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: callee})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
@@ -718,7 +684,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := constant(b, entry, types.BoxRef(2))
-		at := state(b, entry, 0, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
@@ -735,7 +701,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := constant(b, entry, types.BoxRef(2))
-		at := state(b, entry, 0, ssa.Operand{Value: callee, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: callee})
 		got := [3]ssa.Value{b.Value(ssa.TypeI64), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)}
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: got[:]})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
@@ -802,32 +768,6 @@ func TestLower(t *testing.T) {
 		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Contains(t, m.calls, ssa.OpGuardValue.String())
-	})
-
-	t.Run("borrows a constant callee a value guard also compares", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		arg := constant(b, entry, types.BoxI32(7))
-		operand := constant(b, entry, types.BoxRef(2))
-		callee := constant(b, entry, types.BoxRef(2))
-		at0 := state(b, entry, 0)
-		guarded := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{operand, callee}, State: at0, Results: []ssa.Value{guarded}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
-		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
-		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
-
-		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL))
-		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
-		require.NoError(t, err)
-		// No "retain" row: the callee's single retain, consumed only by this
-		// call, is redundant even though a guard.value also compares it.
-		require.NotContains(t, m.calls, "retain")
-		require.False(t, m.sites[0].Owned)
-		require.False(t, exits[0].Owned)
 	})
 
 	t.Run("rejects an unsupported terminator", func(t *testing.T) {

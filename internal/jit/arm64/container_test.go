@@ -30,7 +30,7 @@ func TestMachine_Shape(t *testing.T) {
 		ref, dst := r.Reg(1), r.Reg(2)
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		start := len(a.Rows())
 		require.True(t, m.Lower(a, i32array(2), r))
 
@@ -54,7 +54,7 @@ func TestMachine_Shape(t *testing.T) {
 		op := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x2a}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		start := len(a.Rows())
 		require.True(t, m.Lower(a, op, r))
 
@@ -84,7 +84,7 @@ func TestMachine_Shape(t *testing.T) {
 		op := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		start := len(a.Rows())
 		require.True(t, m.Lower(a, op, r))
 
@@ -107,7 +107,7 @@ func TestMachine_Shape(t *testing.T) {
 		op := ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.Kind(99)}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
 
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		require.False(t, m.Lower(a, op, r))
 	})
 }
@@ -120,7 +120,7 @@ func TestMachine_Container(t *testing.T) {
 
 	guarded := func(t *testing.T, r regs, guard ssa.Operation) (*arm64.Machine, *asm.Assembler) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		require.True(t, m.Lower(a, guard, r))
 		return m, a
 	}
@@ -346,7 +346,7 @@ func TestMachine_Container(t *testing.T) {
 	t.Run("declines a container that carries no shape guard", func(t *testing.T) {
 		r := regs{1: ssa.TypeRef, 3: ssa.TypeI32, 4: ssa.TypeI32}
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		op := ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{1, 3}, Results: []ssa.Value{4}}
 		require.False(t, m.Lower(a, op, r))
 	})
@@ -492,7 +492,7 @@ func TestMachine_Container(t *testing.T) {
 	t.Run("ref.is_null tests the low word of a boxed ref, no guard required", func(t *testing.T) {
 		r := regs{1: ssa.TypeRef, 2: ssa.TypeI1}
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{})
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		start := len(a.Rows())
 		op := ssa.Operation{Op: ssa.OpExec, Code: instr.REF_IS_NULL, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
 		require.True(t, m.Lower(a, op, r))
