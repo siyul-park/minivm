@@ -66,6 +66,9 @@ func TestState_Reg(t *testing.T) {
 }
 
 func TestState_Slot(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native execution needs arm64")
+	}
 	s, err := asm.NewState(4096)
 	require.NoError(t, err)
 	a := asm.New(arm64.New())
