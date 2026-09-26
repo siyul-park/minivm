@@ -31,10 +31,16 @@ func Parse(r io.Reader) (*Program, error) {
 	}
 	firstLine = strings.TrimSpace(firstLine)
 
+	parse := legacy
 	if strings.HasPrefix(firstLine, ".") {
-		return sections(text)
+		parse = sections
 	}
-	return legacy(text)
+	prog, err := parse(text)
+	if err != nil {
+		return nil, err
+	}
+	(&canon{}).program(prog)
+	return prog, nil
 }
 
 func sections(text string) (*Program, error) {
@@ -81,7 +87,6 @@ func sections(text string) (*Program, error) {
 		}
 	}
 
-	(&canon{}).program(prog)
 	return prog, nil
 }
 
@@ -202,9 +207,7 @@ func legacy(text string) (*Program, error) {
 	if len(typs) > 0 {
 		opts = append(opts, WithTypes(typs...))
 	}
-	prog := New(code, opts...)
-	(&canon{}).program(prog)
-	return prog, nil
+	return New(code, opts...), nil
 }
 
 // canon deduplicates the *types.StructType pointers a parsed program reaches,
