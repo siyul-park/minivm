@@ -107,11 +107,14 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 // at OSR submission checks and native safepoints.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
 	n.store.Enter()
-	c := n.store.CodeAt(s.address, s.ip)
-	if c == nil {
-		n.store.Leave()
-		s.code = nil
-		return false
+	c := s.code
+	if c.Retired() {
+		if c = n.store.CodeAt(s.address, s.ip); c == nil {
+			n.store.Leave()
+			s.code = nil
+			return false
+		}
+		s.code = c
 	}
 
 	ctx := n.ctx
@@ -161,7 +164,7 @@ func (n *native) finish(i *Interpreter, s *site, c *jit.Code) {
 	f := i.fr
 	if s.module {
 		f.ip = len(s.fn.Code)
-		i.sp = f.bp + len(s.fn.Slots()) + c.Results
+		i.sp = f.bp + slots(s.fn) + c.Results
 		return
 	}
 	boxRegisters(i, c, f.bp)

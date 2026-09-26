@@ -120,6 +120,7 @@ func (s *Store) Publish(c *Code) bool {
 		atomic.StoreUintptr(&s.natives[c.Address], c.Native())
 		s.codes[c.Address].Store(c)
 		if old != nil {
+			old.retired.Store(true)
 			s.retired = append(s.retired, old)
 			s.pending.Add(1)
 		}
@@ -147,6 +148,7 @@ func (s *Store) Retire(address int) {
 	}
 	atomic.StoreUintptr(&s.natives[address], 0)
 	s.codes[address].Store(nil)
+	c.retired.Store(true)
 	s.retired = append(s.retired, c)
 	s.pending.Add(1)
 }
@@ -163,6 +165,7 @@ func (s *Store) RetireAt(address, ip int) {
 		return
 	}
 	delete(s.osr, k)
+	c.retired.Store(true)
 	s.retired = append(s.retired, c)
 	s.pending.Add(1)
 }

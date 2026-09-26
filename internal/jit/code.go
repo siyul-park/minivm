@@ -3,6 +3,7 @@ package jit
 import (
 	"fmt"
 	"slices"
+	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/types"
@@ -44,6 +45,8 @@ type Code struct {
 	entry  uintptr
 	size   int
 	buffer *asm.Buffer
+	// retired is set by Store under its lock before c joins the retired list.
+	retired atomic.Bool
 }
 
 // Tier values published by the native runtime.
@@ -99,6 +102,12 @@ func (c *Code) Entry() uintptr {
 }
 
 // holds reports whether pc lies inside c's native code.
+// Retired reports whether Store has retired c: an interpreter that cached c
+// and called Store.Enter may still run it until then without a lookup.
+func (c *Code) Retired() bool {
+	return c.retired.Load()
+}
+
 func (c *Code) holds(pc uintptr) bool {
 	return pc >= c.native && pc < c.native+uintptr(c.size)
 }

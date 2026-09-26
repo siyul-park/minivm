@@ -88,6 +88,47 @@ func TestCode_Free(t *testing.T) {
 	require.NoError(t, c.Free())
 }
 
+func TestCode_Retired(t *testing.T) {
+	t.Run("is false while published", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		c := code(t, 0, jit.Baseline)
+		require.True(t, s.Publish(c))
+
+		require.False(t, c.Retired())
+	})
+
+	t.Run("is true once Retire clears it", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		c := code(t, 0, jit.Baseline)
+		require.True(t, s.Publish(c))
+
+		s.Retire(0)
+		require.True(t, c.Retired())
+	})
+
+	t.Run("is true once a higher tier replaces it", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		c := code(t, 0, jit.Baseline)
+		require.True(t, s.Publish(c))
+
+		require.True(t, s.Publish(code(t, 0, jit.Optimized)))
+		require.True(t, c.Retired())
+	})
+
+	t.Run("is true once RetireAt clears an OSR code", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		c := osrCode(t, 0, 12, jit.Optimized)
+		require.True(t, s.Publish(c))
+
+		s.RetireAt(0, 12)
+		require.True(t, c.Retired())
+	})
+}
+
 func TestTier_String(t *testing.T) {
 	tests := []struct {
 		tier jit.Tier

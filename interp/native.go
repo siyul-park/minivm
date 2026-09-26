@@ -589,7 +589,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	k := int(ctx.Depth) - 1
 	m := exit.Frame
 	bp := int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
-	sp := bp + len(i.function(m.Address).Declared())
+	sp := bp + slots(i.function(m.Address))
 
 	tail := m.Stack[len(m.Stack)-exit.Pops:]
 	for j, o := range tail {
@@ -725,7 +725,7 @@ func (n *native) frame(i *Interpreter, start, k int, m jit.Frame, release bool) 
 	f.upvals = nil
 	f.coro = 0
 
-	sp := f.bp + len(i.function(m.Address).Declared())
+	sp := f.bp + slots(i.function(m.Address))
 	for j, o := range m.Stack {
 		boxed := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
 		// A boxed wide i64 is fresh and already owned; only a ref borrows.
@@ -827,4 +827,12 @@ func entry(entries []int64) uintptr {
 // the non-pointer element/field words a guarded exec op writes in place.
 func heapBase(heap []types.Value) uintptr {
 	return uintptr(unsafe.Pointer(unsafe.SliceData(heap)))
+}
+
+// slots is fn's parameter and local count, without Declared's allocation.
+func slots(fn *types.Function) int {
+	if fn.Typ == nil {
+		return len(fn.Locals)
+	}
+	return len(fn.Typ.Params) + len(fn.Locals)
 }
