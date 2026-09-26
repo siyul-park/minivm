@@ -3064,6 +3064,150 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, gotSecond)
 	})
 
+	t.Run("loop-free module code enters native code at ip 0 once hot, matching threaded", func(t *testing.T) {
+		native(t)
+		// Loop-free module code: its only OSR site is ip 0.
+		b := instr.NewBuilder()
+		big, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5).Emit(instr.I32_GT_S).BrIf(big)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_MUL).Br(done)
+		b.Bind(big).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL)
+		b.Bind(done)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var got types.Value
+		var entries float64
+		var runErr, popErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		}, 2*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a callee reached only from natively entered module code still tiers up to Optimized", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 41).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithConstants(incFunction()))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		// One Optimized compile is module code's ip-0 unit; a second is
+		// only possible if inc, called solely from it, also tiered up.
+		var got types.Value
+		var compiles float64
+		var runErr, popErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles >= 2
+		}, 2*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a trap in natively entered module code reports threaded's error every run", func(t *testing.T) {
+		native(t)
+		// Divides by a zero local: every run traps.
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 10).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_DIV_S)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32))
+		wantErr := runProgramErr(t, prog)
+		require.Error(t, wantErr)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var errs []error
+		var entries float64
+		require.Eventually(t, func() bool {
+			errs = append(errs, vm.Run(context.Background()))
+			vm.Reset()
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		}, 2*time.Second, time.Millisecond)
+		for _, err := range errs {
+			require.True(t, errorsEqual(err, wantErr))
+		}
+	})
+
+	t.Run("a cancelled context stops hot loop-free module code as threaded does", func(t *testing.T) {
+		native(t)
+		// Loop-free module code longer than one tick.
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 0)
+		for range 200 {
+			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		}
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		wantErr := func() error {
+			vm := interp.New(prog)
+			defer vm.Close()
+			return vm.Run(ctx)
+		}()
+		require.ErrorIs(t, wantErr, context.Canceled)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var entries float64
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return runErr != nil || entries > 0
+		}, 2*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.ErrorIs(t, vm.Run(ctx), context.Canceled)
+	})
+
 	t.Run("a Pool of two interpreters shares a published OSR code", func(t *testing.T) {
 		native(t)
 		prog := iterativeFibProgram(t, 200_000)

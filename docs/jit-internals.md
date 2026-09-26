@@ -17,8 +17,9 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 |---|---|---|
 | `CALL` | `n` interpreted calls to a `*types.Function` | ip 0 |
 | OSR | `n` back edges at a loop header, module code included | the header |
+| Module entry | `max(n, 2)` runs of loop-free module code | ip 0 |
 
-`compile.Unit.OSR` / `jit.Code.OSR` mark OSR units; a header can sit at ip 0.
+`compile.Unit.OSR` / `jit.Code.OSR` mark OSR units, module entry included; a header can sit at ip 0.
 
 ## Owners
 
@@ -114,12 +115,14 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
 | Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure is permanent only when feedback is unchanged from its snapshot. |
 | Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. |
-| Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, or safepoint. |
+| Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, module entry, or safepoint. |
 | Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 
 ## OSR
 
 Every loop header, including module code, has an observer. After the threshold it queues an Optimized unit and checks `Store.CodeAt` every 256 back edges. Compile failure or refutation restores the threaded handler and disables that observer.
+
+Loop-free module code has one observer at ip 0 instead, sharing the same entry, exit, retirement, and refutation. It counts runs, queues on the second run at the earliest, and checks `Store.CodeAt` every run. Loop-free code reaches no safepoint, so each entry first drains the queue and declines a cancelled run, leaving threaded code to report it. Module code with a loop has no ip-0 observer: its unit would take the address's one queue slot ahead of the header units.
 
 Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in place. Materialized frames finish threaded execution without observers.
 

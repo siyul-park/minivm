@@ -14,8 +14,9 @@ type key struct {
 	address, ip int
 }
 
-// site is one loop header's OSR observation state, owned by the wrapper
-// closure that replaces its threaded handler when the JIT is constructed.
+// site is one OSR entry's observation state — a loop header, or loop-free
+// module code's ip 0 — owned by the wrapper closure that replaces its
+// threaded handler when the JIT is constructed.
 type site struct {
 	address, ip int
 	fn          *types.Function
@@ -25,6 +26,9 @@ type site struct {
 	// inner is s's own threaded handler, restored in place of the observer
 	// once s is known to never resolve.
 	inner func(*Interpreter)
+	// entry reports that s observes loop-free module code's ip 0, once per
+	// Run, instead of a loop header's back edges.
+	entry bool
 
 	count     int64
 	submitted bool
@@ -39,10 +43,11 @@ type site struct {
 	bridged int
 }
 
-// interval is how many back edges pass — once a site has crossed the submit
-// threshold — between its store lookups (and, while unsubmitted, its
-// Queue.Submit retries): rare enough that the lock CodeAt and Submit take
-// never runs on the per-iteration path.
+// interval is how many back edges pass — once a header site has crossed
+// the submit threshold — between its store lookups (and, while unsubmitted,
+// its Queue.Submit retries): rare enough that the lock CodeAt and Submit
+// take never runs on the per-iteration path. An entry site observes Runs
+// and uses 1.
 const interval = 256
 
 // refute counts one deopt against s and reports when it should retire.
@@ -54,19 +59,28 @@ func (s *site) refute() bool {
 // observe wraps every loop header's threaded handler of fn at addr with OSR
 // observation, address 0 (module code) included. A header a fusion
 // absorbed (code[ip] == nil) is left alone: nothing runs there to observe.
+//
+// Loop-free module code is observed at ip 0 instead. Module code with a
+// loop is not: its ip-0 unit would take the queue's one address-0 slot
+// ahead of the headers' units and delay them (measured NBody +4%), for a
+// gain only in the code before the first loop.
 func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 	headers, err := analysis.Headers(fn)
 	if err != nil {
 		return
 	}
+	ips, entry := headers, addr == 0 && len(headers) == 0
+	if entry {
+		ips = []int{0}
+	}
 	code := i.code[addr]
-	for _, ip := range headers {
+	for _, ip := range ips {
 		if ip < 0 || ip >= len(code) || code[ip] == nil {
 			continue
 		}
 		// translate.go completes address 0 through OpComplete regardless of
 		// fn.Typ, which i.module sets to an empty, non-nil FunctionType.
-		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip]}
+		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip], entry: entry}
 		n.sites[key{addr, ip}] = s
 		code[ip] = n.observer(s, code, s.inner)
 	}
@@ -84,9 +98,15 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 			return
 		}
 		s.count++
+		threshold, every := int64(n.threshold), int64(interval)
+		if s.entry {
+			// Only a later Run can enter an entry site's unit: a module run
+			// once never compiles it ahead of its callees.
+			threshold, every = max(threshold, 2), 1
+		}
 		switch {
 		case !s.submitted:
-			if s.count >= int64(n.threshold) && (s.count-int64(n.threshold))%interval == 0 {
+			if s.count >= threshold && (s.count-threshold)%every == 0 {
 				// The queue accepts one unit per address; an entry-0 CALL
 				// compile of the same address may hold it, undrained,
 				// since its own last call.
@@ -94,7 +114,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, Entry: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
-		case s.count%interval == 0:
+		case s.count%every == 0:
 			n.drain(i)
 			s.code = n.store.CodeAt(s.address, s.ip)
 		}
@@ -104,8 +124,17 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 
 // enter runs the current frame as s's cached OSR activation. A cache hit
 // enters directly; queue publication and native-only promotion are drained
-// at OSR submission checks and native safepoints.
+// at OSR submission checks and native safepoints. Loop-free code reaches no
+// safepoint, so an entry site declines a cancelled Run, leaving threaded
+// code to report it, and drains before entering: a callee it alone calls
+// would otherwise never tier up.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
+	if s.entry {
+		if cancelled(i) {
+			return false
+		}
+		n.drain(i)
+	}
 	n.store.Enter()
 	c := s.code
 	if c.Retired() {
