@@ -420,6 +420,65 @@ func (n *native) drain(i *Interpreter) {
 	})
 }
 
+// settle serves exits from trap through safepoints, releases, and bridges.
+// ok reports that the activation reached TrapReturn; otherwise deopt has
+// rebuilt a failing exit and retire reports whether the code retires.
+// bridged is the activation's bridge-retry counter.
+func (n *native) settle(i *Interpreter, code *jit.Code, ctx *jit.Context, trap jit.Trap, mark int64, bridged *int, deopt func(jit.Exit), refute func() bool) (ok, retire bool) {
+	for {
+		if trap == jit.TrapReturn {
+			return true, false
+		}
+
+		exit := n.exit(ctx, code)
+		if i.profiler != nil {
+			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		}
+		switch exit.Kind {
+		case jit.ExitSafepoint:
+			if cancelled(i) {
+				// Threaded code reports the cancellation at its next safepoint,
+				// as an error no guest handler can catch.
+				deopt(exit)
+				return false, refute()
+			}
+			ctx.Heap = heapBase(i.heap)
+			ctx.RC = rcBase(i.rc)
+			ctx.Budget = budget
+			mark = ctx.Budget
+			n.drain(i)
+			trap = jit.Resume(ctx)
+		case jit.ExitRelease:
+			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
+				i.release(ref)
+			}
+			ctx.Heap = heapBase(i.heap)
+			ctx.RC = rcBase(i.rc)
+			trap = jit.Resume(ctx)
+		case jit.ExitBridge, jit.ExitBox:
+			// Checked before serving: a deopt after a bridge would run the op twice.
+			if *bridged < resume && n.serve(i, exit) {
+				*bridged = n.amortized(mark, ctx.Budget, *bridged)
+				mark = ctx.Budget
+				ctx.Heap = heapBase(i.heap)
+				ctx.RC = rcBase(i.rc)
+				trap = jit.Resume(ctx)
+				continue
+			}
+			deopt(exit)
+			if *bridged >= resume {
+				// The site bridged every native entry with nothing else
+				// between: retire rather than pay the round trip forever.
+				return false, true
+			}
+			return false, refute()
+		default:
+			deopt(exit)
+			return false, refute()
+		}
+	}
+}
+
 // run executes one native call whose frame starts at bp and reports whether
 // it should retire.
 func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, bp int, release bool, advance int) bool {
@@ -443,65 +502,22 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
 	}
 
-	trap := jit.Enter(code.Entry(), ctx)
-	for {
-		if trap == jit.TrapReturn {
-			boxRegisters(i, code, bp)
-			if release {
-				i.release(addr)
-			}
-			i.sp = bp + returns
-			i.fr.ip += advance
-			return false
-		}
-
-		exit := n.exit(ctx, code)
-		if i.profiler != nil {
-			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
-		}
-		switch exit.Kind {
-		case jit.ExitSafepoint:
-			if cancelled(i) {
-				// Threaded code reports the cancellation at its next safepoint,
-				// as an error no guest handler can catch.
-				n.deopt(i, exit, release, advance)
-				return n.refute(addr)
-			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
-			ctx.Budget = budget
-			mark = ctx.Budget
-			n.drain(i)
-			trap = jit.Resume(ctx)
-		case jit.ExitRelease:
-			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
-				i.release(ref)
-			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
-			trap = jit.Resume(ctx)
-		case jit.ExitBridge, jit.ExitBox:
-			// Checked before serving: a deopt after a bridge would run the op twice.
-			if n.bridged[addr] < resume && n.serve(i, exit) {
-				n.bridged[addr] = n.amortized(mark, ctx.Budget, n.bridged[addr])
-				mark = ctx.Budget
-				ctx.Heap = heapBase(i.heap)
-				ctx.RC = rcBase(i.rc)
-				trap = jit.Resume(ctx)
-				continue
-			}
-			n.deopt(i, exit, release, advance)
-			if n.bridged[addr] >= resume {
-				// The site bridged every native entry with nothing else
-				// between: retire rather than pay the round trip forever.
-				return true
-			}
-			return n.refute(addr)
-		default:
-			n.deopt(i, exit, release, advance)
-			return n.refute(addr)
+	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
+		ok, retire := n.settle(i, code, ctx, trap, mark, &n.bridged[addr],
+			func(exit jit.Exit) { n.deopt(i, exit, release, advance) },
+			func() bool { return n.refute(addr) },
+		)
+		if !ok {
+			return retire
 		}
 	}
+	boxRegisters(i, code, bp)
+	if release {
+		i.release(addr)
+	}
+	i.sp = bp + returns
+	i.fr.ip += advance
+	return false
 }
 
 // serve runs a resumable ExitBridge or ExitBox in Go; false declines, and

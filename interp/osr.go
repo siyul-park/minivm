@@ -132,8 +132,17 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
 	}
 
-	trap := jit.Enter(c.Entry(), ctx)
-	if n.settle(i, s, c, trap, mark) {
+	ok, retire := true, false
+	if trap := jit.Enter(c.Entry(), ctx); trap != jit.TrapReturn {
+		ok, retire = n.settle(i, c, ctx, trap, mark, &s.bridged,
+			func(exit jit.Exit) { n.materialize(i, exit) },
+			s.refute,
+		)
+	}
+	if ok {
+		n.finish(i, s, c)
+	}
+	if retire {
 		n.store.RetireAt(s.address, s.ip)
 		code[s.ip] = inner
 		s.code = nil
@@ -142,64 +151,6 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	n.store.Leave()
 	_ = n.store.Reclaim()
 	return true
-}
-
-// settle materializes OSR exits into the current interpreter frame and any
-// suspended outer activations, stopping at TrapReturn or permanent refute.
-func (n *native) settle(i *Interpreter, s *site, c *jit.Code, trap jit.Trap, mark int64) bool {
-	ctx := n.ctx
-	for {
-		if trap == jit.TrapReturn {
-			n.finish(i, s, c)
-			return false
-		}
-
-		exit := n.exit(ctx, c)
-		if i.profiler != nil {
-			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
-		}
-		switch exit.Kind {
-		case jit.ExitSafepoint:
-			if cancelled(i) {
-				n.materialize(i, exit)
-				return s.refute()
-			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
-			ctx.Budget = budget
-			mark = ctx.Budget
-			n.drain(i)
-			trap = jit.Resume(ctx)
-		case jit.ExitRelease:
-			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
-				i.release(ref)
-			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
-			trap = jit.Resume(ctx)
-		case jit.ExitBridge, jit.ExitBox:
-			// The limit is checked before serving: running a bridge and then
-			// materializing anyway would run Code twice.
-			if s.bridged < resume && n.serve(i, exit) {
-				s.bridged = n.amortized(mark, ctx.Budget, s.bridged)
-				mark = ctx.Budget
-				ctx.Heap = heapBase(i.heap)
-				ctx.RC = rcBase(i.rc)
-				trap = jit.Resume(ctx)
-				continue
-			}
-			n.materialize(i, exit)
-			if s.bridged >= resume {
-				// The site bridged every native entry with nothing else
-				// between: retire rather than pay the round trip forever.
-				return true
-			}
-			return s.refute()
-		default:
-			n.materialize(i, exit)
-			return s.refute()
-		}
-	}
 }
 
 // finish closes an OSR activation after TrapReturn. Ordinary RETURN results are
