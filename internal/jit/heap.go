@@ -29,6 +29,8 @@ const (
 	OffsetStructTyp        = unsafe.Offsetof(types.Struct{}.Typ)
 	OffsetStructData       = unsafe.Offsetof(types.Struct{}.Data)
 	OffsetStructTypeFields = unsafe.Offsetof(types.StructType{}.Fields)
+	SizeofStructField      = unsafe.Sizeof(types.StructField{})
+	OffsetStructFieldKind  = unsafe.Offsetof(types.StructField{}.Kind)
 )
 
 // Itab returns the first word of the interface v holds: the runtime

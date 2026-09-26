@@ -409,11 +409,18 @@ func TestMachine_Container(t *testing.T) {
 			target.SXTW(vr(6), r.Reg(3)),
 			target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
 			target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
-			target.LDR(vr(7), vr(3), int16(jit.OffsetStructData)),
-			target.LSLI(vr(8), vr(6), 3), target.ADD(vr(8), vr(7), vr(8)),
-			target.UXTW(target.X16, r.Reg(4)),
-			target.STR(target.X16, vr(8), 0),
+			target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
 		}
+		rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+		rows = append(rows,
+			target.MUL(vr(8), vr(6), target.X16), target.ADD(vr(8), vr(7), vr(8)),
+			target.LDRB(target.X16, vr(8), int16(jit.OffsetStructFieldKind)),
+			target.CMPI(target.X16, uint16(types.KindI32)), target.BCondLabel(target.OpBNE, exit),
+			target.LDR(vr(9), vr(3), int16(jit.OffsetStructData)),
+			target.LSLI(vr(10), vr(6), 3), target.ADD(vr(10), vr(9), vr(10)),
+			target.UXTW(target.X16, r.Reg(4)),
+			target.STR(target.X16, vr(10), 0),
+		)
 		require.Equal(t, rows, a.Rows()[start:])
 	})
 
@@ -434,11 +441,18 @@ func TestMachine_Container(t *testing.T) {
 			target.SXTW(vr(6), r.Reg(3)),
 			target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
 			target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
-			target.LDR(vr(7), vr(3), int16(jit.OffsetStructData)),
-			target.LSLI(vr(8), vr(6), 3), target.ADD(vr(8), vr(7), vr(8)),
-			target.SBFX(target.W16, r.Reg(4), 0, 8),
-			target.STR(target.X16, vr(8), 0),
+			target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
 		}
+		rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+		rows = append(rows,
+			target.MUL(vr(8), vr(6), target.X16), target.ADD(vr(8), vr(7), vr(8)),
+			target.LDRB(target.X16, vr(8), int16(jit.OffsetStructFieldKind)),
+			target.CMPI(target.X16, uint16(types.KindI8)), target.BCondLabel(target.OpBNE, exit),
+			target.LDR(vr(9), vr(3), int16(jit.OffsetStructData)),
+			target.LSLI(vr(10), vr(6), 3), target.ADD(vr(10), vr(9), vr(10)),
+			target.SBFX(target.W16, r.Reg(4), 0, 8),
+			target.STR(target.X16, vr(10), 0),
+		)
 		require.Equal(t, rows, a.Rows()[start:])
 	})
 
@@ -459,12 +473,19 @@ func TestMachine_Container(t *testing.T) {
 			target.SXTW(vr(6), r.Reg(3)),
 			target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
 			target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
-			target.LDR(vr(7), vr(3), int16(jit.OffsetStructData)),
-			target.LSLI(vr(8), vr(6), 3), target.ADD(vr(8), vr(7), vr(8)),
-			target.LDR(vr(9), vr(8), 0),
-			target.STR(r.Reg(4), vr(8), 0),
+			target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
 		}
-		rows = append(rows, releaseRows(vr(9))...)
+		rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+		rows = append(rows,
+			target.MUL(vr(8), vr(6), target.X16), target.ADD(vr(8), vr(7), vr(8)),
+			target.LDRB(target.X16, vr(8), int16(jit.OffsetStructFieldKind)),
+			target.CMPI(target.X16, uint16(types.KindRef)), target.BCondLabel(target.OpBNE, exit),
+			target.LDR(vr(9), vr(3), int16(jit.OffsetStructData)),
+			target.LSLI(vr(10), vr(6), 3), target.ADD(vr(10), vr(9), vr(10)),
+			target.LDR(vr(11), vr(10), 0),
+			target.STR(r.Reg(4), vr(10), 0),
+		)
+		rows = append(rows, releaseRows(vr(11))...)
 		require.Equal(t, rows, a.Rows()[start:])
 	})
 

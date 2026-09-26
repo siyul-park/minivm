@@ -20,15 +20,12 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return false
 	}
 	ref, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	heap := m.vreg()
-	a.Emit(target.SBFX(heap, ref, 0, 32), target.LSLI(heap, heap, 4))
-	a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)))
-	a.Emit(target.ADD(heap, target.X16, heap))
-	a.Emit(target.LDR(target.X16, heap, 0))
+	addr := m.heap(a, ref)
+	a.Emit(target.LDR(target.X16, addr, 0))
 	a.Emit(target.LDI(target.X17, uint64(expected))...)
 	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
 	if op.Shape.Struct && op.Shape.Type != 0 {
-		a.Emit(target.LDR(target.X16, heap, int16(jit.OffsetData)))
+		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetStructTyp)))
 		a.Emit(target.LDI(target.X17, uint64(op.Shape.Type))...)
 		a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
@@ -215,8 +212,9 @@ func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 }
 
 // structSet writes a statically typed value to a dynamically indexed guarded
-// struct. Bounds use the runtime field count; ref fields release the old
-// value and adopt the new one.
+// struct. Bounds use the runtime field count; a field whose declared kind
+// differs from the value's deopts, since threaded SetField converts by the
+// declared kind; ref fields release the old value and adopt the new one.
 func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if len(op.Args) != 3 || len(op.Results) != 0 {
 		return false
@@ -236,6 +234,12 @@ func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	length := m.vreg()
 	a.Emit(target.LDR(length, typ, int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)))
 	idx := m.index(a, s, s.Reg(op.Args[1]), length)
+	fields, row := m.vreg(), m.vreg()
+	a.Emit(target.LDR(fields, typ, int16(jit.OffsetStructTypeFields)))
+	a.Emit(target.LDI(target.X16, uint64(jit.SizeofStructField))...)
+	a.Emit(target.MUL(row, idx, target.X16), target.ADD(row, fields, row))
+	a.Emit(target.LDRB(target.X16, row, int16(jit.OffsetStructFieldKind)))
+	a.Emit(target.CMPI(target.X16, uint16(kind)), target.BCondLabel(target.OpBNE, s.Deopt()))
 
 	base := m.vreg()
 	a.Emit(target.LDR(base, data, int16(jit.OffsetStructData)))
@@ -256,13 +260,20 @@ func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 // container is the heap slot's data word for a guarded ref: *types.Array or
 // *types.Struct, the heap's own pointer-shaped representation.
 func (m *Machine) container(a *asm.Assembler, ref asm.Reg) asm.VReg {
+	addr := m.heap(a, ref)
+	data := m.vreg()
+	a.Emit(target.LDR(data, addr, int16(jit.OffsetData)))
+	return data
+}
+
+// heap is the address of ref's own heap slot: Context.Heap plus its index
+// scaled by SizeofValue (a shift, since SizeofValue is a power of two).
+func (m *Machine) heap(a *asm.Assembler, ref asm.Reg) asm.VReg {
 	addr := m.vreg()
 	a.Emit(target.SBFX(addr, ref, 0, 32), target.LSLI(addr, addr, 4))
 	a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)))
 	a.Emit(target.ADD(addr, target.X16, addr))
-	data := m.vreg()
-	a.Emit(target.LDR(data, addr, int16(jit.OffsetData)))
-	return data
+	return addr
 }
 
 // slice is the element pointer and length of ref's guarded array: a boxed

@@ -634,6 +634,36 @@ func TestNew(t *testing.T) {
 		require.Equal(t, uint64(0xFFFFFFFF), s.Data[0])
 	})
 
+	t.Run("deopts a struct.set whose value kind differs from the field's declared kind", func(t *testing.T) {
+		// Threaded SetField converts by the declared kind: i32 2 into an i1 field stores 1.
+		record := types.NewStructType(types.NewStructField(types.TypeI1, types.FieldWithName("x")))
+		b := ssa.New("f")
+		entry := b.Block()
+		ref := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(1)), Results: []ssa.Value{ref}})
+		guarded := b.Value(ssa.TypeRef)
+		guardState := state(b, entry, ssa.Operand{Value: ref})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true}, Args: []ssa.Value{ref}, State: guardState, Results: []ssa.Value{guarded}})
+		idx := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{idx}})
+		val := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{val}})
+		at := state(b, entry, ssa.Operand{Value: guarded}, ssa.Operand{Value: idx}, ssa.Operand{Value: val})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_SET, Args: []ssa.Value{guarded, idx, val}, State: at})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		s := types.NewStruct(record, types.BoxI1(false))
+		heap := []types.Value{nil, s}
+		stack := []types.Boxed{0}
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0, false)
+		ctx := enter(t, stack)
+		ctx.Heap = address(t, heap)
+
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		require.Equal(t, jit.ExitDeopt, exits[ctx.Exit()].Kind)
+		require.Equal(t, uint64(0), s.Data[0])
+	})
+
 	t.Run("sorts a typed i32 array in place via a guarded insertion-sort loop", func(t *testing.T) {
 		b := instr.NewBuilder()
 		outerHeader, outerDone := b.Label(), b.Label()
