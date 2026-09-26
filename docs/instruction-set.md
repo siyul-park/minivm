@@ -28,13 +28,13 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Unsupported operations become `ExitBridge`: only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, and `ARRAY_NEW_DEFAULT` resume native execution; other bridges materialize and deoptimize. `RETURN_CALL`, `YIELD`, and `RESUME` deoptimize directly.
+Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Unsupported operations become `ExitBridge`; `jit-internals.md` owns the allowlist that resumes native execution versus deoptimizing. `RETURN_CALL` deoptimizes directly. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code (see `jit-internals.md`).
 
 | Status | Meaning |
 |---|---|
 | ✅ | `internal/jit/arm64` lowers this opcode to native code |
 | ◐ | `internal/jit/arm64` lowers this opcode only for a subset of its cases; the rest bridge or deoptimize |
-| ⬜ | no ARM64 lowering; bridges or deoptimizes to threaded execution |
+| ⬜ | no ARM64 lowering; bridges or deoptimizes to threaded execution, or (`YIELD`/`RESUME`) makes the translator decline the whole unit at compile time |
 | 🔲 | backend unavailable (no encoder for that architecture) |
 
 AMD64 has no encoder (`internal/asm/`), so every opcode is 🔲 there regardless of ARM64 status.
@@ -91,11 +91,11 @@ One opcode per row, in opcode-value order.
 | Control | `BR_IF` | `br_if` | ✅ | 🔲 | lowered on ARM64 |
 | Control | `BR_TABLE` | `br_table` | ✅ | 🔲 | lowered on ARM64 |
 | Stack | `SELECT` | `select` | ✅ | 🔲 | lowered on ARM64 |
-| Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target, or to the one function recorded at a dynamic site behind `guard.value`, when the return is not i64; other calls bridge |
+| Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target, or to the one callee recorded at a dynamic site's feedback, with up to two register-convention arguments/results of any kind (i64 included); a dynamic call without recorded feedback, a callee frame beyond the reachable offset range, or an i64 result from a callee with no register convention makes lowering reject the whole unit |
 | Control | `RETURN` | `return` | ✅ | 🔲 | lowered on ARM64 |
-| Control | `RETURN_CALL` | `return_call` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Coroutines | `YIELD` | `yield` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Coroutines | `RESUME` | `resume` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Control | `RETURN_CALL` | `return_call` | ⬜ | 🔲 | deoptimizes directly on ARM64 |
+| Coroutines | `YIELD` | `yield` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
+| Coroutines | `RESUME` | `resume` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
 | Coroutines | `CORO_DONE` | `coro.done` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Coroutines | `CORO_VALUE` | `coro.value` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Variables | `GLOBAL_GET` | `global.get` | ✅ | 🔲 | lowered on ARM64 |

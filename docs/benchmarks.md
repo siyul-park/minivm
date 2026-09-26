@@ -139,7 +139,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Native | minivm `jit` | 199.89 µs | 120 | 6 |
 | Reference | Native Go | 4.21 µs | 0 | 0 |
 
-`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`), so it runs close to `threaded`.
+Measured over 50 rounds at `interp.WithThreshold(0)` (`vm_jit_compiles_total`, `vm_jit_exits_total`): one Baseline compile, zero bridge or deopt exits.
 #### `Fannkuch(6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -150,7 +150,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Native | minivm `jit` | 406.90 µs | 34,608 | 1,442 |
 | Reference | Native Go | 17.54 µs | 17,280 | 720 |
 
-`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`), so it runs close to `threaded`.
+Measured over 50 rounds at `interp.WithThreshold(0)`: two Baseline and three Optimized compiles, 8 bridge and 16 call exits, zero deopt exits.
 
 ### Memory and data structures
 #### `TypedArraySum(256)`
@@ -195,7 +195,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Native | minivm `jit` | 52.36 µs | 45,640 | 835 |
 | Reference | Native Go | 1.08 µs | 0 | 0 |
 
-`jit` ties `threaded`: `array.new_default` has no native form, so each native entry bridges at it and the call finishes threaded; the extra B/op and allocs/op are that bridge's cost.
+`array.new_default` bridges and resumes native execution (see `instruction-set.md`); measured over 50 rounds, one Baseline compile produced 2,214 bridge exits paired with 2,214 release exits and zero deopts. The extra B/op and allocs/op are that bridge's cost, not a threaded fallback.
 #### `StructTreeWalk(9)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -209,7 +209,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Native | minivm `jit` | 156.29 µs | 768 | 8 |
 | Reference | Native Go | 12.97 µs | 16,368 | 1,023 |
 
-`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`).
+Measured over 50 rounds at `interp.WithThreshold(0)`: one Baseline and one Optimized compile, 9 bridge and zero deopt exits.
 #### `BinaryTrees(4..6)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |
@@ -220,7 +220,7 @@ The only kernels whose bytecode holds a `RETURN_CALL`; every native entry deopti
 | Native | minivm `jit` | 1.05 ms | 768 | 8 |
 | Reference | Native Go | 118.71 µs | 201,936 | 8,414 |
 
-`jit` deopts on every entry at its own allocation op (unlowered — see `instruction-set.md`), so it runs slower than `threaded`.
+Measured over 50 rounds at `interp.WithThreshold(0)`: two Baseline and three Optimized compiles, 9 bridge and 12 call exits, zero deopt exits.
 #### `SortStress(128,2)`
 
 | Tier | Runtime | ns/op | B/op | allocs/op |

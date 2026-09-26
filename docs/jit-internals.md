@@ -22,15 +22,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 ## Owners
 
-| Concern | Owner |
-|---|---|
-| Threaded execution, tiering, exit handling | `interp/` (`native.go`, `osr.go`) |
-| SSA IR | `internal/ssa/` |
-| Bytecode to SSA, SSA passes | `transform/` |
-| Encoding, allocation, executable memory, enter/resume | `internal/asm/`, `internal/asm/arm64/` |
-| Runtime contract, code, store | `internal/jit/` |
-| Lowering driver, compile queue | `internal/jit/compile/` |
-| ARM64 lowering | `internal/jit/arm64/` |
+`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, threaded execution, tiering, and exit handling specifically live in `native.go` and `osr.go`.
 
 ## Runtime contract
 
@@ -120,7 +112,7 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
-| Failure | A deopt refutes that tier. A compile failure is permanent only when feedback is unchanged from its snapshot. |
+| Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure is permanent only when feedback is unchanged from its snapshot. |
 | Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, or safepoint. |
 | Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
@@ -135,9 +127,9 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 
 - OSR block 0 does not accept i64 parameters.
 - i64 results use X0/X1 only for one or two results; wider result sets stay boxed.
-- Wide i64 values (>49 bits) use `ExitBox` at stores, slot returns, call arguments, and `OpComplete`.
+- A wide (>49-bit) i64 takes `ExitBox` at the sites listed in Exits above.
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
-- Only the allowlisted bridge ops in Exits resume; `ExitCall`, `RETURN_CALL`, `YIELD`, and `RESUME` do not.
+- Only the allowlisted bridge ops in Exits (above) resume; `ExitCall` and `RETURN_CALL`'s `ExitDeopt` do not. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
 - Closures/host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 
 ## Metrics
