@@ -299,7 +299,8 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		n.store.Retire(addr)
 		// The unchanged input has no new feedback for a recompile at this tier.
 		n.markFailed(addr, code.Tier)
-		n.forget(addr)
+		// Counters restart; the failed tier stays blocked.
+		n.calls[addr], n.entries[addr], n.deopts[addr], n.bridged[addr] = 0, 0, 0, 0
 	}
 	_ = n.store.Reclaim()
 	return true
@@ -363,14 +364,6 @@ func (n *native) refute(addr int) bool {
 	return n.deopts[addr] >= refute
 }
 
-// forget resets runtime tiering counters; failed tiers remain blocked.
-func (n *native) forget(addr int) {
-	n.calls[addr] = 0
-	n.entries[addr] = 0
-	n.deopts[addr] = 0
-	n.bridged[addr] = 0
-}
-
 // hasFailed reports whether addr's compile at tier permanently failed.
 func (n *native) hasFailed(addr int, tier jit.Tier) bool {
 	return n.failed[addr][tier-1]
@@ -400,7 +393,11 @@ func (n *native) drain(i *Interpreter) {
 				// another try instead of a permanent failure.
 				n.markFailed(job.Unit.Address, job.Unit.Tier)
 			}
-			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome(job.Err)})
+			outcome := "failed"
+			if errors.Is(job.Err, compile.ErrUnsupported) {
+				outcome = "unsupported"
+			}
+			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome})
 			continue
 		}
 		n.store.Publish(job.Code)
@@ -435,7 +432,12 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 			return true, false
 		}
 
-		exit := n.exit(ctx, code)
+		// At Depth 1 no native call has run since entry: skip Find's locked scan.
+		entered := code
+		if ctx.Depth != 1 {
+			entered = n.store.Find(ctx.PC())
+		}
+		exit := entered.Exits[ctx.Exit()]
 		if i.profiler != nil {
 			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
 		}
@@ -462,8 +464,21 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 			trap = jit.Resume(ctx)
 		case jit.ExitBridge, jit.ExitBox:
 			// Checked before serving: a deopt after a bridge would run the op twice.
-			if *bridged < resume && n.serve(i, exit) {
-				*bridged = n.amortized(mark, ctx.Budget, *bridged)
+			served := false
+			if *bridged < resume {
+				if exit.Kind == jit.ExitBox {
+					served = n.widen(i, exit)
+				} else {
+					served = bridgeable(exit.Code) && n.bridge(i, exit)
+				}
+			}
+			if served {
+				// Enough native work since the last bridge pays for this one.
+				if mark-ctx.Budget >= amortize {
+					*bridged = 0
+				} else {
+					*bridged++
+				}
 				mark = ctx.Budget
 				ctx.Heap = heapBase(i.heap)
 				ctx.RC = rcBase(i.rc)
@@ -523,15 +538,6 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	i.sp = bp + returns
 	i.fr.ip += advance
 	return false
-}
-
-// serve runs a resumable ExitBridge or ExitBox in Go; false declines, and
-// the exit deopts.
-func (n *native) serve(i *Interpreter, exit jit.Exit) bool {
-	if exit.Kind == jit.ExitBox {
-		return n.widen(i, exit)
-	}
-	return bridgeable(exit.Code) && n.bridge(i, exit)
 }
 
 // widen heap-boxes exit.Word, a wide i64, into Context.Results[0] as
@@ -779,42 +785,11 @@ func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
 	}
 }
 
-// exit resolves ctx's current exit map. Depth 1 means the activation that
-// exited is the one entered, own: no native call has run since, so its
-// code is entered's own, avoiding Store.Find's locked scan (osr/bridge
-// resume loops keep Depth at 1 for as long as the unit makes no native
-// call, the common shape of a bridge-dominated loop). A deeper Depth means
-// some native call changed which code is running, so only Find resolves it.
-func (n *native) exit(ctx *jit.Context, entered *jit.Code) jit.Exit {
-	code := entered
-	if ctx.Depth != 1 {
-		code = n.store.Find(ctx.PC())
-	}
-	return code.Exits[ctx.Exit()]
-}
-
-// amortized reports bridged's next value: reset to 0 when at least amortize
-// back edges (mark - now, Context.Budget only falls between refills) ran
-// since the prior bridge, else bridged+1.
-func (n *native) amortized(mark, now int64, bridged int) int {
-	if mark-now >= amortize {
-		return 0
-	}
-	return bridged + 1
-}
-
 func (n *native) metric(i *Interpreter, name string, labels ...prof.Label) {
 	if i.profiler == nil {
 		return
 	}
 	i.samples.AddMetric(name, 1, labels...)
-}
-
-func outcome(err error) string {
-	if errors.Is(err, compile.ErrUnsupported) {
-		return "unsupported"
-	}
-	return "failed"
 }
 
 // cancelled reports whether i's active Run context is done, without

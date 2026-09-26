@@ -214,7 +214,7 @@ func (l *lowering) Reg(v ssa.Value) asm.VReg {
 	if c, ok := l.remat(v); ok {
 		return l.materialize(v, c)
 	}
-	return l.reg(v)
+	return class(int32(v), l.f.Type(v))
 }
 
 // Type is v's static type.
@@ -558,11 +558,6 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 		l.edges = append(l.edges, edges...)
 	}
 	return nil
-}
-
-// reg is v's virtual register.
-func (l *lowering) reg(v ssa.Value) asm.VReg {
-	return class(int32(v), l.f.Type(v))
 }
 
 // fresh returns an unshared register of type t.
