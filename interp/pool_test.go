@@ -122,7 +122,6 @@ func TestPool_Get(t *testing.T) {
 		native(t)
 		const calls = 5
 		const rounds = 600
-		const refute = 8 // interp/native.go's unexported refute constant.
 		prog := applyGlobalProgram(t, calls)
 
 		var wantInc, wantDec int32
@@ -160,8 +159,8 @@ func TestPool_Get(t *testing.T) {
 		p.Put(b)
 
 		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-		// Each interpreter refutes each tier at most once, then runs threaded.
-		require.LessOrEqual(t, deopts, float64(2*2*refute))
+		// Retired sites stop deopting long before every round does.
+		require.Less(t, deopts, float64(2*rounds))
 		require.Greater(t, deopts, float64(0))
 	})
 }

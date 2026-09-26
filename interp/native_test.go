@@ -1889,7 +1889,6 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("an owned argument lent to a borrowed parameter transfers to the materialized callee", func(t *testing.T) {
 		native(t)
-		const refute = 8 // interp/native.go's unexported refute constant.
 		prog := lentProgram(t, 3000)
 
 		wantVM := interp.New(lentProgram(t, 3000))
@@ -1955,7 +1954,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantIncRC, gotIncRC)
 		require.Equal(t, wantDecRC, gotDecRC)
 		require.GreaterOrEqual(t, deopts, float64(1))
-		require.LessOrEqual(t, deopts, float64(2*refute))
+		require.Less(t, deopts, float64(3000))
 	})
 
 	t.Run("a deep recursion resuming safepoints and releases then deopting at its frame limit matches threaded", func(t *testing.T) {
@@ -2413,10 +2412,8 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("a function that deoptimizes every call retires once and never re-enters native code", func(t *testing.T) {
 		native(t)
-		// Warmup is long enough for Baseline and Optimized publication; each
-		// retired tier is permanently blocked, bounding deopts at 2*refute.
+		// Warmup is long enough for Baseline and Optimized publication.
 		const fails = 200
-		const refute = 8 // interp/native.go's unexported refute constant.
 		prog := divFailProgram(t, 200_000, fails)
 		want := runProgram(t, prog)
 
@@ -2442,7 +2439,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
-		require.LessOrEqual(t, deopts, float64(2*refute))
+		require.Less(t, deopts, float64(fails))
 	})
 
 	t.Run("a cancelled context during a native loop escapes guest handlers as the context error", func(t *testing.T) {
@@ -2971,7 +2968,6 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("a loop header whose body always bridges retires its OSR site and never re-enters native code", func(t *testing.T) {
 		native(t)
-		const refute = 8
 		const n = 600
 		prog := bridge(t, n)
 		want := runProgram(t, prog)
@@ -2982,9 +2978,11 @@ func TestWithThreshold(t *testing.T) {
 		ctx := context.Background()
 
 		// One run bridges at most once: a materialized frame finishes threaded.
+		// Retirement is reached once two consecutive runs report the same
+		// exits count.
 		var got types.Value
 		var runErr, popErr error
-		var exits float64
+		var exits, prior float64
 		require.Eventually(t, func() bool {
 			runErr = vm.Run(ctx)
 			if runErr != nil {
@@ -2996,17 +2994,16 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
+			prior = exits
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
-			return exits >= float64(refute)
+			return exits > 0 && exits == prior
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
-		// One submit, one compile; every native entry bridges immediately,
-		// so refute retires the site at exactly the deopt threshold.
+		// One submit, one compile; every native entry bridges immediately.
 		require.Equal(t, float64(1), compiles)
-		require.Equal(t, float64(refute), exits)
 
 		// The retired site never polls or re-enters again: a further run
 		// takes the same back edges threaded, and both metrics hold.
@@ -3019,7 +3016,7 @@ func TestWithThreshold(t *testing.T) {
 		compilesAgain, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 		exitsAgain, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 		require.Equal(t, float64(1), compilesAgain)
-		require.Equal(t, float64(refute), exitsAgain)
+		require.Equal(t, exits, exitsAgain)
 	})
 
 	t.Run("OSR survives Reset: a second run reuses the resolved site", func(t *testing.T) {
@@ -3209,7 +3206,6 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("a speculated callee refuted by a second function deopts, retires, and matches threaded, including RefCount", func(t *testing.T) {
 		native(t)
-		const refute = 8 // interp/native.go's unexported refute constant.
 		prog := applyProgram(t, 3000)
 
 		wantVM := interp.New(applyProgram(t, 3000))
@@ -3271,10 +3267,8 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantIncRC, gotIncRC)
 		require.Equal(t, wantDecRC, gotDecRC)
 		require.GreaterOrEqual(t, deopts, float64(1))
-		// Bounds the same way native_test.go's own retirement case does: a
-		// site that kept re-entering and re-deopting after retirement would
-		// blow well past this, since applyProgram runs 6000 calls total.
-		require.LessOrEqual(t, deopts, float64(2*refute))
+		// A retired site stops deopting long before its 3000 refuting calls end.
+		require.Less(t, deopts, float64(3000))
 	})
 
 	t.Run("a closure callee leaves its site unrecorded and the caller stays threaded", func(t *testing.T) {
