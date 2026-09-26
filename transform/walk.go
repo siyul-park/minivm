@@ -631,7 +631,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 }
 
 // call adopts every stack entry a CALL pops except an argument in a borrowed
-// position (transform.Borrows) backed by a local or a constant: the caller's
+// position (Borrows) backed by a local or a constant: the caller's
 // own local cannot change during the call, and the constant pool is
 // immortal. A global- or upvalue-backed borrowed argument is adopted here,
 // since the callee may overwrite that cell, and released by emit after the
