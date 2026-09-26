@@ -23,11 +23,11 @@ type stub struct{}
 
 func (stub) Arch() asm.Arch      { panic("unused") }
 func (stub) Reserve() []asm.PReg { panic("unused") }
-func (stub) Prologue(*asm.Assembler, []types.Kind, int, bool, int, []types.Kind, []types.Kind, []bool) []asm.VReg {
+func (stub) Prologue(*asm.Assembler, int, bool, compile.Layout) []asm.VReg {
 	panic("unused")
 }
 func (stub) Epilogue(*asm.Assembler)                                          { panic("unused") }
-func (stub) Enter(*asm.Assembler, []types.Kind, []types.Kind) asm.Label       { panic("unused") }
+func (stub) Enter(*asm.Assembler, compile.Layout) asm.Label                   { panic("unused") }
 func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool           { panic("unused") }
 func (stub) Branch(*asm.Assembler, ssa.Terminator, compile.Site, []asm.Label) { panic("unused") }
 func (stub) Return(*asm.Assembler, ssa.Terminator, compile.Site)              { panic("unused") }

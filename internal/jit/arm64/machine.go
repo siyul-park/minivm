@@ -51,11 +51,13 @@ func (m *Machine) Reserve() []asm.PReg {
 	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}
 }
 
-// Prologue builds the frame, records the activation, counts the entry when enabled,
-// and clears non-parameter locals. Register-convention arguments are captured
-// from X0/X1 before those registers are repurposed.
-func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, count bool, address int, arguments, results []types.Kind, borrows []bool) []asm.VReg {
-	*m = Machine{kinds: kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: results, borrows: borrows}
+// Prologue builds the frame, records the activation, counts the entry when
+// enabled, and clears non-parameter locals. Register-convention arguments
+// are captured from X0/X1 before those registers are repurposed. A Machine
+// lowers many functions in sequence (a Queue worker reuses one), so Prologue
+// resets all per-function state.
+func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout) []asm.VReg {
+	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: l.Results, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -75,14 +77,14 @@ func (m *Machine) Prologue(a *asm.Assembler, kinds []types.Kind, params int, cou
 			target.STR(target.X17, target.X16, int16(8*address)),
 		)
 	}
-	for i := params; i < len(kinds); i++ {
+	for i := l.Params; i < len(l.Kinds); i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 	}
-	for i := range arguments {
+	for i := range l.Arguments {
 		a.Emit(target.DEF(register(i)))
 	}
-	regs := make([]asm.VReg, len(arguments))
-	for i, k := range arguments {
+	regs := make([]asm.VReg, len(l.Arguments))
+	for i, k := range l.Arguments {
 		src := register(i)
 		m.temp--
 		switch k.Repr() {
@@ -119,7 +121,7 @@ func (m *Machine) Epilogue(a *asm.Assembler) {
 // Enter emits the Go entry stub after the epilogue so native-to-native calls
 // still enter at offset 0. The stub loads pinned state and register arguments,
 // calls the body, then boxes register results into the VM frame.
-func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
+func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 	label := a.Label()
 	a.Bind(label)
 	a.Emit(
@@ -127,7 +129,7 @@ func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.L
 		target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 		target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 	)
-	for i, k := range arguments {
+	for i, k := range l.Arguments {
 		dst := register(i)
 		switch k.Repr() {
 		case types.KindRef, types.KindF64:
@@ -144,7 +146,7 @@ func (m *Machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.L
 		target.STR(target.LR, target.SP, 8),
 		target.BLLabel(m.entry),
 	)
-	for i, k := range results {
+	for i, k := range l.Results {
 		src := register(i)
 		switch k.Repr() {
 		case types.KindRef, types.KindF64, types.KindI64:

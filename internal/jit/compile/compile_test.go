@@ -36,17 +36,17 @@ type machine struct {
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
 func (m *machine) Reserve() []asm.PReg { return nil }
 
-func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bool, _ int, arguments, results []types.Kind, _ []bool) []asm.VReg {
+func (m *machine) Prologue(_ *asm.Assembler, _ int, count bool, l compile.Layout) []asm.VReg {
 	m.calls = append(m.calls, "prologue")
-	m.kinds = kinds
+	m.kinds = l.Kinds
 	m.count = count
-	m.arguments = arguments
-	m.results = results
+	m.arguments = l.Arguments
+	m.results = l.Results
 	if !m.capture {
 		return nil
 	}
-	regs := make([]asm.VReg, len(arguments))
-	for i := range arguments {
+	regs := make([]asm.VReg, len(l.Arguments))
+	for i := range l.Arguments {
 		regs[i] = asm.NewVReg(int32(-2-i), asm.RegTypeInt, asm.Width64)
 	}
 	return regs
@@ -54,10 +54,10 @@ func (m *machine) Prologue(_ *asm.Assembler, kinds []types.Kind, _ int, count bo
 
 func (m *machine) Epilogue(*asm.Assembler) { m.calls = append(m.calls, "epilogue") }
 
-func (m *machine) Enter(a *asm.Assembler, arguments, results []types.Kind) asm.Label {
+func (m *machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 	m.calls = append(m.calls, "enter")
-	m.arguments = arguments
-	m.results = results
+	m.arguments = l.Arguments
+	m.results = l.Results
 	label := a.Label()
 	a.Bind(label)
 	return label
