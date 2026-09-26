@@ -5,6 +5,8 @@ import (
 	"maps"
 	"math"
 	"runtime"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -36,10 +38,6 @@ type native struct {
 	bridged []int
 	// failed records permanent compile failure per address and tier.
 	failed [][2]bool
-	// candidates holds every address with published Baseline code not yet
-	// promoted or permanently blocked: drain's promotion scan visits only
-	// these instead of every address's own entry count.
-	candidates []int
 	// sites indexes every observed OSR site by (address, ip): drain looks a
 	// failed OSR unit's site up here to restore its threaded handler.
 	sites map[key]*site
@@ -67,7 +65,44 @@ type shared struct {
 	queue  *compile.Queue
 	module transform.Module
 
+	// candidates holds every address, pool-wide, with published Baseline
+	// code not yet promoted or permanently blocked. Any native sharing r
+	// may nominate or sweep it, not only the one that published the job.
+	mu         sync.Mutex
+	candidates []int
+	// count is len(candidates), readable without mu so an empty sweep —
+	// every call's common case — takes no lock.
+	count atomic.Int64
+
 	refs atomic.Int64
+}
+
+// nominate adds addr to r's candidates, once.
+func (r *shared) nominate(addr int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !slices.Contains(r.candidates, addr) {
+		r.candidates = append(r.candidates, addr)
+		r.count.Add(1)
+	}
+}
+
+// sweep calls visit on every candidate and keeps only the ones it reports
+// live, under one lock for the whole pass.
+func (r *shared) sweep(visit func(addr int) (live bool)) {
+	if r.count.Load() == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	live := r.candidates[:0]
+	for _, addr := range r.candidates {
+		if visit(addr) {
+			live = append(live, addr)
+		}
+	}
+	r.candidates = live
+	r.count.Store(int64(len(live)))
 }
 
 // nativeStack is the native stack size per interpreter.
@@ -367,25 +402,22 @@ func (n *native) drain(i *Interpreter) {
 		}
 		n.store.Publish(job.Code)
 		if job.Code.Tier == jit.Baseline {
-			n.candidates = append(n.candidates, job.Unit.Address)
+			n.nominate(job.Unit.Address)
 		}
 		n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
 	}
-	if len(n.candidates) == 0 {
-		return
-	}
-	live := n.candidates[:0]
-	for _, addr := range n.candidates {
+	// Candidates are pool-wide: a native that never drains a Baseline job
+	// still promotes it once its own entries reach jit.Promote.
+	n.sweep(func(addr int) bool {
 		code := n.store.Code(addr)
 		if code == nil || code.Tier != jit.Baseline || n.hasFailed(addr, jit.Optimized) {
-			continue
+			return false
 		}
 		if n.entries[addr] >= jit.Promote {
 			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.feedback(addr), Tier: jit.Optimized})
 		}
-		live = append(live, addr)
-	}
-	n.candidates = live
+		return true
+	})
 }
 
 // run executes one native call whose frame starts at bp and reports whether

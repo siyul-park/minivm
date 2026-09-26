@@ -123,7 +123,7 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Failure | A deopt refutes that tier. A compile failure is permanent only when feedback is unchanged from its snapshot. |
 | Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, or safepoint. |
-| Pool | `Pool` shares `Store`, `Queue`, and module data; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
+| Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach `jit.Promote` requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 
 ## OSR
 

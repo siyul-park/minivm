@@ -163,6 +163,53 @@ func TestPool_Get(t *testing.T) {
 		require.Less(t, deopts, float64(2*rounds))
 		require.Greater(t, deopts, float64(0))
 	})
+
+	t.Run("a pooled interpreter promotes code another interpreter drained", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithConstants(sumFunction(t)))
+
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer p.Close()
+		compiles := func(tier string) float64 {
+			v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: tier}, prof.Label{Key: "outcome", Value: "ok"})
+			return v
+		}
+		call := func(vm *interp.Interpreter) error {
+			defer vm.Reset()
+			if err := vm.Run(context.Background()); err != nil {
+				return err
+			}
+			_, err := vm.Pop()
+			vm.Flush()
+			return err
+		}
+
+		// first alone drains the Baseline compile, calling too rarely to promote it.
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			err = call(first)
+			return err != nil || compiles("baseline") == 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, err)
+
+		// second never drains a Baseline job; its own calls must promote it.
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			err = call(second)
+			return err != nil || compiles("optimized") >= 1
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, err)
+
+		p.Put(first)
+		p.Put(second)
+	})
 }
 
 func TestPool_Put(t *testing.T) {
