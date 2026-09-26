@@ -39,7 +39,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack. |
 | `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | `asm.State` first, then `Trap`, exit id, bases (`Stack`, `Heap`, `Globals`, `RC`, `Natives`, `Entries`), `Top`, `Limit`, `FB`, `Depth`, `Records`, `Budget`. The interpreter writes bases before every `Enter`/`Resume`. |
+| `jit.Context` | `asm.State` first, then `Trap`, exit id, then `Stack`, `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes bases before every `Enter`/`Resume`. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
 | `jit.Store` | Published code and `Context.Natives`. |

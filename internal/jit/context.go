@@ -61,6 +61,20 @@ const (
 	TrapBridge
 )
 
+// String returns the trap name.
+func (t Trap) String() string {
+	switch t {
+	case TrapReturn:
+		return "return"
+	case TrapDeopt:
+		return "deopt"
+	case TrapBridge:
+		return "bridge"
+	default:
+		return "invalid"
+	}
+}
+
 // Offsets of the Context fields native code writes before an exit.
 const (
 	OffsetTrap    = unsafe.Offsetof(Context{}.trap)
@@ -140,18 +154,4 @@ func (c *Context) Read(record int, v Value) uint64 {
 		panic("jit: an outer activation's value must be spilled")
 	}
 	return c.Word(c.Records[record].SP + uintptr(8*v.Loc.Slot))
-}
-
-// String returns the trap name.
-func (t Trap) String() string {
-	switch t {
-	case TrapReturn:
-		return "return"
-	case TrapDeopt:
-		return "deopt"
-	case TrapBridge:
-		return "bridge"
-	default:
-		return "invalid"
-	}
 }
