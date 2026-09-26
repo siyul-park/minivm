@@ -16,6 +16,11 @@ func TestNewEncoder(t *testing.T) {
 func TestEncoder_Encode(t *testing.T) {
 	encoder := arm64.NewEncoder()
 
+	// A non-constant expression so int16(...) truncates at runtime instead
+	// of failing to compile, matching what a caller could pass at runtime.
+	outOfRangeScaledOffset := 4096
+	outOfRangeOffset := int16(8 * outOfRangeScaledOffset)
+
 	tests := []struct {
 		name string
 		inst asm.Instruction
@@ -154,6 +159,13 @@ func TestEncoder_Encode(t *testing.T) {
 		{name: "unencodable logical immediate", inst: arm64.ANDI(arm64.X1, arm64.X2, 0), want: arm64.ErrMissingImmediate},
 		{name: "int destination for SCVTF", inst: arm64.SCVTF(arm64.X1, arm64.X2), want: asm.ErrInvalidOperand},
 		{name: "float source for CLZ", inst: arm64.CLZ(arm64.X1, arm64.D2), want: asm.ErrInvalidOperand},
+		{name: "ADDI imm12 out of range", inst: arm64.ADDI(arm64.X1, arm64.X2, 4096), want: asm.ErrInvalidOperand},
+		{name: "CMPI imm12 out of range", inst: arm64.CMPI(arm64.X0, 4096), want: asm.ErrInvalidOperand},
+		{name: "CMNI imm12 out of range", inst: arm64.CMNI(arm64.X0, 4096), want: asm.ErrInvalidOperand},
+		{name: "LDR offset out of range", inst: arm64.LDR(arm64.X17, arm64.X16, outOfRangeOffset), want: asm.ErrInvalidOperand},
+		{name: "LDR offset misaligned", inst: arm64.LDR(arm64.X1, arm64.X2, 3), want: asm.ErrInvalidOperand},
+		{name: "LDR negative offset", inst: arm64.LDR(arm64.X1, arm64.X2, -8), want: asm.ErrInvalidOperand},
+		{name: "STR offset out of range", inst: arm64.STR(arm64.X1, arm64.X2, outOfRangeOffset), want: asm.ErrInvalidOperand},
 		{name: "B offset unaligned", inst: arm64.B(2), want: asm.ErrBranchOutOfRange},
 		{name: "B offset exceeds imm26", inst: arm64.B(1 << 27), want: asm.ErrBranchOutOfRange},
 		{name: "BEQ offset exceeds imm19", inst: arm64.BEQ(1 << 21), want: asm.ErrBranchOutOfRange},

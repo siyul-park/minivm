@@ -871,6 +871,28 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapReturn, jit.Enter(native, ctx))
 		require.Equal(t, types.BoxI32(42), stack[0])
 	})
+
+	t.Run("counts an entry at an address beyond the load/store imm12 range", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
+		})
+		stack := []types.Boxed{types.BoxI32(1), types.BoxI32(2)}
+		const at = 4096 // 8*at exceeds the unsigned-offset LDR/STR imm12 (0xFFF) scaled range
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, at, false)
+
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		ctx.FB = address(t, stack)
+		ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
+		ctx.Limit = uint64(len(ctx.Records))
+		ctx.Budget = 1000
+		entries := make([]int64, at+1)
+		ctx.Entries = address(t, entries)
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI32(3), stack[0])
+		require.Equal(t, int64(1), entries[at])
+	})
 }
 
 // sum is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.

@@ -81,6 +81,21 @@ func TestMachine_Prologue(t *testing.T) {
 		}, a.Rows())
 	})
 
+	t.Run("counts entry through a register when the offset exceeds imm12", func(t *testing.T) {
+		a := asm.New(target.New())
+		arm64.New().Prologue(a, 4096, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1})
+		require.Equal(t, []asm.Instruction{
+			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
+			target.MOVZ(target.X17, 0x8000, 0),
+			target.ADD(target.X16, target.X16, target.X17),
+			target.LDR(target.X17, target.X16, 0),
+			target.ADDI(target.X17, target.X17, 1),
+			target.STR(target.X17, target.X16, 0),
+			target.STR(target.XZR, target.X25, 8),
+			target.STR(target.XZR, target.X25, 16),
+		}, a.Rows()[8:])
+	})
+
 	t.Run("skips entry count", func(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Prologue(a, 3, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Params: 1})
@@ -768,6 +783,20 @@ func TestMachine_Branch(t *testing.T) {
 			target.CMPI(index, 1), target.BCondLabel(target.OpBEQ, second),
 			target.BLabel(rest),
 		}, a.Rows())
+	})
+
+	t.Run("loads a case index through a register past CMPI's imm12 range", func(t *testing.T) {
+		a := asm.New(target.New())
+		labels := make([]asm.Label, 0xFFF+3)
+		for i := range labels {
+			labels[i] = a.Label()
+		}
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, labels)
+		rows := a.Rows()
+		want := append([]asm.Instruction{target.MOVZ(target.W16, 0x1000, 0)},
+			target.CMP(index, target.W16), target.BCondLabel(target.OpBEQ, labels[0x1000]),
+			target.BLabel(labels[len(labels)-1]))
+		require.Equal(t, want, rows[len(rows)-len(want):])
 	})
 }
 

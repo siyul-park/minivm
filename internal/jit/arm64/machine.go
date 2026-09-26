@@ -70,12 +70,23 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 		target.ADDI(target.X27, target.X27, 1),
 	)
 	if count {
-		a.Emit(
-			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
-			target.LDR(target.X17, target.X16, int16(8*address)),
-			target.ADDI(target.X17, target.X17, 1),
-			target.STR(target.X17, target.X16, int16(8*address)),
-		)
+		a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
+		if 8*address <= 0xFFF {
+			a.Emit(
+				target.LDR(target.X17, target.X16, int16(8*address)),
+				target.ADDI(target.X17, target.X17, 1),
+				target.STR(target.X17, target.X16, int16(8*address)),
+			)
+		} else {
+			// Past the LDR/STR imm12 offset range.
+			a.Emit(target.LDI(target.X17, uint64(8*address))...)
+			a.Emit(
+				target.ADD(target.X16, target.X16, target.X17),
+				target.LDR(target.X17, target.X16, 0),
+				target.ADDI(target.X17, target.X17, 1),
+				target.STR(target.X17, target.X16, 0),
+			)
+		}
 	}
 	for i := l.Params; i < len(l.Kinds); i++ {
 		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
@@ -208,8 +219,18 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 		a.Emit(target.CBNZLabel(s.Reg(t.Args[0]), labels[0]), target.BLabel(labels[1]))
 	case ssa.OpTable:
 		index := s.Reg(t.Args[0])
+		scratch := target.X16
+		if index.Width() == asm.Width32 {
+			scratch = target.W16
+		}
 		for i, label := range labels[:len(labels)-1] {
-			a.Emit(target.CMPI(index, uint16(i)), target.BCondLabel(target.OpBEQ, label))
+			// Past the CMPI imm12 range.
+			if i <= 0xFFF {
+				a.Emit(target.CMPI(index, uint16(i)), target.BCondLabel(target.OpBEQ, label))
+			} else {
+				a.Emit(target.LDI(scratch, uint64(i))...)
+				a.Emit(target.CMP(index, scratch), target.BCondLabel(target.OpBEQ, label))
+			}
 		}
 		a.Emit(target.BLabel(labels[len(labels)-1]))
 	}

@@ -1032,6 +1032,9 @@ func (e *Encoder) encodeCompareImm(op uint32, inst asm.Instruction) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
+	if err := imm12(imm, 1); err != nil {
+		return nil, err
+	}
 	base, err := intBase(op, n)
 	if err != nil {
 		return nil, err
@@ -1051,6 +1054,9 @@ func (e *Encoder) encodeLoad(op32, op64 uint32, scale32, scale64 int64, inst asm
 	if dst.Width() == asm.Width32 {
 		op, scale = op32, scale32
 	}
+	if err := imm12(offset, scale); err != nil {
+		return nil, err
+	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(dst)), nil
 }
@@ -1065,6 +1071,9 @@ func (e *Encoder) encodeStore(op uint32, scale int64, inst asm.Instruction) ([]b
 	}
 	if src.Type() == asm.RegTypeFloat && src.Width() == asm.Width32 {
 		op, scale = op&^(1<<30), 4
+	}
+	if err := imm12(offset, scale); err != nil {
+		return nil, err
 	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(src)), nil
@@ -1374,11 +1383,23 @@ func encR4(base uint32, d, n, m, a asm.PReg) ([]byte, error) {
 
 // encRImm12 emits an arithmetic-immediate (imm12<<10 | Rn<<5 | Rd).
 func encRImm12(base uint32, d, n asm.PReg, imm int64) ([]byte, error) {
+	if err := imm12(imm, 1); err != nil {
+		return nil, err
+	}
 	b, err := intBase(base, d, n)
 	if err != nil {
 		return nil, err
 	}
 	return enc(b | (uint32(imm)&0xFFF)<<10 | reg(n)<<5 | reg(d)), nil
+}
+
+// imm12 rejects a value that is not a non-negative multiple of scale whose
+// quotient fits an unsigned 12-bit immediate field.
+func imm12(v, scale int64) error {
+	if v < 0 || v%scale != 0 || v/scale > 0xFFF {
+		return asm.ErrInvalidOperand
+	}
+	return nil
 }
 
 func logicalImmediate(base uint32, dst, src asm.PReg, imm int64) (uint32, error) {
