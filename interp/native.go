@@ -427,7 +427,9 @@ func (n *native) drain(i *Interpreter) {
 // ok reports that the activation reached TrapReturn; otherwise deopt has
 // rebuilt a failing exit and retire reports whether the code retires.
 // bridged is the activation's bridge-retry counter.
-func (n *native) settle(i *Interpreter, code *jit.Code, ctx *jit.Context, trap jit.Trap, mark int64, bridged *int, deopt func(jit.Exit), refute func() bool) (ok, retire bool) {
+func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *int, deopt func(jit.Exit), refute func() bool) (ok, retire bool) {
+	ctx := n.ctx
+	mark := int64(budget)
 	for {
 		if trap == jit.TrapReturn {
 			return true, false
@@ -498,15 +500,16 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp))
 	ctx.Budget = budget
 	ctx.Depth = 0
-	mark := ctx.Budget
 
 	if i.profiler != nil {
 		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
 	}
 
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
-		ok, retire := n.settle(i, code, ctx, trap, mark, &n.bridged[addr],
-			func(exit jit.Exit) { n.deopt(i, exit, release, advance) },
+		ok, retire := n.settle(i, code, trap, &n.bridged[addr],
+			// ip advances the entering (pre-rebuild) frame, which rebuild
+			// never writes, so it applies before rebuild retargets i.fr.
+			func(exit jit.Exit) { i.fr.ip += advance; n.rebuild(i, exit, i.fp, release) },
 			func() bool { return n.refute(addr) },
 		)
 		if !ok {
@@ -626,42 +629,24 @@ func (n *native) exec(i *Interpreter, f *frame, results []types.Kind) (ok bool) 
 		}
 	}()
 	f.code[f.ip](i)
+	// A bridged result unboxes as its raw native word: refs are boxed words
+	// natively (no runtime tag transform), so this is a plain
+	// reinterpretation. Every bridgeable opcode's own result is a ref.
 	for j, kind := range results {
-		n.ctx.Results[j] = n.word(i, kind, i.stack[i.sp-len(results)+j])
+		v := i.stack[i.sp-len(results)+j]
+		if kind != types.KindRef {
+			panic("interp: bridge result kind " + kind.String() + " is not a ref")
+		}
+		n.ctx.Results[j] = uint64(v)
 	}
 	return true
 }
 
-// word converts a KindRef boxed value to its raw native word: refs are
-// boxed words natively (no runtime tag transform), so this is a plain
-// reinterpretation. Every bridgeable opcode's own result is a ref.
-func (n *native) word(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
-	if kind != types.KindRef {
-		panic("interp: bridge result kind " + kind.String() + " is not a ref")
-	}
-	return uint64(v)
-}
-
-// deopt materializes native activations outermost-first and positions the
-// interpreter at the innermost threaded frame. release/advance preserve the
-// entering call site's ownership and IP semantics.
-func (n *native) deopt(i *Interpreter, exit jit.Exit, release bool, advance int) {
-	ctx := n.ctx
-	depth := int(ctx.Depth)
-	inner := n.rebuild(i, exit, i.fp, release)
-
-	i.fr.ip += advance
-	i.fp += depth
-	i.fr = inner
-
-	ctx.Depth = 0
-	ctx.Abandon()
-}
-
 // rebuild materializes every native activation as a frame from start,
-// replays an ExitCall's callee, and returns the innermost frame. release
-// reports whether activation 0 owns the callee reference it was entered with.
-func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool) *frame {
+// replays an ExitCall's callee, and positions the interpreter at the
+// innermost one. release reports whether activation 0 owns the callee
+// reference it was entered with.
+func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool) {
 	ctx := n.ctx
 	depth := int(ctx.Depth)
 
@@ -682,7 +667,7 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool)
 	}
 
 	for k := 0; k < depth; k++ {
-		n.frame(i, ctx, start, k, maps[k], owns[k])
+		n.frame(i, start, k, maps[k], owns[k])
 	}
 	for k := 1; k < depth; k++ {
 		bp := i.frames[start+k].bp
@@ -711,14 +696,18 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start int, release bool)
 		inner.ip--
 	}
 
-	return inner
+	i.fp = start + depth
+	i.fr = inner
+	ctx.Depth = 0
+	ctx.Abandon()
 }
 
 // frame materializes activation k from m. release reports whether k owns
 // the callee reference it was entered with: the outermost activation
 // follows the entering call site, and every other one follows the call
 // site's own Owned decision in the caller's compiled code.
-func (n *native) frame(i *Interpreter, ctx *jit.Context, start, k int, m jit.Frame, release bool) {
+func (n *native) frame(i *Interpreter, start, k int, m jit.Frame, release bool) {
+	ctx := n.ctx
 	f := &i.frames[start+k]
 	f.addr = m.Address
 	f.code = n.exactCode(i, m.Address)

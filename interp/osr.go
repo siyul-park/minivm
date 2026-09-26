@@ -125,7 +125,6 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp+1))
 	ctx.Budget = budget
 	ctx.Depth = 0
-	mark := ctx.Budget
 
 	if i.profiler != nil {
 		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
@@ -133,8 +132,11 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 
 	ok, retire := true, false
 	if trap := jit.Enter(c.Entry(), ctx); trap != jit.TrapReturn {
-		ok, retire = n.settle(i, c, ctx, trap, mark, &s.bridged,
-			func(exit jit.Exit) { n.materialize(i, exit) },
+		ok, retire = n.settle(i, c, trap, &s.bridged,
+			// An OSR activation is entered without a call, so there is no
+			// caller frame above it in Records to preserve: rebuild rewrites
+			// the current frame in place instead of pushing a new one.
+			func(exit jit.Exit) { n.rebuild(i, exit, i.fp-1, i.fr.release) },
 			s.refute,
 		)
 	}
@@ -164,19 +166,4 @@ func (n *native) finish(i *Interpreter, s *site, c *jit.Code) {
 	}
 	boxRegisters(i, c, f.bp)
 	i.leave(f, f.bp+len(s.fn.Typ.Returns))
-}
-
-// materialize rewrites the current frame from exit's own map in place,
-// instead of pushing a new one: an OSR activation is entered without a
-// call, so there is no caller frame above it in Records to preserve.
-func (n *native) materialize(i *Interpreter, exit jit.Exit) {
-	ctx := n.ctx
-	depth := int(ctx.Depth)
-	inner := n.rebuild(i, exit, i.fp-1, i.fr.release)
-
-	i.fp += depth - 1
-	i.fr = inner
-
-	ctx.Depth = 0
-	ctx.Abandon()
 }
