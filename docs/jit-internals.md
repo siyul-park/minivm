@@ -116,7 +116,7 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
 | Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure is permanent only when feedback is unchanged from its snapshot. |
-| Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. |
+| Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. They count against the entry that entered native code; an amortized bridge also clears its own function's count, so a callee's native-called work pays for its threaded entries. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, module entry, or safepoint. |
 | Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 

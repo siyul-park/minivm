@@ -474,8 +474,11 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 			}
 			if served {
 				// Enough native work since the last bridge pays for this one.
+				// A natively called activation counts against its caller's
+				// entry, so its work also clears its own function's count.
 				if mark-ctx.Budget >= amortize {
 					*bridged = 0
+					n.bridged[exit.Frame.Address] = 0
 				} else {
 					*bridged++
 				}

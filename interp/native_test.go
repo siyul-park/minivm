@@ -1672,6 +1672,86 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantConst, constCount)
 	})
 
+	t.Run("a callee's unamortized threaded-entry bridges do not retire it while its native calls amortize theirs", func(t *testing.T) {
+		native(t)
+		// The loop adds f(i) for i < n. f(0) bridges three string ops with no
+		// native work between them; every other f(i) loops four times first,
+		// amortizing its bridges.
+		const n = 2000
+		fb := instr.NewBuilder()
+		work, loop, done := fb.Label(), fb.Label(), fb.Label()
+		fb.Emit(instr.LOCAL_GET, 0).BrIf(work)
+		fb.Emit(instr.CONST_GET, 1).Emit(instr.STRING_ENCODE_UTF32).Emit(instr.STRING_NEW_UTF32).Emit(instr.STRING_LEN).Emit(instr.RETURN)
+		fb.Bind(work).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		fb.Bind(loop)
+		fb.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(done)
+		fb.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		fb.Br(loop)
+		fb.Bind(done).Emit(instr.CONST_GET, 1).Emit(instr.STRING_ENCODE_UTF32).Emit(instr.STRING_NEW_UTF32).Emit(instr.STRING_LEN).Emit(instr.RETURN)
+		fcode, err := fb.Assemble()
+		require.NoError(t, err)
+		f := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeI32},
+			Code:   instr.Marshal(fcode),
+		}
+
+		b := instr.NewBuilder()
+		header, exit, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Bind(header)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(exit)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(inner)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(inner)
+		b.Bind(innerDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(header)
+		b.Bind(exit).Emit(instr.LOCAL_GET, 1)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32), program.WithConstants(f, types.String("ab")))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		// f(0) runs threaded-entered at most once per Run; enough Runs pass
+		// for its bridges to reach the retirement limit several times over.
+		const runs = 16
+		var got types.Value
+		var runErr, popErr error
+		var round int
+		var entries, prior float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			round++
+			total, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			entries, prior = total-prior, total
+			return round >= runs && entries < n/2
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+		require.GreaterOrEqual(t, round, runs)
+		// A retired f leaves the loop's native call nothing to enter, so the
+		// loop runs threaded and enters f's OSR code for nearly every f(i).
+		require.Less(t, entries, float64(n/2))
+	})
+
 	t.Run("native OpStore releases a ref-typed slot's old value, matching threaded RefCount", func(t *testing.T) {
 		native(t)
 		const n = 200_000
