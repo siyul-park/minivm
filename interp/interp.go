@@ -969,13 +969,18 @@ func (i *Interpreter) restore(f *frame, addr int) {
 	}
 	f.code = i.code[addr]
 	f.addr = addr
-	if f.ref > 0 && f.ref < len(i.heap) {
-		if cl, ok := i.heap[f.ref].(*types.Closure); ok && int(cl.Fn) == addr {
-			f.upvals = cl.Upvals
-			return
+	f.upvals = i.upvals(f.ref, addr)
+}
+
+// upvals returns the upvals a frame running addr through ref reads: the
+// closure's own when ref is a closure over addr, none otherwise.
+func (i *Interpreter) upvals(ref, addr int) []types.Boxed {
+	if ref > 0 && ref < len(i.heap) {
+		if cl, ok := i.heap[ref].(*types.Closure); ok && int(cl.Fn) == addr {
+			return cl.Upvals
 		}
 	}
-	f.upvals = nil
+	return nil
 }
 
 func (i *Interpreter) fault(r any) error {

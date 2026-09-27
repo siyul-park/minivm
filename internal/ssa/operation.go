@@ -24,18 +24,27 @@ type Slot struct {
 	Index int
 }
 
-// Shape describes the container specialization a guard admits: an array
-// whose elements are of Kind in its canonical representation
-// (types.TypedArray[T] for a scalar Kind, *types.Array for KindRef), or,
-// when Struct is set, a *types.Struct of struct type Type.
+// Shape describes the specialization a guard admits: an array whose
+// elements are of Kind in its canonical representation
+// (types.TypedArray[T] for a scalar Kind, *types.Array for KindRef); when
+// Struct is set, a *types.Struct of struct type Type; when Function is set,
+// a *types.Closure over that function of function type Type holding at
+// least Captures upvals. A CALL carries the closure Shape its callee is
+// known to have.
 type Shape struct {
-	// Kind is the admitted array element kind; meaningless when Struct.
+	// Kind is the admitted array element kind; meaningless when Struct or
+	// Function.
 	Kind types.Kind
 	// Struct reports whether the admitted representation is a struct of
 	// type Type instead of an array of Kind.
 	Struct bool
-	// Type identifies the admitted struct type, when Struct.
+	// Type identifies the admitted struct type, when Struct, or function
+	// type, when Function.
 	Type uintptr
+	// Function is the address of the function an admitted closure calls.
+	Function int
+	// Captures is the upvals count an admitted closure holds at least.
+	Captures int
 	// Host identifies the host field kind, when applicable.
 	Host reflect.Kind
 }

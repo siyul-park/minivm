@@ -15,7 +15,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 | Entry | Counts | Threshold | Cadence | Root |
 |---|---|---|---|---|
-| `CALL` | interpreted calls to a `*types.Function` | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
+| `CALL` | interpreted calls to a `*types.Function`, and `ExitCall` replays of a closure call | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
 | OSR | back edges at a loop header, module code included | `n` | `interval` (256) back edges | the header |
 | Module entry | Runs of loop-free module code | `max(n, 2)` | every Run | ip 0 |
 
@@ -32,7 +32,8 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack. |
 | `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `jit.Context` | `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
 | `jit.Store` | Published code and `Context.Natives`. |
@@ -58,16 +59,33 @@ A loop header `MUST` have state before its budget check. An OSR unit loads block
 
 Translate never retains a constant callee: the pool keeps it alive, so its call state does not own it and the native call neither retains nor releases it. Lower takes `Call.Owned` from that state. A dynamic `CALL` with one recorded feedback target becomes a guarded constant call only for a callee operand its state does not own.
 
+A `CALL` whose callee is a closure carries the closure's `ssa.Shape` (function, type, captures), and Lower calls that function, passing the closure's upvals:
+
+| Callee | Resolution |
+|---|---|
+| a `CLOSURE_NEW` over a constant function in the same unit, on the stack or in a local no path re-stores before the call | static: no guard; an OSR unit knows no closure built before its header |
+| a closure recorded at the site's feedback | `guard.shape` on the operand: a `*types.Closure` over the function, of its type, holding at least its captures |
+
+A local- or constant-backed callee is lent: the call neither retains nor releases it. Closure feedback is recorded only where Go already runs: an `ExitCall` replay of a closure call records its callee and counts its entry, since the threaded closure `CALL` has no native hook.
+
+A function with captures runs natively only through its closure:
+
+| Entry | Rule |
+|---|---|
+| Go (`CALL`) | declines: a direct call carries no upvals |
+| OSR | declines unless the frame holds its captures |
+| Native call | lowering rejects a direct call of it |
+
 A reference parameter its function never writes (`transform.Borrows`) is borrowed: a native caller lends a local- or constant-backed argument without a retain, and releases an owned one after the call.
 
 ## ARM64 activation
 
 | Area | Contract |
 |---|---|
-| Prologue | Push `Records[Depth]`, save `Record.PC`, count `Entries[address]` when enabled, start non-parameter locals at their zeros (`value-representation.md`), loading each distinct zero once; OSR starts none. |
-| Store | Reference-capable `OpStore` releases the old slot value before overwrite, matching threaded `LOCAL_SET`. |
+| Prologue | Push `Records[Depth]`, save `Record.PC`, count `Entries[address]` when enabled, start non-parameter locals at their zeros (`value-representation.md`), loading each distinct zero once; OSR starts none. A function that reads or writes its upvals loads their base from `Context.Upvals`. |
+| Store | Reference-capable `OpStore` releases the old slot value before overwrite, matching threaded `LOCAL_SET` and `UPVAL_SET`. |
 | Return | `OpReturn` releases reference slots; borrowed parameters only at depth 1 (the Go-entered activation), returns up to two register results in X0/X1, or stores boxed results; `OpComplete` writes past locals. |
-| Call | Constant calls box arguments into the callee frame, then use `Context.Natives[addr]`; self-calls use the unit entry. Missing code, depth, or frame space takes `ExitCall`. |
+| Call | Constant calls box arguments into the callee frame, then use `Context.Natives[addr]`; self-calls use the unit entry. A closure call to a function with captures writes the closure's upvals base to `Context.Upvals` after its budget check. Missing code, depth, or frame space takes `ExitCall`. |
 
 ### Call convention
 
@@ -98,14 +116,14 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Bridge | Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `STRING_LEN`, `STRING_CONCAT` run once through `native.bridge`; all other bridges deopt. |
+| Bridge | Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT`, `CLOSURE_NEW`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `STRING_LEN`, `STRING_CONCAT` run once through `native.bridge`; all other bridges deopt. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge/box trap drops the retains its handler did not consume, restoring each operand's count, and follows normal deopt so the instruction executes once. |
 
 A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scratch stack and leaves native registers untouched. A bridged op adopts no operand (`transform` adopts only a stored value, for a heap write with no result): the bridge retains every ref operand for its handler, and native code releases the ones it owns afterwards. A handler that panics may already have released operands; the retains keep them alive. The materializer retains borrowed refs; a boxed wide i64 is a fresh owned heap value. Bridge/box resumption shares `resume`/`amortize`.
 
-`Exit.Lent` slots are retained when a callee is materialized or an ExitCall replayed.
+`Exit.Lent` slots are retained when a callee is materialized or an ExitCall replayed. `Exit.Closure` locates a closure call's callee: the replay pushes it, and the materialized callee frame runs through it with its upvals.
 
 ## Store and tiers
 
@@ -115,7 +133,7 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
-| Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure is permanent only when feedback is unchanged from its snapshot. |
+| Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. An `ExitCall` to a callee whose Baseline is still pending (no code, not failed) neither refutes nor counts against the bridge limit. A compile failure is permanent only when feedback is unchanged from its snapshot. |
 | Bridges | Each code address/site keeps its unamortized bridge count and native work across entries. A bridge is amortized when work since the previous served bridge reaches `amortize` (4); TrapReturn finalizes the last work segment. That clears the site's count and the bridged function's own count. Calls, returns, back edges, and native callees all contribute to the work. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation or entry, or safepoint. |
 | Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
@@ -137,7 +155,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - A wide (>49-bit) i64 takes `ExitBox` at the sites listed in Exits above.
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
 - Only the allowlisted bridge ops in Exits (above) resume; `ExitCall` and `RETURN_CALL`'s `ExitDeopt` do not. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
-- Closures/host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
+- Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 
 ## Metrics
 

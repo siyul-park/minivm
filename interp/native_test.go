@@ -3892,6 +3892,315 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, got)
 	})
 
+	t.Run("native closure calls match threaded on value and RefCount, with native entries and no deopt or call exits per Run", func(t *testing.T) {
+		native(t)
+		prog := counterProgram(t)
+
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		wantCounter, err := threaded.Pop()
+		require.NoError(t, err)
+		wantValue, wantCount, err := popString(threaded)
+		require.NoError(t, err)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, label prof.Label) float64 {
+			v, _ := profiler.Metric(name, label)
+			return v
+		}
+		entry := prof.Label{Key: "tier", Value: "optimized"}
+		deopt, call := prof.Label{Key: "kind", Value: "deopt"}, prof.Label{Key: "kind", Value: "call"}
+
+		var counter types.Value
+		var value string
+		var count int
+		var runErr, popErr error
+		var compiled, entries, deopts, called float64
+		require.Eventually(t, func() bool {
+			vm.Flush()
+			entered, deopted, exited := metric("vm_jit_entries_total", entry), metric("vm_jit_exits_total", deopt), metric("vm_jit_exits_total", call)
+			if runErr = vm.Run(context.Background()); runErr != nil {
+				return true
+			}
+			if counter, popErr = vm.Pop(); popErr != nil {
+				return true
+			}
+			if value, count, popErr = popString(vm); popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			entries, deopts, called = metric("vm_jit_entries_total", entry)-entered, metric("vm_jit_exits_total", deopt)-deopted, metric("vm_jit_exits_total", call)-exited
+			// The closure body is the only Baseline unit: compiled, it is
+			// called natively, or the Run takes a call exit.
+			compiled, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiled > 0 && entries > 0 && deopts == 0 && called == 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantCounter, counter)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+		require.Positive(t, compiled)
+		require.Positive(t, entries)
+		require.Zero(t, deopts)
+		require.Zero(t, called)
+	})
+
+	t.Run("a native caller keeps entering while its closure callee's Baseline is pending", func(t *testing.T) {
+		native(t)
+		// The callee counts only on ExitCall replays, so at a threshold
+		// above refute its Baseline is pending for more entries than a
+		// refuted caller survives.
+		prog := counterProgram(t)
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(2*8), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		metric := func(name string, label prof.Label) float64 {
+			v, _ := profiler.Metric(name, label)
+			return v
+		}
+		entry, call := prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "kind", Value: "call"}
+
+		var got types.Value
+		var runErr, popErr error
+		var entries, called float64
+		require.Eventually(t, func() bool {
+			vm.Flush()
+			entered, exited := metric("vm_jit_entries_total", entry), metric("vm_jit_exits_total", call)
+			if runErr = vm.Run(context.Background()); runErr != nil {
+				return true
+			}
+			if got, popErr = vm.Pop(); popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			entries, called = metric("vm_jit_entries_total", entry)-entered, metric("vm_jit_exits_total", call)-exited
+			return entries > 0 && called == 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+		require.Positive(t, entries)
+		require.Zero(t, called)
+	})
+
+	t.Run("a closure body reached only from native code compiles through ExitCall replay without a threaded hook", func(t *testing.T) {
+		native(t)
+		counter := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32).
+			Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+		gb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Locals(types.TypeAny, types.TypeI32)
+		loop, done := gb.Label(), gb.Label()
+		gb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.LOCAL_SET, 1))
+		gb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 64), instr.New(instr.I32_GE_S)).BrIf(done)
+		gb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.DROP))
+		gb.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2)).Br(loop)
+		gb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 7).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithConstants(counter, gb.MustBuild()))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		baseline, optimized := prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "tier", Value: "optimized"}
+		call := prof.Label{Key: "kind", Value: "call"}
+		entered := func() float64 {
+			return metric("vm_jit_entries_total", baseline) + metric("vm_jit_entries_total", optimized)
+		}
+
+		var got types.Value
+		var runErr, popErr error
+		var compiled, entries, called float64
+		require.Eventually(t, func() bool {
+			vm.Flush()
+			before, exited := entered(), metric("vm_jit_exits_total", call)
+			if runErr = vm.Run(context.Background()); runErr != nil {
+				return true
+			}
+			if got, popErr = vm.Pop(); popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
+			entries, called = entered()-before, metric("vm_jit_exits_total", call)-exited
+			return compiled >= 2 && entries > 0 && called == 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+		require.GreaterOrEqual(t, compiled, float64(2))
+		require.Positive(t, entries)
+		require.Zero(t, called)
+	})
+
+	t.Run("a declined bridge inside a natively called closure rebuilds its frame with its upvals", func(t *testing.T) {
+		native(t)
+		const calls = 64
+		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI1}, Returns: []types.Type{types.TypeI32}}).Captures(types.TypeI32)
+		loop, done, slow := fb.Label(), fb.Label(), fb.Label()
+		fb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_EQZ)).BrIf(done)
+		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.UPVAL_SET, 0))
+		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 0)).Br(loop)
+		fb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1)).BrIf(slow)
+		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN))
+		fb.Bind(slow).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_POPCNT), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+		gb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeAny, types.TypeI32, types.TypeI32)
+		loop, done = gb.Label(), gb.Label()
+		gb.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.LOCAL_SET, 0))
+		gb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, calls), instr.New(instr.I32_GE_S)).BrIf(done)
+		gb.Emit(instr.New(instr.I32_CONST, 100), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, calls-1), instr.New(instr.I32_EQ))
+		gb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CALL), instr.New(instr.LOCAL_SET, 2))
+		gb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1)).Br(loop)
+		gb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+		b := instr.NewBuilder()
+		b.Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithConstants(fb.MustBuild(), gb.MustBuild()))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		baseline := prof.Label{Key: "tier", Value: "baseline"}
+		call := prof.Label{Key: "kind", Value: "call"}
+
+		var got types.Value
+		var runErr, popErr error
+		var compiled, entries, called float64
+		require.Eventually(t, func() bool {
+			vm.Flush()
+			entered, exited := metric("vm_jit_entries_total", baseline), metric("vm_jit_exits_total", call)
+			if runErr = vm.Run(context.Background()); runErr != nil {
+				return true
+			}
+			if got, popErr = vm.Pop(); popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			// With the caller entered natively and no call exit, every
+			// closure call ran natively, the last one into I32_POPCNT, whose
+			// bridge never resumes.
+			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
+			entries, called = metric("vm_jit_entries_total", baseline)-entered, metric("vm_jit_exits_total", call)-exited
+			return compiled >= 2 && entries > 0 && called == 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+		require.GreaterOrEqual(t, compiled, float64(2))
+		require.Positive(t, entries)
+		require.Zero(t, called)
+	})
+
+	t.Run("a bridged CLOSURE_NEW resumes native code and matches threaded, including a capture's RefCount", func(t *testing.T) {
+		native(t)
+		const n = 200_000
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString}}).
+			Captures(types.TypeString).
+			Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+		b := instr.NewBuilder()
+		loop, done, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(inner)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(inner)
+		b.Bind(innerDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.CONST_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeAny, types.TypeI32), program.WithConstants(types.String("held"), fn))
+		wantValue, wantCount := runProgramString(t, prog)
+
+		var runErr, popErr error
+		var value string
+		var count int
+		var bridges, deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			if runErr = vm.Run(context.Background()); runErr != nil {
+				return true
+			}
+			if value, count, popErr = popString(vm); popErr != nil {
+				return true
+			}
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			// A declined bridge deopts and its site retires within a few
+			// entries; only resumed ones number in the thousands.
+			return bridges > 1000
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+		require.Greater(t, bridges, float64(1000))
+		require.Zero(t, deopts)
+	})
+
+	t.Run("a function with captures called directly stays threaded and faults on its upval as threaded does", func(t *testing.T) {
+		native(t)
+		const calls = 200
+		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI1}, Returns: []types.Type{types.TypeI32}}).Captures(types.TypeI32)
+		loop, done, read := fb.Label(), fb.Label(), fb.Label()
+		fb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_EQZ)).BrIf(done)
+		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 0)).Br(loop)
+		fb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1)).BrIf(read)
+		fb.Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN))
+		fb.Bind(read).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN))
+		b := instr.NewBuilder()
+		loop, done = b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, calls).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 1000).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, calls-1).Emit(instr.I32_EQ)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fb.MustBuild()))
+		want := runProgramErr(t, prog)
+		require.Error(t, want)
+
+		got := runProgramErr(t, prog, interp.WithThreshold(0))
+		require.True(t, errorsEqual(got, want), "got %v, want %v", got, want)
+	})
+
 	t.Run("a natively called function reads each unwritten local as its declared kind's zero, as threaded does", func(t *testing.T) {
 		native(t)
 		b := instr.NewBuilder()
@@ -4071,6 +4380,29 @@ func deopt(t *testing.T, n, k int) *program.Program {
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
 		program.WithConstants(f, types.String("abc")))
+}
+
+// counterProgram builds one closure over an i32 counter and a string, calls
+// it 64 times from loop-free module code, and leaves the last call's
+// results: the ClosureCounter shape.
+func counterProgram(t *testing.T) *program.Program {
+	t.Helper()
+	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString, types.TypeI32}}).
+		Captures(types.TypeI32, types.TypeString).
+		Emit(
+			instr.New(instr.UPVAL_GET, 1), instr.New(instr.UPVAL_SET, 1), instr.New(instr.UPVAL_GET, 1),
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0),
+			instr.New(instr.RETURN),
+		).MustBuild()
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 0)
+	for range 64 {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL).Emit(instr.DROP).Emit(instr.DROP)
+	}
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeAny), program.WithConstants(fn, types.String("held")))
 }
 
 // fib loops at module level and calls fib(8). Once the header is native,

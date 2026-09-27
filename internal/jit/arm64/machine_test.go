@@ -30,7 +30,7 @@ const (
 func (r regs) Type(v ssa.Value) ssa.Type { return r[v] }
 
 func (r regs) Slot(s ssa.Slot) ssa.Type {
-	if s.Space == ssa.SpaceGlobal {
+	if s.Space == ssa.SpaceGlobal || s.Space == ssa.SpaceUpval {
 		return ssa.TypeRef
 	}
 	return 0
@@ -140,6 +140,17 @@ func TestMachine_Prologue(t *testing.T) {
 			target.DEF(target.X1),
 			target.MOVW(args[0], target.X0),
 			target.MOV(args[1], target.X1),
+		}, a.Rows()[8:])
+	})
+
+	t.Run("loads the upvals base after the register-passed parameters", func(t *testing.T) {
+		a := asm.New(target.New())
+		args := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width32)}
+		arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindI32}, Arguments: []types.Kind{types.KindI32}, Upvals: true}, args)
+		require.Equal(t, []asm.Instruction{
+			target.DEF(target.X0),
+			target.MOVW(args[0], target.X0),
+			target.LDR(vr(1), target.Ctx, int16(jit.OffsetUpvals)),
 		}, a.Rows()[8:])
 	})
 
@@ -365,6 +376,8 @@ func TestMachine_Lower(t *testing.T) {
 	type test struct {
 		name string
 		regs regs
+		// layout is the function shape the prologue before op starts.
+		layout compile.Layout
 		// guard, when set, lowers a shape guard first, unmeasured, so op's
 		// own rows can assume it already ran.
 		guard *ssa.Operation
@@ -803,7 +816,41 @@ func TestMachine_Lower(t *testing.T) {
 			), lower: true,
 		},
 		{
-			name: "declines an upvalue slot",
+			name:   "load upval addresses the upvals base",
+			regs:   regs{1: i32},
+			layout: compile.Layout{Upvals: true},
+			op:     ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval, Index: 2}, Results: []ssa.Value{1}},
+			rows:   []asm.Instruction{target.LDR(w(1), vr(1), 16)}, lower: true,
+		},
+		{
+			name:   "store upval releases the old word through the upvals base",
+			regs:   regs{1: ssa.TypeRef},
+			layout: compile.Layout{Upvals: true},
+			op:     ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceUpval, Index: 1}, Args: []ssa.Value{1}},
+			rows: slices.Concat(
+				[]asm.Instruction{
+					target.LDR(vr(2), vr(1), 8),
+					target.LSRI(target.X16, vr(2), 49),
+				},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17),
+					target.BCondLabel(target.OpBNE, resume),
+					target.SBFX(target.X17, vr(2), 0, 32),
+					target.CBZLabel(target.X17, resume),
+				},
+				counter,
+				[]asm.Instruction{
+					target.CMPI(target.X17, 1),
+					target.BCondLabel(target.OpBLE, exit),
+					target.SUBI(target.X17, target.X17, 1),
+					target.STR(target.X17, target.X16, 0),
+					target.STR(x(1), vr(1), 8),
+				},
+			), lower: true,
+		},
+		{
+			name: "declines an upval slot of a function that never loads its upvals base",
 			regs: regs{1: i32},
 			op:   ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval}, Results: []ssa.Value{1}},
 		},
@@ -882,6 +929,41 @@ func TestMachine_Lower(t *testing.T) {
 					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
 				)
 			}(),
+			lower: true,
+		},
+		{
+			name: "admits a closure over the function, of its type, holding its captures",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Function: 3, Type: 0x2a, Captures: 1}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: slices.Concat(
+				[]asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)},
+				target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				},
+				target.LDI(target.X17, uint64(jit.Itab((*types.Closure)(nil)))),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetData)),
+					target.LDR(target.W16, vr(2), int16(jit.OffsetClosureFn)),
+				},
+				target.LDI(target.X17, 3),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(target.X16, vr(2), int16(jit.OffsetClosureTyp)),
+				},
+				target.LDI(target.X17, 0x2a),
+				[]asm.Instruction{
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(target.X16, vr(2), int16(jit.OffsetClosureUpvals+jit.OffsetSliceLen)),
+					target.CMPI(target.X16, 1), target.BCondLabel(target.OpBCC, exit),
+					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
+				},
+			),
 			lower: true,
 		},
 		{
@@ -1226,7 +1308,7 @@ func TestMachine_Lower(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, a := arm64.New(), asm.New(target.New())
-			m.Prologue(a, 0, true, compile.Layout{}, nil)
+			m.Prologue(a, 0, true, tt.layout, nil)
 			if tt.guard != nil {
 				require.True(t, m.Lower(a, *tt.guard, tt.regs))
 			}
@@ -1551,6 +1633,63 @@ func TestMachine_Call(t *testing.T) {
 				target.BCondLabel(target.OpBLE, exit),
 				target.SUBI(target.X17, target.X17, 1),
 				target.STR(target.X17, target.X16, 0),
+				target.LDR(r.Reg(3), target.X25, 32),
+			},
+		), a.Rows()[start:])
+	})
+
+	t.Run("passes a closure callee's upvals base through the context", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
+		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
+		start := len(a.Rows())
+		require.True(t, m.Call(a, compile.Call{
+			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next, Upvals: true,
+		}, r))
+
+		code, closure, upvals := vr(1), vr(2), vr(3)
+		require.Equal(t, slices.Concat(
+			[]asm.Instruction{target.UXTW(target.X16, r.Reg(1))},
+			target.LDI(target.X17, types.Tag(types.KindI32)),
+			[]asm.Instruction{
+				target.ORR(target.X16, target.X16, target.X17),
+				target.STR(target.X16, target.X25, 32),
+				target.LDR(code, target.Ctx, int16(jit.OffsetNatives)),
+			},
+			target.LDI(target.X16, 5),
+			[]asm.Instruction{
+				target.LDRR(code, code, target.X16),
+				target.CBZLabel(code, bridge),
+				target.ADDI(target.X16, target.X25, 56),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBHI, bridge),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.CMP(target.X27, target.X17),
+				target.BCondLabel(target.OpBCS, bridge),
+				target.LSLI(target.X16, target.X27, 5),
+				target.ADD(target.X16, target.Ctx, target.X16),
+				target.ADDI(target.X17, target.SP, 0),
+				target.STR(target.X17, target.X16, record(jit.RecordSP)),
+			},
+			target.LDI(target.X17, 7),
+			[]asm.Instruction{
+				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
+				target.SBFX(closure, r.Reg(2), 0, 32),
+				target.LSLI(closure, closure, 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(closure, target.X16, closure),
+				target.LDR(upvals, closure, int16(jit.OffsetData)),
+				target.LDR(upvals, upvals, int16(jit.OffsetClosureUpvals)),
+				target.STR(upvals, target.Ctx, int16(jit.OffsetUpvals)),
+				target.ADDI(target.X25, target.X25, 32),
+				target.BLR(code),
+				target.USE(live),
+				target.SUBI(target.X25, target.X25, 32),
 				target.LDR(r.Reg(3), target.X25, 32),
 			},
 		), a.Rows()[start:])

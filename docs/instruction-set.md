@@ -91,7 +91,7 @@ One opcode per row, in opcode-value order.
 | Control | `BR_IF` | `br_if` | ✅ | 🔲 | lowered on ARM64 |
 | Control | `BR_TABLE` | `br_table` | ✅ | 🔲 | lowered on ARM64 |
 | Stack | `SELECT` | `select` | ✅ | 🔲 | lowered on ARM64 |
-| Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target, or to the one callee recorded at a dynamic site's feedback, with up to two register-convention arguments/results of any kind (i64 included); a dynamic call without recorded feedback, a callee frame beyond the reachable offset range, or an i64 result from a callee with no register convention makes lowering reject the whole unit |
+| Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target, to a closure the unit itself built with `CLOSURE_NEW` over a constant function, or to the one function or closure recorded at a dynamic site's feedback, with up to two register-convention arguments/results of any kind (i64 included); a dynamic call with no such target, a direct call of a function with captures, a callee frame beyond the reachable offset range, or an i64 result from a callee with no register convention makes lowering reject the whole unit |
 | Control | `RETURN` | `return` | ✅ | 🔲 | lowered on ARM64 |
 | Control | `RETURN_CALL` | `return_call` | ⬜ | 🔲 | deoptimizes directly on ARM64 |
 | Coroutines | `YIELD` | `yield` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
@@ -105,8 +105,8 @@ One opcode per row, in opcode-value order.
 | Variables | `LOCAL_SET` | `local.set` | ✅ | 🔲 | lowered on ARM64 |
 | Variables | `LOCAL_TEE` | `local.tee` | ✅ | 🔲 | lowered on ARM64 |
 | Variables | `CONST_GET` | `const.get` | ✅ | 🔲 | lowered on ARM64 |
-| Variables | `UPVAL_GET` | `upval.get` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Variables | `UPVAL_SET` | `upval.set` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Variables | `UPVAL_GET` | `upval.get` | ✅ | 🔲 | lowered on ARM64 |
+| Variables | `UPVAL_SET` | `upval.set` | ✅ | 🔲 | lowered on ARM64 |
 | References | `REF_NULL` | `ref.null` | ✅ | 🔲 | lowered on ARM64 |
 | References | `REF_NEW` | `ref.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | References | `REF_GET` | `ref.get` | ⬜ | 🔲 | bridges to threaded on ARM64 |
@@ -285,7 +285,7 @@ One opcode per row, in opcode-value order.
 | Maps | `MAP_DELETE` | `map.delete` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Maps | `MAP_KEYS` | `map.keys` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Closures | `CLOSURE_NEW` | `closure.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Closures | `CLOSURE_NEW` | `closure.new` | ⬜ | 🔲 | bridges to threaded on ARM64 and resumes native code |
 | Maps | `MAP_ITER` | `map.iter` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Structured errors | `THROW` | `throw` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Structured errors | `ERROR_NEW` | `error.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |

@@ -22,9 +22,17 @@ type Module struct {
 	// Types is the declared-type table.
 	Types []types.Type
 	// Callees maps a dynamic CALL's offset in the translated function to the
-	// one function reference observed there. A recorded snapshot, never live
-	// state; unset for a site never seen or seen with more than one callee.
-	Callees map[int]int
+	// one callee observed there. A recorded snapshot, never live state; unset
+	// for a site never seen or seen with more than one callee.
+	Callees map[int]Callee
+}
+
+// Callee is the one target a dynamic CALL site observed.
+type Callee struct {
+	// Function is the called function's reference.
+	Function int
+	// Closure reports that the site calls Function through a closure.
+	Closure bool
 }
 
 // Objects maps constant references to object facts.
@@ -71,7 +79,7 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 		return nil, nil
 	}
 	activation := activation{function: function, address: address, slots: function.Declared()}
-	states, seen, ok := f.analyze(activation, spans, 0, nil)
+	states, seen, ok := f.analyze(activation, spans, 0, frame{closures: make([]int, len(activation.slots))})
 	if !ok {
 		return nil, nil
 	}

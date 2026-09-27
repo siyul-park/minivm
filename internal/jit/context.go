@@ -39,6 +39,10 @@ type Context struct {
 	Entries uintptr
 	Top     uintptr
 	FB      uintptr
+	// Upvals is the upvals base of the activation being entered, 0 for none:
+	// the interpreter writes it before an OSR Enter and a native closure call
+	// before its branch; only a prologue reads it.
+	Upvals uintptr
 
 	Depth   uint64
 	Limit   uint64
@@ -87,6 +91,7 @@ const (
 	OffsetEntries = unsafe.Offsetof(Context{}.Entries)
 	OffsetTop     = unsafe.Offsetof(Context{}.Top)
 	OffsetFB      = unsafe.Offsetof(Context{}.FB)
+	OffsetUpvals  = unsafe.Offsetof(Context{}.Upvals)
 	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)
 	OffsetLimit   = unsafe.Offsetof(Context{}.Limit)
 	OffsetBudget  = unsafe.Offsetof(Context{}.Budget)

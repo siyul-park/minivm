@@ -11,6 +11,8 @@ import (
 
 // shape lowers guard.shape. It admits only the representation and optional
 // concrete type encoded by Shape; null, host, or mismatched containers deopt.
+// A closure guard first deopts a word that is no reference at all, since a
+// dynamic callee may hold any value.
 func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if len(op.Args) != 1 || len(op.Results) != 1 {
 		return false
@@ -20,6 +22,11 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return false
 	}
 	ref, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if op.Shape.Function != 0 {
+		a.Emit(target.LSRI(target.X16, ref, types.VBits))
+		a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>types.VBits)...)
+		a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+	}
 	addr := m.heap(a, ref)
 	a.Emit(target.LDR(target.X16, addr, 0))
 	a.Emit(target.LDI(target.X17, uint64(expected))...)
@@ -30,14 +37,48 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		a.Emit(target.LDI(target.X17, uint64(op.Shape.Type))...)
 		a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
 	}
+	if op.Shape.Function != 0 {
+		m.closure(a, addr, op.Shape, s)
+	}
 	m.Move(a, dst, ref)
 	m.guards[op.Results[0]] = op.Shape
 	return true
 }
 
+// closure deopts unless the *types.Closure at heap slot addr calls
+// shape.Function, has type shape.Type, and holds at least shape.Captures
+// upvals.
+func (m *Machine) closure(a *asm.Assembler, addr asm.VReg, shape ssa.Shape, s compile.Site) {
+	data := m.vreg()
+	a.Emit(target.LDR(data, addr, int16(jit.OffsetData)))
+	a.Emit(target.LDR(target.W16, data, int16(jit.OffsetClosureFn)))
+	a.Emit(target.LDI(target.X17, uint64(shape.Function))...)
+	a.Emit(
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()),
+		target.LDR(target.X16, data, int16(jit.OffsetClosureTyp)),
+	)
+	a.Emit(target.LDI(target.X17, uint64(shape.Type))...)
+	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+	if shape.Captures == 0 {
+		return
+	}
+	a.Emit(target.LDR(target.X16, data, int16(jit.OffsetClosureUpvals+jit.OffsetSliceLen)))
+	if shape.Captures <= 0xFFF {
+		a.Emit(target.CMPI(target.X16, uint16(shape.Captures)))
+	} else {
+		a.Emit(target.LDI(target.X17, uint64(shape.Captures))...)
+		a.Emit(target.CMP(target.X16, target.X17))
+	}
+	a.Emit(target.BCondLabel(target.OpBCC, s.Deopt()))
+}
+
 // itab is the itab of the concrete representation shape admits: TypedArray[T]
-// for a scalar Kind, *types.Array for KindRef, *types.Struct when Struct.
+// for a scalar Kind, *types.Array for KindRef, *types.Struct when Struct,
+// *types.Closure when Function.
 func itab(shape ssa.Shape) uintptr {
+	if shape.Function != 0 {
+		return jit.Itab((*types.Closure)(nil))
+	}
 	if shape.Struct {
 		return jit.Itab((*types.Struct)(nil))
 	}

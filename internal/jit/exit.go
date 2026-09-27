@@ -16,8 +16,12 @@ type Exit struct {
 	Pops int
 	// Callee is the function address an ExitCall replays.
 	Callee int
-	// Owned reports whether the call site retained Callee's reference: an
-	// ExitCall replay must retain a borrowed Callee's reference itself before
+	// Closure is where an ExitCall's closure over Callee lives, nil when the
+	// call names Callee directly: the replay pushes it, and a callee
+	// materialized from this call runs through it.
+	Closure *Value
+	// Owned reports whether the call site retained its callee's reference: an
+	// ExitCall replay must retain a borrowed callee's reference itself before
 	// pushing it, so the interpreter's own CALL has one of its own to release.
 	Owned bool
 	// Lent are the callee frame slots this call passes without a reference

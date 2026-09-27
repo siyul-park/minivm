@@ -23,8 +23,10 @@ type lowering struct {
 	address int
 	// osr reports whether this unit is rooted at a loop header instead of
 	// its function's own entry.
-	osr     bool
-	count   bool
+	osr   bool
+	count bool
+	// upvals reports that f reads or writes its upvals.
+	upvals  bool
 	objects transform.Objects
 	states  map[ssa.Value]ssa.Operation
 	consts  map[ssa.Value]uint64
@@ -173,6 +175,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		}
 		for _, op := range b.Operations {
 			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
+			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
 			mark(op.Args)
 			for _, frame := range op.Frames {
 				for _, o := range frame.Stack {
@@ -249,6 +252,9 @@ func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
 	if slot.Space == ssa.SpaceGlobal {
 		return ssa.TypeRef
 	}
+	if slot.Space == ssa.SpaceUpval && slot.Index >= 0 && slot.Index < len(l.fn.Captures) {
+		return ssa.TypeOf(l.fn.Captures[slot.Index].Kind())
+	}
 	return 0
 }
 
@@ -320,7 +326,7 @@ func (l *lowering) function() error {
 		borrows = transform.Borrows(l.fn)
 	}
 	results := registers(l.fn)
-	layout := Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Results: results, Borrows: borrows}
+	layout := Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Results: results, Borrows: borrows, Upvals: l.upvals}
 	l.args = make([]asm.VReg, len(args))
 	for i, k := range args {
 		l.args[i] = l.fresh(ssa.TypeOf(k))
@@ -639,16 +645,21 @@ func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	return s.label, s.resume
 }
 
-// call lowers a statically resolved CALL and records the post-call state.
+// call lowers a CALL of a constant function, or of the closure its Shape
+// names, and records the post-call state. A function with captures runs
+// only through its closure: called directly, it has no upvals to read.
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
-	c, ok := l.consts[callee]
-	if !ok || l.f.Type(callee) != ssa.TypeRef {
-		return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
+	ref, closure := op.Shape.Function, op.Shape.Function != 0
+	if !closure {
+		c, ok := l.consts[callee]
+		if !ok || l.f.Type(callee) != ssa.TypeRef {
+			return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
+		}
+		ref = types.Boxed(c).Ref()
 	}
-	ref := types.Boxed(c).Ref()
 	target := l.objects[ref].Function
-	if target == nil || target.Typ == nil {
+	if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
 	}
 	if registers(target) == nil {
@@ -673,6 +684,10 @@ func (l *lowering) call(op ssa.Operation) error {
 	id := l.exit(jit.ExitCall)
 	l.exits[id].Callee = ref
 	l.exits[id].Owned = owned
+	if closure {
+		l.exits[id].Closure = &jit.Value{}
+		l.place(id, l.exits[id].Closure, callee)
+	}
 	for j, b := range transform.Borrows(target) {
 		if b && !frame.Stack[below+j].Owned {
 			l.exits[id].Lent = append(l.exits[id].Lent, j)
@@ -697,6 +712,7 @@ func (l *lowering) call(op ssa.Operation) error {
 		Self:      !l.osr && ref == l.address,
 		Registers: registers(target),
 		Arguments: arguments(target),
+		Upvals:    closure && len(target.Captures) > 0,
 	}
 	if !l.m.Call(l.a, site, l) {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)

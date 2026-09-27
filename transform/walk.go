@@ -14,6 +14,9 @@ type walker struct {
 	block      int
 	activation activation
 	stack      []operand
+	// closures is, per slot, the function of the closure this unit stored
+	// there, 0 when unknown (see frame).
+	closures []int
 
 	ip     int
 	before []operand
@@ -134,19 +137,19 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 	return w.leave(s.end), true
 }
 
-func (w *walker) edges(s span, states [][]fact, ids []int) ([]ssa.Edge, bool) {
+func (w *walker) edges(s span, states []frame, ids []int) ([]ssa.Edge, bool) {
 	if len(s.succs) == 0 {
 		return nil, true
 	}
 	for _, succ := range s.succs {
-		if len(states[succ]) != len(w.stack) {
+		if len(states[succ].stack) != len(w.stack) {
 			return nil, false
 		}
 	}
 	for i := range w.stack {
 		owned, borrowed := false, false
 		for _, succ := range s.succs {
-			if states[succ][i].backing == backingStack {
+			if states[succ].stack[i].backing == backingStack {
 				owned = true
 			} else {
 				borrowed = true
@@ -335,7 +338,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if target == nil {
 			return false
 		}
-		return w.emit(operation, 1+len(target.Captures), []fact{{kind: types.KindRef}})
+		return w.emit(operation, 1+len(target.Captures), []fact{{kind: types.KindRef, closure: capture.reference}})
 	case instr.STRUCT_NEW:
 		idx := int(inst.Operand(0))
 		if idx >= len(w.types) {
@@ -424,12 +427,18 @@ func (w *walker) record(container fact) *types.StructType {
 	return nil
 }
 
+// callee resolves the function a CALL at operand at calls: a constant
+// function, or the function of a closure this unit built (fact.closure).
 func (w *walker) callee(at int) *types.Function {
 	o := w.stack[at]
-	if !o.referenceKnown || o.reference <= 0 {
+	ref := o.closure
+	if ref == 0 && o.referenceKnown {
+		ref = o.reference
+	}
+	if ref <= 0 {
 		return nil
 	}
-	target := w.objects.function(o.reference)
+	target := w.objects.function(ref)
 	if target == nil || target.Typ == nil {
 		return nil
 	}
@@ -441,12 +450,14 @@ func (w *walker) callee(at int) *types.Function {
 // for a non-owned ref operand only (an owned one would leak its own count on
 // substitution). It declines by returning nil. On success it guards the
 // operand against the admitted constant and replaces the stack entry with
-// it, so the CALL proceeds exactly as a resolved one.
+// it, so the CALL proceeds exactly as a resolved one; a closure callee keeps
+// its operand, guarded to be a closure over the admitted function.
 func (w *walker) speculate(at int) *types.Function {
-	ref, ok := w.callees[w.ip]
+	callee, ok := w.callees[w.ip]
 	if !ok {
 		return nil
 	}
+	ref := callee.Function
 	target := w.objects.function(ref)
 	if target == nil || target.Typ == nil {
 		return nil
@@ -454,6 +465,11 @@ func (w *walker) speculate(at int) *types.Function {
 	o := w.stack[at]
 	if o.kind != types.KindRef || o.backing == backingStack {
 		return nil
+	}
+	if callee.Closure {
+		w.guard(at, closure(ref, target))
+		w.stack[at].closure = ref
+		return target
 	}
 	c := w.builder.Value(ssa.TypeRef)
 	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(ref)), Results: []ssa.Value{c}})
@@ -476,6 +492,9 @@ func (w *walker) load(space ssa.Space, index int) bool {
 	t, ok := typ(out.kind)
 	if !ok {
 		return false
+	}
+	if space == ssa.SpaceLocal {
+		out.closure = w.closures[index]
 	}
 	value := w.builder.Value(t)
 	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpLoad, Slot: slot, Results: []ssa.Value{value}})
@@ -505,6 +524,9 @@ func (w *walker) store(space ssa.Space, index int) bool {
 	if w.stack[top].kind == types.KindRef {
 		w.own(top)
 		w.detach(out.backing, out.offset)
+	}
+	if space == ssa.SpaceLocal {
+		w.closures[index] = w.stack[top].closure
 	}
 	w.builder.Add(w.block, ssa.Operation{
 		Op:    ssa.OpStore,
@@ -612,9 +634,10 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 
 	adopted := adopts(opcode, pops, len(results))
 	var borrows []bool
+	var shape ssa.Shape
 	switch {
 	case opcode.Writes(instr.Frame):
-		borrows = w.call()
+		borrows, shape = w.call()
 	case adopted > 0:
 		w.own(len(w.stack) - 1)
 	}
@@ -625,7 +648,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	consumed := append([]operand(nil), w.stack[len(w.stack)-pops:]...)
 	w.stack = w.stack[:len(w.stack)-pops]
 
-	operation := ssa.Operation{Op: ssa.OpExec, Code: opcode, Args: args, State: w.deopt(), Results: out}
+	operation := ssa.Operation{Op: ssa.OpExec, Code: opcode, Shape: shape, Args: args, State: w.deopt(), Results: out}
 	w.builder.Add(w.block, operation)
 
 	for i, r := range results {
@@ -645,20 +668,25 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	return true
 }
 
-// call adopts every stack entry a CALL pops except a constant callee and an
-// argument in a borrowed position (Borrows) backed by a local or a constant:
-// the caller's own local cannot change during the call, and the constant
-// pool is immortal. A global- or upvalue-backed borrowed argument is adopted
-// here, since the callee may overwrite that cell, and released by emit after
-// the call instead of by the callee. It returns the resolved target's
-// Borrows: CALL reaches emit only after callee or speculate has resolved one.
-func (w *walker) call() []bool {
+// call adopts every stack entry a CALL pops except a callee and an argument
+// in a borrowed position (Borrows) backed by a local or a constant: the
+// caller's own local cannot change during the call, and the constant pool is
+// immortal. A global- or upvalue-backed borrowed argument or callee is
+// adopted here, since the callee may overwrite that cell, and released by
+// emit after the call instead of by the callee. It returns the resolved
+// target's Borrows and, for a closure callee, the closure Shape the CALL
+// carries: CALL reaches emit only after callee or speculate has resolved one.
+func (w *walker) call() ([]bool, ssa.Shape) {
 	top := len(w.stack) - 1
 	target := w.callee(top)
+	var shape ssa.Shape
+	if ref := w.stack[top].closure; ref != 0 {
+		shape = closure(ref, target)
+	}
 	borrows := Borrows(target)
 	base := top - len(borrows)
 	for i := range w.stack {
-		if i == top && w.stack[i].backing == backingConst {
+		if i == top && w.lent(i) {
 			continue
 		}
 		if i >= base && i < top && borrows[i-base] && w.lent(i) {
@@ -666,7 +694,13 @@ func (w *walker) call() []bool {
 		}
 		w.own(i)
 	}
-	return borrows
+	return borrows, shape
+}
+
+// closure is the Shape of a closure over target, the function at ref, as
+// CLOSURE_NEW builds it: of target's type, holding its captures.
+func closure(ref int, target *types.Function) ssa.Shape {
+	return ssa.Shape{Function: ref, Type: uintptr(unsafe.Pointer(target.Typ)), Captures: len(target.Captures)}
 }
 
 // lent reports whether stack entry i's own backing survives a call unaided:

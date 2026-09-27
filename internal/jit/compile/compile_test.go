@@ -25,6 +25,7 @@ type machine struct {
 	arguments []types.Kind
 	args      []asm.VReg
 	results   []types.Kind
+	upvals    bool
 	regs      map[ssa.Value]asm.VReg
 	moves     [][2]asm.VReg
 	uses      [][]asm.VReg
@@ -47,6 +48,7 @@ func (m *machine) Prologue(_ *asm.Assembler, _ int, count bool, l compile.Layout
 	m.arguments = l.Arguments
 	m.args = args
 	m.results = l.Results
+	m.upvals = l.Upvals
 }
 
 func (m *machine) Epilogue(*asm.Assembler) { m.calls = append(m.calls, "epilogue") }
@@ -513,6 +515,65 @@ func TestLower(t *testing.T) {
 				}},
 			},
 		}, exits)
+	})
+
+	t.Run("calls the closure its call names, passing its upvals and mapping it on the call exit", func(t *testing.T) {
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		b := ssa.New("f")
+		entry := b.Block()
+		closure := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{closure}})
+		at := state(b, entry, 0, ssa.Operand{Value: closure})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Function: 2, Captures: 1}, Args: []ssa.Value{closure}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)})}
+		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, 2, m.sites[0].Address)
+		require.Equal(t, closure, m.sites[0].Callee)
+		require.True(t, m.sites[0].Upvals)
+		require.False(t, m.sites[0].Owned)
+		require.Equal(t, jit.ExitCall, exits[0].Kind)
+		require.Equal(t, 2, exits[0].Callee)
+		require.NotNil(t, exits[0].Closure)
+		require.Equal(t, types.KindRef, exits[0].Closure.Kind)
+	})
+
+	t.Run("rejects a direct call of a function that captures", func(t *testing.T) {
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		b := ssa.New("f")
+		entry := b.Block()
+		callee := constant(b, entry, types.BoxRef(2))
+		at := state(b, entry, 0, ssa.Operand{Value: callee})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		require.ErrorIs(t, err, compile.ErrUnsupported)
+	})
+
+	t.Run("hands the machine a function's upvals only when it reads them", func(t *testing.T) {
+		upvals := func(t *testing.T, space ssa.Space) bool {
+			b := ssa.New("f")
+			entry := b.Block()
+			v := b.Value(ssa.TypeI32)
+			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: space}, Results: []ssa.Value{v}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}})
+
+			m := new(machine)
+			fn := function(1, 0)
+			fn.Captures = []types.Type{types.TypeI32}
+			_, _, _, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
+			require.NoError(t, err)
+			return m.upvals
+		}
+
+		require.True(t, upvals(t, ssa.SpaceUpval))
+		require.False(t, upvals(t, ssa.SpaceLocal))
 	})
 
 	t.Run("lends a borrowed argument its state does not own", func(t *testing.T) {

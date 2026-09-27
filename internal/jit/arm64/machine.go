@@ -38,6 +38,9 @@ type Machine struct {
 	// threaded CALL pushed it owned; a native caller lent it instead. Empty
 	// for an OSR unit, whose threaded-entered frame owns every slot.
 	borrows []bool
+	// upvals holds the activation's upvals base once Prologue loads it
+	// (Layout.Upvals); upval slots address it.
+	upvals asm.VReg
 	// flag is the compare Site.Fuse left in the condition flags, true
 	// under cond, for the OpBranch right after it.
 	flag ssa.Value
@@ -76,7 +79,8 @@ func (m *Machine) Reserve() []asm.PReg {
 // Prologue builds the frame, records the activation, counts the entry when
 // enabled, and starts non-parameter locals at their zeros, loading each
 // distinct zero once. Register-convention arguments move from X0/X1 into args
-// before those registers are repurposed. A Machine lowers many functions in
+// before those registers are repurposed; the upvals base loads after them.
+// A Machine lowers many functions in
 // sequence (a Queue worker reuses one), so Prologue resets all per-function
 // state.
 func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout, args []asm.VReg) {
@@ -132,6 +136,10 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	}
 	for i, dst := range args {
 		convention(a, dst, i, true)
+	}
+	if l.Upvals {
+		m.upvals = m.vreg()
+		a.Emit(target.LDR(m.upvals, target.Ctx, int16(jit.OffsetUpvals)))
 	}
 }
 
@@ -388,7 +396,8 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	}
 }
 
-// Call writes boxed arguments at the callee frame base and dispatches
+// Call writes boxed arguments at the callee frame base, passes a closure
+// callee's upvals base through Context.Upvals when Upvals, and dispatches
 // through Context.Natives, or, when Self, branches directly to the unit's
 // own entry. Missing code, depth, or space takes ExitCall; an owned Callee
 // is released once the callee returns, a borrowed one left alone.
@@ -425,6 +434,13 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	// Spend before changing X25 so a safepoint resumes with the caller frame.
 	a.Emit(target.SUBSI(target.X24, target.X24, 1), target.BCondLabel(target.OpBLE, c.Safepoint))
 	a.Bind(c.Resume)
+	if c.Upvals {
+		upvals := m.container(a, s.Reg(c.Callee))
+		a.Emit(
+			target.LDR(upvals, upvals, int16(jit.OffsetClosureUpvals)),
+			target.STR(upvals, target.Ctx, int16(jit.OffsetUpvals)),
+		)
+	}
 	a.Emit(target.ADDI(target.X25, target.X25, uint16(8*c.Base)))
 	// A register-passed argument also moves into X0/X1 raw, on top of its
 	// boxed slot store (exits read only the slot). The moves sit right
@@ -572,7 +588,7 @@ func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 }
 
 // base is the register a slot is addressed from: X25 for a local of this
-// activation, the globals base for a global.
+// activation, the globals base for a global, the upvals base for an upval.
 func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 	if slot.Index < 0 || slot.Index > 4095 {
 		return nil, false
@@ -584,6 +600,8 @@ func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 		base := m.vreg()
 		a.Emit(target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)))
 		return base, true
+	case slot.Space == ssa.SpaceUpval && m.upvals != asm.VReg{}:
+		return m.upvals, true
 	default:
 		return nil, false
 	}

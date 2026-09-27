@@ -3,6 +3,7 @@ package transform_test
 import (
 	"fmt"
 	"testing"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
@@ -528,7 +529,7 @@ blk0: ()
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: fn}},
-			Callees:   map[int]int{ips[0]: 1, ips[1]: 1},
+			Callees:   map[int]transform.Callee{ips[0]: {Function: 1}, ips[1]: {Function: 1}},
 		}
 
 		out, err := transform.Translate(m, 1, fn, 0)
@@ -536,6 +537,87 @@ blk0: ()
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, wantIndirectRecursiveFib(ips), ssa.Format(out))
+	})
+
+	t.Run("resolves a closure built in the same unit as a static callee and lends it from its local", func(t *testing.T) {
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		fn := &types.Function{
+			Locals: []types.Type{types.TypeAny},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 5).Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 0)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL)
+			}),
+		}
+		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: target}}}
+
+		out, err := transform.Translate(m, 0, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, fmt.Sprintf(`func 0:0
+blk0: ()
+	v1:i32 = const 5
+	v2:ref = const 2
+	v4:state = state {addr=0 base=0 ip=8 returns=0 stack=[v1, v2]}
+	v3:ref = closure.new v1, v2 state v4
+	v5:state = state {addr=0 base=0 ip=9 returns=0 stack=[v3 owned]}
+	store local[0], v3 state v5
+	v6:ref = load local[0]
+	v8:state = state {addr=0 base=0 ip=13 returns=0 stack=[v6]}
+	v7:i32 = call v6 closure 2 type 0x%x captures 1 state v8
+	v9:state = state {addr=0 base=0 ip=14 returns=0 stack=[v7]}
+	complete v7 state v9
+`, uintptr(unsafe.Pointer(target.Typ))), ssa.Format(out))
+	})
+
+	t.Run("declines a closure callee through a local another path re-stores", func(t *testing.T) {
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI1, types.TypeAny}},
+			Locals: []types.Type{types.TypeAny},
+			Code: assemble(t, func(b *instr.Builder) {
+				skip := b.Label()
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 2)
+				b.Emit(instr.LOCAL_GET, 0).BrIf(skip)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_SET, 2)
+				b.Bind(skip).Emit(instr.LOCAL_GET, 2).Emit(instr.CALL).Emit(instr.DROP).Emit(instr.RETURN)
+			}),
+		}
+		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: target}}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
+	t.Run("speculates a closure callee its feedback observed and lends it from its local", func(t *testing.T) {
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+			}),
+		}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(2)},
+			Objects:   transform.Objects{2: {Function: target}},
+			Callees:   map[int]transform.Callee{2: {Function: 2, Closure: true}},
+		}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		typ := uintptr(unsafe.Pointer(target.Typ))
+		require.Equal(t, fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:ref = load local[0]
+	v3:state = state {addr=1 base=0 ip=2 returns=1 stack=[v1]}
+	v2:ref = guard.shape v1 closure 2 type 0x%x captures 1 state v3
+	v4:i32 = call v2 closure 2 type 0x%x captures 1 state v3
+	v5:state = state {addr=1 base=0 ip=3 returns=1 stack=[v4]}
+	return v4 state v5
+`, typ, typ), ssa.Format(out))
 	})
 
 	t.Run("lends a global-backed argument by owning it and releasing it after the call", func(t *testing.T) {
@@ -607,7 +689,7 @@ blk0: ()
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: fn}, 7: {Struct: &types.StructType{}}},
-			Callees:   map[int]int{ips[0]: 7, ips[1]: 7},
+			Callees:   map[int]transform.Callee{ips[0]: {Function: 7}, ips[1]: {Function: 7}},
 		}
 
 		out, err := transform.Translate(m, 1, fn, 0)
@@ -621,7 +703,7 @@ blk0: ()
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: target}},
-			Callees:   map[int]int{ip: 1},
+			Callees:   map[int]transform.Callee{ip: {Function: 1}},
 		}
 
 		out, err := transform.Translate(m, 0, fn, 0)

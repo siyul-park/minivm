@@ -127,9 +127,10 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 // s's lookup cadence, counting entries: a callee called only from native
 // code would otherwise tier up only at a safepoint. Loop-free code reaches
 // no safepoint, so an entry site declines a cancelled Run, leaving threaded
-// code to report it.
+// code to report it. Native code reads a word per capture without a bounds
+// check, so a frame without its captures declines too.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
-	if s.entry && cancelled(i) {
+	if s.entry && cancelled(i) || len(i.fr.upvals) < len(s.fn.Captures) {
 		return false
 	}
 	if s.count++; s.count%s.cadence == 0 {
@@ -154,6 +155,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	ctx.Entries = entry(n.entries)
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[i.fr.bp:])
+	ctx.Upvals = base(i.fr.upvals)
 	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp+1))
 	ctx.Budget = budget
 	ctx.Depth = 0
@@ -168,7 +170,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 			// An OSR activation is entered without a call, so there is no
 			// caller frame above it in Records to preserve: rebuild rewrites
 			// the current frame in place instead of pushing a new one.
-			func(exit jit.Exit) { n.rebuild(i, exit, i.fp-1, i.fr.release) },
+			func(exit jit.Exit) { n.rebuild(i, exit, i.fp-1, i.fr.ref, i.fr.release) },
 			s.refute,
 		)
 	}

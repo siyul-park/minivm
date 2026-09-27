@@ -139,7 +139,7 @@ func indirectFibonacci(t *testing.T) (*types.Function, transform.Module) {
 	module := transform.Module{
 		Constants: []types.Boxed{types.BoxRef(1)},
 		Objects:   transform.Objects{1: {Function: fib}},
-		Callees:   map[int]int{ips[0]: 1, ips[1]: 1},
+		Callees:   map[int]transform.Callee{ips[0]: {Function: 1}, ips[1]: {Function: 1}},
 	}
 	return fib, module
 }

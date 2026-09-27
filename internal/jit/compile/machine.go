@@ -73,6 +73,9 @@ type Layout struct {
 	// Borrows is transform.Borrows for a non-OSR unit and nil for an OSR
 	// unit, whose threaded-entered frame owns every slot.
 	Borrows []bool
+	// Upvals reports that the function reads or writes its upvals: Prologue
+	// loads their base from Context.Upvals.
+	Upvals bool
 }
 
 // Site is what Machine sees of the operation or terminator it lowers.
@@ -104,9 +107,9 @@ type Site interface {
 type Call struct {
 	// Address is the callee's function address, its Context.Natives index.
 	Address int
-	// Callee is the function reference the call adopts when Owned; a
-	// borrowed Callee lives in the constant pool and native code neither
-	// retains nor releases it.
+	// Callee is the function or closure reference the call adopts when
+	// Owned; a borrowed Callee lives in the constant pool or a caller's
+	// slot, and native code neither retains nor releases it.
 	Callee        ssa.Value
 	Args, Results []ssa.Value
 	// Base is the callee's frame base in slots from this activation's, and
@@ -141,6 +144,10 @@ type Call struct {
 	// arguments): each also moves into the target's register-convention
 	// registers, on top of its slot store.
 	Arguments []types.Kind
+	// Upvals reports that Callee is a closure over a function with
+	// captures: the call writes the closure's upvals base to
+	// Context.Upvals.
+	Upvals bool
 }
 
 // ErrUnsupported reports SSA the backend does not lower.
