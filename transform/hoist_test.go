@@ -166,12 +166,14 @@ func TestHoistPass_Run(t *testing.T) {
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
-	t.Run("hoists a pure operation but leaves a guard and its deopt state untouched", func(t *testing.T) {
+	t.Run("hoists a pure operation but leaves a shape guard in a loop that calls", func(t *testing.T) {
 		l := newCountedLoop()
 		array := l.b.Param(l.pre, ssa.TypeRef)
+		callee := l.b.Param(l.pre, ssa.TypeRef)
 		x, y := l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
 		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
 		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: deoptState(l.b, l.pre)})
 
 		sum := l.b.Value(ssa.TypeI32)
 		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
@@ -196,6 +198,184 @@ func TestHoistPass_Run(t *testing.T) {
 		require.Equal(t, 1, strings.Count(blockChunk(out, 0), "i32.add"))
 		require.Equal(t, 2, strings.Count(out, "i32.add"))
 		require.NotContains(t, blockChunk(out, 0), "guard.shape")
+	})
+
+	t.Run("hoists a shape guard on an invariant ref into the preheader under the loop's entry state", func(t *testing.T) {
+		b := ssa.New("f")
+		pre, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+		array := b.Param(pre, ssa.TypeRef)
+		zero, bound, one := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+		b.Term(pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero}}}})
+
+		counter := b.Param(header, ssa.TypeI32)
+		entry := b.Value(ssa.TypeState)
+		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 2, Stack: []ssa.Operand{{Value: counter}, {Value: bound}}}}, Results: []ssa.Value{entry}})
+		cond := b.Value(ssa.TypeI1)
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: entry, Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+
+		at := b.Value(ssa.TypeState)
+		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 5, Stack: []ssa.Operand{{Value: array}, {Value: counter}}}}, Results: []ssa.Value{at}})
+		guarded, element := b.Value(ssa.TypeRef), b.Value(ssa.TypeI32)
+		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: at, Results: []ssa.Value{guarded}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, counter}, State: at, Results: []ssa.Value{element}})
+		step := b.Value(ssa.TypeState)
+		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 6, Stack: []ssa.Operand{{Value: counter}, {Value: one}}}}, Results: []ssa.Value{step}})
+		next := b.Value(ssa.TypeI32)
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: step, Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, `func f
+blk0: (v1:ref)
+	v2:i32 = const 0
+	v3:i32 = const 10
+	v4:i32 = const 1
+	v9:state = state {addr=1 base=0 ip=2 returns=0 stack=[v2, v3]}
+	v10:ref = guard.shape v1 kind i32 state v9
+	jump blk1(v2)
+blk1: (v5:i32) <-- (blk0, blk2)
+	v6:state = state {addr=1 base=0 ip=2 returns=0 stack=[v5, v3]}
+	v7:i1 = i32.lt_s v5, v3 state v6
+	br v7, blk2(), blk3()
+blk2: () <-- (blk1)
+	v8:state = state {addr=1 base=0 ip=5 returns=0 stack=[v1, v5]}
+	v11:i32 = array.get v10, v5 state v8
+	v12:state = state {addr=1 base=0 ip=6 returns=0 stack=[v5, v4]}
+	v13:i32 = i32.add v5, v4 state v12
+	jump blk1(v13)
+blk3: () <-- (blk1)
+	return v5
+`, ssa.Format(fn))
+	})
+
+	t.Run("leaves a shape guard in a conditional block of a quiet loop", func(t *testing.T) {
+		b := ssa.New("f")
+		pre, header, body, then, latch, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
+		array := b.Param(pre, ssa.TypeRef)
+		zero, bound, one := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+		b.Term(pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero}}}})
+
+		counter := b.Param(header, ssa.TypeI32)
+		entry := b.Value(ssa.TypeState)
+		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 2, Stack: []ssa.Operand{{Value: counter}, {Value: bound}}}}, Results: []ssa.Value{entry}})
+		cond := b.Value(ssa.TypeI1)
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: entry, Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+
+		taken := b.Value(ssa.TypeI1)
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, zero}, State: entry, Results: []ssa.Value{taken}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{taken}, Edges: []ssa.Edge{{Block: then}, {Block: latch}}})
+
+		at := b.Value(ssa.TypeState)
+		b.Add(then, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 5, Stack: []ssa.Operand{{Value: array}, {Value: counter}}}}, Results: []ssa.Value{at}})
+		guarded, element := b.Value(ssa.TypeRef), b.Value(ssa.TypeI32)
+		b.Add(then, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: at, Results: []ssa.Value{guarded}})
+		b.Add(then, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, counter}, State: at, Results: []ssa.Value{element}})
+		b.Term(then, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: latch}}})
+
+		next := b.Value(ssa.TypeI32)
+		b.Add(latch, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: entry, Results: []ssa.Value{next}})
+		b.Term(latch, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
+		require.NotContains(t, blockChunk(out, pre), "guard.shape")
+		require.Contains(t, out, "guard.shape")
+	})
+
+	t.Run("hoists a load of a local the loop never stores, and the shape guard over it", func(t *testing.T) {
+		l := newCountedLoop()
+		array, guarded, element := l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4, Stack: []ssa.Operand{{Value: array}, {Value: l.counter}}}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guarded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{guarded, l.counter, l.one}, State: state})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, l.counter}, State: state, Results: []ssa.Value{element}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		pre := blockChunk(ssa.Format(fn), l.pre)
+		require.Contains(t, pre, "load local[0]")
+		require.Contains(t, pre, "guard.shape")
+	})
+
+	t.Run("does not hoist a load of a local the loop stores", func(t *testing.T) {
+		l := newCountedLoop()
+		loaded, sum := l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Results: []ssa.Value{loaded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{loaded, l.counter}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Args: []ssa.Value{sum}, State: deoptState(l.b, l.pre)})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, blockChunk(ssa.Format(fn), l.body), "load local[1]")
+	})
+
+	t.Run("does not hoist a shape guard whose loop entry state names a loop-defined value", func(t *testing.T) {
+		b := ssa.New("f")
+		pre, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+		array := b.Param(pre, ssa.TypeRef)
+		zero, bound, one := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+		b.Term(pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero}}}})
+
+		counter, total := b.Param(header, ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Results: []ssa.Value{total}})
+		entry := b.Value(ssa.TypeState)
+		b.Add(header, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 2, Stack: []ssa.Operand{{Value: total}, {Value: counter}}}}, Results: []ssa.Value{entry}})
+		cond := b.Value(ssa.TypeI1)
+		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: entry, Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+
+		at := b.Value(ssa.TypeState)
+		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 5, Stack: []ssa.Operand{{Value: array}, {Value: counter}}}}, Results: []ssa.Value{at}})
+		guarded, element, sum, next := b.Value(ssa.TypeRef), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: at, Results: []ssa.Value{guarded}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, counter}, State: at, Results: []ssa.Value{element}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{total, element}, State: at, Results: []ssa.Value{sum}})
+		b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Args: []ssa.Value{sum}, State: at})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: at, Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, blockChunk(ssa.Format(fn), body), "guard.shape")
 	})
 
 	t.Run("cascades a doubly loop-invariant operation out of a nested loop in one run", func(t *testing.T) {

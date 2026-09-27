@@ -2732,6 +2732,107 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, result)
 	})
 
+	t.Run("a quiet loop reading a null array only under a condition never true stays native across runs, matching threaded", func(t *testing.T) {
+		native(t)
+		const runs = 32
+		// A null []i32 local read only under a branch no iteration takes.
+		b := instr.NewBuilder()
+		loop, skip, done := b.Label(), b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 20_000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_GE_S).BrIf(skip)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Bind(skip)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 2)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.NewArrayType(types.TypeI32), types.TypeI32, types.TypeI32))
+		want := runProgram(t, prog)
+
+		var errs []error
+		var results []types.Value
+		var entries, deopts float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			errs, results = nil, nil
+			for range runs {
+				if err := vm.Run(context.Background()); err != nil {
+					errs = append(errs, err)
+					return true
+				}
+				result, err := vm.Pop()
+				if err != nil {
+					errs = append(errs, err)
+					return true
+				}
+				results = append(results, result)
+				vm.Reset()
+			}
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return entries >= runs/2
+		}, 5*time.Second, time.Millisecond)
+		require.Empty(t, errs)
+		require.Len(t, results, runs)
+		for _, result := range results {
+			require.Equal(t, want, result)
+		}
+		require.Less(t, deopts, float64(2))
+	})
+
+	t.Run("an array replaced inside an Optimized loop is guarded afresh each iteration, matching threaded", func(t *testing.T) {
+		native(t)
+		// The []i32 local is replaced by a fresh array of varying length every iteration.
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 200_000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_AND).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_AND).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_AND).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 2)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		elem := types.NewArrayType(types.TypeI32)
+		prog := program.New(code, program.WithLocals(elem, types.TypeI32, types.TypeI32), program.WithTypes(elem))
+		want := runProgram(t, prog)
+
+		var runErr, popErr error
+		var result types.Value
+		var entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
+	})
+
 	t.Run("stays off by default: no vm_jit metrics are reported", func(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(fibCallsProgram(t, 3), interp.WithProfiler(profiler))

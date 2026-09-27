@@ -50,7 +50,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 |---|---|
 | Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
-| Optimized | fold → forward → CSE → guard → hoist → DCE → promote → DCE |
+| Optimized | fold → forward → CSE → guard → DCE → promote → hoist → DCE |
 | Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
 | Build | assemble, allocate, encode, publish through `jit.Code` |
 

@@ -92,8 +92,8 @@ func passes(tier jit.Tier) []pass.Pass[*ssa.Function] {
 	case jit.Optimized:
 		return []pass.Pass[*ssa.Function]{
 			transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(),
-			transform.NewGuardPass(), transform.NewHoistPass(), transform.NewDCEPass(),
-			transform.NewPromotePass(), transform.NewDCEPass(),
+			transform.NewGuardPass(), transform.NewDCEPass(), transform.NewPromotePass(),
+			transform.NewHoistPass(), transform.NewDCEPass(),
 		}
 	default:
 		return nil

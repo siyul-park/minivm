@@ -25,6 +25,8 @@ pipeline   ordered transforms + invalidation
 
 Each pass owns one policy. Current passes include folding, simplification, promotion, forwarding, CSE, guard elimination, LICM, and DCE.
 
+LICM moves pure operations, and in a loop that calls, allocates, and releases nothing (`quiet` in `transform/hoist.go`), slot loads the loop never stores and shape guards on invariant refs in blocks every iteration runs. A hoisted guard takes the loop header's entry state, so its failure deopts at loop entry.
+
 SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`.
 
 ## Bytecode
