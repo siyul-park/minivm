@@ -568,12 +568,15 @@ func (w *walker) constant(word uint64, out fact) bool {
 	return true
 }
 
-// adopts returns the number of popped operands transferred to the destination.
-func adopts(code instr.Opcode, pops int) int {
+// adopts returns the number of popped operands transferred to the destination:
+// every one when it enters a frame, the stored value when it overwrites heap
+// contents and yields nothing. A bridged op adopts none: the bridge retains
+// each operand for its handler.
+func adopts(code instr.Opcode, pops, results int) int {
 	switch {
 	case code.Writes(instr.Frame):
 		return pops
-	case code.Reads(instr.Heap) && code.Writes(instr.Heap):
+	case code.Reads(instr.Heap) && code.Writes(instr.Heap) && results == 0:
 		return 1
 	default:
 		return 0
@@ -607,7 +610,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 		out[i] = w.builder.Value(t)
 	}
 
-	adopted := adopts(opcode, pops)
+	adopted := adopts(opcode, pops, len(results))
 	var borrows []bool
 	switch {
 	case opcode.Writes(instr.Frame):

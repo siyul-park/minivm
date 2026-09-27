@@ -565,11 +565,13 @@ func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
 }
 
 // bridgeable selects handlers that can execute once in place and safely decline.
-// The allowlist excludes handlers that consume ownership before their only possible
-// panic or whose runtime pop count exceeds the recorded SSA arguments.
+// The allowlist excludes handlers whose runtime pop count exceeds the recorded
+// SSA arguments, that write their argument slots before they can panic, or
+// that do anything but release their operands before they can panic.
 func bridgeable(code instr.Opcode) bool {
 	switch code {
-	case instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT, instr.ARRAY_NEW_DEFAULT:
+	case instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT, instr.ARRAY_NEW_DEFAULT,
+		instr.STRING_NEW_UTF32, instr.STRING_ENCODE_UTF32, instr.STRING_LEN, instr.STRING_CONCAT:
 		return true
 	default:
 		return false
@@ -592,13 +594,25 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	sp := bp + slots(i.function(m.Address))
 
 	tail := m.Stack[len(m.Stack)-exit.Pops:]
+	// counts are the ref operands' counts before any retain below: a handler
+	// that panics may already have released some of them.
+	var buf [8]int
+	counts := buf[:0]
 	for j, o := range tail {
 		v := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
-		// A boxed wide i64 is fresh and already owned; a ref is retained for the handler.
-		if o.Value.Kind == types.KindRef {
-			i.retainBox(v)
-		}
 		i.stack[sp+j] = v
+		count := 0
+		if o.Value.Kind == types.KindRef {
+			count = i.rc[v.Ref()]
+		}
+		counts = append(counts, count)
+	}
+	// A boxed wide i64 is fresh and already owned; a ref is retained for the
+	// handler, so no handler release reclaims it.
+	for j, o := range tail {
+		if o.Value.Kind == types.KindRef {
+			i.retainBox(i.stack[sp+j])
+		}
 	}
 
 	savedFr, savedSP := i.fr, i.sp
@@ -612,10 +626,11 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	i.fr = savedFr
 	if !ok {
 		// A bridgeable handler never writes its argument slots before it can
-		// panic, so i.stack[sp+j] still holds what was retained above.
+		// panic, so i.stack[sp+j] still holds each operand; releasing down to
+		// counts drops only the retains the handler did not consume.
 		for j, o := range tail {
-			if o.Value.Kind == types.KindRef {
-				i.releaseBox(i.stack[sp+j])
+			if ref := i.stack[sp+j].Ref(); o.Value.Kind == types.KindRef && ref != 0 && i.rc[ref] > counts[j] {
+				i.release(ref)
 			}
 		}
 		i.sp = savedSP
@@ -624,10 +639,8 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 }
 
 // exec runs f's own instruction and, on success, unboxes the len(results)
-// values it pushed into Context.Results. A panic is recovered and reported
-// as a decline; nothing i.heap/i.rc-visible happens before it for any
-// bridgeable opcode (see bridgeable), so a decline needs no further cleanup
-// of what the handler itself touched.
+// values it pushed into Context.Results as native words. A panic is
+// recovered and reported as a decline.
 func (n *native) exec(i *Interpreter, f *frame, results []types.Kind) (ok bool) {
 	defer func() {
 		if recover() != nil {
@@ -635,15 +648,16 @@ func (n *native) exec(i *Interpreter, f *frame, results []types.Kind) (ok bool) 
 		}
 	}()
 	f.code[f.ip](i)
-	// A bridged result unboxes as its raw native word: refs are boxed words
-	// natively (no runtime tag transform), so this is a plain
-	// reinterpretation. Every bridgeable opcode's own result is a ref.
 	for j, kind := range results {
 		v := i.stack[i.sp-len(results)+j]
-		if kind != types.KindRef {
-			panic("interp: bridge result kind " + kind.String() + " is not a ref")
+		switch kind {
+		case types.KindRef:
+			n.ctx.Results[j] = uint64(v)
+		case types.KindI32:
+			n.ctx.Results[j] = uint64(uint32(v.I32()))
+		default:
+			panic("interp: bridge result kind " + kind.String() + " has no native word")
 		}
-		n.ctx.Results[j] = uint64(v)
 	}
 	return true
 }

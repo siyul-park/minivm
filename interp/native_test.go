@@ -545,6 +545,36 @@ func trap(t *testing.T, warm int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithTypes(elem))
 }
 
+// texts grows a string by "ab" until it is 2n bytes long, re-deriving each
+// "ab" through string.encode_utf32 and string.new_utf32 so the ops see
+// borrowed, constant, and owned operands, and chains one struct per pass so
+// the heap grows. An inner loop amortizes the bridges.
+func texts(t *testing.T, n int) *program.Program {
+	t.Helper()
+	record := node()
+	b := instr.NewBuilder()
+	loop, done, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN).Emit(instr.LOCAL_TEE, 3)
+	b.Emit(instr.I32_CONST, uint64(2*n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(inner)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Br(inner)
+	b.Bind(innerDone)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1)
+	b.Emit(instr.STRING_ENCODE_UTF32).Emit(instr.STRING_NEW_UTF32).Emit(instr.STRING_CONCAT).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 1).Emit(instr.STRUCT_NEW, 0).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeString, record, types.TypeI32, types.TypeI32), program.WithTypes(record),
+		program.WithConstants(types.String(""), types.String("ab")))
+}
+
 // dynamicConcatProgram forces the dynamic-CALL entry path by loading the callee
 // from a local rather than CONST_GET;CALL fusion. It warms twice, then leaves one result.
 func dynamicConcatProgram(t *testing.T, warm int) *program.Program {
@@ -1003,11 +1033,11 @@ func divFailProgram(t *testing.T, warm, fails int) *program.Program {
 		program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
 }
 
-// nestedConcatOuterFunction calls concatFunction(a, b) through a constant
-// callee, so a hot outer's native call enters concatFunction's native code
-// directly, two native activations deep, before concatFunction's own
-// STRING_CONCAT (arm64 lowers no string opcode) deopts them both; both then
-// run to a normal RETURN threaded, unlike an error unwind.
+// nestedConcatOuterFunction calls its constant callee with (a, b), so a hot
+// outer's native call enters the callee's native code directly, two native
+// activations deep, before the callee's STRING_EQ (which native code neither
+// lowers nor resumes) deopts them both; both then run to a normal RETURN
+// threaded, unlike an error unwind.
 func nestedConcatOuterFunction(t *testing.T) *types.Function {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -1021,10 +1051,19 @@ func nestedConcatOuterFunction(t *testing.T) *types.Function {
 }
 
 // nestedConcatProgram compiles the caller first so later native-to-native calls
-// reach concatFunction directly; concat still deopts at STRING_CONCAT and returns its result.
+// reach the callee directly; the callee deopts at STRING_EQ and returns the
+// STRING_CONCAT of its parameters.
 func nestedConcatProgram(t *testing.T, warm int) *program.Program {
 	t.Helper()
-	inner := concatFunction(t)
+	ib := instr.NewBuilder()
+	ib.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_EQ).Emit(instr.DROP)
+	ib.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_CONCAT).Emit(instr.RETURN)
+	icode, err := ib.Assemble()
+	require.NoError(t, err)
+	inner := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeString, types.TypeString}, Returns: []types.Type{types.TypeString}},
+		Code: instr.Marshal(icode),
+	}
 	outer := nestedConcatOuterFunction(t)
 	b := instr.NewBuilder()
 	loop, done := b.Label(), b.Label()
@@ -1553,6 +1592,84 @@ func TestWithThreshold(t *testing.T) {
 		}, 5*time.Second, time.Millisecond)
 		require.Error(t, gotErr)
 		require.True(t, errorsEqual(gotErr, wantErr))
+	})
+
+	t.Run("bridged string ops resume native code and match threaded, including RefCount", func(t *testing.T) {
+		native(t)
+		prog := texts(t, 20_000)
+		threaded := interp.New(prog)
+		require.NoError(t, threaded.Run(context.Background()))
+		wantValue, wantCount, err := popString(threaded)
+		require.NoError(t, err)
+		ab, err := threaded.Const(1)
+		require.NoError(t, err)
+		wantConst, err := threaded.RefCount(ab.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		var runErr, popErr, constErr error
+		var value string
+		var count, constCount int
+		var bridges, entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			value, count, popErr = popString(vm)
+			if popErr != nil {
+				return true
+			}
+			constCount, constErr = vm.RefCount(ab.Ref())
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return bridges > entries
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, constErr)
+		// An entry that declined its first bridge could not reach a second one.
+		require.Greater(t, bridges, entries)
+		require.Equal(t, wantValue, value)
+		require.Equal(t, wantCount, count)
+		require.Equal(t, wantConst, constCount)
+	})
+
+	t.Run("a string op bridge that exhausts the heap declines and matches threaded's error and RefCount", func(t *testing.T) {
+		native(t)
+		const limit = 20_000
+		prog := texts(t, 2*limit)
+		threaded := interp.New(prog, interp.WithHeapLimit(limit))
+		wantErr := threaded.Run(context.Background())
+		require.ErrorIs(t, wantErr, interp.ErrHeapExhausted)
+		ab, err := threaded.Const(1)
+		require.NoError(t, err)
+		wantConst, err := threaded.RefCount(ab.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		var gotErr, constErr error
+		var constCount int
+		var bridges, entries float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithHeapLimit(limit), interp.WithProfiler(profiler))
+			defer vm.Close()
+			gotErr = vm.Run(context.Background())
+			constCount, constErr = vm.RefCount(ab.Ref())
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return bridges > entries
+		}, 5*time.Second, time.Millisecond)
+		require.Greater(t, bridges, entries)
+		require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
+		require.NoError(t, constErr)
+		require.Equal(t, wantConst, constCount)
 	})
 
 	t.Run("native OpStore releases a ref-typed slot's old value, matching threaded RefCount", func(t *testing.T) {
@@ -3580,16 +3697,16 @@ func concat(t *testing.T, n int) *program.Program {
 }
 
 // deopt loops at module level over n calls of f(i) = i, except f(k), which
-// adds string.len of a constant: an operation native code does not lower, so
-// f's native code deoptimizes there while the loop's promoted locals live in
-// the caller's native frame.
+// adds string.eq of a constant with itself: an operation native code neither
+// lowers nor resumes, so f's native code deoptimizes there while the loop's
+// promoted locals live in the caller's native frame.
 func deopt(t *testing.T, n, k int) *program.Program {
 	t.Helper()
 	fb := instr.NewBuilder()
 	slow := fb.Label()
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRING_LEN).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_EQ).Emit(instr.I32_ADD).Emit(instr.RETURN)
 	fcode, err := fb.Assemble()
 	require.NoError(t, err)
 	f := &types.Function{
@@ -3725,8 +3842,8 @@ func runModuleDivCaught(t *testing.T, prog *program.Program) (int, types.Boxed) 
 	return count, code
 }
 
-// bridge loops n times at module level over STRING_LEN, which native code
-// does not lower: every native entry of its header bridges.
+// bridge loops n times at module level over STRING_EQ, which native code
+// neither lowers nor resumes: every native entry of its header bridges.
 func bridge(t *testing.T, n int) *program.Program {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -3734,7 +3851,7 @@ func bridge(t *testing.T, n int) *program.Program {
 	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
 	b.Bind(header)
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.CONST_GET, 0).Emit(instr.STRING_LEN).Emit(instr.DROP)
+	b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 	b.Br(header)
 	b.Bind(done).Emit(instr.LOCAL_GET, 0)

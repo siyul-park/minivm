@@ -567,6 +567,29 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
+	t.Run("keeps a string op's operands with the translated code, since the op stores none of them", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeString}, Returns: []types.Type{types.TypeString}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_CONCAT).Emit(instr.RETURN)
+			}),
+		}
+		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:ref = load local[0]
+	v2:ref = const 2
+	v4:state = state {addr=1 base=0 ip=5 returns=1 stack=[v1, v2]}
+	v3:ref = string.concat v1, v2 state v4
+	v5:state = state {addr=1 base=0 ip=6 returns=1 stack=[v3 owned]}
+	return v3 state v5
+`, ssa.Format(out))
+	})
+
 	t.Run("declines a dynamic callee without feedback", func(t *testing.T) {
 		fn, _ := indirectRecursiveFib(t)
 		m := transform.Module{

@@ -252,16 +252,16 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_TO_I64_U` | `f64.to_i64_u` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_TO_F32` | `f64.to_f32` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | 🔲 | lowered on ARM64 |
-| Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_LEN` | `string.len` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Strings | `STRING_LEN` | `string.len` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Strings | `STRING_GE` | `string.ge` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
 | Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges |

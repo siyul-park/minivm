@@ -98,12 +98,12 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Bridge | Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT` run once through `native.bridge`; all other bridges deopt. |
+| Bridge | Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `STRING_LEN`, `STRING_CONCAT` run once through `native.bridge`; all other bridges deopt. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
-| Trap | A bridge/box trap abandons its extra retains and follows normal deopt so the instruction executes once. |
+| Trap | A bridge/box trap drops the retains its handler did not consume, restoring each operand's count, and follows normal deopt so the instruction executes once. |
 
-A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scratch stack and leaves native registers untouched. The materializer retains borrowed refs; a boxed wide i64 is a fresh owned heap value. Bridge/box resumption shares `resume`/`amortize`.
+A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scratch stack and leaves native registers untouched. A bridged op adopts no operand (`transform` adopts only a stored value, for a heap write with no result): the bridge retains every ref operand for its handler, and native code releases the ones it owns afterwards. A handler that panics may already have released operands; the retains keep them alive. The materializer retains borrowed refs; a boxed wide i64 is a fresh owned heap value. Bridge/box resumption shares `resume`/`amortize`.
 
 `Exit.Lent` slots are retained when a callee is materialized or an ExitCall replayed.
 
