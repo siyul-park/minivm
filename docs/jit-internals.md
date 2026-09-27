@@ -13,11 +13,11 @@ Native tier: ownership, runtime contract, lifecycle.
 bytecode → transform.Translate → SSA passes (per tier) → compile.Lower → asm.Assembler.Build → jit.Code
 ```
 
-| Entry | Trigger | Root |
-|---|---|---|
-| `CALL` | `n` interpreted calls to a `*types.Function` | ip 0 |
-| OSR | `n` back edges at a loop header, module code included | the header |
-| Module entry | `max(n, 2)` runs of loop-free module code | ip 0 |
+| Entry | Counts | Threshold | Cadence | Root |
+|---|---|---|---|---|
+| `CALL` | interpreted calls to a `*types.Function` | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
+| OSR | back edges at a loop header, module code included | `n` | `interval` (256) back edges | the header |
+| Module entry | Runs of loop-free module code | `max(n, 2)` | every Run | ip 0 |
 
 `compile.Unit.OSR` / `jit.Code.OSR` mark OSR units, module entry included; a header can sit at ip 0.
 
@@ -122,9 +122,11 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 
 ## OSR
 
-Every loop header, including module code, has an observer. After the threshold it queues an Optimized unit and checks `Store.CodeAt` every 256 back edges. Compile failure or refutation restores the threaded handler and disables that observer.
+Every loop header, including module code, has an observer; loop-free module code has one at ip 0 instead. Each site fixes its threshold and cadence at construction (Entries table). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure or refutation restores the threaded handler and disables the site.
 
-Loop-free module code has one observer at ip 0 instead, sharing the same entry, exit, retirement, and refutation. It counts runs, queues on the second run at the earliest, and checks `Store.CodeAt` every run. Loop-free code reaches no safepoint, so its entry declines a cancelled run, leaving threaded code to report it. Module code with a loop has no ip-0 observer: its unit would take the address's one queue slot ahead of the header units.
+Loop-free code reaches no safepoint, so the ip-0 site drains on every entry and declines an already-cancelled Run, leaving threaded code to report it. Its threshold floor of 2 keeps a module run once from compiling ahead of its callees.
+
+Module code with a loop has no ip-0 site: its unit would take the address's one queue slot ahead of the header units.
 
 Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in place. Materialized frames finish threaded execution without observers.
 

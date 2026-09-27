@@ -27,8 +27,11 @@ type site struct {
 	// once s is known to never resolve.
 	inner func(*Interpreter)
 	// entry reports that s observes loop-free module code's ip 0, once per
-	// Run, instead of a loop header's back edges.
+	// Run: it declines a cancelled Run, since that code reaches no safepoint.
 	entry bool
+	// threshold is s's submit count; cadence is how often past it s retries
+	// submission, looks up published code, and drains on a cached entry.
+	threshold, cadence int64
 
 	count     int64
 	submitted bool
@@ -78,7 +81,13 @@ func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 		}
 		// translate.go completes address 0 through OpComplete regardless of
 		// fn.Typ, which i.module sets to an empty, non-nil FunctionType.
-		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip], entry: entry}
+		threshold, cadence := int64(n.threshold), int64(interval)
+		if entry {
+			// A module run once never compiles ahead of its callees; Runs are
+			// rare and loop-free code has no safepoint to drain at.
+			threshold, cadence = max(threshold, 2), 1
+		}
+		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip], entry: entry, threshold: threshold, cadence: cadence}
 		n.sites[key{addr, ip}] = s
 		code[ip] = n.observer(s, code, s.inner)
 	}
@@ -96,15 +105,9 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 			return
 		}
 		s.count++
-		threshold, every := int64(n.threshold), int64(interval)
-		if s.entry {
-			// Only a later Run can enter an entry site's unit: a module run
-			// once never compiles it ahead of its callees.
-			threshold, every = max(threshold, 2), 1
-		}
 		switch {
 		case !s.submitted:
-			if s.count >= threshold && (s.count-threshold)%every == 0 {
+			if s.count >= s.threshold && (s.count-s.threshold)%s.cadence == 0 {
 				// The queue accepts one unit per address; an entry-0 CALL
 				// compile of the same address may hold it, undrained,
 				// since its own last call.
@@ -112,7 +115,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, Entry: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
-		case s.count%every == 0:
+		case s.count%s.cadence == 0:
 			n.drain(i)
 			s.code = n.store.CodeAt(s.address, s.ip)
 		}
@@ -126,14 +129,10 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 // no safepoint, so an entry site declines a cancelled Run, leaving threaded
 // code to report it.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
-	every := int64(interval)
-	if s.entry {
-		if cancelled(i) {
-			return false
-		}
-		every = 1
+	if s.entry && cancelled(i) {
+		return false
 	}
-	if s.count++; s.count%every == 0 {
+	if s.count++; s.count%s.cadence == 0 {
 		n.drain(i)
 	}
 	n.store.Enter()
