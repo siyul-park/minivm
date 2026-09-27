@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -3723,6 +3724,99 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
 		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("a natively called function reads each unwritten local as its declared kind's zero, as threaded does", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 20_000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		for range zeroTypes {
+			b.Emit(instr.DROP)
+		}
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(zeroFunction()))
+
+		var got []types.Value
+		var entries float64
+		var runErr, popErr error
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got = got[:0]
+			for range zeroValues {
+				var v types.Value
+				if v, popErr = vm.Pop(); popErr != nil {
+					return true
+				}
+				got = append(got, v)
+			}
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, zeroValues, got)
+	})
+
+	t.Run("OSR leaves each unwritten module local and global at its declared kind's zero, as threaded does", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 200_000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		for j := range zeroTypes {
+			b.Emit(instr.LOCAL_GET, uint64(j+1))
+		}
+		for j := range zeroTypes {
+			b.Emit(instr.GLOBAL_GET, uint64(j))
+		}
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(append([]types.Type{types.TypeI32}, zeroTypes...)...), program.WithGlobals(zeroTypes...))
+		want := slices.Concat(zeroValues, zeroValues)
+
+		var got []types.Value
+		var entries float64
+		var runErr, popErr error
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got = got[:0]
+			for range want {
+				var v types.Value
+				if v, popErr = vm.Pop(); popErr != nil {
+					return true
+				}
+				got = append(got, v)
+			}
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 	})
 }

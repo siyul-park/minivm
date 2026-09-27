@@ -3,6 +3,7 @@ package arm64
 
 import (
 	"math/bits"
+	"slices"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -73,10 +74,11 @@ func (m *Machine) Reserve() []asm.PReg {
 }
 
 // Prologue builds the frame, records the activation, counts the entry when
-// enabled, and clears non-parameter locals. Register-convention arguments
-// move from X0/X1 into args before those registers are repurposed. A Machine
-// lowers many functions in sequence (a Queue worker reuses one), so Prologue
-// resets all per-function state.
+// enabled, and starts non-parameter locals at their zeros, loading each
+// distinct zero once. Register-convention arguments move from X0/X1 into args
+// before those registers are repurposed. A Machine lowers many functions in
+// sequence (a Queue worker reuses one), so Prologue resets all per-function
+// state.
 func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout, args []asm.VReg) {
 	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: l.Results, borrows: l.Borrows}
 	a.Bind(m.entry)
@@ -109,8 +111,21 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 			)
 		}
 	}
-	for i := l.Params; i < len(l.Kinds); i++ {
-		a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
+	base := len(l.Kinds) - len(l.Zeros)
+	for i, word := range l.Zeros {
+		if slices.Contains(l.Zeros[:i], word) {
+			continue
+		}
+		src := target.XZR
+		if word != 0 {
+			a.Emit(target.LDI(target.X16, uint64(word))...)
+			src = target.X16
+		}
+		for j := i; j < len(l.Zeros); j++ {
+			if l.Zeros[j] == word {
+				a.Emit(target.STR(src, target.X25, int16((base+j)*8)))
+			}
+		}
 	}
 	for i := range args {
 		a.Emit(target.DEF(register(i)))

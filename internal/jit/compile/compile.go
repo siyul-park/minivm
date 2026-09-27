@@ -309,24 +309,18 @@ func (l *lowering) function() error {
 	}
 	headers := graph.Headers(l.f, graph.NewDominance(l.f))
 
-	kinds := l.fn.Slots()
-	params := 0
-	if l.fn.Typ != nil {
-		params = len(l.fn.Typ.Params)
-	}
-	if l.osr {
-		// Every slot is a live local at a header, not just the params the
-		// function was called with: the prologue must clear none of them.
-		params = len(kinds)
-	}
+	// Every slot is a live local at an OSR header, not just the params the
+	// function was called with: the prologue must start none of them.
+	var zeros []types.Boxed
 	var args []types.Kind
 	var borrows []bool
 	if !l.osr {
+		zeros = types.Zeros(l.fn.Locals)
 		args = arguments(l.fn)
 		borrows = transform.Borrows(l.fn)
 	}
 	results := registers(l.fn)
-	layout := Layout{Kinds: kinds, Params: params, Arguments: args, Results: results, Borrows: borrows}
+	layout := Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Results: results, Borrows: borrows}
 	l.args = make([]asm.VReg, len(args))
 	for i, k := range args {
 		l.args[i] = l.fresh(ssa.TypeOf(k))

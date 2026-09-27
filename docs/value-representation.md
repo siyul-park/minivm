@@ -41,6 +41,10 @@ minivm uses NaN boxing.
 | `KindI8` | signed 8-bit integer |
 | `KindI1` | `0` or `1` |
 
+## Zero
+
+A non-parameter local or a global starts as `types.Zero` of its declared kind, so a `ref` or `any` slot is null. Every tier observes the same words.
+
 ## Computational Types
 
 `i1`, `i8`, and `i32` share one 32-bit computational lane while retaining distinct runtime kinds.

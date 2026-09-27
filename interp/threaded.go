@@ -174,7 +174,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					if locals > 0 {
-						clear(i.stack[i.sp-1 : i.sp+locals-1])
+						copy(i.stack[i.sp-1:i.sp+locals-1], i.zeros[addr])
 					}
 					if i.native != nil && i.native.call(i, addr, fn, true, 1) {
 						return
@@ -214,7 +214,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					if locals > 0 {
-						clear(i.stack[i.sp-1 : i.sp+locals-1])
+						copy(i.stack[i.sp-1:i.sp+locals-1], i.zeros[int(fn.Fn)])
 					}
 					f := &i.frames[i.fp]
 					f.code = i.code[fn.Fn]
@@ -340,7 +340,7 @@ var (
 								panic(ErrStackOverflow)
 							}
 							if locals > 0 {
-								clear(i.stack[i.sp-1 : i.sp+locals-1])
+								copy(i.stack[i.sp-1:i.sp+locals-1], i.zeros[code])
 							}
 							f := &i.frames[i.fp]
 							f.code = i.code[code]
@@ -374,7 +374,7 @@ var (
 							i.release(f.ref)
 						}
 						if locals > 0 {
-							clear(i.stack[base+params : base+params+locals])
+							copy(i.stack[base+params:base+params+locals], i.zeros[code])
 						}
 						f.code = i.code[code]
 						f.upvals = upvals
@@ -411,7 +411,7 @@ var (
 								panic(ErrStackOverflow)
 							}
 							if locals > 0 {
-								clear(i.stack[i.sp-1 : i.sp+locals-1])
+								copy(i.stack[i.sp-1:i.sp+locals-1], i.zeros[code])
 							}
 							f := &i.frames[i.fp]
 							f.code = i.code[code]
@@ -445,7 +445,7 @@ var (
 							i.release(f.ref)
 						}
 						if locals > 0 {
-							clear(i.stack[base+params : base+params+locals])
+							copy(i.stack[base+params:base+params+locals], i.zeros[code])
 						}
 						f.code = i.code[code]
 						f.upvals = upvals
@@ -66807,7 +66807,7 @@ var (
 								panic(ErrStackOverflow)
 							}
 							if locals > 0 {
-								clear(i.stack[i.sp : i.sp+locals])
+								copy(i.stack[i.sp:i.sp+locals], i.zeros[addr])
 							}
 							f := &i.frames[i.fp]
 							f.code = i.code[addr]
@@ -66841,7 +66841,7 @@ var (
 							i.release(f.ref)
 						}
 						if locals > 0 {
-							clear(i.stack[base+params : base+params+locals])
+							copy(i.stack[base+params:base+params+locals], i.zeros[addr])
 						}
 						f.code = i.code[addr]
 						f.upvals = nil
@@ -66879,7 +66879,7 @@ var (
 								panic(ErrStackOverflow)
 							}
 							if locals > 0 {
-								clear(i.stack[i.sp : i.sp+locals])
+								copy(i.stack[i.sp:i.sp+locals], i.zeros[int(fn.Fn)])
 							}
 							f := &i.frames[i.fp]
 							f.code = i.code[fn.Fn]
@@ -66913,7 +66913,7 @@ var (
 							i.release(f.ref)
 						}
 						if locals > 0 {
-							clear(i.stack[base+params : base+params+locals])
+							copy(i.stack[base+params:base+params+locals], i.zeros[int(fn.Fn)])
 						}
 						f.code = i.code[fn.Fn]
 						f.upvals = fn.Upvals
@@ -67101,7 +67101,7 @@ var (
 							panic(ErrStackOverflow)
 						}
 						if locals > 0 {
-							clear(i.stack[i.sp : i.sp+locals])
+							copy(i.stack[i.sp:i.sp+locals], i.zeros[addr])
 						}
 						if i.native != nil && i.native.call(i, addr, fn, false, 4) {
 							return
@@ -67147,7 +67147,7 @@ var (
 							panic(ErrStackOverflow)
 						}
 						if locals > 0 {
-							clear(i.stack[i.sp : i.sp+locals])
+							copy(i.stack[i.sp:i.sp+locals], i.zeros[int(fn.Fn)])
 						}
 						f := &i.frames[i.fp]
 						f.code = i.code[fn.Fn]

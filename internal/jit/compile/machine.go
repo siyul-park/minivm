@@ -60,9 +60,10 @@ type Machine interface {
 type Layout struct {
 	// Kinds is the function's slots, params first then locals.
 	Kinds []types.Kind
-	// Params is the number of leading Kinds entries that are parameters;
-	// Prologue clears the rest.
-	Params int
+	// Zeros is the word Prologue starts each of the trailing len(Zeros)
+	// Kinds entries at (types.Zeros of the declared locals); nil for an OSR
+	// unit, whose locals are live.
+	Zeros []types.Boxed
 	// Arguments is the function's register-convention parameters (see
 	// arguments), empty when none apply.
 	Arguments []types.Kind

@@ -91,3 +91,16 @@ func Kinds(ts []Type) []Kind {
 	}
 	return out
 }
+
+// Zeros returns the Zero of each declared type's kind, the word a slot of
+// that type starts as. Returns nil for an empty input.
+func Zeros(ts []Type) []Boxed {
+	if len(ts) == 0 {
+		return nil
+	}
+	out := make([]Boxed, len(ts))
+	for i, t := range ts {
+		out[i] = Zero(t.Kind())
+	}
+	return out
+}

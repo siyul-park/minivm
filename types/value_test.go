@@ -51,3 +51,8 @@ func TestKinds(t *testing.T) {
 	require.Nil(t, types.Kinds(nil))
 	require.Equal(t, []types.Kind{types.KindI32, types.KindRef, types.KindF64}, types.Kinds([]types.Type{types.TypeI32, types.TypeAny, types.TypeF64}))
 }
+
+func TestZeros(t *testing.T) {
+	require.Nil(t, types.Zeros(nil))
+	require.Equal(t, []types.Boxed{types.BoxI8(0), types.BoxI64(0), types.BoxedNull, types.BoxedNull}, types.Zeros([]types.Type{types.TypeI8, types.TypeI64, types.TypeString, types.TypeAny}))
+}

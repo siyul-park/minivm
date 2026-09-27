@@ -187,13 +187,13 @@ func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advan
 		body = append(body,
 			jen.If(jen.Id("i").Dot("sp").Op("<=").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp").Op("-").Lit(1), jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zero(callee.addr, jen.Id("i").Dot("sp").Op("-").Lit(1), jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1))),
 		)
 	} else {
 		body = append(body,
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zero(callee.addr, jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
 		)
 	}
 	if native {
@@ -248,7 +248,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
 				frameOverflow(),
 				jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-				jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp").Op("-").Lit(1), jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1))),
+				jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zero(callee.addr, jen.Id("i").Dot("sp").Op("-").Lit(1), jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1))),
 				jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),
 				jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(callee.code)),
 				jen.Id("f").Dot("upvals").Op("=").Add(callee.upvals),
@@ -276,7 +276,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			),
 			jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
 			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
-			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zero(callee.addr, jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
 			jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(callee.code)),
 			jen.Id("f").Dot("upvals").Op("=").Add(callee.upvals),
 			jen.Id("f").Dot("addr").Op("=").Add(callee.addr),
@@ -296,7 +296,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
 			frameOverflow(),
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zero(callee.addr, jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
 			jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),
 			jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(callee.code)),
 			jen.Id("f").Dot("upvals").Op("=").Add(callee.upvals),
@@ -324,7 +324,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 		),
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp"))),
 		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
-		jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
+		jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zero(callee.addr, jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
 		jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(callee.code)),
 		jen.Id("f").Dot("upvals").Op("=").Add(callee.upvals),
 		jen.Id("f").Dot("addr").Op("=").Add(callee.addr),
@@ -422,8 +422,10 @@ func allocClosure(targetSlots int, borrowed bool, advance int) []jen.Code {
 	return body
 }
 
-func clearRange(start, end jen.Code) jen.Code {
-	return jen.Clear(jen.Id("i").Dot("stack").Index(jen.Add(start).Op(":").Add(end)))
+// zero starts the locals in stack[start:end] at the declared zeros of the
+// function at addr.
+func zero(addr, start, end jen.Code) jen.Code {
+	return jen.Copy(jen.Id("i").Dot("stack").Index(jen.Add(start).Op(":").Add(end)), jen.Id("i").Dot("zeros").Index(jen.Add(addr)))
 }
 
 func adjust(expr jen.Code, delta int) *jen.Statement {

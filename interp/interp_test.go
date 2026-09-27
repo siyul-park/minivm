@@ -3,6 +3,7 @@ package interp_test
 import (
 	"context"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,18 @@ type marshalBenchMethods struct {
 
 // heapRunway mirrors the interpreter's unexported heapRunway. Keep in sync.
 const heapRunway = 64
+
+// zeroTypes declares one slot of each kind, plus any; zeroReads pushes each
+// unwritten local, and zeroValues is what an unwritten local or global reads,
+// popped last first.
+var (
+	zeroTypes  = []types.Type{types.TypeI32, types.TypeI8, types.TypeI1, types.TypeI64, types.TypeF32, types.TypeF64, types.TypeString, types.TypeAny}
+	zeroValues = []types.Value{types.Null, types.Null, types.F64(0), types.F32(0), types.I64(0), types.I1(false), types.I8(0), types.I32(0)}
+	zeroReads  = []instr.Instruction{
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 3),
+		instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 7),
+	}
+)
 
 var runTests = []struct {
 	program *program.Program
@@ -245,6 +258,39 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.LOCAL_TEE, 0)}, program.WithLocals(types.TypeI32)),
 		values:  []types.Value{types.I32(9)},
+	},
+	{
+		program: program.New(zeroReads, program.WithLocals(zeroTypes...)),
+		values:  zeroValues,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.GLOBAL_GET, 2), instr.New(instr.GLOBAL_GET, 3),
+			instr.New(instr.GLOBAL_GET, 4), instr.New(instr.GLOBAL_GET, 5), instr.New(instr.GLOBAL_GET, 6), instr.New(instr.GLOBAL_GET, 7),
+		}, program.WithGlobals(zeroTypes...)),
+		values: zeroValues,
+	},
+	{
+		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(zeroFunction())),
+		values:  zeroValues,
+	},
+	{
+		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL)}, program.WithConstants(zeroFunction())),
+		values:  zeroValues,
+	},
+	{
+		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)}, program.WithConstants(zeroFunction())),
+		values:  zeroValues,
+	},
+	{
+		// The tail call reuses the caller's frame, whose local 0 holds 7.
+		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(
+			types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).Locals(types.TypeI32).Emit(
+				instr.New(instr.I32_CONST, 7), instr.New(instr.LOCAL_SET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.RETURN_CALL),
+			).MustBuild(),
+			zeroFunction(),
+		)),
+		values: zeroValues,
 	},
 	{
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(types.I32(11))),
@@ -5172,6 +5218,14 @@ func (v *marshalBenchMethods) Bump(n int32) int32 {
 	v.Count += n
 	v.hidden++
 	return v.Count
+}
+
+// zeroFunction returns its locals, one of each zeroTypes, unwritten.
+func zeroFunction() *types.Function {
+	return types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).
+		Locals(zeroTypes...).
+		Emit(append(slices.Clone(zeroReads), instr.New(instr.RETURN))...).
+		MustBuild()
 }
 
 // runTestName renders a runTests case's program to a single-line name, so the

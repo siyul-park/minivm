@@ -32,6 +32,7 @@ type Interpreter struct {
 	globalTypes []types.Type
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
+	zeros       [][]types.Boxed
 	coros       []bool
 	handlers    [][]instr.Handler
 	module      *types.Function
@@ -227,6 +228,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		globalTypes: prog.Globals,
 		instrs:      make([][]byte, len(prog.Constants)+1),
 		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
+		zeros:       make([][]types.Boxed, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
 		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
 		dynamic:     map[int]bool{},
@@ -313,6 +315,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	i.instrs[0] = prog.Code
+	i.zeros[0] = types.Zeros(prog.Locals)
 	i.handlers[0] = prog.Handlers
 	i.coros[0] = i.yields(prog.Code)
 
@@ -330,8 +333,8 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 
 	i.frames[0].code = i.code[0]
 	i.frames[0].bp = i.sp
-	if locals := len(prog.Locals); locals > 0 {
-		clear(i.stack[i.sp : i.sp+locals])
+	if locals := len(i.zeros[0]); locals > 0 {
+		copy(i.stack[i.sp:i.sp+locals], i.zeros[0])
 		i.sp += locals
 	}
 	i.fp = 1
@@ -750,8 +753,8 @@ func (i *Interpreter) Reset() {
 	f.code = i.code[0]
 	f.upvals = nil
 	i.fr = f
-	if locals := len(i.module.Locals); locals > 0 {
-		clear(i.stack[i.sp : i.sp+locals])
+	if locals := len(i.zeros[0]); locals > 0 {
+		copy(i.stack[i.sp:i.sp+locals], i.zeros[0])
 		i.sp += locals
 	}
 
@@ -774,7 +777,11 @@ func (i *Interpreter) Reset() {
 // seed restores each global from its declaration rather than its previous value.
 func (i *Interpreter) seed() {
 	for idx, typ := range i.globalTypes {
-		i.globals[idx] = i.zero(typ.Kind())
+		// A ref global owns its null, as a stored null is owned.
+		if typ.Kind() == types.KindRef {
+			i.retain(0)
+		}
+		i.globals[idx] = types.Zero(typ.Kind())
 	}
 }
 
@@ -1197,26 +1204,6 @@ func (i *Interpreter) stacktrace() []FrameInfo {
 	return frames
 }
 
-// zero returns the zero Boxed for a slot of the declared kind: a typed
-// numeric zero, or for ref kinds a retained null ref (heap index 0 is
-// permanently Null), so the slot's runtime kind always matches its
-// declaration and releasing the seeded value stays balanced.
-func (i *Interpreter) zero(kind types.Kind) types.Boxed {
-	switch kind.Repr() {
-	case types.KindI32:
-		return types.BoxI32(0)
-	case types.KindI64:
-		return types.BoxI64(0)
-	case types.KindF32:
-		return types.BoxF32(0)
-	case types.KindF64:
-		return types.BoxF64(0)
-	default:
-		i.retain(0)
-		return types.BoxedNull
-	}
-}
-
 // mapKey defines the canonical map key: i1/i8 normalize to i32, strings key
 // by content, and other refs by heap address. The optional second result is
 // the owned stored key when normalization alone cannot reconstruct it.
@@ -1614,6 +1601,9 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.code) {
 		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
 	}
+	if addr >= len(i.zeros) {
+		i.zeros = append(i.zeros, make([][]types.Boxed, n-len(i.zeros))...)
+	}
 	if addr >= len(i.handlers) {
 		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
 	}
@@ -1626,6 +1616,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
 	i.code[addr] = i.compile(fn, i.tick == 1)
+	i.zeros[addr] = types.Zeros(fn.Locals)
 	if dynamic {
 		i.dynamic[addr] = true
 	}
@@ -1966,6 +1957,7 @@ func (i *Interpreter) remove(addr int) {
 	}
 	i.instrs[addr] = nil
 	i.code[addr] = nil
+	i.zeros[addr] = nil
 	i.handlers[addr] = nil
 	i.coros[addr] = false
 	delete(i.dynamic, addr)
